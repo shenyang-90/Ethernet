@@ -57,9 +57,10 @@
 
 | 参数名 | 类型 | 默认值 | 可配置范围 | 说明 | 影响模块 |
 |--------|------|--------|------------|------|----------|
-| `MAC_COUNT` | int | 2 | 1 ~ 2 | MAC 实例数量 | XGMAC-CORE, DMA, MTL |
-| `MAC_SPEED_MODE` | int | 3 | 0: 10M/100M<br>1: 1G<br>2: 2.5G<br>3: 5G<br>4: 10G | 每个 MAC 支持的最高速率 | XGMAC-CORE, HSPHY IF |
-| `PHY_COUNT_PER_MAC` | int | 1 | 1 ~ 2 | 每个 MAC 连接的 PHY 数量 | HSPHY IF, RGMII/SGMII MUX |
+| `MAC_COUNT` | int | 2 | **1 ~ 8** | MAC 实例数量 | XGMAC-CORE, DMA, MTL |
+| `MAC_TYPE` | int | 2 | **0: MAC (10/100M)<br>1: GMAC (1G)<br>2: XGMAC (2.5G/5G/10G)** | MAC 核心类型，决定 MAC 层能力等级 | XGMAC-CORE, HSPHY IF |
+| `PHY_COUNT` | int | 2 | **1 ~ 8** | PHY 实例总数量（**独立于 MAC 数量**） | HSPHY IF, PHY MUX |
+| `PHY_SPEED` | int | 3 | **0: 10/100M<br>1: 1G<br>2: 2.5G<br>3: 5G<br>4: 10G** | 每个 PHY 支持的最高速率 | HSPHY IF, PCS/PMA |
 | `SUPPORT_1588` | bit | 1 | 0 / 1 | 是否支持 IEEE 1588 / gPTP 时间同步 | PTP/Timestamp |
 | `SUPPORT_GPTP` | bit | 1 | 0 / 1 | 是否支持 802.1AS gPTP（依赖 SUPPORT_1588=1） | PTP/Timestamp |
 | `SUPPORT_TSN` | bit | 1 | 0 / 1 | 是否支持 TSN 协议栈总开关 | MTL, MAC Core |
@@ -70,14 +71,16 @@
 | `SUPPORT_BRIDGE` | bit | 1 | 0 / 1 | 是否支持 MAC-to-MAC Bridge 转发 | Bridge |
 | `SUPPORT_VLAN` | bit | 1 | 0 / 1 | 是否支持 802.1Q VLAN 处理 | TBU, RX Filter |
 | `SUPPORT_MACSEC` | bit | 0 | 0 / 1 | 是否支持 802.1AE MACsec（需外部 CSS 加速器） | HSPHY IF (安全通道) |
-| `SUPPORT_AVTP` | bit | 0 | 0 / 1 | 是否支持 IEEE 1722 AVTP 封装（车载音频/视频） | TX Checksum |
+| `SUPPORT_AVTP` | bit | 0 | 0 / 1 | 是否支持 IEEE 1722 AVTP（⚠️ 当前所有车规MCU均无硬件卸载，仅预留接口） | TX Checksum |
 
 > **配置约束**：
 > - `SUPPORT_GPTP=1` 要求 `SUPPORT_1588=1`
 > - `SUPPORT_FRER=1` 要求 `SUPPORT_BRIDGE=1` 且 `MAC_COUNT ≥ 2`
-> - `SUPPORT_FP=1` 要求 `MAC_SPEED_MODE ≥ 1` (≥1G)
+> - `SUPPORT_FP=1` 要求 `MAC_TYPE ≥ 1` (GMAC/XGMAC)
 > - `SUPPORT_TAS=1` 要求 `SUPPORT_CBS=1`（推荐，非强制）
 > - `SUPPORT_MACSEC=1` 要求外部 CSS 安全加速器连接
+> - **MAC 与 PHY 解耦**：`PHY_COUNT` 可以大于 `MAC_COUNT`（通过 PHY MUX 共享 MAC），也可以小于（通过 Switch 扩展）
+> - **MAC_TYPE 与 PHY_SPEED 独立配置**：MAC_TYPE 决定 MAC 层能力，PHY_SPEED 决定物理层速率。例如 XGMAC (MAC_TYPE=2) 可通过降频运行在 1G PHY (PHY_SPEED=1) 上
 
 ### 1.4.2 非协议相关 — DMA/缓冲参数
 
@@ -119,13 +122,15 @@
 
 ### 1.4.4 参数配置矩阵 — 典型应用场景
 
-| 场景 | MAC_COUNT | MAC_SPEED | DMA_CH | TSN | 1588 | Bridge | ASIL | 估算门数 |
-|------|-----------|-----------|--------|-----|------|--------|------|----------|
-| **Zone Controller 骨干** | 2 | 5G | 8 | ✅ | ✅ | ✅ | B | ~205k |
-| **ADAS 传感器汇聚** | 2 | 5G | 8 | ✅ | ✅ | ❌ | B | ~190k |
-| **CAN-Ethernet 网关** | 1 | 1G | 4 | ❌ | ✅ | ❌ | B | ~120k |
-| **域内边缘节点** | 1 | 100M | 2 | ❌ | ❌ | ❌ | QM | ~60k |
-| **OTA 更新节点** | 1 | 1G | 4 | ❌ | ❌ | ❌ | A | ~80k |
+| 场景 | MAC_COUNT | MAC_TYPE | PHY_COUNT | PHY_SPEED | DMA_CH | TSN | 1588 | Bridge | ASIL | 估算门数 |
+|------|-----------|----------|-----------|-----------|--------|-----|------|--------|------|----------|
+| **Zone Controller 骨干** | 2 | XGMAC | 2 | 5G | 8 | ✅ | ✅ | ✅ | B | ~205k |
+| **ADAS 传感器汇聚** | 2 | XGMAC | 2 | 5G | 8 | ✅ | ✅ | ❌ | B | ~190k |
+| **中央网关 (多端口)** | 4 | GMAC | 8 | 1G | 4 | ❌ | ✅ | ✅ | B | ~280k |
+| **CAN-Ethernet 网关** | 1 | GMAC | 1 | 1G | 4 | ❌ | ✅ | ❌ | B | ~120k |
+| **域内边缘节点** | 1 | MAC | 1 | 100M | 2 | ❌ | ❌ | ❌ | QM | ~60k |
+| **OTA 更新节点** | 1 | GMAC | 1 | 1G | 4 | ❌ | ❌ | ❌ | A | ~80k |
+| **信息娱乐域 (AVB)** | 1 | GMAC | 1 | 1G | 4 | ✅ | ✅ | ❌ | QM | ~110k |
 
 ---
 
