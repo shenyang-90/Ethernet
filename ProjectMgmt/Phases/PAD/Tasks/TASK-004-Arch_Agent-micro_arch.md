@@ -8,7 +8,7 @@
   "task_type": "doc_writing",
   "priority": "P1",
   "status": "PENDING",
-  "assigned_to": "Design_Agent",
+  "assigned_to": "Arch_Agent",
   "assigned_by": "PM_Agent",
   "deadline": "TBD",
   "title": "微架构设计与模块划分",
