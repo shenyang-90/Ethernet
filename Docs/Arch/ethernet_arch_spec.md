@@ -49,6 +49,86 @@
 
 ---
 
+## 1.4 可配置参数 (Parameter Configuration)
+
+本 IP 支持通过顶层 Verilog/SystemVerilog `parameter` 进行编译时裁剪，以适配不同应用场景（Zone Controller / ADAS HUB / 网关 / 边缘节点）的资源与功能需求。
+
+### 1.4.1 协议相关参数
+
+| 参数名 | 类型 | 默认值 | 可配置范围 | 说明 | 影响模块 |
+|--------|------|--------|------------|------|----------|
+| `MAC_COUNT` | int | 2 | 1 ~ 2 | MAC 实例数量 | XGMAC-CORE, DMA, MTL |
+| `MAC_SPEED_MODE` | int | 3 | 0: 10M/100M<br>1: 1G<br>2: 2.5G<br>3: 5G<br>4: 10G | 每个 MAC 支持的最高速率 | XGMAC-CORE, HSPHY IF |
+| `PHY_COUNT_PER_MAC` | int | 1 | 1 ~ 2 | 每个 MAC 连接的 PHY 数量 | HSPHY IF, RGMII/SGMII MUX |
+| `SUPPORT_1588` | bit | 1 | 0 / 1 | 是否支持 IEEE 1588 / gPTP 时间同步 | PTP/Timestamp |
+| `SUPPORT_GPTP` | bit | 1 | 0 / 1 | 是否支持 802.1AS gPTP（依赖 SUPPORT_1588=1） | PTP/Timestamp |
+| `SUPPORT_TSN` | bit | 1 | 0 / 1 | 是否支持 TSN 协议栈总开关 | MTL, MAC Core |
+| `SUPPORT_CBS` | bit | 1 | 0 / 1 | 是否支持 802.1Qav CBS（依赖 SUPPORT_TSN） | MTL Scheduler |
+| `SUPPORT_TAS` | bit | 1 | 0 / 1 | 是否支持 802.1Qbv TAS（依赖 SUPPORT_TSN） | MTL Gate Control |
+| `SUPPORT_FP` | bit | 1 | 0 / 1 | 是否支持 802.1Qbu 帧抢占（依赖 SUPPORT_TSN） | MAC Merge Layer |
+| `SUPPORT_FRER` | bit | 1 | 0 / 1 | 是否支持 802.1CB FRER（依赖 SUPPORT_BRIDGE） | Bridge, SEQ/R-Tag |
+| `SUPPORT_BRIDGE` | bit | 1 | 0 / 1 | 是否支持 MAC-to-MAC Bridge 转发 | Bridge |
+| `SUPPORT_VLAN` | bit | 1 | 0 / 1 | 是否支持 802.1Q VLAN 处理 | TBU, RX Filter |
+| `SUPPORT_MACSEC` | bit | 0 | 0 / 1 | 是否支持 802.1AE MACsec（需外部 CSS 加速器） | HSPHY IF (安全通道) |
+| `SUPPORT_AVTP` | bit | 0 | 0 / 1 | 是否支持 IEEE 1722 AVTP 封装（车载音频/视频） | TX Checksum |
+
+> **配置约束**：
+> - `SUPPORT_GPTP=1` 要求 `SUPPORT_1588=1`
+> - `SUPPORT_FRER=1` 要求 `SUPPORT_BRIDGE=1` 且 `MAC_COUNT ≥ 2`
+> - `SUPPORT_FP=1` 要求 `MAC_SPEED_MODE ≥ 1` (≥1G)
+> - `SUPPORT_TAS=1` 要求 `SUPPORT_CBS=1`（推荐，非强制）
+> - `SUPPORT_MACSEC=1` 要求外部 CSS 安全加速器连接
+
+### 1.4.2 非协议相关 — DMA/缓冲参数
+
+| 参数名 | 类型 | 默认值 | 可配置范围 | 说明 | 影响 |
+|--------|------|--------|------------|------|------|
+| `DMA_CH_COUNT` | int | 8 | 1, 2, 4, 8 | DMA 通道数量（每 MAC） | DMA Engine, 描述符内存 |
+| `MTL_TX_FIFO_DEPTH` | int | 32 | 8, 16, 32, 64 | TX FIFO 深度（KB） | MTL TX, SRAM |
+| `MTL_RX_FIFO_DEPTH` | int | 32 | 8, 16, 32, 64 | RX FIFO 深度（KB） | MTL RX, SRAM |
+| `MTL_TX_QUEUES` | int | 8 | 1, 2, 4, 8 | TX 队列数量（每 MAC） | MTL Scheduler |
+| `MTL_RX_QUEUES` | int | 8 | 1, 2, 4, 8 | RX 队列数量（每 MAC） | MTL RX Filter |
+| `DESC_SIZE` | int | 16 | 16, 32 | 描述符大小（Byte，标准/扩展） | DMA, 内存布局 |
+| `AXI_ID_WIDTH` | int | 4 | 4, 8 | AXI Master ID 位宽 | AXI Master |
+| `AXI_DATA_WIDTH` | int | 64 | 32, 64, 128 | AXI Master 数据位宽 | AXI Master, DMA |
+| `CSR_ADDR_WIDTH` | int | 12 | 10, 12, 14 | AXI-Lite Slave 地址位宽 | CSR 寄存器数量 |
+| `MAX_BURST_LEN` | int | 16 | 8, 16 | AXI 最大 Burst 长度 | DMA, AXI 效率 |
+
+> **配置约束**：
+> - `DMA_CH_COUNT` 必须 ≥ `MTL_TX_QUEUES` 且 ≥ `MTL_RX_QUEUES`
+> - `MTL_TX_FIFO_DEPTH` + `MTL_RX_FIFO_DEPTH` × `MAC_COUNT` ≤ 总 SRAM 预算
+> - `AXI_DATA_WIDTH` 需与 SoC 总线位宽匹配
+
+### 1.4.3 非协议相关 — 功能安全参数
+
+| 参数名 | 类型 | 默认值 | 可配置范围 | 说明 | 影响 |
+|--------|------|--------|------------|------|------|
+| `ASIL_LEVEL` | int | 2 | 0: QM<br>1: ASIL-A<br>2: ASIL-B<br>3: ASIL-C<br>4: ASIL-D | 目标安全完整性等级 | 所有模块 |
+| `ECC_DATA_WIDTH` | int | 64 | 32, 64 | ECC 保护数据位宽 | SRAM, FIFO |
+| `ECC_SYNDROME_WIDTH` | int | 8 | 4, 8 | ECC Syndrome 位宽 | ECC 编码器/解码器 |
+| `ENABLE_PARITY_FSM` | bit | 1 | 0 / 1 | 是否使能 FSM 状态机 Parity 保护 | 所有 FSM |
+| `ENABLE_CSR_TIMEOUT` | bit | 1 | 0 / 1 | 是否使能 CSR 访问超时检测 | CSR 接口 |
+| `ENABLE_BUS_TIMEOUT` | bit | 1 | 0 / 1 | 是否使能 AXI 总线超时检测 | AXI Master |
+| `SMU_ALERT_WIDTH` | int | 4 | 1, 2, 4 | SMU 报警信号位宽 | Safety Monitor |
+| `ECC_SCRUB_INTERVAL` | int | 1000 | 100 ~ 10000 | ECC 刷新间隔（时钟周期） | SRAM 控制器 |
+
+> **配置约束**：
+> - `ASIL_LEVEL ≥ 2` (ASIL-B) 要求 `ENABLE_PARITY_FSM=1` 且 `ENABLE_CSR_TIMEOUT=1`
+> - `ASIL_LEVEL ≥ 3` (ASIL-C) 额外要求 `ECC_DATA_WIDTH=64` 且 `ENABLE_BUS_TIMEOUT=1`
+> - `ASIL_LEVEL=0` (QM) 可关闭所有安全机制，最小化面积
+
+### 1.4.4 参数配置矩阵 — 典型应用场景
+
+| 场景 | MAC_COUNT | MAC_SPEED | DMA_CH | TSN | 1588 | Bridge | ASIL | 估算门数 |
+|------|-----------|-----------|--------|-----|------|--------|------|----------|
+| **Zone Controller 骨干** | 2 | 5G | 8 | ✅ | ✅ | ✅ | B | ~205k |
+| **ADAS 传感器汇聚** | 2 | 5G | 8 | ✅ | ✅ | ❌ | B | ~190k |
+| **CAN-Ethernet 网关** | 1 | 1G | 4 | ❌ | ✅ | ❌ | B | ~120k |
+| **域内边缘节点** | 1 | 100M | 2 | ❌ | ❌ | ❌ | QM | ~60k |
+| **OTA 更新节点** | 1 | 1G | 4 | ❌ | ❌ | ❌ | A | ~80k |
+
+---
+
 ## 2. System Block Diagram
 
 ### 2.1 顶层框图
