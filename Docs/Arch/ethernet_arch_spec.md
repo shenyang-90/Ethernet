@@ -404,7 +404,7 @@ v
 
 | 文档 | 路径 | 说明 |
 |------|------|------|
-| **Safety Concept** | `Docs/Safety/safety_concept.md` | **FuSa Agent — 功能安全概念 (安全目标/DC/FHTI/ASIL分解)** |
+| **Safety Concept** | `Docs/FuSa/safety_concept.md` | **FuSa Agent — 功能安全概念 (安全目标/DC/FHTI/ASIL分解)** |
 | Protocol Analysis | `Docs/Arch/protocol_analysis.md` | 协议详细分析与竞品对比 |
 | Interface Spec | `Docs/Arch/ethernet_interface_spec.md` | 信号定义与时序要求 |
 | Clock/Reset Spec | `Docs/Arch/ethernet_clock_reset_spec.md` | 时钟域与复位策略 |

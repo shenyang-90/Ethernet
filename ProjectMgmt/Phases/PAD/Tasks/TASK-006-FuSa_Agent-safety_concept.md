@@ -20,7 +20,7 @@
 
 | 交付物 | 路径 | 状态 | 说明 |
 |--------|------|------|------|
-| Safety Concept | `Docs/Safety/safety_concept.md` | ✅ **已完成** | 安全目标、诊断覆盖、FHTI、ASIL 分解、竞品对标 |
+| Safety Concept | `Docs/FuSa/safety_concept.md` | ✅ **已完成** | 安全目标、诊断覆盖、FHTI、ASIL 分解、竞品对标 |
 
 ## 完成标准
 
