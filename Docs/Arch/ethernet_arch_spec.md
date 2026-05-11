@@ -2,10 +2,11 @@
 
 > **项目**: Ethernet IP (IP_20260502_001)
 > **模块/系统**: Gigabit Ethernet MAC + PHY Subsystem
-> **版本**: v1.0
+> **版本**: v1.3
 > **日期**: 2026-05-11
 > **作者**: Arch Agent
 > **评审状态**: Draft → 待评审
+> **变更**: v1.1 新增可配置参数矩阵; v1.2 重构 MAC/PHY 参数 (MAC_COUNT 1-8, MAC_TYPE, PHY_COUNT 独立); v1.3 分析 ISSUE-001/003/004/005, 新增 PHY_TYPE/10BASE-T1S, 补充 CBS erratum/TC 限制/参考路径修正
 
 ---
 
@@ -385,6 +386,9 @@ v
 |------|------|------|----------|
 | v0.1 | 2026-05-02 | Arch Agent | 初始模板创建 |
 | v1.0 | 2026-05-11 | Arch Agent | 填充完整架构内容，基于 TC4x 研究和协议分析 |
+| v1.1 | 2026-05-11 | Arch Agent | 新增 1.4 可配置参数矩阵（协议/DMA/安全参数） |
+| v1.2 | 2026-05-11 | Arch Agent | 重构参数：MAC_COUNT 1-8, MAC_TYPE (MAC/GMAC/XGMAC), PHY_COUNT 独立 1-8, PHY_SPEED 解耦 |
+| v1.3 | 2026-05-11 | Arch Agent | 分析 ISSUE-001/003/004/005; 新增 PHY_TYPE/10BASE-T1S; 补充 CBS erratum/TC 限制/参考路径修正 |
 
 ### 8.2 待解决问题
 
