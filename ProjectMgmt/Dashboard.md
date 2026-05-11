@@ -2,7 +2,7 @@
 
 > **项目**: IP_20260502_001  
 > **阶段**: PAD  
-> **更新时间**: 2026-05-12 02:00:01  
+> **更新时间**: 2026-05-12 02:04:00  
 > **自动更新**: `make dashboard`
 
 ---
@@ -11,8 +11,9 @@
 
 | 指标 | 数值 |
 |------|------|
-| 总任务 | 4 |
-| 已完成 | 3 (75%) |
+| 总任务 | 5 |
+| 已完成 | 3 (60%) |
+| 进行中 | 2 (40%) |
 | 已分配 | 0 |
 | 待处理 | 0 |
 
@@ -23,12 +24,22 @@
 | TASK-003 | 编写Architecture Specification并细化协议分析 | Arch_Agent | ✅ COMPLETED | P0 |
 | TASK-014 | PAD阶段项目计划与里程碑管理 | PM_Agent | ✅ COMPLETED | P0 |
 | TASK-015 | Ethernet协议分析初稿与竞品功能分析 | Arch_Agent | ✅ COMPLETED | P0 |
-| TASK-004 | 微架构设计与模块划分 | Arch_Agent | ❓ READY_TO_START | P1 |
+| TASK-006 | FuSa Safety Concept | FuSa_Agent | 🔄 RUNNING | P1 |
+| TASK-004 | 微架构设计与模块划分 | Arch_Agent | 🔄 IN_PROGRESS | P1 |
+
+## 依赖关系状态
+
+| 任务 | 前置依赖 | 状态 |
+|------|---------|------|
+| TASK-004 | TASK-003 | ✅ 已满足，已自动解阻塞 |
+| TASK-006 | TASK-003 | ✅ 已满足，进行中 |
 
 ## 下一步行动
 
-- 所有依赖满足的任务已完成或已分配
+- Arch Agent: 继续完成TASK-004微架构设计Spec (Docs/Design/ethernet/ethernet_design_spec.md)
+- FuSa Agent: 推进TASK-006 Safety Concept评审
+- PM Agent: 准备PAD阶段Review Gate
 
 ---
 
-*自动生成: ethernet_orchestrator.py*
+*自动生成: ethernet-pad-orchestrator.py*
