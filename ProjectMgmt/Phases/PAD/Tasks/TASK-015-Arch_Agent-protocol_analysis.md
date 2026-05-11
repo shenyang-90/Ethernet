@@ -39,6 +39,7 @@
 
 ## 任务备注
 
+- 2026-05-11: Arch Spec (ethernet_arch_spec.md)、Interface Spec、Clock/Reset Spec 已完成编写，进入 IN_PROGRESS 状态
 - 2026-05-11: 初稿已完成，由AI Yang辅助生成
 - 后续要求: protocol_analysis.md 需进一步细化，并作为 TASK-003 Architecture Specification 的核心输入章节
 

@@ -7,7 +7,7 @@
   "phase": "PAD",
   "task_type": "doc_writing",
   "priority": "P0",
-  "status": "ASSIGNED",
+  "status": "IN_PROGRESS",
   "assigned_to": "Arch_Agent",
   "assigned_by": "PM_Agent",
   "deadline": "2026-05-18",
