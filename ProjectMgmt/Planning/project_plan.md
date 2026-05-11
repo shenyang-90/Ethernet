@@ -27,6 +27,7 @@
 | TASK-015 | **协议分析文档** (Protocol Analysis) | Arch Agent | 2026-05-11 | 2026-05-13 | TASK-014 | 🟢 完成 |
 | TASK-003 | Architecture Specification (含 Interface Spec + Clock/Reset Spec) | Arch Agent | 2026-05-13 | 2026-05-18 | TASK-015 | 🟢 完成 |
 | TASK-004 | 微架构设计与模块划分 | Arch_Agent | 2026-05-20 | 2026-05-25 | TASK-003 | ⬜ |
+| **TASK-006** | **功能安全概念定义** | **FuSa Agent** | **2026-05-11** | **2026-05-13** | **TASK-003** | **🟢 完成** |
 | TASK-PAD-REV | PAD阶段评审 (Gate Check) | AI Yang | 2026-05-25 | 2026-05-25 | 全部完成 | ⬜ |
 
 ## 4. 资源分配
