@@ -8,6 +8,13 @@
   "task_type": "doc_writing",
   "priority": "P0",
   "status": "IN_PROGRESS",
+  "status_detail": "DELIVERABLES_COMPLETE_AWAITING_REVIEW",
+  "deliverables_status": {
+    "protocol_analysis.md": "COMPLETE (v1.0, 555+ lines, references Kimi Agent research)",
+    "ethernet_arch_spec.md": "COMPLETE (v1.0, all sections filled)",
+    "ethernet_interface_spec.md": "COMPLETE (v1.0, detailed signal definitions)",
+    "ethernet_clock_reset_spec.md": "COMPLETE (v1.0, CDC/reset/clock gating detailed)"
+  },
   "assigned_to": "Arch_Agent",
   "assigned_by": "PM_Agent",
   "deadline": "2026-05-18",
