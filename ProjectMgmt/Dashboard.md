@@ -2,7 +2,7 @@
 
 > **项目**: IP_20260502_001  
 > **阶段**: PAD  
-> **更新时间**: 2026-05-11 16:30:01  
+> **更新时间**: 2026-05-11 16:40:06  
 > **自动更新**: `make dashboard`
 
 ---
@@ -23,11 +23,11 @@
 | TASK-003 | 编写Architecture Specification并细化协议分析 | Arch_Agent | ❓ IN_PROGRESS | P0 |
 | TASK-014 | PAD阶段项目计划与里程碑管理 | PM_Agent | ✅ COMPLETED | P0 |
 | TASK-015 | Ethernet协议分析初稿与竞品功能分析 | Arch_Agent | ✅ COMPLETED | P0 |
-| TASK-004 | 微架构设计与模块划分 | Design_Agent | ⬜ PENDING | P1 |
+| TASK-004 | 微架构设计与模块划分 | Arch_Agent | ⬜ PENDING | P1 |
 
 ## 下一步行动
 
-- **TASK-004**: 微架构设计与模块划分 → 分配给 Design_Agent
+- **TASK-004**: 微架构设计与模块划分 → 分配给 Arch_Agent
 
 ---
 
