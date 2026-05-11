@@ -12,7 +12,7 @@
   "assigned_by": "PM_Agent",
   "deadline": "TBD",
   "title": "微架构设计与模块划分",
-  "requirements": "完成模块划分、数据通路设计、子模块接口定义",
+  "requirements": "完成模块划分、数据通路设计、子模块接口定义。依赖TASK-003 Arch Spec完成。",
   "acceptance_criteria": [
     "模块划分图完成",
     "数据通路与控制通路明确",
@@ -22,6 +22,10 @@
     "files": [
       "Docs/Design/ethernet/ethernet_design_spec.md(架构部分)"
     ]
+  },
+  "dependencies": {
+    "pre_tasks": ["TASK-003"],
+    "blocks": []
   },
   "working_directory": "sandbox/ethernet/Docs/Design/",
   "ai_assist": true,

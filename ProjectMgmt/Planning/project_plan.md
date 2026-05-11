@@ -24,11 +24,9 @@
 | 任务ID | 任务名称 | 负责人 | 计划开始 | 计划结束 | 依赖 | 状态 |
 |--------|----------|--------|----------|----------|------|------|
 | TASK-014 | PAD阶段项目计划与里程碑管理 | PM Agent | 2026-05-11 | 2026-05-11 | - | 🟢 完成 |
-| TASK-015 | **协议分析文档** (Protocol Analysis) | Arch Agent | 2026-05-11 | 2026-05-13 | TASK-014 | 🟡 进行中 |
-| TASK-003 | Architecture Specification | Arch Agent | 2026-05-13 | 2026-05-18 | TASK-015 | ⬜ |
-| TASK-016 | Interface Specification | Arch Agent | 2026-05-16 | 2026-05-20 | TASK-015 | ⬜ |
-| TASK-017 | Clock/Reset Specification | Arch Agent | 2026-05-18 | 2026-05-20 | TASK-003 | ⬜ |
-| TASK-004 | 微架构设计与模块划分 | Design Agent | 2026-05-20 | 2026-05-25 | TASK-003,016,017 | ⬜ |
+| TASK-015 | **协议分析文档** (Protocol Analysis) | Arch Agent | 2026-05-11 | 2026-05-13 | TASK-014 | 🟢 完成 |
+| TASK-003 | Architecture Specification (含 Interface Spec + Clock/Reset Spec) | Arch Agent | 2026-05-13 | 2026-05-18 | TASK-015 | 🟢 完成 |
+| TASK-004 | 微架构设计与模块划分 | Arch_Agent | 2026-05-20 | 2026-05-25 | TASK-003 | ⬜ |
 | TASK-PAD-REV | PAD阶段评审 (Gate Check) | AI Yang | 2026-05-25 | 2026-05-25 | 全部完成 | ⬜ |
 
 ## 4. 资源分配
@@ -44,11 +42,9 @@
 
 | 交付物 | 路径 | 负责人 | 状态 |
 |--------|------|--------|------|
-| 协议分析文档 | `Docs/Arch/protocol_analysis.md` | Arch Agent | 🟡 进行中 |
-| 架构规格书 | `Docs/Arch/ethernet_arch_spec.md` | Arch Agent | ⬜ |
-| 接口规格书 | `Docs/Arch/ethernet_interface_spec.md` | Arch Agent | ⬜ |
-| 时钟复位规格书 | `Docs/Arch/ethernet_clock_reset_spec.md` | Arch Agent | ⬜ |
-| 微架构设计 | `Docs/Design/ethernet/ethernet_design_spec.md` | Design Agent | ⬜ |
+| 协议分析文档 | `Docs/Arch/protocol_analysis.md` | Arch Agent | 🟢 完成 |
+| 架构规格书 (含Interface + Clock/Reset) | `Docs/Arch/ethernet_arch_spec.md` | Arch Agent | 🟢 完成 |
+| 微架构设计 | `Docs/Design/ethernet/ethernet_design_spec.md` | Arch_Agent | ⬜ 待EDR阶段 |
 | PAD评审Checklist | `ProjectMgmt/Phases/PAD/Reviews/checklist.md` | AI Yang | ⬜ |
 
 ## 6. 风险跟踪

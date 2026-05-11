@@ -33,8 +33,6 @@ ethernet
 | PAD  | ████████░░░ | ░░░░░░░░░░░ | ░░░░░░░░░░░ |     |     |     |     |     |
 | 协议分析 | ███░░░░░░░░ |             |             |     |     |     |     |     |
 | Arch Spec | ░░░████░░░░ | █░░░░░░░░░░ |             |     |     |     |     |     |
-| Interface |             | ░░██░░░░░░░ |             |     |     |     |     |     |
-| Clock/Rst |             | ░░░░██░░░░░ |             |     |     |     |     |     |
 | 微架构    |             |             | █████░░░░░░ |     |     |     |     |     |
 | EDR  |             |             |             | ███ | ███ |     |     |     |
 | IDR  |             |             |             |     |     | ███ | ███ | ███ |
@@ -47,11 +45,7 @@ ethernet
 ```
 协议分析 (TASK-015)
     ↓
-Arch Spec (TASK-003)
-    ↓
-Interface Spec (TASK-016) ─┐
-    ↓                      │
-Clock/Reset Spec (TASK-017)┘
+Arch Spec (TASK-003) — 含 Interface Spec + Clock/Reset Spec
     ↓
 微架构设计 (TASK-004)
     ↓
