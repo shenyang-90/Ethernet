@@ -8,7 +8,7 @@
   "task_type": "doc_writing",
   "priority": "P0",
   "status": "COMPLETED",
-  "status_detail": "GATE_CHECK_PASSED_AWAITING_FINAL_APPROVAL",
+  "status_detail": "FINAL_APPROVAL_GRANTED_TASK_CLOSED",
   "deliverables_status": {
     "protocol_analysis.md": "COMPLETE (v1.0, 555+ lines, references Kimi Agent research)",
     "ethernet_arch_spec.md": "COMPLETE (v1.3, all sections filled)",
