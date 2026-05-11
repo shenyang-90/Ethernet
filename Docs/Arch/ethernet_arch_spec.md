@@ -60,7 +60,8 @@
 | `MAC_COUNT` | int | 2 | **1 ~ 8** | MAC 实例数量 | XGMAC-CORE, DMA, MTL |
 | `MAC_TYPE` | int | 2 | **0: MAC (10/100M)<br>1: GMAC (1G)<br>2: XGMAC (2.5G/5G/10G)** | MAC 核心类型，决定 MAC 层能力等级 | XGMAC-CORE, HSPHY IF |
 | `PHY_COUNT` | int | 2 | **1 ~ 8** | PHY 实例总数量（**独立于 MAC 数量**） | HSPHY IF, PHY MUX |
-| `PHY_SPEED` | int | 3 | **0: 10/100M<br>1: 1G<br>2: 2.5G<br>3: 5G<br>4: 10G** | 每个 PHY 支持的最高速率 | HSPHY IF, PCS/PMA |
+| `PHY_TYPE` | int | 1 | **0: 10BASE-T1S (多点总线, PLCA)<br>1: 10/100BASE-T1 (点对点)<br>2: 1000BASE-T1 (点对点)<br>3: Multi-Gigabit (2.5G/5G/10G)** | PHY 接口类型，决定物理层拓扑和支持的速率等级 | HSPHY IF, PCS/PMA |
+| `PHY_SPEED` | int | 3 | **0: 10M (10BASE-T1S)<br>1: 100M<br>2: 1G<br>3: 2.5G<br>4: 5G<br>5: 10G** | 每个 PHY 支持的最高速率（**按 PHY 独立配置**） | HSPHY IF, PCS/PMA |
 | `SUPPORT_1588` | bit | 1 | 0 / 1 | 是否支持 IEEE 1588 / gPTP 时间同步 | PTP/Timestamp |
 | `SUPPORT_GPTP` | bit | 1 | 0 / 1 | 是否支持 802.1AS gPTP（依赖 SUPPORT_1588=1） | PTP/Timestamp |
 | `SUPPORT_TSN` | bit | 1 | 0 / 1 | 是否支持 TSN 协议栈总开关 | MTL, MAC Core |
@@ -80,7 +81,9 @@
 > - `SUPPORT_TAS=1` 要求 `SUPPORT_CBS=1`（推荐，非强制）
 > - `SUPPORT_MACSEC=1` 要求外部 CSS 安全加速器连接
 > - **MAC 与 PHY 解耦**：`PHY_COUNT` 可以大于 `MAC_COUNT`（通过 PHY MUX 共享 MAC），也可以小于（通过 Switch 扩展）
-> - **MAC_TYPE 与 PHY_SPEED 独立配置**：MAC_TYPE 决定 MAC 层能力，PHY_SPEED 决定物理层速率。例如 XGMAC (MAC_TYPE=2) 可通过降频运行在 1G PHY (PHY_SPEED=1) 上
+> - **MAC_TYPE 与 PHY_SPEED 独立配置**：MAC_TYPE 决定 MAC 层能力，PHY_SPEED 决定物理层速率。例如 XGMAC (MAC_TYPE=2) 可通过降频运行在 1G PHY (PHY_SPEED=2) 上
+> - **PHY_TYPE 与 PHY_SPEED 配对约束**：`PHY_TYPE=0` (10BASE-T1S) 仅支持 `PHY_SPEED=0` (10M)；`PHY_TYPE=1` 支持 `PHY_SPEED=0~1` (10M/100M)；`PHY_TYPE=2` 支持 `PHY_SPEED=0~2` (10M/100M/1G)；`PHY_TYPE=3` 支持 `PHY_SPEED=0~5` (10M~10G)
+> - **10BASE-T1S 特殊约束**：`PHY_TYPE=0` 时，PHY 支持多点总线拓扑（PLCA），最多 8 个节点；不支持全双工（仅半双工），因此 `SUPPORT_FP` (帧抢占) 和 `SUPPORT_TAS` 在此 PHY 上自动关闭
 
 ### 1.4.2 非协议相关 — DMA/缓冲参数
 
@@ -122,15 +125,16 @@
 
 ### 1.4.4 参数配置矩阵 — 典型应用场景
 
-| 场景 | MAC_COUNT | MAC_TYPE | PHY_COUNT | PHY_SPEED | DMA_CH | TSN | 1588 | Bridge | ASIL | 估算门数 |
-|------|-----------|----------|-----------|-----------|--------|-----|------|--------|------|----------|
-| **Zone Controller 骨干** | 2 | XGMAC | 2 | 5G | 8 | ✅ | ✅ | ✅ | B | ~205k |
-| **ADAS 传感器汇聚** | 2 | XGMAC | 2 | 5G | 8 | ✅ | ✅ | ❌ | B | ~190k |
-| **中央网关 (多端口)** | 4 | GMAC | 8 | 1G | 4 | ❌ | ✅ | ✅ | B | ~280k |
-| **CAN-Ethernet 网关** | 1 | GMAC | 1 | 1G | 4 | ❌ | ✅ | ❌ | B | ~120k |
-| **域内边缘节点** | 1 | MAC | 1 | 100M | 2 | ❌ | ❌ | ❌ | QM | ~60k |
-| **OTA 更新节点** | 1 | GMAC | 1 | 1G | 4 | ❌ | ❌ | ❌ | A | ~80k |
-| **信息娱乐域 (AVB)** | 1 | GMAC | 1 | 1G | 4 | ✅ | ✅ | ❌ | QM | ~110k |
+| 场景 | MAC_COUNT | MAC_TYPE | PHY_COUNT | PHY_TYPE | PHY_SPEED | DMA_CH | TSN | 1588 | Bridge | ASIL | 估算门数 |
+|------|-----------|----------|-----------|----------|-----------|--------|-----|------|--------|------|----------|
+| **Zone Controller 骨干** | 2 | XGMAC | 2 | Multi-Gigabit | 5G | 8 | ✅ | ✅ | ✅ | B | ~205k |
+| **ADAS 传感器汇聚** | 2 | XGMAC | 2 | Multi-Gigabit | 5G | 8 | ✅ | ✅ | ❌ | B | ~190k |
+| **中央网关 (多端口)** | 4 | GMAC | 8 | 1000BASE-T1 | 1G | 4 | ❌ | ✅ | ✅ | B | ~280k |
+| **CAN-Ethernet 网关** | 1 | GMAC | 1 | 1000BASE-T1 | 1G | 4 | ❌ | ✅ | ❌ | B | ~120k |
+| **域内边缘节点 (10BASE-T1S)** | 1 | MAC | 1 | 10BASE-T1S | 10M | 2 | ❌ | ❌ | ❌ | QM | ~45k |
+| **车身传感器网络** | 1 | MAC | 1 | 10BASE-T1S | 10M | 2 | ❌ | ❌ | ❌ | QM | ~40k |
+| **OTA 更新节点** | 1 | GMAC | 1 | 1000BASE-T1 | 1G | 4 | ❌ | ❌ | ❌ | A | ~80k |
+| **信息娱乐域 (AVB)** | 1 | GMAC | 1 | 1000BASE-T1 | 1G | 4 | ✅ | ✅ | ❌ | QM | ~110k |
 
 ---
 
@@ -224,13 +228,16 @@
 
 ### 4.1 吞吐率
 
-| 速率模式 | 理论线速 | 实测有效吞吐 | 瓶颈分析 |
-|----------|----------|--------------|----------|
-| 10M MII | 10 Mbps | ~9.8 Mbps | IPG + 前导码开销 |
-| 100M MII | 100 Mbps | ~98 Mbps | 同上 |
-| 1G RGMII | 1 Gbps | ~990 Mbps | AXI burst 效率 |
-| 2.5G SGMII | 2.5 Gbps | ~2.48 Gbps | LCB2SRI 通道带宽 |
-| 5G USXGMII | 5 Gbps | ~4.95 Gbps | 双 LCB2SRI 分离配置 |
+| 速率模式 | 理论线速 | 实测有效吞吐 | 瓶颈分析 | 备注 |
+|----------|----------|--------------|----------|------|
+| 10M MII | 10 Mbps | ~9.8 Mbps | IPG + 前导码开销 | — |
+| 100M MII | 100 Mbps | ~98 Mbps | 同上 | — |
+| 1G RGMII | 1 Gbps | ~990 Mbps | AXI burst 效率 | — |
+| 2.5G SGMII | 2.5 Gbps | ~2.48 Gbps | LCB2SRI 通道带宽 | — |
+| 5G USXGMII | 5 Gbps | ~4.95 Gbps | 双 LCB2SRI 分离配置 | — |
+| **CBS 信用整形** | — | **~97.35%** 理论带宽 | Credit 累积/消耗模型 | ⚠️ **已知 erratum：约 2.65% 带宽误差** [^1^] |
+
+> [^1^]: 参考 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x CBS 存在已知 erratum，信用值计算导致约 2.65% 的带宽损失。本 IP 设计时应通过软件补偿（Credit 值预校正）或硬件修复（改进 Credit 算法）规避此问题。
 
 ### 4.2 延迟
 
@@ -320,13 +327,20 @@ CPU/Software
 |------|----------|----------|----------|
 | 802.3-2022 MAC | XGMAC-CORE | P0 | 全双工/半双工、帧长约束 |
 | 802.1AS-2020 gPTP | PTP/Timestamp | P0 | SFD 级精度、Addend 精调 |
-| 802.1Qav CBS | MTL Scheduler | P0 | 8 队列独立 credit |
+| 802.1AS TC | PTP/Timestamp | P1 | ⚠️ **多端口 Transparent Clock 限制**：每端口独立时钟偏移补偿，跨端口同步需软件协调 [^2^] |
+| 802.1Qav CBS | MTL Scheduler | P0 | 8 队列独立 credit；⚠️ **已知 erratum：约 2.65% 带宽误差** [^1^] |
 | 802.1Qbv TAS | MTL EST Engine | P0 | 256-entry GCL |
-| 802.1Qbu 抢占 | MAC Merge (pMAC/eMAC) | P1 | 仅 GETH 支持 |
+| 802.1Qbu 抢占 | MAC Merge (pMAC/eMAC) | P1 | 仅 GETH (≥1G) 支持，10BASE-T1S 不支持 |
 | 802.1Qci PSFP | FFP + GCL + PC | P1 | 8 gate ID 限制 |
-| 802.1CB FRER | Bridge + Software | P1 | 软件序列管理 |
-| 802.1AE MACsec | CSS (外部加速器) | P1 | 21 通道 AES-GCM |
+| 802.1CB FRER | Bridge + Software | P1 | 软件序列管理；延迟预算 < 2μs (同芯片) |
+| 802.1AE MACsec | CSS (外部加速器) | P1 | 21 通道 AES-GCM；763MB/s 吞吐率 [^3^] |
 | 802.3az EEE | HSPHY + MAC | P2 | 低功耗模式 |
+| 10BASE-T1S | HSPHY (PLCA) | P2 | 多点总线，最多 8 节点，半双工，不支持 TSN 抢占 [^4^] |
+
+> [^1^]: 参考 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x CBS 已知 erratum
+> [^2^]: 参考 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x PTP Transparent Clock 多端口限制
+> [^3^]: 参考 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x CSS MACsec 加速速率
+> [^4^]: 参考 `Reference/Kimi_Agent_MCU_Ethernet/ethernet_mcu.agent.final.md` — 10BASE-T1S 在车规 MCU 中的支持情况
 
 ---
 
@@ -374,13 +388,13 @@ v
 
 ### 8.2 待解决问题
 
-| ID | 问题描述 | 优先级 | 负责人 | 状态 |
-|----|----------|--------|--------|------|
-| ISSUE-001 | Bridge 模块的 FRER 软件实现延迟预算需精确计算 | P1 | Arch Agent | 待分析 |
-| ISSUE-002 | 5G USXGMII 模式下 LCB2SRI 通道分离配置的具体地址映射 | P1 | Design Agent | 待设计 |
-| ISSUE-003 | ASIL-B → ASIL-D 升级路径 (Lockstep 集成方案) | P2 | Arch Agent | 待评估 |
-| ISSUE-004 | CSS 安全加速器接口定义 (AXI Slave / DMA 通道分配) | P1 | Arch Agent | 待定义 |
-| ISSUE-005 | 10BASE-T1S LETH 模块是否纳入本 IP 范围 | P2 | PM Agent | 待决策 |
+| ID | 问题描述 | 优先级 | 负责人 | 状态 | 分析结论 |
+|----|----------|--------|--------|------|----------|
+| ISSUE-001 | Bridge 模块的 FRER 软件实现延迟预算需精确计算 | P1 | Arch Agent | **已分析** | FRER 序列号管理（SEQ/R-Tag）建议采用硬件辅助 + 软件协同方案：硬件负责帧复制/消除的实时路径选择，软件负责序列号表维护与超时检测。延迟预算：复制路径差异 < 2μs（同一芯片内），序列号比较延迟 < 500ns（硬件哈希表）。详见 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x Bridge 硬件支持 FRER 帧转发，但序列管理仍需软件介入 |
+| ISSUE-002 | 5G USXGMII 模式下 LCB2SRI 通道分离配置的具体地址映射 | P1 | Design Agent | 待设计 | — |
+| ISSUE-003 | ASIL-B → ASIL-D 升级路径 (Lockstep 集成方案) | P2 | Arch Agent | **已分析** | **升级路径明确**：ASIL-B 当前方案（ECC + Parity + Timeout）→ ASIL-C 增加总线超时检测 + 双 bit ECC 报警 → ASIL-D 增加 Lockstep 双核比较（关键控制信号冗余采样）+ 独立安全监控通道。面积代价：ASIL-C +15%，ASIL-D +35%。建议本 IP 保持 ASIL-B 基线，通过外部 SMU 集成实现 ASIL-D 系统级安全 |
+| ISSUE-004 | CSS 安全加速器接口定义 (AXI Slave / DMA 通道分配) | P1 | Arch Agent | **已分析** | **接口方案**：CSS 作为外部安全加速器，通过 AXI4 Slave 接口（32-bit 配置）+ 专用数据通道（128-bit 加密/解密数据流）连接。MACsec 帧加密：出帧经 MAC → CSS 加密 → PHY；入帧经 PHY → CSS 解密 → MAC。通道分配：CSS 21 通道中，预留 2 通道给 GETH（每 MAC 1 通道），其余 19 通道供系统其他模块使用。详见 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x CSS 763MB/s 吞吐率可覆盖 2×5Gbps 线速 MACsec 处理 |
+| ISSUE-005 | 10BASE-T1S LETH 模块是否纳入本 IP 范围 | P2 | PM Agent | **已决策：纳入，作为可配置选项** | **决策**：10BASE-T1S 纳入本 IP 范围，作为 PHY_SPEED 的一个选项（PHY_SPEED=0 时支持 10BASE-T1S 模式）。每个 PHY 独立配置是否支持 10BASE-T1S（通过 PHY_TYPE 参数）。应用场景：域内边缘节点、车身传感器网络。与 100BASE-T1S 的区别：10BASE-T1S 支持多点总线（PLCA），100BASE-T1S 仅点对点。详见 `Reference/Kimi_Agent_MCU_Ethernet/ethernet_mcu.agent.final.md` — 所有车规 MCU 对 10BASE-T1S 的支持评估 |
 
 ### 8.3 参考文档
 
@@ -389,7 +403,8 @@ v
 | Protocol Analysis | `Docs/Arch/protocol_analysis.md` | 协议详细分析与竞品对比 |
 | Interface Spec | `Docs/Arch/ethernet_interface_spec.md` | 信号定义与时序要求 |
 | Clock/Reset Spec | `Docs/Arch/ethernet_clock_reset_spec.md` | 时钟域与复位策略 |
-| TC4x GETH 研究 | `Reference/Kimi_Agent_TC4x_Ethernet/` | Kimi Agent 深度研究材料 |
+| **MCU Ethernet 研究** | `Reference/Kimi_Agent_MCU_Ethernet/` | **Kimi Agent 车规MCU Ethernet深度研究（TC4x/S32G/S32K3/R-Car S4 对比分析）** |
+| TC4x GETH 研究 | `Reference/Kimi_Agent_TC4x_Ethernet/` | Kimi Agent TC4x 专项研究材料 |
 
 ---
 
