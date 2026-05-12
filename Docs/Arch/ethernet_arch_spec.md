@@ -91,6 +91,10 @@
 > - `SUPPORT_GPTP=1` 要求 `SUPPORT_1588=1`
 > - `SUPPORT_FRER=1` 要求 `SUPPORT_SWITCH=1` 且 `MAC_COUNT ≥ 2`
 > - `SUPPORT_FP=1` 要求 `MAC_TYPE ≥ 1` (GMAC/XGMAC)
+> - **`SUPPORT_TAS` 与 `SWITCH_TAS` 互斥**：
+>   - 当 `SUPPORT_SWITCH=1` 时，**TAS 统一为 Switch 级**（`SWITCH_TAS=1`, `SUPPORT_TAS=0`）
+>   - 当 `SUPPORT_SWITCH=0` 时，TAS 为端点级（`SUPPORT_TAS=1`, `SWITCH_TAS=0`）
+>   - 两者不可同时使能，硬件互锁：`SWITCH_TAS=1 → SUPPORT_TAS=0`
 > - `SUPPORT_TAS=1` 要求 `SUPPORT_CBS=1`（推荐，非强制）
 > - **`SWITCH_TAS=1` 要求 `SUPPORT_SWITCH=1` 且 `SUPPORT_TSN=1`**
 > - **`SWITCH_L3=1` 要求 `SUPPORT_SWITCH=1` 且 `MAC_TYPE ≥ 1`**
@@ -102,7 +106,7 @@
 > - **MAC_TYPE 与 PHY_SPEED 独立配置**：MAC_TYPE 决定 MAC 层能力，PHY_SPEED 决定物理层速率。例如 XGMAC (MAC_TYPE=2) 可通过降频运行在 1G PHY (PHY_SPEED=2) 上
 > - **PHY_TYPE 与 PHY_SPEED 配对约束**：`PHY_TYPE=0` (10BASE-T1S) 仅支持 `PHY_SPEED=0` (10M)；`PHY_TYPE=1` 支持 `PHY_SPEED=0~1` (10M/100M)；`PHY_TYPE=2` 支持 `PHY_SPEED=0~2` (10M/100M/1G)；`PHY_TYPE=3` 支持 `PHY_SPEED=0~5` (10M~10G)
 > - **10BASE-T1S 特殊约束**：`PHY_TYPE=0` 时，PHY 支持多点总线拓扑（PLCA），最多 8 个节点；不支持全双工（仅半双工），因此 `SUPPORT_FP` (帧抢占) 和 `SUPPORT_TAS` 在此 PHY 上自动关闭
-> - **Switch 级 TAS 约束**：`SWITCH_TAS=1` 时，端点 MAC 的 `SUPPORT_TAS` 可关闭（端点无需感知门控周期，由 Switch 统一调度）
+> - **Switch 级 TAS 约束**：`SWITCH_TAS=1` 时，端点 MAC 的 `SUPPORT_TAS` 自动关闭（端点无需感知门控周期，由 Switch 统一调度）
 
 ### 1.4.2 非协议相关 — DMA/缓冲参数
 
@@ -420,6 +424,7 @@ v
 | v1.1 | 2026-05-11 | Arch Agent | 新增 1.4 可配置参数矩阵（协议/DMA/安全参数） |
 | v1.2 | 2026-05-11 | Arch Agent | 重构参数：MAC_COUNT 1-8, MAC_TYPE (MAC/GMAC/XGMAC), PHY_COUNT 独立 1-8, PHY_SPEED 解耦 |
 | v1.4 | 2026-05-12 | Arch Agent | **基于 R-Car S4 Gap Analysis 升级**: 4-port L2/L3 Switch (替换 Bridge), 双 PHC + vPHC 虚拟化, AVTP 硬件感知, Switch 级 TAS/PSFP, 更新应用场景矩阵和资源估算 |
+| **v1.4.1** | **2026-05-12** | **Arch Agent** | **ISSUE-006~009 参数化定义**: TAS 互斥规则 (Switch 级优先), 双 PHC/vPHC 寄存器接口, L3 路由表/ARP 缓存, AVTP RX Filter/DMA 队列映射 |
 
 ### 8.2 待解决问题
 
@@ -429,10 +434,10 @@ v
 | ISSUE-002 | 5G USXGMII 模式下 LCB2SRI 通道分离配置的具体地址映射 | P1 | Design Agent | 待设计 | — |
 | ISSUE-003 | ASIL-B → ASIL-D 升级路径 (Lockstep 集成方案) | P2 | Arch Agent | **已分析** | **升级路径明确**：ASIL-B 当前方案（ECC + Parity + Timeout）→ ASIL-C 增加总线超时检测 + 双 bit ECC 报警 → ASIL-D 增加 Lockstep 双核比较（关键控制信号冗余采样）+ 独立安全监控通道。面积代价：ASIL-C +15%，ASIL-D +35%。建议本 IP 保持 ASIL-B 基线，通过外部 SMU 集成实现 ASIL-D 系统级安全 |
 | ISSUE-004 | CSS 安全加速器接口定义 (AXI Slave / DMA 通道分配) | P1 | Arch Agent | **已分析** | **接口方案**：CSS 作为外部安全加速器，通过 AXI4 Slave 接口（32-bit 配置）+ 专用数据通道（128-bit 加密/解密数据流）连接。MACsec 帧加密：出帧经 MAC → CSS 加密 → PHY；入帧经 PHY → CSS 解密 → MAC。通道分配：CSS 21 通道中，预留 2 通道给 GETH（每 MAC 1 通道），其余 19 通道供系统其他模块使用。详见 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x CSS 763MB/s 吞吐率可覆盖 2×5Gbps 线速 MACsec 处理 |
-| ISSUE-006 | **Switch 级 TAS (802.1Qbv) 与端点级 TAS 的互斥/协同设计** | P1 | Arch Agent | **新发现** | **R-Car S4 采用 Switch 级 TAS，端点无需感知门控周期**。本 IP 若同时支持端点级 TAS (`SUPPORT_TAS=1`) 和 Switch 级 TAS (`SWITCH_TAS=1`)，需明确互斥关系：同一网络中只能有一个 TAS 调度主节点。建议默认关闭端点级 TAS（`SUPPORT_TAS=0, SWITCH_TAS=1`），端点按普通以太网发送，由 Switch 统一调度。若需端点直接控制（如 Zone Controller 骨干），则关闭 Switch 级 TAS。配置参数 `TAS_MODE`：0=端点级, 1=Switch 级, 2=混合（需软件协调） |
-| ISSUE-007 | **双 PHC + vPHC 的 Xen IO Ring 接口定义与 SoC 集成** | P1 | Arch Agent | **新发现** | **R-Car S4 通过 Xen IO Rings 实现 vPHC 只读访问**。本 IP 需定义：① PHC0/PHC1 的寄存器接口（与单 PHC 兼容）；② vPHC 的 IO Ring 格式（8B 时间戳 + 4B 域ID + 4B 序列号）；③ dom0 写物理 PHC 的权限控制（Region ID/SPID）；④ domU 只读 vPHC 的轮询/中断机制。SoC 集成方需提供 Hypervisor 适配层。面积增量：双 PHC ~+10k 门，vPHC IO Ring ~+5k 门 |
-| ISSUE-008 | **L3 路由表容量与查表延迟** | P2 | Design Agent | **待设计** | **SWITCH_L3=1 时，Switch Core 需支持基于 IP 地址的 Layer 3 转发**。关键参数：① 路由表容量（建议 256/512/1K 条目可配）；② 查表延迟（TCAM vs 哈希表，TCAM < 50ns，哈希表 < 200ns）；③ ARP 缓存（建议 128 条目，老化时间 600s）；④ 默认路由（0.0.0.0/0 指向 Host CPU）。需在 EDR 阶段与 Verification Agent 确认测试覆盖 |
-| ISSUE-009 | **AVTP 硬件感知的 VLAN + PCP 过滤位定义** | P2 | Arch Agent | **待分析** | **R-Car Gen3 的 AVTP-awareness 基于 VLAN Tag (0x8100) + PCP (3-bit 优先级) 识别 AVB 流**。本 IP 若 `SUPPORT_AVTP_AWARE=1`，需在 RX Filter 中增加：① AVTP 以太类型识别（0x22F0 IEEE 1722）；② VLAN PCP 匹配（PCP=3 为 SR Class B，PCP=2 为 SR Class A）；③ 独立 DMA 队列映射（AVTP 流 → 专用 RX Queue）。需与信息娱乐域软件栈确认 AVTP 封装格式兼容性 | **决策**：10BASE-T1S 纳入本 IP 范围，作为 PHY_SPEED 的一个选项（PHY_SPEED=0 时支持 10BASE-T1S 模式）。每个 PHY 独立配置是否支持 10BASE-T1S（通过 PHY_TYPE 参数）。应用场景：域内边缘节点、车身传感器网络。与 100BASE-T1S 的区别：10BASE-T1S 支持多点总线（PLCA），100BASE-T1S 仅点对点。详见 `Reference/Kimi_Agent_MCU_Ethernet/ethernet_mcu.agent.final.md` — 所有车规 MCU 对 10BASE-T1S 的支持评估 |
+| ISSUE-006 | **Switch 级 TAS (802.1Qbv) 参数化定义与端点级 TAS 互斥规则** | P1 | Arch Agent | **已定义** | **参数化规则**：当 `SUPPORT_SWITCH=1` 时，TAS 使能统一为 **Switch 级**（`SWITCH_TAS=1`），端点级 TAS 自动关闭（`SUPPORT_TAS=0`）。当 `SUPPORT_SWITCH=0` 时，TAS 使能为端点级（`SUPPORT_TAS=1`）。两者**互斥**，不可同时使能。配置参数简化：删除 `TAS_MODE`，改为 `SWITCH_TAS` 与 `SUPPORT_TAS` 的硬件互锁（`SWITCH_TAS=1 → SUPPORT_TAS=0`，反之亦然）。**理由**：同一网络中只能有一个 TAS 调度主节点。Switch 级 TAS 降低端点软件复杂度，适合中央网关；端点级 TAS 适合 Zone Controller 骨干（无 Switch）。
+| ISSUE-007 | **双 PHC + vPHC 的 Xen IO Ring 接口定义与 SoC 集成** | P1 | Arch Agent | **已定义** | **寄存器接口**：① PHC0/PHC1 各 64-bit 纳秒计数器 + 32-bit 亚纳秒寄存器，地址映射兼容单 PHC（基地址 +0x000/0x100 偏移）；② vPHC IO Ring：每 1ms 由 dom0 推送物理 PHC 时间戳到共享内存环（64B 槽位：8B 时间戳 + 4B 域ID + 4B 序列号 + 48B 保留），domU 只读轮询或中断触发；③ 权限控制：dom0 通过 Region ID=0x0 写物理 PHC，domU 通过 Region ID≥0x1 只读 vPHC，硬件解码 AXI AWID/ARID 的 Region 字段拒绝越权写；④ 中断：vPHC 更新完成触发 `vphc_update_irq` 到 domU IR。**SoC 集成需求**：Hypervisor 需提供 Xen IO Ring 基地址配置 + Region ID 分配表。**面积**：双 PHC +10k 门，vPHC IO Ring +5k 门。
+| ISSUE-008 | **L3 路由表容量、查表机制与 ARP 缓存定义** | P2 | Design Agent | **已定义** | **路由表**：① 容量 256/512/1K 条目可配（参数 `L3_ROUTE_TABLE_SIZE`）；② 查表机制：哈希表（默认，<200ns）或 TCAM（可选，<50ns），哈希冲突用链地址法，4-way 组相联；③ 表项格式：{IP 前缀(32b) + 掩码长度(6b) + 下一跳 MAC(48b) + 出端口(8b) + 命中计数(16b) + 有效位(1b)}；④ 默认路由：0.0.0.0/0 → Host CPU（软件处理）。**ARP 缓存**：128 条目，格式 {IP(32b) + MAC(48b) + 端口(8b) + 老化时间(16b)}，硬件自动老化（600s），Host 可预填充静态条目。**查表路径**：Ingress 帧 → 提取目的 IP → 路由表查表 → 命中则改写 DMAC 为下一跳 MAC 并从出端口转发；未命中则上送 Host CPU。**测试覆盖**：需在 EDR 阶段由 Verification Agent 验证 1K 条目满载时的查表延迟和冲突率。
+| ISSUE-009 | **AVTP 硬件感知的 RX Filter 位定义与 DMA 队列映射** | P2 | Arch Agent | **已定义** | **AVTP 识别逻辑**：① 以太类型匹配：0x22F0（IEEE 1722 AVTP）或 0x8100（VLAN Tag）→ 若 VLAN 则进一步匹配 PCP；② VLAN PCP 匹配：PCP=2（SR Class A，延迟 <2ms）、PCP=3（SR Class B，延迟 <50ms），掩码可配；③ Stream ID 提取：从 AVTP 帧载荷提取 64-bit Stream ID，匹配预配置的白名单（16 条目）。**DMA 队列映射**：AVTP 流命中 → 独立 RX Queue（`RX_Q_AVTP`，默认 Queue 7，可配），与其他流量物理隔离；非 AVTP 流 → 常规 Queue 0~6。**寄存器配置**：`AVTP_CTRL`（使能 + 队列选择）、`AVTP_VLAN_PCP_MASK`（PCP 匹配掩码）、`AVTP_STREAM_ID[n]`（16 条目白名单）。**软件协同**：信息娱乐域软件栈需确认 AVTP 封装格式（IEEE 1722-2016 vs 1722-2021），建议默认支持 1722-2016（R-Car Gen3 兼容）。 |
 
 ### 8.3 参考文档
 
