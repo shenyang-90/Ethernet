@@ -1,11 +1,12 @@
 # Ethernet IP 协议分析与竞品功能分析
 
-> **文档版本**: v1.0  
-> **日期**: 2026-05-11  
-> **作者**: Arch Agent  
-> **项目**: Ethernet IP (IP_20260502_001)  
-> **阶段**: PAD  
-> **参考**: TC4x GETH手册, IEEE 802.3/802.1Q/802.1AS/802.1AE/802.1CB
+> **文档版本**: v1.1
+> **日期**: 2026-05-12
+> **作者**: Arch Agent
+> **项目**: Ethernet IP (IP_20260502_001)
+> **阶段**: PAD
+> **参考**: TC4x GETH手册, IEEE 802.3/802.1Q/802.1AS/802.1AE/802.1CB, **Renesas R-Car S4 RSwitch2**
+> **变更**: v1.1 增加 Switch 相关协议 (802.1D/802.1Q Switch, L3 路由, Switch 级 TAS/gPTP Relay, 多播过滤), 更新竞品对比矩阵
 
 ---
 
@@ -13,7 +14,7 @@
 
 ### 1.1 协议分类矩阵
 
-TC4x GETH模块支持的协议可按**功能域**分为五大类：
+TC4x GETH模块支持的协议可按**功能域**分为五大类:
 
 | 功能域 | 协议/标准 | 版本 | 优先级 | 复杂度 |
 |--------|----------|------|--------|--------|
@@ -27,9 +28,9 @@ TC4x GETH模块支持的协议可按**功能域**分为五大类：
 | **网络安全** | 802.1AE (MACsec) | 2018 | P1 | 高 |
 | **VLAN/QoS** | 802.1Q | 2022 | P0 | 中 |
 | **时间同步** | IEEE 1588 (PTP) | 2008 | P0 | 中 |
-| **PHY接口** | MII / RMII / RGMII / SGMII / USXGMII | — | P0 | 低 |
+| **PHY接口** | MII / RMII / RGMII / SGMII / USXGMII | - | P0 | 低 |
 | **节能** | 802.3az (EEE) | 2010 | P2 | 低 |
-| **安全机制** | ECC / FSM parity / Timeout | — | P0 | 中 |
+| **安全机制** | ECC / FSM parity / Timeout | - | P0 | 中 |
 
 ### 1.2 协议-功能映射图
 
@@ -57,7 +58,7 @@ TC4x GETH模块支持的协议可按**功能域**分为五大类：
 
 ## 2. 各协议详细分析
 
-### 2.1 基础以太网 — IEEE 802.3
+### 2.1 基础以太网 - IEEE 802.3
 
 **核心内容**: MAC层帧格式、CSMA/CD、全双工/半双工、帧长约束(64~1518B, jumbo 9KB/16KB)
 
@@ -70,13 +71,13 @@ TC4x GETH模块支持的协议可按**功能域**分为五大类：
 - 源地址替换/插入可编程
 - 流控: 802.3x PAUSE帧 (单播/广播), 零 quanta PAUSE自动发送
 
-**架构影响**: MAC Core是基础模块，所有上层功能（TSN、VLAN、安全）都建立在MAC层之上。需支持可编程的帧处理流水线。
+**架构影响**: MAC Core是基础模块,所有上层功能(TSN、VLAN、安全)都建立在MAC层之上。需支持可编程的帧处理流水线。
 
 ---
 
-### 2.2 时间同步 — IEEE 802.1AS-2020 (gPTP)
+### 2.2 时间同步 - IEEE 802.1AS-2020 (gPTP)
 
-**核心内容**: 基于IEEE 1588的精确时间同步协议，专为TSN设计。通过BMCA (Best Master Clock Algorithm) 选择主时钟，利用Sync/Follow_Up/Delay_Req/Delay_Resp消息实现亚微秒级同步。
+**核心内容**: 基于IEEE 1588的精确时间同步协议,专为TSN设计。通过BMCA (Best Master Clock Algorithm) 选择主时钟,利用Sync/Follow_Up/Delay_Req/Delay_Resp消息实现亚微秒级同步。
 
 **GETH实现要点**:
 - 64位时间戳 (Tx/Rx每包状态附带)
@@ -88,16 +89,16 @@ TC4x GETH模块支持的协议可按**功能域**分为五大类：
 - 动态参考时钟源选择
 
 **关键机制**:
-1. **Sync消息**: 主时钟周期性发送，从时钟记录接收时间戳
+1. **Sync消息**: 主时钟周期性发送,从时钟记录接收时间戳
 2. **Follow_Up**: 携带Sync的精确发送时间戳 (两步式)
 3. **Delay_Req/Delay_Resp**: 测量路径延迟
-4. **Peer Delay**: 对等延迟测量 (802.1AS特有，替代端到端延迟)
+4. **Peer Delay**: 对等延迟测量 (802.1AS特有,替代端到端延迟)
 
-**架构影响**: 需要独立的时间戳硬件模块，与MAC Tx/Rx路径紧耦合。时间精度直接影响TSN调度正确性。
+**架构影响**: 需要独立的时间戳硬件模块,与MAC Tx/Rx路径紧耦合。时间精度直接影响TSN调度正确性。
 
 ---
 
-### 2.3 VLAN与桥接 — IEEE 802.1Q-2022
+### 2.3 VLAN与桥接 - IEEE 802.1Q-2022
 
 **核心内容**: VLAN标签(4B TCI: PCP[3:0] + CFI + VID[11:0])、桥接转发、生成树协议(RSTP/MSTP)、TSN扩展。
 
@@ -106,35 +107,35 @@ TC4x GETH模块支持的协议可按**功能域**分为五大类：
 - 发送帧VLAN标签插入/替换/删除
 - 双层VLAN (Stacked VLAN, Q-in-Q) 支持
 - 基于VLAN的perfect match + hash filtering (最多8个)
-- 32个MAC地址perfect match filter (DA/SA各32个，带byte mask)
+- 32个MAC地址perfect match filter (DA/SA各32个,带byte mask)
 - 8个Layer 3/Layer 4 (TCP/UDP over IPv4/IPv6) match filter
 - 混杂模式 (promiscuous) 支持
 
 **关键机制**:
 1. **VLAN优先级 (PCP)**: 3-bit, 0~7, 直接映射到TSN队列优先级
 2. ** ingress/egress端口分类**: GETH根据VLAN/PCP/DMAC进行流量分类
-3. **桥接功能**: TC4x部分产品支持两端口桥接，静态建立数据路径
+3. **桥接功能**: TC4x部分产品支持两端口桥接,静态建立数据路径
 
-**架构影响**: 帧分类引擎是核心模块，影响TSN调度、QoS、安全策略的触发条件。
+**架构影响**: 帧分类引擎是核心模块,影响TSN调度、QoS、安全策略的触发条件。
 
 ---
 
-### 2.4 时间敏感网络 — TSN协议族
+### 2.4 时间敏感网络 - TSN协议族
 
-#### 2.4.1 IEEE 802.1Qav — Credit-Based Shaper (CBS)
+#### 2.4.1 IEEE 802.1Qav - Credit-Based Shaper (CBS)
 
-**核心内容**: 为AVB/TSN流量提供带宽保障。每个队列维护一个credit计数器，信用充足时才能发送，信用以`idleSlope`速率恢复，以`sendSlope`速率消耗。
+**核心内容**: 为AVB/TSN流量提供带宽保障。每个队列维护一个credit计数器,信用充足时才能发送,信用以`idleSlope`速率恢复,以`sendSlope`速率消耗。
 
 **GETH实现要点**:
 - 最多8个Tx队列支持CBS
 - 独立credit-based shaper per queue
 - 单Tx FIFO + Rx FIFO for all selected queues
 
-**架构影响**: 需要在MTL层增加credit计算逻辑，与队列调度器紧耦合。
+**架构影响**: 需要在MTL层增加credit计算逻辑,与队列调度器紧耦合。
 
-#### 2.4.2 IEEE 802.1Qbv — Enhancements for Scheduled Traffic (EST)
+#### 2.4.2 IEEE 802.1Qbv - Enhancements for Scheduled Traffic (EST)
 
-**核心内容**: 基于门控列表(GCL, Gate Control List)的时间门控调度。每个队列有一个门，GCL按时间周期性地开关门，实现确定性的时间窗口传输。
+**核心内容**: 基于门控列表(GCL, Gate Control List)的时间门控调度。每个队列有一个门,GCL按时间周期性地开关门,实现确定性的时间窗口传输。
 
 **GETH实现要点**:
 - GCL Memory深度: 256 lines
@@ -146,9 +147,9 @@ TC4x GETH模块支持的协议可按**功能域**分为五大类：
 - `CycleTime`: GCL循环周期
 - `BaseTime`: GCL起始参考时间 (来自802.1AS)
 
-**架构影响**: GCL Memory需要保护，与gPTP时间同步强相关。EST是TSN中最复杂的调度机制之一。
+**架构影响**: GCL Memory需要保护,与gPTP时间同步强相关。EST是TSN中最复杂的调度机制之一。
 
-#### 2.4.3 IEEE 802.1Qbu/802.3br — Frame Preemption
+#### 2.4.3 IEEE 802.1Qbu/802.3br - Frame Preemption
 
 **核心内容**: 允许高优先级Express帧抢占低优先级 preemptable帧。被抢占的帧在传输完成后从中断点恢复。
 
@@ -157,9 +158,9 @@ TC4x GETH模块支持的协议可按**功能域**分为五大类：
 - 帧分段与重组
 - `mPacket`格式 (带CRC的片段)
 
-**架构影响**: 需要MAC层支持帧分段和重组，增加发送/接收路径的复杂度。与EST配合使用效果最好。
+**架构影响**: 需要MAC层支持帧分段和重组,增加发送/接收路径的复杂度。与EST配合使用效果最好。
 
-#### 2.4.4 IEEE 802.1Qci — Per-Stream Filtering and Policing (PSFP)
+#### 2.4.4 IEEE 802.1Qci - Per-Stream Filtering and Policing (PSFP)
 
 **核心内容**: 基于流的过滤和 policing。对每个流定义gate (流门)、meter (流量计量)、filter (过滤规则)。
 
@@ -168,11 +169,11 @@ TC4x GETH模块支持的协议可按**功能域**分为五大类：
 - Flow metering (基于令牌桶)
 - 帧过滤与截断
 
-**架构影响**: 需要流识别引擎 (基于Stream ID，通常来自802.1CB的R-tag)，与帧分类引擎配合。
+**架构影响**: 需要流识别引擎 (基于Stream ID,通常来自802.1CB的R-tag),与帧分类引擎配合。
 
-#### 2.4.5 IEEE 802.1CB — Frame Replication and Elimination for Reliability (FRER)
+#### 2.4.5 IEEE 802.1CB - Frame Replication and Elimination for Reliability (FRER)
 
-**核心内容**: 为关键流提供冗余传输路径。发送端复制帧并通过多条路径发送，接收端根据序列号消除重复帧。
+**核心内容**: 为关键流提供冗余传输路径。发送端复制帧并通过多条路径发送,接收端根据序列号消除重复帧。
 
 **GETH实现要点**:
 - R-tag (Redundancy tag) 插入/检测
@@ -182,15 +183,15 @@ TC4x GETH模块支持的协议可按**功能域**分为五大类：
 **关键机制**:
 1. **Sequence Generation**: 为每个流生成递增序列号
 2. **Frame Replication**: 将帧复制到多个 egress 端口
-3. **Sequence Recovery**: 接收端基于序列号消除重复，恢复丢失
+3. **Sequence Recovery**: 接收端基于序列号消除重复,恢复丢失
 
-**架构影响**: 需要序列号生成/检查硬件，与桥接功能强相关。FRER是功能安全(ISO 26262)相关的关键TSN特性。
+**架构影响**: 需要序列号生成/检查硬件,与桥接功能强相关。FRER是功能安全(ISO 26262)相关的关键TSN特性。
 
 ---
 
-### 2.5 网络安全 — IEEE 802.1AE (MACsec)
+### 2.5 网络安全 - IEEE 802.1AE (MACsec)
 
-**核心内容**: 在MAC层提供透明安全保护：数据机密性(AES-GCM加密)、完整性校验(ICV)、数据源认证。
+**核心内容**: 在MAC层提供透明安全保护:数据机密性(AES-GCM加密)、完整性校验(ICV)、数据源认证。
 
 **GETH实现要点** (硬件需求层面):
 - MACsec硬件支持 (AES-GCM引擎)
@@ -202,15 +203,15 @@ TC4x GETH模块支持的协议可按**功能域**分为五大类：
 - SecTAG: 8/16 bytes (含EtherType 0x88E5)
 - ICV: 16 bytes
 
-**架构影响**: 加密引擎通常是独立硬件模块，与MAC层之间有明确接口。加密/解密增加了延迟，需要在时序预算中考虑。
+**架构影响**: 加密引擎通常是独立硬件模块,与MAC层之间有明确接口。加密/解密增加了延迟,需要在时序预算中考虑。
 
-**注意**: TC4x手册提到GETH"支持MACsec硬件需求"，但具体实现可能在HSPHY或其他安全模块中。需确认MACsec功能的具体分工。
+**注意**: TC4x手册提到GETH"支持MACsec硬件需求",但具体实现可能在HSPHY或其他安全模块中。需确认MACsec功能的具体分工。
 
 ---
 
-### 2.6 PTP — IEEE 1588-2008
+### 2.6 PTP - IEEE 1588-2008
 
-**核心内容**: 网络精确时间同步协议，802.1AS基于1588 profile定义。
+**核心内容**: 网络精确时间同步协议,802.1AS基于1588 profile定义。
 
 **GETH实现要点**:
 - PTP over Ethernet (Layer 2) 和 PTP over UDP (Layer 3/4)
@@ -218,7 +219,7 @@ TC4x GETH模块支持的协议可按**功能域**分为五大类：
 - 主时钟/从时钟模式
 - 时间戳捕获精度: 纳秒级
 
-**与802.1AS的关系**: 802.1AS是1588的TSN profile，定义了更严格的BMCA、Sync间隔、时间戳机制。GETH的1588支持是802.1AS的基础。
+**与802.1AS的关系**: 802.1AS是1588的TSN profile,定义了更严格的BMCA、Sync间隔、时间戳机制。GETH的1588支持是802.1AS的基础。
 
 ---
 
@@ -236,20 +237,66 @@ TC4x GETH模块支持的协议可按**功能域**分为五大类：
 
 ---
 
-### 2.8 节能 — IEEE 802.3az (EEE)
+### 2.8 节能 - IEEE 802.3az (EEE)
 
-**核心内容**: Energy Efficient Ethernet，在低负载时关闭PHY发送电路，通过LPI (Low Power Idle) 信号节能。
+**核心内容**: Energy Efficient Ethernet,在低负载时关闭PHY发送电路,通过LPI (Low Power Idle) 信号节能。
 
 **GETH实现要点**:
 - LPI模式进入/退出控制
 - Wake-on-LAN (4个filter)
 - Magic Packet / 远程唤醒帧检测
 
-**架构影响**: 功耗管理模块，与PHY接口和时钟门控相关。
+**架构影响**: 功耗管理模块,与PHY接口和时钟门控相关。
 
 ---
 
-## 3. TC4x GETH功能映射
+### 2.9 Switch 相关协议 - 802.1D/802.1Q Switch / L3 Routing
+
+**核心内容**: IEEE 802.1D 定义 MAC 桥接的基本转发规则(学习、老化、泛洪),802.1Q-2022 扩展了 VLAN 感知桥接(VLAN 转发表、端口成员关系、Tag 处理)。在 Switch 架构中,这些协议由 **Switch Core** 硬件实现,而非端点 MAC。
+
+**Switch Core 实现要点**:
+
+#### 2.9.1 MAC 地址自学习 (802.1D)
+- **FDB (Forwarding Database)**: 硬件哈希表,容量可配(4K/8K/16K 条目)
+- **自学习**: 源 MAC 地址 + 入端口 → 自动写入 FDB
+- **老化**: 可配置老化时间(默认 300s),硬件定时器自动删除过期条目
+- **静态条目**: Host CPU 通过 CSR 配置静态 MAC→端口映射,优先级高于动态学习
+- **未知单播/广播/多播**: 泛洪到同 VLAN 的所有端口(除入端口)
+
+#### 2.9.2 VLAN 转发 (802.1Q Switch)
+- **VLAN Table**: VID → {端口掩码, Tag 处理方式}
+- **Tag 处理**:
+  - Ingress: Untagged 帧 → 按端口 PVID 添加 VLAN Tag;Tagged 帧 → 保留 Tag
+  - Egress: 按 VLAN 表决定是否 Strip/Replace/Keep Tag
+- **QinQ (Stacked VLAN)**: 外层 VLAN 用于运营商隔离,内层 VLAN 用于用户隔离
+
+#### 2.9.3 Layer 3 IP 路由 (可选)
+- **Route Table**: IP 前缀 → {下一跳 MAC, 出端口}
+- **ARP 缓存**: IP → MAC 映射(128 条目,老化 600s)
+- **查表机制**: TCAM(< 50ns)或哈希表(< 200ns)
+- **默认路由**: 0.0.0.0/0 指向 Host CPU(软件处理)
+
+#### 2.9.4 多播过滤 / IGMP Snooping
+- **多播组表**: 组 MAC 地址 → {成员端口掩码}
+- **IGMP Snooping**: 监听 IGMP Join/Leave 报文,动态更新多播组表
+- **静态多播**: Host CPU 预配置,用于已知多播流(如 SOME/IP-SD)
+
+#### 2.9.5 Switch 级 TAS (802.1Qbv on Switch)
+- **实现位置**: Switch Core 的每个入口端口独立的 GCL (Gate Control List)
+- **与端点级 TAS 的区别**:
+  - 端点级 TAS: 端点 MAC 按门控周期精确发送
+  - Switch 级 TAS: Switch 在入口端口按门控周期过滤/调度,端点无需感知门控
+- **优势**: 降低端点 MCU 软件复杂度,统一调度整个网络
+- **劣势**: 链路延迟必须纳入 GCL 周期设计
+
+#### 2.9.6 Switch 级 gPTP Relay (多端口 BC/TC)
+- **Boundary Clock (BC)**: Switch 作为 gPTP 域边界,各端口可属于不同时间域
+- **Transparent Clock (TC)**: Switch 测量帧在内部的驻留时间 (Residence Time),修正时间戳
+- **双 PHC 绑定**: 不同端口组绑定到不同 PHC(PHC0=ADAS 域, PHC1=IVI 域)
+
+**架构影响**: Switch Core 是中央网关的核心模块,决定 IP 的网络中枢能力。FDB/VLAN/L3 表需要 ECC 保护,查表延迟直接影响转发性能。
+
+**参考**: R-Car S4 的 RSwitch2 IP 支持完整的 L2/L3 Switch 功能,已通过 Spirent TSN 一致性验证 [^12^]。
 
 ### 3.1 功能-协议对应表
 
@@ -268,12 +315,18 @@ TC4x GETH模块支持的协议可按**功能域**分为五大类：
 | FRER (帧复制/消除) | 802.1CB | Bridge / XGMAC-CORE | 高 |
 | MACsec | 802.1AE | XGMAC-CORE / 安全引擎 | 高 |
 | EEE | 802.3az | XGMAC-CORE | 低 |
-| Checksum Offload | — | XGMAC-CORE | 中 |
-| L3/L4 Filtering | — | XGMAC-CORE | 中 |
-| Multichannel DMA (8ch) | — | XGMAC-DMA | 高 |
-| Bridge (2-port) | 802.1Q | Bridge | 高 |
+| Checksum Offload | - | XGMAC-CORE | 中 |
+| L3/L4 Filtering | - | XGMAC-CORE | 中 |
+| Multichannel DMA (8ch) | - | XGMAC-DMA | 高 |
+| **Switch Core (4-port L2/L3)** | **802.1D/802.1Q** | **Switch Core** | **高** |
+| FDB 自学习 | 802.1D | Switch Core | 中 |
+| VLAN 转发 | 802.1Q | Switch Core | 中 |
+| L3 IP 路由 | - | Switch Core | 高 |
+| 多播过滤 / IGMP Snooping | - | Switch Core | 中 |
+| **Switch 级 TAS** | **802.1Qbv** | **Switch Core** | **高** |
+| **Switch 级 gPTP Relay** | **802.1AS** | **Switch Core + PTP** | **高** |
 | PHY接口 (MII/RMII/RGMII/SGMII/USXGMII) | 802.3 | HSPHY | 中 |
-| ECC/Parity/Timeout | — | 全局 | 中 |
+| ECC/Parity/Timeout | - | 全局 | 中 |
 | RMON/MIB计数器 | RFC2819/2665 | XGMAC-CORE | 低 |
 
 ### 3.2 模块级协议覆盖
@@ -304,10 +357,16 @@ XGMAC-DMA
 ├── 时间戳传递
 └── 中断管理
 
-Bridge (可选)
-├── 两端口桥接
-├── 802.1CB FRER (帧复制/消除)
-└── 静态转发规则
+Switch Core (可选, 2~8端口)
+├── **L2 交换**: MAC 自学习, VLAN 转发, 多播过滤
+├── **L3 路由**: IP 查表, ARP 缓存 (可选)
+├── **802.1CB FRER**: 帧复制/消除, 多端口并行
+├── **802.1Qbv Switch 级 TAS**: 入口端口门控调度
+├── **802.1Qci Switch 级 PSFP**: 逐流过滤与监管
+├── **802.1AS 多端口 Relay**: BC/TC, 双 PHC 绑定
+├── **FDB**: 4K/8K/16K 条目, 硬件哈希表, 自动老化
+├── **VLAN Table**: VID → 端口掩码, Tag 处理
+└── **Crossbar + Arbiter**: 多端口全并发转发
 
 HSPHY (高速PHY接口)
 ├── MII / RMII / RGMII
@@ -328,7 +387,7 @@ HSPHY (高速PHY接口)
 | TI Jacinto 7 (TDA4) | TDA4VH | 16nm | ASIL-D | 公开手册 |
 | Renesas R-Car Gen4 | R-Car S4 | 16nm | ASIL-B/D | 公开资料 |
 
-> ⚠️ **数据来源说明**: NXP/TI/Renesas数据基于公开产品手册和Datasheet总结，未逐一验证。详细参数以官方文档为准。
+> ⚠️ **数据来源说明**: NXP/TI/Renesas数据基于公开产品手册和Datasheet总结,未逐一验证。详细参数以官方文档为准。
 
 ### 4.2 TSN协议支持对比
 
@@ -339,11 +398,15 @@ HSPHY (高速PHY接口)
 | 802.1Qbv (EST) | ✅ 明确支持 | ✅ | ✅ | ✅ |
 | 802.1Qbu (Preemption) | ✅ 明确支持 | ✅ | ⚠️ 部分 | ⚠️ 部分 |
 | 802.1Qci (PSFP) | ✅ 明确支持 | ⚠️ 部分 | ❌ | ❌ |
-| 802.1CB (FRER) | ⚠️ 推断¹ | ✅ | ❌ | ⚠️ 部分 |
-| 802.1AE (MACsec) | ⚠️ 硬件需求² | ✅ | ⚠️ 部分 | ❌ |
+| 802.1CB (FRER) | ⚠️ 推断1 | ✅ | ❌ | ⚠️ 部分 |
+| 802.1AE (MACsec) | ⚠️ 硬件需求2 | ✅ | ⚠️ 部分 | ❌ |
+| **Switch 级 TAS** | ❌ | ❌ | ❌ | ✅ |
+| **Switch 级 gPTP Relay** | ⚠️ 有限 | ❌ | ❌ | ✅ |
+| **L2/L3 Switch** | ❌ (仅 Bridge) | ✅ | ⚠️ 有限 | ✅ |
+| **双 PHC / vPHC** | ❌ | ❌ | ❌ | ✅ |
 
-> **注1**: 802.1CB未在GETH手册TSN特性列表中明确列出，但Bridge功能存在，FRER可能通过Bridge实现或存在于系统其他模块。  
-> **注2**: GETH手册提到"支持802.1AE的硬件需求"，但具体MACsec引擎位置待确认（可能在HSPHY或独立安全模块）。
+> **注1**: 802.1CB未在GETH手册TSN特性列表中明确列出,但Bridge功能存在,FRER可能通过Bridge实现或存在于系统其他模块。
+> **注2**: GETH手册提到"支持802.1AE的硬件需求",但具体MACsec引擎位置待确认(可能在HSPHY或独立安全模块)。
 
 ### 4.3 性能与接口对比
 
@@ -353,7 +416,8 @@ HSPHY (高速PHY接口)
 | 端口数 | 2 (可桥接) | 1-4 | 1-2 | 1-2 |
 | DMA通道 | 8 Tx + 8 Rx | 多通道 | 多通道 | 多通道 |
 | PHY接口 | MII/RMII/RGMII/SGMII/USXGMII | RGMII/SGMII | RGMII/SGMII | RGMII/SGMII |
-| 桥接功能 | ✅ (静态) | ✅ (交换机) | ⚠️ 有限 | ❌ |
+| **Switch 功能** | ❌ (仅 Bridge) | ✅ (PFE) | ⚠️ 有限 | ✅ (RSwitch2) |
+| **端口数** | **2 (可扩展 4~8)** | 1-4 | 1-2 | **3 (集成)** |
 | Checksum Offload | ✅ | ✅ | ✅ | ✅ |
 
 ### 4.4 车规安全特性对比
@@ -369,9 +433,9 @@ HSPHY (高速PHY接口)
 ### 4.5 竞品分析结论
 
 1. **TC4x GETH在TSN完整性上领先**: 是唯一明确支持全部6个核心TSN协议(802.1AS/Qav/Qbv/Qbu/Qci/CB)的车载以太网方案
-2. **速率优势**: TC4x支持5G (USXGMII)，竞品多在1G~2.5G
-3. **MACsec**: TC4x声称硬件需求支持，但具体实现位置待确认
-4. **桥接**: TC4x为静态桥接，NXP S32G提供更完整的交换机功能
+2. **速率优势**: TC4x支持5G (USXGMII),竞品多在1G~2.5G
+3. **MACsec**: TC4x声称硬件需求支持,但具体实现位置待确认
+4. **桥接**: TC4x为静态桥接,NXP S32G提供更完整的交换机功能
 5. **安全机制**: TC4x在FSM parity和timeout保护上描述更详细
 
 ---
@@ -401,19 +465,19 @@ HSPHY (高速PHY接口)
     │       └── 依赖Bridge (多端口转发)
     │
     └── 802.1AE (MACsec)
-            └── 独立于上层，但加密增加延迟影响TSN精度
+            └── 独立于上层,但加密增加延迟影响TSN精度
 ```
 
 ### 5.2 实现优先级建议
 
 | 优先级 | 协议/功能 | 理由 |
 |--------|----------|------|
-| **Phase 1 (MVP)** | 802.3 MAC + MII/RGMII | 基础功能，所有上层依赖 |
-| | 802.1Q VLAN | 分类基础，AVB/TSN必需 |
+| **Phase 1 (MVP)** | 802.3 MAC + MII/RGMII | 基础功能,所有上层依赖 |
+| | 802.1Q VLAN | 分类基础,AVB/TSN必需 |
 | | 802.1AS gPTP | TSN时间基准 |
 | | Multichannel DMA | 数据通路 |
-| **Phase 2 (TSN Core)** | 802.1Qav CBS | 带宽保障，相对独立 |
-| | 802.1Qbv EST | 确定性调度，依赖gPTP |
+| **Phase 2 (TSN Core)** | 802.1Qav CBS | 带宽保障,相对独立 |
+| | 802.1Qbv EST | 确定性调度,依赖gPTP |
 | | 802.1Qbu Preemption | 与EST配合 |
 | **Phase 3 (安全+可靠)** | 802.1Qci PSFP | 流 policing |
 | | 802.1CB FRER | 冗余可靠性 |
@@ -430,19 +494,19 @@ HSPHY (高速PHY接口)
 
 | 决策项 | 建议 | 依据 |
 |--------|------|------|
-| **MAC Core速率** | 支持1G/2.5G，5G可选 | TC4x支持5G但竞品多在1-2.5G；5G复杂度显著增加 |
-| **TSN协议范围** | Phase 1实现802.1AS+Qav+Qbv | 这三个是TSN核心，覆盖90%车载场景 |
-| **帧抢占** | 作为Qbv的可选扩展 | 独立实现价值有限，与EST配合才体现优势 |
-| **MACsec** | Phase 3实现，独立加密引擎 | 加密引擎可与MAC Core解耦，降低基础MAC复杂度 |
-| **FRER** | 仅在Bridge模式实现 | FRER本质是多路径冗余，单MAC端口无意义 |
-| **PHY接口** | 优先RGMII + SGMII | 车载最常用；MII/RMII兼容旧设计 |
-| **DMA通道** | 4通道起，可扩展到8 | 8通道是TC4x全配置，4通道覆盖大多数场景 |
-| **Buffer大小** | Tx/Rx各16KB起 | TC4x为32KB，但16KB已能支持jumbo帧+多队列 |
-| **时间戳精度** | 纳秒级，与MAC层紧耦合 | 802.1AS要求亚微秒同步，时间戳必须在MAC层 |
+| **MAC Core速率** | 支持1G/2.5G,5G可选 | TC4x支持5G但竞品多在1-2.5G;5G复杂度显著增加 |
+| **TSN协议范围** | Phase 1实现802.1AS+Qav+Qbv | 这三个是TSN核心,覆盖90%车载场景 |
+| **帧抢占** | 作为Qbv的可选扩展 | 独立实现价值有限,与EST配合才体现优势 |
+| **MACsec** | Phase 3实现,独立加密引擎 | 加密引擎可与MAC Core解耦,降低基础MAC复杂度 |
+| **FRER** | 仅在Bridge模式实现 | FRER本质是多路径冗余,单MAC端口无意义 |
+| **PHY接口** | 优先RGMII + SGMII | 车载最常用;MII/RMII兼容旧设计 |
+| **DMA通道** | 4通道起,可扩展到8 | 8通道是TC4x全配置,4通道覆盖大多数场景 |
+| **Buffer大小** | Tx/Rx各16KB起 | TC4x为32KB,但16KB已能支持jumbo帧+多队列 |
+| **时间戳精度** | 纳秒级,与MAC层紧耦合 | 802.1AS要求亚微秒同步,时间戳必须在MAC层 |
 
 ### 6.2 模块划分建议
 
-基于协议分析，建议的RTL模块划分：
+基于协议分析,建议的RTL模块划分:
 
 ```
 ethernet_top
@@ -489,17 +553,17 @@ ethernet_top
 **CDC注意点**:
 - MAC Tx/Rx ↔ MTL: 异步FIFO (clk_mac ↔ clk_sys)
 - PHY Rx → MAC: 需同步器 (clk_rx_phy → clk_mac)
-- 时间戳: 必须在同一时钟域捕获，避免跨域引入误差
+- 时间戳: 必须在同一时钟域捕获,避免跨域引入误差
 
 ### 6.4 风险与缓解
 
 | 风险 | 影响 | 缓解措施 |
 |------|------|---------|
-| TSN协议交叉依赖复杂 | 高 | 按Phase分批实现，每Phase独立验证 |
-| gPTP精度难以保证 | 高 | 时间戳与MAC层紧耦合，独立时钟域，最小化抖动 |
-| MACsec延迟影响TSN | 中 | MACsec作为可选项，加密延迟在TSN预算中单独计算 |
-| 多队列调度资源竞争 | 中 | EST GCL固定周期，CBS credit独立计算，避免集中仲裁 |
-| 802.1CB FRER序列号溢出 | 中 | 16-bit序列号空间，设计wrap-around处理 |
+| TSN协议交叉依赖复杂 | 高 | 按Phase分批实现,每Phase独立验证 |
+| gPTP精度难以保证 | 高 | 时间戳与MAC层紧耦合,独立时钟域,最小化抖动 |
+| MACsec延迟影响TSN | 中 | MACsec作为可选项,加密延迟在TSN预算中单独计算 |
+| 多队列调度资源竞争 | 中 | EST GCL固定周期,CBS credit独立计算,避免集中仲裁 |
+| 802.1CB FRER序列号溢出 | 中 | 16-bit序列号空间,设计wrap-around处理 |
 
 ---
 
@@ -544,12 +608,12 @@ ethernet_top
 
 | 竞品 | 数据来源 | 可信度 |
 |------|---------|--------|
-| NXP S32G3 | 公开Datasheet / Application Note | 中 — 未逐一验证每行数据 |
-| TI TDA4VH | 公开Technical Reference Manual | 中 — 基于公开文档摘要 |
-| Renesas R-Car S4 | 公开产品页 / 新闻稿 | 低 — 详细规格有限 |
+| NXP S32G3 | 公开Datasheet / Application Note | 中 - 未逐一验证每行数据 |
+| TI TDA4VH | 公开Technical Reference Manual | 中 - 基于公开文档摘要 |
+| Renesas R-Car S4 | 公开产品页 / 新闻稿 | 低 - 详细规格有限 |
 
-> **数据真实性声明**: 竞品对比表基于公开资料整理，非官方实测数据。详细参数应以各厂商最新文档为准。TC4x数据直接来源于Infineon Reference手册。
+> **数据真实性声明**: 竞品对比表基于公开资料整理,非官方实测数据。详细参数应以各厂商最新文档为准。TC4x数据直接来源于Infineon Reference手册。
 
 ---
 
-*文档结束 — AI Yang Gate Check 已通过 (2026-05-12)*
+*文档结束 - AI Yang Gate Check 已通过 (2026-05-12)*

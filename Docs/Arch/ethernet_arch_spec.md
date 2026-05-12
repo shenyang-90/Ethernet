@@ -2,11 +2,11 @@
 
 > **项目**: Ethernet IP (IP_20260502_001)
 > **模块/系统**: Gigabit Ethernet MAC + PHY Subsystem
-> **版本**: v1.3
-> **日期**: 2026-05-11
+> **版本**: v1.4
+> **日期**: 2026-05-12
 > **作者**: Arch Agent
 > **评审状态**: Draft → 待评审
-> **变更**: v1.1 新增可配置参数矩阵; v1.2 重构 MAC/PHY 参数 (MAC_COUNT 1-8, MAC_TYPE, PHY_COUNT 独立); v1.3 分析 ISSUE-001/003/004/005, 新增 PHY_TYPE/10BASE-T1S, 补充 CBS erratum/TC 限制/参考路径修正
+> **变更**: v1.1 新增可配置参数矩阵; v1.2 重构 MAC/PHY 参数; v1.3 分析 ISSUE-001/003/004/005; **v1.4 基于 R-Car S4 Gap Analysis 升级: 4-port Switch + vPHC + AVTP 硬件感知**
 
 ---
 
@@ -14,14 +14,16 @@
 
 ### 1.1 系统概述
 
-本项目旨在设计一款面向车规级应用的 Ethernet IP 子系统，对标 Infineon AURIX TC4x 系列 GETH/LETH 架构。IP 支持 10M/100M/1G/2.5G/5G 全双工速率，集成完整的 TSN（Time-Sensitive Networking）协议栈、硬件安全加速接口以及多 PHY 接口适配能力。
+本项目旨在设计一款面向车规级应用的 Ethernet IP 子系统，对标 Infineon AURIX TC4x 系列 GETH/LETH 架构**与 Renesas R-Car S4 中央网关方案**。IP 支持 10M/100M/1G/2.5G/5G/10G 全双工速率，集成完整的 TSN（Time-Sensitive Networking）协议栈、**4-port L2/L3 Switch**、**双 PHC + vPHC 虚拟化**、硬件安全加速接口以及多 PHY 接口适配能力。
 
 核心设计目标：
 - **高性能**: 支持 5Gbps 线速，8 路独立 DMA 通道，64-bit AXI Master 接口
 - **确定性**: 硬件级 gPTP 时间同步、TAS 门控调度、CBS 信用整形
+- **可交换性**: **4-port L2/L3 Switch** 支持 MAC 自学习、VLAN 转发、多播过滤
+- **虚拟化**: **双 PHC + vPHC** 支持 SDV/Hypervisor 多 VM 时间域隔离
 - **安全性**: ASIL-B 安全完整性等级，ECC/Parity/Timeout 保护机制
 - **可扩展性**: 支持 MII/RMII/RGMII/SGMII/USXGMII 多种 PHY 接口
-- **协议完整**: TSN 协议族（802.1AS/802.1Qav/802.1Qbv/802.1Qbu/802.1Qci/802.1CB）硬件支持
+- **协议完整**: TSN 协议族（802.1AS/802.1Qav/802.1Qbv/802.1Qbu/802.1Qci/802.1CB）硬件支持，**Switch 级 TAS**
 
 ### 1.2 应用场景
 
@@ -37,15 +39,19 @@
 
 | 特性 | 描述 | 实现模块 |
 |------|------|----------|
-| **双 XGMAC 架构** | 2 个独立 5G MAC，支持 Bridge 转发 | XGMAC Core |
+| **双 XGMAC 架构** | 2 个独立 5G MAC，支持 **Switch 转发** | XGMAC Core |
+| **4-port L2/L3 Switch** | **MAC 自学习、VLAN 转发、多播过滤、L3 路由** | Switch Core |
+| **双 PHC + vPHC** | **2 个独立 PHC，Xen IO Rings 虚拟化** | PTP/Timestamp |
 | **8 路 DMA 通道** | 独立 TX/RX Engine，3 级流水线 | DMA Engine |
 | **32KB FIFO** | TX/RX 各 32KB MTL 缓冲 | MTL Layer |
-| **TSN 协议栈** | 802.1AS/802.1Qav/802.1Qbv/802.1Qbu 硬件实现 | MAC Core + MTL |
+| **TSN 协议栈** | 802.1AS/802.1Qav/802.1Qbv/802.1Qbu **硬件实现** | MAC Core + MTL |
+| **Switch 级 TAS** | **802.1Qbv 在 Switch 入口端口硬件调度** | Switch Core |
 | **帧抢占** | 802.1Qbu pMAC/eMAC 双虚拟 MAC | MAC Merge Layer |
 | **硬件时间戳** | SFD 级精度，64-bit 纳秒计数器 | PTP Hardware Unit |
 | **安全特性** | ECC/FSM Parity/CSR Timeout，ASIL-B | Safety Monitor |
 | **校验和卸载** | IP/TCP/UDP 硬件计算 | TX/RX Checksum Engine |
 | **VLAN 处理** | 插入/替换/删除，QinQ 支持 | TBU (Transmit Bus Interface) |
+| **AVTP 硬件感知** | **AVTP 流识别、RX 分离到独立 DMA 队列** | RX Filter + DMA |
 | **PHY 接口** | MII/RMII/RGMII/SGMII/USXGMII | HSPHY (外部) |
 
 ---
@@ -69,22 +75,34 @@
 | `SUPPORT_CBS` | bit | 1 | 0 / 1 | 是否支持 802.1Qav CBS（依赖 SUPPORT_TSN） | MTL Scheduler |
 | `SUPPORT_TAS` | bit | 1 | 0 / 1 | 是否支持 802.1Qbv TAS（依赖 SUPPORT_TSN） | MTL Gate Control |
 | `SUPPORT_FP` | bit | 1 | 0 / 1 | 是否支持 802.1Qbu 帧抢占（依赖 SUPPORT_TSN） | MAC Merge Layer |
-| `SUPPORT_FRER` | bit | 1 | 0 / 1 | 是否支持 802.1CB FRER（依赖 SUPPORT_BRIDGE） | Bridge, SEQ/R-Tag |
-| `SUPPORT_BRIDGE` | bit | 1 | 0 / 1 | 是否支持 MAC-to-MAC Bridge 转发 | Bridge |
-| `SUPPORT_VLAN` | bit | 1 | 0 / 1 | 是否支持 802.1Q VLAN 处理 | TBU, RX Filter |
+| `SUPPORT_FRER` | bit | 1 | 0 / 1 | 是否支持 802.1CB FRER（依赖 SUPPORT_SWITCH=1） | Switch, SEQ/R-Tag |
+| `SUPPORT_SWITCH` | bit | 1 | 0 / 1 | 是否支持 **L2/L3 Switch**（替代 Bridge） | **Switch Core** |
+| **`SWITCH_PORT_COUNT`** | int | **4** | **2 ~ 8** | **Switch 端口数量** | **Switch Core** |
+| **`SWITCH_TAS`** | bit | **1** | 0 / 1 | **是否支持 Switch 级 802.1Qbv TAS（依赖 SUPPORT_SWITCH=1）** | **Switch Core** |
+| **`SWITCH_L3`** | bit | **0** | 0 / 1 | **是否支持 Layer 3 IP 路由（依赖 SUPPORT_SWITCH=1）** | **Switch Core** |
+| `SUPPORT_VLAN` | bit | 1 | 0 / 1 | 是否支持 802.1Q VLAN 处理 | TBU, RX Filter, Switch |
 | `SUPPORT_MACSEC` | bit | 0 | 0 / 1 | 是否支持 802.1AE MACsec（需外部 CSS 加速器） | HSPHY IF (安全通道) |
-| `SUPPORT_AVTP` | bit | 0 | 0 / 1 | 是否支持 IEEE 1722 AVTP（⚠️ 当前所有车规MCU均无硬件卸载，仅预留接口） | TX Checksum |
+| `SUPPORT_AVTP` | bit | 0 | 0 / 1 | 是否支持 IEEE 1722 AVTP（⚠️ 所有车规MCU均无硬件卸载，但支持**AVTP 硬件感知**） | RX Filter + DMA |
+| **`SUPPORT_AVTP_AWARE`** | bit | **0** | 0 / 1 | **是否支持 AVTP 流识别与 RX 分离（依赖 SUPPORT_AVTP=1）** | **RX Filter, Switch** |
+| **`PHC_COUNT`** | int | **1** | **1, 2** | **PTP Hardware Clock 数量** | **PTP/Timestamp** |
+| **`SUPPORT_VPHC`** | bit | **0** | 0 / 1 | **是否支持 vPHC 虚拟化（依赖 PHC_COUNT=2）** | **PTP/Timestamp, Xen IO Rings** |
 
 > **配置约束**：
 > - `SUPPORT_GPTP=1` 要求 `SUPPORT_1588=1`
-> - `SUPPORT_FRER=1` 要求 `SUPPORT_BRIDGE=1` 且 `MAC_COUNT ≥ 2`
+> - `SUPPORT_FRER=1` 要求 `SUPPORT_SWITCH=1` 且 `MAC_COUNT ≥ 2`
 > - `SUPPORT_FP=1` 要求 `MAC_TYPE ≥ 1` (GMAC/XGMAC)
 > - `SUPPORT_TAS=1` 要求 `SUPPORT_CBS=1`（推荐，非强制）
+> - **`SWITCH_TAS=1` 要求 `SUPPORT_SWITCH=1` 且 `SUPPORT_TSN=1`**
+> - **`SWITCH_L3=1` 要求 `SUPPORT_SWITCH=1` 且 `MAC_TYPE ≥ 1`**
+> - **`SUPPORT_VPHC=1` 要求 `PHC_COUNT=2` 且 `SUPPORT_GPTP=1`**
+> - **`SUPPORT_AVTP_AWARE=1` 要求 `SUPPORT_AVTP=1` 且 `SUPPORT_VLAN=1`**
 > - `SUPPORT_MACSEC=1` 要求外部 CSS 安全加速器连接
 > - **MAC 与 PHY 解耦**：`PHY_COUNT` 可以大于 `MAC_COUNT`（通过 PHY MUX 共享 MAC），也可以小于（通过 Switch 扩展）
+> - **Switch 端口约束**：`SWITCH_PORT_COUNT ≤ MAC_COUNT`（每 Switch 端口绑定一个 MAC）
 > - **MAC_TYPE 与 PHY_SPEED 独立配置**：MAC_TYPE 决定 MAC 层能力，PHY_SPEED 决定物理层速率。例如 XGMAC (MAC_TYPE=2) 可通过降频运行在 1G PHY (PHY_SPEED=2) 上
 > - **PHY_TYPE 与 PHY_SPEED 配对约束**：`PHY_TYPE=0` (10BASE-T1S) 仅支持 `PHY_SPEED=0` (10M)；`PHY_TYPE=1` 支持 `PHY_SPEED=0~1` (10M/100M)；`PHY_TYPE=2` 支持 `PHY_SPEED=0~2` (10M/100M/1G)；`PHY_TYPE=3` 支持 `PHY_SPEED=0~5` (10M~10G)
 > - **10BASE-T1S 特殊约束**：`PHY_TYPE=0` 时，PHY 支持多点总线拓扑（PLCA），最多 8 个节点；不支持全双工（仅半双工），因此 `SUPPORT_FP` (帧抢占) 和 `SUPPORT_TAS` 在此 PHY 上自动关闭
+> - **Switch 级 TAS 约束**：`SWITCH_TAS=1` 时，端点 MAC 的 `SUPPORT_TAS` 可关闭（端点无需感知门控周期，由 Switch 统一调度）
 
 ### 1.4.2 非协议相关 — DMA/缓冲参数
 
@@ -126,12 +144,13 @@
 
 ### 1.4.4 参数配置矩阵 — 典型应用场景
 
-| 场景 | MAC_COUNT | MAC_TYPE | PHY_COUNT | PHY_TYPE | PHY_SPEED | DMA_CH | TSN | 1588 | Bridge | ASIL | 估算门数 |
+| 场景 | MAC_COUNT | MAC_TYPE | PHY_COUNT | PHY_TYPE | PHY_SPEED | DMA_CH | TSN | 1588 | **Switch** | ASIL | 估算门数 |
 |------|-----------|----------|-----------|----------|-----------|--------|-----|------|--------|------|----------|
-| **Zone Controller 骨干** | 2 | XGMAC | 2 | Multi-Gigabit | 5G | 8 | ✅ | ✅ | ✅ | B | ~205k |
-| **ADAS 传感器汇聚** | 2 | XGMAC | 2 | Multi-Gigabit | 5G | 8 | ✅ | ✅ | ❌ | B | ~190k |
-| **中央网关 (多端口)** | 4 | GMAC | 8 | 1000BASE-T1 | 1G | 4 | ❌ | ✅ | ✅ | B | ~280k |
-| **CAN-Ethernet 网关** | 1 | GMAC | 1 | 1000BASE-T1 | 1G | 4 | ❌ | ✅ | ❌ | B | ~120k |
+| **中央网关 (Switch)** | **4** | **GMAC** | **4** | **1000BASE-T1** | **1G** | **4** | **✅** | **✅** | **✅** | **B** | **~480k** |
+| ADAS 传感器汇聚 | 2 | XGMAC | 2 | Multi-Gigabit | 5G | 8 | ✅ | ✅ | ❌ | B | ~190k |
+| Zone Controller 骨干 | 2 | XGMAC | 2 | Multi-Gigabit | 5G | 8 | ✅ | ✅ | ✅ | B | ~205k |
+| **SDV 中央网关 (Switch+vPHC)** | **4** | **GMAC** | **4** | **1000BASE-T1** | **1G** | **4** | **✅** | **✅** | **✅** | **B** | **~520k** |
+| CAN-Ethernet 网关 | 1 | GMAC | 1 | 1000BASE-T1 | 1G | 4 | ❌ | ✅ | ❌ | B | ~120k |
 | **域内边缘节点 (10BASE-T1S)** | 1 | MAC | 1 | 10BASE-T1S | 10M | 2 | ❌ | ❌ | ❌ | QM | ~45k |
 | **车身传感器网络** | 1 | MAC | 1 | 10BASE-T1S | 10M | 2 | ❌ | ❌ | ❌ | QM | ~40k |
 | **OTA 更新节点** | 1 | GMAC | 1 | 1000BASE-T1 | 1G | 4 | ❌ | ❌ | ❌ | A | ~80k |
@@ -155,34 +174,40 @@
 |  +----------|----------+         +----------|----------+                               |
 |             |                               |                                          |
 |             v                               v                                          |
-|  +================================================================================+  |
-|  |                              Bridge Module (可选)                                |  |
-|  |                  XGMAC0 <---> XGMAC1 / Host <---> XGMAC1                         |  |
-|  +================================================================================+  |
-|             |                               |                                          |
-|  +----------v-----------+         +----------v-----------+                             |
-|  |     XGMAC 0          |         |     XGMAC 1          |                             |
-|  |  +---------------+   |         |  +---------------+   |                             |
-|  |  | XGMAC-CORE    |   |         |  | XGMAC-CORE    |   |                             |
-|  |  | (MAC Layer)   |   |         |  | (MAC Layer)   |   |                             |
-|  |  +-------|-------+   |         |  +-------|-------+   |                             |
-|  |          |           |         |          |           |                             |
-|  |  +-------v-------+   |         |  +-------v-------+   |                             |
-|  |  |     MTL       |   |         |  |     MTL       |   |                             |
-|  |  | (32KB FIFO)   |   |         |  | (32KB FIFO)   |   |                             |
-|  |  +-------|-------+   |         |  +-------|-------+   |                             |
-|  |          |           |         |          |           |                             |
-|  |  +-------v-------+   |         |  +-------v-------+   |                             |
-|  |  |  DMA Engine   |   |         |  |  DMA Engine   |   |                             |
-|  |  | (8 Channels)  |   |         |  | (8 Channels)  |   |                             |
-|  |  +---------------+   |         |  +---------------+   |                             |
-|  +----------|----------+         +----------|----------+                             |
-|             |                               |                                          |
-|             v                               v                                          |
-|  +================================================================================+  |
-|  |                         HSPHY (High Speed PHY)                                   |  |
-|  |   MII/RMII/RGMII  |  SGMII  |  USXGMII  |  PPS Output                            |  |
-|  +================================================================================+  |
+|  +================================================================================+  +
+|  |                     Switch Core (L2/L3, 2~8 ports, 可选)                        |  +
+|  |   MAC0 <───┐                                                                    |  +
+|  |   MAC1 <───┼── [Crossbar + Arbiter] ──► Port 0/1/2/3... (全并发转发)           |  +
+|  |   MAC2 <───┤   - FDB (Forwarding DB, 自学习/静态)                              |  +
+|  |   MAC3 <───┘   - VLAN Table (VID → 端口掩码)                                  |  +
+|  |   Host  ───►   - L3 Route Table (IP → MAC, 可选)                              |  +
+|  |                - TAS GCL (Switch 级门控, 可选)                                |  +
+|  |                - Multicast Filter / IGMP Snooping                            |  +
+|  +================================================================================+  +
+|             |              |              |              |                             |
+|  +----------v----------+  +-v----------+  +-v----------+  +-v----------+               |
+|  |     MAC 0           |  |   MAC 1    |  |   MAC 2    |  |   MAC 3    |               |
+|  |  +---------------+  |  | +--------+ |  | +--------+ |  | +--------+               |
+|  |  | XGMAC-CORE    |  |  | |XGMAC   | |  | |XGMAC   | |  | |XGMAC   |               |
+|  |  | (MAC Layer)   |  |  | |(或GMAC)| |  | |(或GMAC)| |  | |(或GMAC)|               |
+|  |  +-------|-------+  |  | +---|----+ |  | +---|----+ |  | +---|----+               |
+|  |          |          |  |     |      |  |     |      |  |     |                    |
+|  |  +-------v-------+  |  | +---v----+ |  | +---v----+ |  | +---v----+               |
+|  |  |     MTL       |  |  | |  MTL   | |  | |  MTL   | |  | |  MTL   |               |
+|  |  | (32KB FIFO)   |  |  | |(FIFO)  | |  | |(FIFO)  | |  | |(FIFO)  |               |
+|  |  +-------|-------+  |  | +---|----+ |  | +---|----+ |  | +---|----+               |
+|  |          |          |  |     |      |  |     |      |  |     |                    |
+|  |  +-------v-------+  |  | +---v----+ |  | +---v----+ |  | +---v----+               |
+|  |  |  DMA Engine   |  |  | |  DMA   | |  | |  DMA   | |  | |  DMA   |               |
+|  |  | (8 Channels)  |  |  | |(4/8ch) | |  | |(4/8ch) | |  | |(4/8ch) |               |
+|  |  +---------------+  |  | +--------+ |  | +--------+ |  | +--------+               |
+|  +----------|----------+  +------------+  +------------+  +------------+              |
+|             |              |              |              |                             |
+|             v              v              v              v                             |
+|  +================================================================================+  +
+|  |                         HSPHY (High Speed PHY)                                   |  +
+|  |   MII/RMII/RGMII  |  SGMII  |  USXGMII  |  PPS Output                            |  +
+|  +================================================================================+  +
 |                                                                                        |
 +========================================================================================+
 ```
@@ -194,8 +219,8 @@
 | **XGMAC-CORE** | IEEE 802.3 MAC 层实现、帧过滤、VLAN 处理 | B |
 | **MTL** | FIFO 缓冲、队列管理、流量整形 (CBS/TAS) | B |
 | **DMA** | 描述符管理、数据搬运、时间戳回写 | B |
-| **PTP/Timestamp** | 1588/gPTP 时间同步、PPS 输出 | B |
-| **Bridge** | MAC-to-MAC 帧转发、FRER 路径冗余 | B |
+| **Switch Core** | **L2/L3 帧交换、FDB 自学习、VLAN 转发、多播过滤、Switch 级 TAS** | **B** |
+| **PTP/Timestamp** | 1588/gPTP 时间同步、**双 PHC + vPHC 虚拟化**、PPS 输出 | B |
 | **Safety Monitor** | ECC/Parity/Timeout 检测与报警 | B |
 | **HSPHY Interface** | PHY 接口适配 (RGMII/SGMII/USXGMII) | B |
 
@@ -257,8 +282,9 @@
 | XGMAC-CORE ×2 | ~80 | 8 | 不含 FIFO |
 | MTL ×2 | ~20 | 64 (32K×2) | TX/RX FIFO |
 | DMA ×2 | ~40 | 4 | 描述符缓存 |
+| Switch Core | **~80** | **16** | **FDB + VLAN + L3 Route + TAS GCL** |
 | PTP/Timestamp | ~15 | 2 | 时间戳 FIFO |
-| Bridge | ~10 | 4 | 转发表 |
+| PTP/Timestamp (双 PHC) | **~25** | **4** | **双 PHC + vPHC 虚拟化** |
 | Safety/ECC | ~15 | 0 | 校验逻辑 |
 | HSPHY IF | ~25 | 0 | 接口逻辑 |
 | **总计** | **~205** | **~82** | — |
@@ -330,10 +356,15 @@ CPU/Software
 | 802.1AS-2020 gPTP | PTP/Timestamp | P0 | SFD 级精度、Addend 精调 |
 | 802.1AS TC | PTP/Timestamp | P1 | ⚠️ **多端口 Transparent Clock 限制**：每端口独立时钟偏移补偿，跨端口同步需软件协调 [^2^] |
 | 802.1Qav CBS | MTL Scheduler | P0 | 8 队列独立 credit；⚠️ **已知 erratum：约 2.65% 带宽误差** [^1^] |
-| 802.1Qbv TAS | MTL EST Engine | P0 | 256-entry GCL |
+| 802.1Qbv TAS | MTL EST Engine | P0 | 256-entry GCL；**Switch 级 TAS 在 Switch Core 实现** |
 | 802.1Qbu 抢占 | MAC Merge (pMAC/eMAC) | P1 | 仅 GETH (≥1G) 支持，10BASE-T1S 不支持 |
-| 802.1Qci PSFP | FFP + GCL + PC | P1 | 8 gate ID 限制 |
-| 802.1CB FRER | Bridge + Software | P1 | 软件序列管理；延迟预算 < 2μs (同芯片) |
+| 802.1Qci PSFP | FFP + GCL + PC | P1 | 8 gate ID 限制；**Switch 级 PSFP 在入口端口实现** |
+| **802.1CB FRER** | **Switch Core + Software** | P1 | **硬件帧复制/消除路径选择，软件序列号管理** |
+| **802.1D MAC Bridge** | **Switch Core** | **P1** | **MAC 地址自学习、老化、静态 FDB** |
+| **802.1Q VLAN Switch** | **Switch Core** | **P0** | **VLAN 转发表、端口成员关系、Tag 处理** |
+| **L3 IP 路由** | **Switch Core (可选)** | **P2** | **IP 地址查表、ARP 缓存、L3 转发决策** |
+| **多播过滤 / IGMP** | **Switch Core** | **P2** | **IGMP Snooping、静态多播组、泛洪控制** |
+| **Switch 级 gPTP Relay** | **PTP/Timestamp + Switch Core** | **P1** | **多端口 BC/TC Relay，双 PHC 绑定** |
 | 802.1AE MACsec | CSS (外部加速器) | P1 | 21 通道 AES-GCM；763MB/s 吞吐率 [^3^] |
 | 802.3az EEE | HSPHY + MAC | P2 | 低功耗模式 |
 | 10BASE-T1S | HSPHY (PLCA) | P2 | 多点总线，最多 8 节点，半双工，不支持 TSN 抢占 [^4^] |
@@ -351,9 +382,9 @@ CPU/Software
 
 | 安全机制 | 保护对象 | 检测能力 | 恢复策略 |
 |----------|----------|----------|----------|
-| **ECC** | MTL FIFO、描述符缓存、Bridge 表 | 单 bit 纠错、双 bit 检错 | 自动纠错 + 错误计数 |
-| **FSM Parity** | 所有状态机 (MAC/DMA/MTL/PTP) | 奇偶校验错误 | 安全状态转换 + 报警 |
-| **Timeout** | CSR 访问、DMA 响应、Bridge 转发 | 响应超时检测 | 复位请求 + 状态上报 |
+| **ECC** | MTL FIFO、描述符缓存、**Switch FDB/VLAN/L3 表** | 单 bit 纠错、双 bit 检错 | 自动纠错 + 错误计数 |
+| **FSM Parity** | 所有状态机 (MAC/DMA/MTL/PTP/**Switch**) | 奇偶校验错误 | 安全状态转换 + 报警 |
+| **Timeout** | CSR 访问、DMA 响应、**Switch 转发** | 响应超时检测 | 复位请求 + 状态上报 |
 | **Clock Monitor** | 各时钟域 | 时钟丢失/毛刺检测 | 安全复位 + 备用时钟 |
 | **Lockstep** | 关键控制信号 (可选) | 双核比较 | NMI 触发 |
 
@@ -388,17 +419,20 @@ v
 | v1.0 | 2026-05-11 | Arch Agent | 填充完整架构内容，基于 TC4x 研究和协议分析 |
 | v1.1 | 2026-05-11 | Arch Agent | 新增 1.4 可配置参数矩阵（协议/DMA/安全参数） |
 | v1.2 | 2026-05-11 | Arch Agent | 重构参数：MAC_COUNT 1-8, MAC_TYPE (MAC/GMAC/XGMAC), PHY_COUNT 独立 1-8, PHY_SPEED 解耦 |
-| v1.3 | 2026-05-11 | Arch Agent | 分析 ISSUE-001/003/004/005; 新增 PHY_TYPE/10BASE-T1S; 补充 CBS erratum/TC 限制/参考路径修正 |
+| v1.4 | 2026-05-12 | Arch Agent | **基于 R-Car S4 Gap Analysis 升级**: 4-port L2/L3 Switch (替换 Bridge), 双 PHC + vPHC 虚拟化, AVTP 硬件感知, Switch 级 TAS/PSFP, 更新应用场景矩阵和资源估算 |
 
 ### 8.2 待解决问题
 
 | ID | 问题描述 | 优先级 | 负责人 | 状态 | 分析结论 |
 |----|----------|--------|--------|------|----------|
-| ISSUE-001 | Bridge 模块的 FRER 软件实现延迟预算需精确计算 | P1 | Arch Agent | **已分析** | FRER 序列号管理（SEQ/R-Tag）建议采用硬件辅助 + 软件协同方案：硬件负责帧复制/消除的实时路径选择，软件负责序列号表维护与超时检测。延迟预算：复制路径差异 < 2μs（同一芯片内），序列号比较延迟 < 500ns（硬件哈希表）。详见 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x Bridge 硬件支持 FRER 帧转发，但序列管理仍需软件介入 |
+| ISSUE-001 | **Switch 模块的 FDB 自学习算法与 FRER 硬件路径选择延迟预算** | P1 | Arch Agent | **更新中** | **原 Bridge → Switch 升级后**: FDB 自学习需评估硬件哈希表容量（建议 4K/8K/16K 条目可配），老化时间可配（默认 300s）。FRER 序列号管理仍采用硬件辅助 + 软件协同方案，但 Switch 级帧复制/消除可并行于 4 个端口，延迟预算：复制路径差异 < 2μs（同一芯片内），序列号比较延迟 < 500ns。详见 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x 硬件支持 FRER 帧转发，但序列管理仍需软件介入 |
 | ISSUE-002 | 5G USXGMII 模式下 LCB2SRI 通道分离配置的具体地址映射 | P1 | Design Agent | 待设计 | — |
 | ISSUE-003 | ASIL-B → ASIL-D 升级路径 (Lockstep 集成方案) | P2 | Arch Agent | **已分析** | **升级路径明确**：ASIL-B 当前方案（ECC + Parity + Timeout）→ ASIL-C 增加总线超时检测 + 双 bit ECC 报警 → ASIL-D 增加 Lockstep 双核比较（关键控制信号冗余采样）+ 独立安全监控通道。面积代价：ASIL-C +15%，ASIL-D +35%。建议本 IP 保持 ASIL-B 基线，通过外部 SMU 集成实现 ASIL-D 系统级安全 |
 | ISSUE-004 | CSS 安全加速器接口定义 (AXI Slave / DMA 通道分配) | P1 | Arch Agent | **已分析** | **接口方案**：CSS 作为外部安全加速器，通过 AXI4 Slave 接口（32-bit 配置）+ 专用数据通道（128-bit 加密/解密数据流）连接。MACsec 帧加密：出帧经 MAC → CSS 加密 → PHY；入帧经 PHY → CSS 解密 → MAC。通道分配：CSS 21 通道中，预留 2 通道给 GETH（每 MAC 1 通道），其余 19 通道供系统其他模块使用。详见 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x CSS 763MB/s 吞吐率可覆盖 2×5Gbps 线速 MACsec 处理 |
-| ISSUE-005 | 10BASE-T1S LETH 模块是否纳入本 IP 范围 | P2 | PM Agent | **已决策：纳入，作为可配置选项** | **决策**：10BASE-T1S 纳入本 IP 范围，作为 PHY_SPEED 的一个选项（PHY_SPEED=0 时支持 10BASE-T1S 模式）。每个 PHY 独立配置是否支持 10BASE-T1S（通过 PHY_TYPE 参数）。应用场景：域内边缘节点、车身传感器网络。与 100BASE-T1S 的区别：10BASE-T1S 支持多点总线（PLCA），100BASE-T1S 仅点对点。详见 `Reference/Kimi_Agent_MCU_Ethernet/ethernet_mcu.agent.final.md` — 所有车规 MCU 对 10BASE-T1S 的支持评估 |
+| ISSUE-006 | **Switch 级 TAS (802.1Qbv) 与端点级 TAS 的互斥/协同设计** | P1 | Arch Agent | **新发现** | **R-Car S4 采用 Switch 级 TAS，端点无需感知门控周期**。本 IP 若同时支持端点级 TAS (`SUPPORT_TAS=1`) 和 Switch 级 TAS (`SWITCH_TAS=1`)，需明确互斥关系：同一网络中只能有一个 TAS 调度主节点。建议默认关闭端点级 TAS（`SUPPORT_TAS=0, SWITCH_TAS=1`），端点按普通以太网发送，由 Switch 统一调度。若需端点直接控制（如 Zone Controller 骨干），则关闭 Switch 级 TAS。配置参数 `TAS_MODE`：0=端点级, 1=Switch 级, 2=混合（需软件协调） |
+| ISSUE-007 | **双 PHC + vPHC 的 Xen IO Ring 接口定义与 SoC 集成** | P1 | Arch Agent | **新发现** | **R-Car S4 通过 Xen IO Rings 实现 vPHC 只读访问**。本 IP 需定义：① PHC0/PHC1 的寄存器接口（与单 PHC 兼容）；② vPHC 的 IO Ring 格式（8B 时间戳 + 4B 域ID + 4B 序列号）；③ dom0 写物理 PHC 的权限控制（Region ID/SPID）；④ domU 只读 vPHC 的轮询/中断机制。SoC 集成方需提供 Hypervisor 适配层。面积增量：双 PHC ~+10k 门，vPHC IO Ring ~+5k 门 |
+| ISSUE-008 | **L3 路由表容量与查表延迟** | P2 | Design Agent | **待设计** | **SWITCH_L3=1 时，Switch Core 需支持基于 IP 地址的 Layer 3 转发**。关键参数：① 路由表容量（建议 256/512/1K 条目可配）；② 查表延迟（TCAM vs 哈希表，TCAM < 50ns，哈希表 < 200ns）；③ ARP 缓存（建议 128 条目，老化时间 600s）；④ 默认路由（0.0.0.0/0 指向 Host CPU）。需在 EDR 阶段与 Verification Agent 确认测试覆盖 |
+| ISSUE-009 | **AVTP 硬件感知的 VLAN + PCP 过滤位定义** | P2 | Arch Agent | **待分析** | **R-Car Gen3 的 AVTP-awareness 基于 VLAN Tag (0x8100) + PCP (3-bit 优先级) 识别 AVB 流**。本 IP 若 `SUPPORT_AVTP_AWARE=1`，需在 RX Filter 中增加：① AVTP 以太类型识别（0x22F0 IEEE 1722）；② VLAN PCP 匹配（PCP=3 为 SR Class B，PCP=2 为 SR Class A）；③ 独立 DMA 队列映射（AVTP 流 → 专用 RX Queue）。需与信息娱乐域软件栈确认 AVTP 封装格式兼容性 | **决策**：10BASE-T1S 纳入本 IP 范围，作为 PHY_SPEED 的一个选项（PHY_SPEED=0 时支持 10BASE-T1S 模式）。每个 PHY 独立配置是否支持 10BASE-T1S（通过 PHY_TYPE 参数）。应用场景：域内边缘节点、车身传感器网络。与 100BASE-T1S 的区别：10BASE-T1S 支持多点总线（PLCA），100BASE-T1S 仅点对点。详见 `Reference/Kimi_Agent_MCU_Ethernet/ethernet_mcu.agent.final.md` — 所有车规 MCU 对 10BASE-T1S 的支持评估 |
 
 ### 8.3 参考文档
 

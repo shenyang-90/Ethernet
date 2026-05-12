@@ -21,6 +21,8 @@
 | 交付物 | 路径 | 状态 | 说明 |
 |--------|------|------|------|
 | Safety Concept | `Docs/FuSa/safety_concept.md` | ✅ **已完成** | 安全目标、诊断覆盖、FHTI、ASIL 分解、竞品对标 |
+| Gap Analysis (R-Car S4) | `Docs/Arch/gap_analysis_rcar_s4.md` | ✅ **已完成** | Switch/PHC/AVTP/FFI/IDS 差距分析 |
+| **Arch Spec v1.4** | **`Docs/Arch/ethernet_arch_spec.md`** | **✅ 已完成** | **4-port Switch + vPHC + AVTP 硬件感知参数化** |
 
 ## 完成标准
 
