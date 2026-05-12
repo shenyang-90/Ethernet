@@ -235,14 +235,28 @@ SG-ETH-06 (ASIL-B)
 
 ### 5.3 ASIL-D 系统级实现 (非 IP 内)
 
-| 机制 | 实现位置 | 说明 |
-|------|----------|------|
-| Lockstep 比较 | SoC CPU (如 TriCore Lockstep) | 软件级安全监控 |
-| SMU 报警聚合 | SoC SMU | 集中管理所有安全报警 |
-| 外部看门狗 | SoC 外部 | 独立复位源 |
-| E2E 保护 (SecOC/DT) | 系统级 AUTOSAR | 端到端数据保护 |
+> ⚠️ **重要纠正**: 本 IP 模块内部安全机制（ECC + Parity + Timeout + Clock Monitor）仅达 **ASIL-B**。模块不能独立达到 ASIL-D。
+>
+> ASIL-D 是**系统级**认证，需要 SoC 提供以下机制与本 IP 的 ASIL-B 基线叠加：
 
-> **对标分析**: Infineon TC4x GETH 模块硬件本身可达 ASIL-D，但其安全状态切换依赖 SoC SMU。NXP S32G 通过 Cortex-M7 Lockstep 实现 ASIL-D，但 GMAC/PFE 模块独立安全等级未单独声明。本 IP 策略与 TC4x 最接近：**模块级 ASIL-B + SoC 级 ASIL-D 集成**。
+| 机制 | 实现位置 | ASIL-D 作用 | 类型 (ISO 26262) |
+|------|----------|-------------|------------------|
+| Lockstep CPU | SoC CPU (TriCore/PPU) | 检测计算错误（系统性故障） | SM[HW] |
+| SMU 双冗余 | SoC SMU (SAFE0/SAFE1/STDBY) | 聚合报警的自身故障覆盖 | SM[HW] |
+| 外部 PMIC | TLF4x Safety Switch | 独立电源关断（单点故障覆盖） | ESM[HW] |
+| SafeTlib | 软件运行时库 | 测试报警通路 + BIST 触发 | SM[SW] |
+| E2E 保护 | AUTOSAR SecOC/DT | 端到端数据完整性 | 系统级 |
+
+**TC4x 对标澄清**:
+- TC4x **整芯片** 标 ASIL-D（含 Lockstep + SMU + PMIC + SafeTlib）
+- TC4x **GETH 模块单独** 不声明独立 ASIL 等级（模块内部是 ASIL-B 机制）
+- 本 IP 策略：模块级 ASIL-B，明确依赖 SoC 级机制升级至系统级 ASIL-D
+
+**面积与复杂度分界**:
+- ASIL-B/C 增量在 IP 内部（~17-23% 面积）
+- ASIL-D 增量在 SoC 级（Lockstep/SMU/PMIC 不计入 IP 面积）
+
+> **设计决策**: 本 IP 不内嵌 Lockstep 或双冗余 SMU（面积 +35% 且与 SoC 重复），而是输出标准化 SMU_ALERT[3:0] 信号，由 SoC SMU 统一处理。这与 TC4x 的模块-系统分层策略一致。
 
 ---
 
