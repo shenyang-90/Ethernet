@@ -1055,1714 +1055,1167 @@ GCL_RUNNING:
   end
 
 GCL_PENDING:
-  // Cycle time alignment check
-  // If entry transitions are too fast (< 1μs), hardware may need
-  // to extend to minimum feasible time
-  gcl_state <= GCL_RUNNING;
+  // Transition: check for cycle completion or continue
+  if (gcl_entry_idx >= gcl_list_length) begin
+    gcl_state <= GCL_COMPLETE;
+  end else begin
+    gcl_state <= GCL_RUNNING;
+    // Load next entry from memory
+    gcl_mem_addr <= gcl_entry_idx;
+  end
 
 GCL_COMPLETE:
-  // Check if cycle time extension needed
-  if (gcl_timer >= gcl_cycle_time) begin
-    gcl_state <= GCL_RUNNING;
+  // Cycle complete: check for cycle time rollover
+  if (gcl_cycle_rollover) begin
     gcl_entry_idx <= 0;
+    gcl_state <= GCL_RUNNING;
     gcl_timer <= 0;
-    gcl_cycle_count <= gcl_cycle_count + 1;
   end else begin
-    gcl_timer <= gcl_timer + 1;
+    gcl_state <= GCL_IDLE;  // Wait for next enable
   end
 
 endcase
-
-// Gate output to Queue Scheduler
-assign gate_open[0] = current_gate_vector[0] && gcl_state == GCL_RUNNING;
-assign gate_open[1] = current_gate_vector[1] && gcl_state == GCL_RUNNING;
-// ... (for all 8 queues)
 ```
 
-#### 2.3.3 gPTP Time to GCL Cycle Mapping
+#### 2.3.3 GCL Cycle Time & Base Time
 
 ```
-GCL Cycle Time Computation
+GCL Cycle Parameters
 
-Cycle Time = sum of all TimeInterval values in GCL entries
-
-Cycle alignment to gPTP time:
-  effective_time = ptp_time - gcl_base_time
-  cycle_position = effective_time mod gcl_cycle_time
+CycleTime: Total duration of one GCL cycle (all entries)
+  - 32-bit nanoseconds
+  - Range: 1 ns to ~4.29 seconds
+  - Must be >= sum of all entry TimeIntervals
   
-  Find entry i where:
-    sum(TimeInterval[0..i-1]) <= cycle_position < sum(TimeInterval[0..i])
+BaseTime: Absolute start time of first GCL cycle
+  - 80-bit PTP timestamp (48b seconds + 32b nanoseconds)
+  - Aligned to gPTP time base
+  
+Cycle Rollover:
+  - When current cycle completes, next cycle starts at: BaseTime + N × CycleTime
+  - N = floor((current_ptp_time - BaseTime) / CycleTime) + 1
 
 RTL Implementation:
-  // Pre-compute cumulative time table (at configuration time)
-  reg [31:0] gcl_cumulative [0:255];
-  // cumulative[i] = sum of TimeInterval[0..i]
+  // Cycle time accumulator
+  reg [31:0] cycle_time_accum;
+  reg [47:0] cycle_base_sec;
+  reg [31:0] cycle_base_ns;
   
-  // Runtime position lookup
-  wire [79:0] eff_time = {ptp_seconds, ptp_nanoseconds} -
-                         {gcl_base_time_sec, gcl_base_time_ns};
-  wire [31:0] cycle_pos = eff_time[31:0] % gcl_cycle_time;
-  
-  // Binary search or linear scan for current entry
-  // (Linear scan acceptable for 256 entries at ns speed)
-  always @(*) begin
-    gcl_entry_idx = 0;
-    for (i = 0; i < gcl_list_length; i = i + 1) begin
-      if (cycle_pos >= gcl_cumulative[i])
-        gcl_entry_idx = i + 1;
+  always @(posedge clk_ts) begin
+    if (gcl_state == GCL_COMPLETE) begin
+      // Calculate next cycle start
+      cycle_base_ns <= cycle_base_ns + gcl_cycle_time;
+      if (cycle_base_ns >= 1_000_000_000) begin
+        cycle_base_ns <= cycle_base_ns - 1_000_000_000;
+        cycle_base_sec <= cycle_base_sec + 1;
+      end
     end
   end
-```
-
-#### 2.3.4 CycleTime and BaseTime Registers
-
-```
-GCL Time Registers
-
-Register: GCL_BASE_TIME_SECONDS (0x0408)
-  Bits[47:0]: BaseTime seconds (48-bit)
-  
-Register: GCL_BASE_TIME_NANOSECONDS (0x040C)
-  Bits[31:0]: BaseTime nanoseconds (32-bit)
-  
-Register: GCL_CYCLE_TIME_SECONDS (0x0410)
-  Bits[47:0]: CycleTime seconds (48-bit)
-  
-Register: GCL_CYCLE_TIME_NANOSECONDS (0x0414)
-  Bits[31:0]: CycleTime nanoseconds (32-bit)
-  
-Register: GCL_CONTROL (0x0400)
-  Bit[0]: GCL_ENABLE
-  Bit[1]: GCL_RESTART (self-clearing)
-  Bit[2]: GCL_CHANGE (request GCL update)
-  Bits[7:3]: reserved
-  Bits[15:8]: GCL_LIST_LENGTH (1-255)
-  Bit[16]: GCL_CYCLE_COMPLETE_IRQ_EN
-  Bit[17]: GCL_ENTRY_CHANGE_IRQ_EN
-  Bits[31:18]: reserved
-
-Register: GCL_STATUS (0x0404)
-  Bit[0]: GCL_ACTIVE
-  Bit[1]: GCL_CYCLE_COMPLETE
-  Bit[2]: GCL_ENTRY_CHANGED
-  Bits[7:3]: GCL_CURRENT_ENTRY_IDX
-  Bits[15:8]: GCL_ERROR_CODE
-  Bits[31:16]: reserved
-
-GCL Update Sequence (RTL Handshake):
-  1. Software writes new GCL entries to memory
-  2. Software sets GCL_CHANGE = 1
-  3. Hardware: If GCL currently IDLE or COMPLETE → load immediately
-     If GCL RUNNING → wait for current cycle completion
-  4. Hardware clears GCL_CHANGE when loaded
 ```
 
 ---
 
 ### 2.4 IEEE 802.1Qav - Credit-Based Shaper (CBS) - RTL-Coding Detail
 
-#### 2.4.1 Exact Credit Formula
+#### 2.4.1 Credit Formula - Fixed-Point Implementation
 
 ```
-Credit-Based Shaper Algorithm (IEEE 802.1Qav, Clause 34.3)
+Credit-Based Shaper (802.1Qav, Clause 8.6.8)
 
-Variables per queue (i = 0..7):
-  credit_i: Current credit value (signed fixed-point)
-  idleSlope_i: Rate at which credit increases (bits per second)
-  sendSlope_i: Rate at which credit decreases (bits per second)
-  hiCredit_i: Upper bound (0 or positive)
-  loCredit_i: Lower bound (negative or 0)
-  frameSize: Size of frame to be transmitted (bits)
-  portTransmitRate: Line rate (bits per second)
-
-Credit Update Rules:
-
-1. If queue is not transmitting AND gate is open:
-     credit += idleSlope × Δt
-     (credit increases over time)
-
-2. If queue is transmitting:
-     credit -= sendSlope × frameSize
-     (credit decreases by sendSlope for duration of frame transmission)
-
-3. If gate is closed:
-     credit = max(credit, 0)  // Or hold, depending on implementation
+Credit Update Formula:
+  credit_new = credit + (idleSlope × delta_t) - (sendSlope × frameSize)
 
 Where:
-  sendSlope = portTransmitRate - idleSlope
+  idleSlope = configured bandwidth fraction × portTransmitRate
+  sendSlope = idleSlope - portTransmitRate
   
-  Typically: idleSlope = allocatedBandwidth × portTransmitRate
-              sendSlope = (1 - allocatedBandwidth) × portTransmitRate
+  Example: Queue configured for 20% of 1Gbps
+    idleSlope = 0.20 × 1Gbps = 200 Mbps
+    sendSlope = 200 Mbps - 1000 Mbps = -800 Mbps
 
 Credit Bounds:
-  loCredit ≤ credit ≤ hiCredit
+  hiCredit = maxInterferenceSize × (idleSlope / portTransmitRate)
+  loCredit = 0 (or negative for burst tolerance)
+
+Fixed-Point Representation:
+  - Credit: 48-bit signed (16-bit integer + 32-bit fractional)
+  - idleSlope: 32-bit unsigned (8-bit integer + 24-bit fractional)
+  - sendSlope: 32-bit signed
+  - portTransmitRate: 32-bit (Mbps)
   
-  hiCredit = maxFrameSize × (idleSlope / sendSlope)
-  loCredit = -maxInterferenceSize × (idleSlope / portTransmitRate)
-
-Transmission Condition:
-  A frame from queue i can be transmitted if:
-    a) gate_open[i] == 1 (from GCL or always open)
-    b) credit_i ≥ 0
-    c) No higher-priority queue with credit ≥ 0 and frame ready
-```
-
-#### 2.4.2 Fixed-Point Representation
-
-```verilog
-// Credit Fixed-Point Representation
-// Format: 48.16 (48 integer bits, 16 fractional bits)
-// Range: ±2^47 credits ≈ ±140T credits
-// Resolution: 1/65536 ≈ 0.000015 credit units
-
-typedef struct packed {
-  logic signed [47:0] integer_part;
-  logic        [15:0] fractional_part;
-} credit_t;
-
-// Or combined:
-typedef logic signed [63:0] credit_value_t;  // [63:16] = integer, [15:0] = fraction
-
-// Slopes in fixed-point (bits per nanosecond, scaled)
-// idleSlope = allocatedBandwidth [0.0 ~ 1.0] × portTransmitRate
-// 
-// Example: 1Gbps port, 25% allocated to AVB queue
-//   idleSlope = 0.25 × 1Gbps = 250Mbps
-//   sendSlope = 750Mbps
-//   
-// In bits/ns: idleSlope = 250 / 1000 = 0.25 bits/ns
-//   Fixed-point: idleSlope_fp = 0.25 × 2^16 = 16384 = 0x4000
-
-// Credit update every clock cycle (ns granularity)
-// credit_new = credit_old + (idleSlope_fp × Δt_ns) - (sendSlope_fp × frame_bits)
-
-// Parameters per queue (registers)
-reg [31:0] cbs_idle_slope [0:7];   // Fixed-point 16.16, bits/ns
-reg [31:0] cbs_send_slope [0:7];   // Fixed-point 16.16, bits/ns
-reg signed [47:0] cbs_hi_credit [0:7];  // Upper bound
-reg signed [47:0] cbs_lo_credit [0:7];  // Lower bound
-
-// Credit accumulator
-reg signed [63:0] cbs_credit [0:7];  // 48.16 fixed-point
-
-// Credit computation (per ns)
-always @(posedge clk_mac) begin
-  for (i = 0; i < 8; i = i + 1) begin
-    if (gate_open[i] && !tx_active[i] && cbs_credit[i] < cbs_hi_credit[i]) begin
-      // Credit accumulation (idle)
-      cbs_credit[i] <= cbs_credit[i] + {{32{cbs_idle_slope[i][31]}}, cbs_idle_slope[i]};
-    end else if (tx_active[i]) begin
-      // Credit consumption (transmitting)
-      cbs_credit[i] <= cbs_credit[i] -
-        ({{16{1'b0}}, frame_size_bits} * {{32{cbs_send_slope[i][31]}}, cbs_send_slope[i]} >> 16);
-    end
-    
-    // Clamp to bounds
-    if (cbs_credit[i] > cbs_hi_credit[i]) cbs_credit[i] <= cbs_hi_credit[i];
-    if (cbs_credit[i] < cbs_lo_credit[i]) cbs_credit[i] <= cbs_lo_credit[i];
-  end
-end
-```
-
-#### 2.4.3 Credit Bounds (0 and hiCredit)
-
-```
-Credit Bound Calculations
-
-hiCredit Calculation:
-  hiCredit = maxFrameSize × (idleSlope / sendSlope)
+  Scaling: All values scaled by 2^24 for fractional precision
   
-  Example: maxFrameSize = 1522 bytes = 12176 bits
-           idleSlope = 250 Mbps, sendSlope = 750 Mbps
-           hiCredit = 12176 × (250/750) = 12176 × 0.333 = 4059 bits
-
-loCredit Calculation:
-  loCredit = -maxInterferenceSize × (idleSlope / portTransmitRate)
-  
-  Example: maxInterferenceSize = 1522 bytes = 12176 bits
-           idleSlope = 250 Mbps, portTransmitRate = 1 Gbps
-           loCredit = -12176 × (250/1000) = -3044 bits
+  Example fixed-point:
+    idleSlope = 200 Mbps = 200,000,000
+    Scaled: 200,000,000 × 2^24 = 3,355,443,200,000,000 (0x0BEBC200_000000)
 
 RTL Implementation:
-  // Pre-computed bounds (configured by software)
-  wire signed [47:0] hi_credit = cbs_hi_credit_reg;
-  wire signed [47:0] lo_credit = cbs_lo_credit_reg;  // Negative value
+  reg [47:0] credit;          // Signed 48-bit (16.32 fixed-point)
+  reg [31:0] idle_slope;      // 8.24 fixed-point
+  reg [31:0] send_slope;      // Signed 8.24 fixed-point
+  reg [31:0] port_rate;       // Mbps
+  reg [47:0] hi_credit;
   
-  // Transmission eligibility
-  assign cbs_can_transmit[i] = (cbs_credit[i] >= 0) && gate_open[i] && frame_ready[i];
-```
-
-#### 2.4.4 Integration with Queue Scheduler
-
-```
-CBS + Queue Scheduler Integration
-
-Priority Order (strict priority within AVB class):
-  1. Time-triggered (TT) traffic: GCL-gated, highest priority
-  2. AVB Class A (SR Class A): CBS shaped
-  3. AVB Class B (SR Class B): CBS shaped
-  4. Best-effort traffic: No shaping
-
-Scheduler Decision Logic:
-  if (TT_frame_ready && TT_gate_open)
-    transmit TT frame
-  else if (ClassA_frame_ready && ClassA_gate_open && ClassA_credit >= 0)
-    transmit Class A frame
-  else if (ClassB_frame_ready && ClassB_gate_open && ClassB_credit >= 0)
-    transmit Class B frame
-  else if (BE_frame_ready)
-    transmit BE frame
-  else
-    idle
-
-RTL Implementation:
-  // Combined scheduler with CBS and GCL
-  always @(*) begin
-    tx_queue_sel = 3'd7;  // Default: no transmission
-    
-    if (gcl_gate_open[0] && tt_frame_ready)
-      tx_queue_sel = 3'd0;  // TT queue
-    else if (gcl_gate_open[1] && avb_a_ready && cbs_credit[1] >= 0)
-      tx_queue_sel = 3'd1;  // AVB Class A
-    else if (gcl_gate_open[2] && avb_b_ready && cbs_credit[2] >= 0)
-      tx_queue_sel = 3'd2;  // AVB Class B
-    else if (gcl_gate_open[7] && be_frame_ready)
-      tx_queue_sel = 3'd7;  // Best effort
-  end
+  // Credit update (per clock cycle or per frame)
+  wire [47:0] credit_increment = idle_slope * delta_t;  // delta_t in ns
+  wire [47:0] credit_decrement = send_slope * frame_size;  // frame_size in bits
   
-  // Frame transmission starts → credit decreases
   always @(posedge clk_mac) begin
-    if (tx_start && tx_queue_sel == 3'd1)
-      tx_active[1] <= 1;  // Class A transmitting
-    else if (tx_complete)
-      tx_active[1] <= 0;
+    if (credit_update_en) begin
+      credit <= credit + credit_increment - credit_decrement;
+      // Saturate at bounds
+      if (credit > hi_credit) credit <= hi_credit;
+      if (credit < 0) credit <= 0;
+    end
+  end
+  
+  // Transmission gate: open when credit >= 0 and frame available
+  wire cbs_gate_open = (credit >= 0) && queue_has_frame;
+```
+
+#### 2.4.2 CBS Integration with Queue Scheduler
+
+```
+CBS Queue Scheduler Integration
+
+Priority Order (highest to lowest):
+  1. TAS Gate Control (802.1Qbv) - if TAS enabled
+  2. CBS Shaper (802.1Qav) - per queue credit-based
+  3. Strict Priority (SP) - fixed queue priority
+  4. Weighted Round Robin (WRR) - configurable weights
+
+Scheduler Arbitration Logic:
+  if (tas_enabled && tas_gate_open[selected_queue]) begin
+    // TAS takes precedence
+    selected_queue = tas_selected_queue;
+  end else if (cbs_enabled && cbs_gate_open[selected_queue]) begin
+    // CBS shaped queue
+    selected_queue = highest_priority_cbs_queue;
+  end else if (sp_enabled) begin
+    // Strict priority
+    selected_queue = highest_priority_ready_queue;
+  end else begin
+    // WRR
+    selected_queue = wrr_next_queue;
+  end
+
+RTL Implementation:
+  // Combined scheduler
+  reg [2:0] selected_queue;
+  
+  always @(*) begin
+    if (tas_active) begin
+      selected_queue = tas_queue;
+    end else begin
+      // Check CBS queues first (highest priority CBS queue)
+      for (i = 7; i >= 0; i = i - 1) begin
+        if (cbs_gate_open[i]) begin
+          selected_queue = i;
+          break;
+        end
+      end
+      // If no CBS queue, use strict priority
+      // ...
+    end
   end
 ```
 
 ---
 
-### 2.5 IEEE 802.1Qbu/802.3br - Frame Preemption - RTL-Coding Detail
+### 2.5 IEEE 802.1Qbu - Frame Preemption - RTL-Coding Detail
 
-#### 2.5.1 Exact mPacket Format with SMD Values
+#### 2.5.1 mPacket Format
 
 ```
-Frame Preemption: mPacket Format (802.1Qbu/802.3br)
+Frame Preemption - mPacket Format (802.1Qbu / 802.3br)
 
-Express MAC (eMAC): Handles time-critical traffic
-Preemptable MAC (pMAC): Handles preemptable traffic
-
-Frame Classification:
-  Express Traffic: Highest priority, cannot be preempted
-    - PCP values: Configurable (default 7, 6)
-    - VLAN PCP or MAC-specific rules
-  Preemptable Traffic: Can be interrupted by express traffic
-    - All other traffic classes
+Express Traffic: High priority, non-preemptable
+Preemptable Traffic: Low priority, can be preempted by express
 
 mPacket (MAC Merge Packet) Format:
 
-Complete Frame (non-preempted):
-  | Preamble (7B) | SFD (1B: 0xD5) | eMAC Frame | FCS (4B) |
+Non-fragment (complete frame):
+  [Preamble: 7B 0x55] [SMD-S: 1B Start] [Frame Data] [FCS: 4B]
+  SMD-S = 0xE6 (Start of express frame, not preemptable)
+  or SMD-S = 0x7A (Start of preemptable frame)
 
-Preempted Frame Fragments:
-  First Fragment:
-    | Preamble (7B) | SMD-Sx (1B) | pMAC Fragment Data | CRC-8 (3B) |
-  
-  Continuation Fragments:
-    | Preamble (7B) | SMD-Cx (1B) | pMAC Fragment Data | CRC-8 (3B) |
-  
-  Final Fragment:
-    | Preamble (7B) | SMD-Ex (1B) | pMAC Remaining Data | FCS (4B) |
+First fragment:
+  [Preamble: 7B 0x55] [SMD-E: 1B] [Fragment Data] [CRC: 4B partial] [mCRC: 3B]
+  SMD-E = 0xE5 (Express verification, not used in fragmentation)
+  SMD-C = 0x61 (Continue fragment)
 
-SMD (Start MDelimiter) Values:
-  SMD-S0 = 0xE6  // First fragment (sequence 0)
-  SMD-S1 = 0x7C  // First fragment (sequence 1)
-  SMD-S2 = 0xB0  // First fragment (sequence 2)
-  SMD-S3 = 0xFC  // First fragment (sequence 3)
-  SMD-C0 = 0x61  // Continuation fragment (sequence 0)
-  SMD-C1 = 0x52  // Continuation fragment (sequence 1)
-  SMD-C2 = 0x9E  // Continuation fragment (sequence 2)
-  SMD-C3 = 0x2A  // Continuation fragment (sequence 3)
-  SMD-E0 = 0xE6 ^ 0x78 = 0x9E  // Verify: SMD-E0 = 0x9E (per spec)
-  Actually: SMD-E0 = 0x78, SMD-E1 = 0x4B, SMD-E2 = 0x87, SMD-E3 = 0x3D
-  
-  (Complete table per IEEE 802.3br Table 99-1)
-  
-  SMD-Sx pattern: bits[7:6] = 2'b11, bits[5:4] = sequence[1:0]
-  SMD-Cx pattern: bits[7:6] = 2'b10, bits[5:4] = sequence[1:0]
-  SMD-Ex pattern: bits[7:6] = 2'b01, bits[5:4] = sequence[1:0]
+Continuation fragment:
+  [Preamble: 7B 0x55] [SMD-C: 1B] [Fragment Data] [mCRC: 3B]
+  SMD-C = 0x61
 
-Verify Sequence Number:
-  SMD-V = 0x07  // Verification frame (not a real SMD, but verify seq)
+Last fragment:
+  [Preamble: 7B 0x55] [SMD-C: 1B] [Fragment Data] [FCS: 4B] [mCRC: 3B]
 
-Fragment Constraints:
-  - Minimum fragment size: 64 bytes (including preamble + SMD + CRC)
-  - Maximum fragment size: Limited by on-wire max (1522 bytes)
-  - Minimum non-final fragment: 64 bytes
-  - Express frame must complete before preempting again
+SMD (Start/Continuation Frame Delimiter) Values:
+  SMD-S (0xE6) = Start of non-preemptable frame
+  SMD-E (0xE5) = Express frame (not preemptable)
+  SMD-C (0x61) = Continuation fragment
+  SMD-V (0x78) = Verify (for alignment check)
 
-CRC-8 for Fragments:
-  Polynomial: x^8 + x^2 + x + 1 (0x07)
-  Initial: 0xFF
-  Covers: SMD + fragment data
-  
-  Note: Fragment CRC-8 is NOT the final frame CRC-32.
-  Final fragment uses standard CRC-32 over entire original frame.
+mCRC (3-byte CRC for fragment integrity):
+  - Polynomial: x^24 + x^21 + x^20 + x^17 + x^15 + x^11 + x^9 + x^8 + x^6 + x^5 + x^1 + 1
+  - Different from standard CRC-32
+  - Verifies fragment integrity during reassembly
+
+Fragment Size Constraints:
+  - Minimum fragment size: 64 bytes (including preamble)
+  - Maximum fragment size: limited by FIFO depth
+  - Last fragment must include full FCS
 ```
 
-#### 2.5.2 Express vs Preemptable Classification Rules
+#### 2.5.2 Preemption FSM - TX Side
 
 ```verilog
-// Frame Classification Logic
-function automatic is_express;
-  input [15:0] vlan_tci;  // VLAN Tag Control Information
-  input [47:0] da;         // Destination MAC
-  input [15:0] ether_type;
-  begin
-    // Priority-based classification
-    if (vlan_tci[15:13] >= express_pcp_threshold)  // Default threshold = 6
-      is_express = 1;
-    // MAC-address-based classification
-    else if (da == express_multicast_addr)  // e.g., 01:80:C2:00:00:0E
-      is_express = 1;
-    // EtherType-based classification
-    else if (ether_type == express_etype)  // e.g., AVTP = 0x22F0
-      is_express = 1;
-    else
-      is_express = 0;
-  end
-endfunction
+// Frame Preemption TX State Machine
+localparam PREEMPT_IDLE        = 3'd0;
+localparam PREEMPT_TRANSMIT    = 3'd1;  // Transmitting preemptable frame
+localparam PREEMPT_FRAGMENT    = 3'd2;  // Fragmenting preemptable frame
+localparam PREEMPT_EXPRESS     = 3'd3;  // Transmitting express frame
+localparam PREEMPT_RESUME      = 3'd4;  // Resuming preempted frame
+localparam PREEMPT_VERIFY      = 3'd5;  // Verify SMD alignment
 
-// Classification table (configurable, 16 entries)
-reg [2:0]  classify_pcp [0:15];
-reg [47:0] classify_da_mask [0:15];
-reg [47:0] classify_da_value [0:15];
-reg [15:0] classify_etype [0:15];
-reg        classify_result [0:15];  // 1 = express
-
-// Default rules:
-// Rule 0: PCP 7 = Express
-// Rule 1: PCP 6 = Express  
-// Rule 2: PCP 5 = Preemptable
-// ...
-// Rule 15: Default = Preemptable
-```
-
-#### 2.5.3 Frame Fragmentation and Reassembly FSM
-
-```verilog
-// Preemption TX FSM (pMAC side)
-localparam PREEMPT_IDLE        = 4'd0;
-localparam PREEMPT_FIRST_FRAG  = 4'd1;
-localparam PREEMPT_INTERMED    = 4'd2;
-localparam PREEMPT_VERIFY      = 4'd3;
-localparam PREEMPT_FINAL_FRAG  = 4'd4;
-localparam PREEMPT_EXPRESS     = 4'd5;
-localparam PREEMPT_WAIT_EXP    = 4'd6;
-
-reg [1:0] frag_sequence;  // 0..3, wraps around
-reg [15:0] frag_byte_cnt;
-reg [15:0] total_frame_bytes;
-reg [31:0] frame_crc32;   // Running CRC-32 of full frame
-
-case (preempt_state)
+case (preempt_tx_state)
 
 PREEMPT_IDLE:
   if (express_frame_ready) begin
-    preempt_state <= PREEMPT_EXPRESS;
+    preempt_tx_state <= PREEMPT_EXPRESS;
   end else if (preemptable_frame_ready) begin
-    preempt_state <= PREEMPT_FIRST_FRAG;
-    frag_sequence <= frag_sequence + 1;
-    frag_byte_cnt <= 0;
-    frame_crc32 <= 32'hFFFFFFFF;  // Initialize CRC
+    preempt_tx_state <= PREEMPT_TRANSMIT;
   end
 
-PREEMPT_FIRST_FRAG:
-  // Output: Preamble + SMD-Sx + data + CRC-8
-  tx_gmii_data = (frag_byte_cnt < 7) ? 8'h55 :
-                 (frag_byte_cnt == 7) ? smd_s_value[frag_sequence] :
-                 tx_fifo_rdata;
-  
-  frag_byte_cnt <= frag_byte_cnt + 1;
-  total_frame_bytes <= total_frame_bytes + 1;
-  
-  // Update CRC-32 (for final verification)
-  frame_crc32 <= crc32_update(frame_crc32, tx_fifo_rdata);
-  
-  // Check for express preemption request
-  if (express_frame_ready && frag_byte_cnt >= 64) begin
-    // Minimum 64 bytes transmitted before preemption allowed
-    preempt_state <= PREEMPT_WAIT_EXP;
-    // Output CRC-8 and close fragment
-  end else if (total_frame_bytes >= preemptable_frame_length) begin
-    // Frame complete without preemption
-    preempt_state <= PREEMPT_FINAL_FRAG;
+PREEMPT_TRANSMIT:
+  // Transmitting preemptable frame normally
+  if (express_frame_ready) begin
+    // Express frame arrives - preempt current frame
+    // Save current position, send mCRC, then switch to express
+    save_tx_position = current_tx_byte;
+    preempt_tx_state <= PREEMPT_FRAGMENT;
+  end else if (frame_complete) begin
+    preempt_tx_state <= PREEMPT_IDLE;
   end
 
-PREEMPT_WAIT_EXP:
-  // Complete current fragment with CRC-8
-  tx_gmii_data = crc8_value;
-  preempt_state <= PREEMPT_EXPRESS;
+PREEMPT_FRAGMENT:
+  // Send fragment with SMD-C and mCRC
+  tx_smd = SMD_C;  // 0x61
+  tx_data = fragment_data;
+  tx_mcrc = compute_mcrc(fragment_data);
+  
+  if (fragment_sent) begin
+    preempt_tx_state <= PREEMPT_EXPRESS;
+  end
 
 PREEMPT_EXPRESS:
-  // eMAC takes over: standard frame transmission
-  if (express_tx_complete) begin
-    // Return to pMAC if preemptable frame not complete
-    if (total_frame_bytes < preemptable_frame_length)
-      preempt_state <= PREEMPT_INTERMED;
-    else
-      preempt_state <= PREEMPT_IDLE;
-  end
-
-PREEMPT_INTERMED:
-  // Continuation fragment: Preamble + SMD-Cx
-  tx_gmii_data = (frag_byte_cnt < 7) ? 8'h55 :
-                 (frag_byte_cnt == 7) ? smd_c_value[frag_sequence] :
-                 tx_fifo_rdata;
-  frag_byte_cnt <= frag_byte_cnt + 1;
+  // Transmit express frame
+  tx_smd = SMD_S;  // 0xE6
+  tx_data = express_frame_data;
   
-  if (express_frame_ready && frag_byte_cnt >= 64)
-    preempt_state <= PREEMPT_WAIT_EXP;
-  else if (total_frame_bytes >= preemptable_frame_length)
-    preempt_state <= PREEMPT_FINAL_FRAG;
+  if (express_frame_complete) begin
+    if (preempted_frame_pending) begin
+      preempt_tx_state <= PREEMPT_RESUME;
+    end else begin
+      preempt_tx_state <= PREEMPT_IDLE;
+    end
+  end
 
-PREEMPT_FINAL_FRAG:
-  // Final fragment: Preamble + SMD-Ex + remaining data + CRC-32
-  tx_gmii_data = (frag_byte_cnt < 7) ? 8'h55 :
-                 (frag_byte_cnt == 7) ? smd_e_value[frag_sequence] :
-                 tx_fifo_rdata;
+PREEMPT_RESUME:
+  // Resume preempted frame from saved position
+  tx_smd = SMD_C;  // 0x61
+  tx_data = resumed_frame_data;
   
-  if (all_data_sent) begin
-    // Append FCS (CRC-32 of full original frame)
-    tx_gmii_data = crc32_final_value;
-    preempt_state <= PREEMPT_VERIFY;
+  if (frame_complete) begin
+    preempt_tx_state <= PREEMPT_IDLE;
+  end else if (express_frame_ready) begin
+    // Another express frame - preempt again
+    save_tx_position = current_tx_byte;
+    preempt_tx_state <= PREEMPT_FRAGMENT;
   end
-
-PREEMPT_VERIFY:
-  // Verify sequence continuity check
-  // SMD-V frame sent periodically (every 128 fragments)
-  if (verify_count >= 128) begin
-    send_smd_v_frame();
-    verify_count <= 0;
-  end
-  preempt_state <= PREEMPT_IDLE;
 
 endcase
 ```
 
-#### 2.5.4 CRC Handling for Fragments
+#### 2.5.3 Fragmentation and Reassembly
 
 ```
-Fragment CRC-8 Calculation:
-  Polynomial: G(x) = x^8 + x^2 + x + 1 = 0x07
-  Initial value: 0xFF
-  
-  CRC-8 covers: SMD byte + all data bytes in fragment
-  
-  After computing CRC-8 over SMD + data:
-    Final CRC = NOT(computed_value)  // One's complement
-    
-  On receive: recompute CRC-8, should equal 0xF3 (magic check value)
+Fragmentation Rules:
+  1. Preemptable frame can be fragmented at any byte boundary
+  2. Minimum fragment size: 64 bytes
+  3. Each fragment (except last) carries mCRC
+  4. Last fragment carries full FCS
+  5. Maximum fragments per frame: limited by FIFO (typically 4-8)
 
-Full Frame CRC-32:
-  The final fragment includes the CRC-32 of the COMPLETE original frame.
-  The CRC-32 is computed over all bytes from DA through final data byte.
-  
-  Preemption does NOT affect the final CRC-32: it is computed as if
-  the frame was transmitted contiguously.
+Reassembly Rules:
+  1. Fragments must arrive in sequence (no reordering)
+  2. mCRC verified per fragment
+  3. If mCRC fails, discard entire frame
+  4. Timeout: if fragment not received within ~1ms, discard
 
 RTL Implementation:
-  // Dual CRC engines
-  crc8_engine  fragment_crc (  // For intermediate fragments
-    .polynomial(8'h07),
-    .init(8'hFF),
-    .data_in(fragment_data),
-    .crc_out(fragment_crc8)
-  );
+  reg [15:0] fragment_seq_num;
+  reg [15:0] expected_seq_num;
+  reg [31:0] reassembly_buffer;
+  reg [3:0]  fragment_count;
   
-  crc32_engine frame_crc (     // For final CRC-32
-    .polynomial(32'h04C11DB7),
-    .init(32'hFFFFFFFF),
-    .data_in(frame_data),
-    .crc_out(final_fcs)
-  );
+  always @(posedge clk_mac) begin
+    if (rx_smd == SMD_C) begin
+      // Continuation fragment
+      if (fragment_seq_num == expected_seq_num) begin
+        reassembly_buffer <= {reassembly_buffer, fragment_data};
+        expected_seq_num <= expected_seq_num + 1;
+        fragment_count <= fragment_count + 1;
+      end else begin
+        // Out of sequence - discard
+        reassembly_state <= REASM_DISCARD;
+      end
+    end else if (rx_smd == SMD_S && rx_data == SMD_E) begin
+      // End of fragmented frame
+      if (mCRC_valid) begin
+        reassembly_state <= REASM_COMPLETE;
+      end else begin
+        reassembly_state <= REASM_DISCARD;
+      end
+    end
+  end
 ```
 
 ---
 
 ### 2.6 IEEE 802.1Q VLAN - RTL-Coding Detail
 
-#### 2.6.1 Exact TCI Bit Layout
+#### 2.6.1 TCI Bit Layout
 
 ```
 VLAN Tag Control Information (TCI) - 16 bits
 
-Bit[15:13] = PCP (Priority Code Point) - 3 bits
-  000 (0) = Background (BK)
-  001 (1) = Best Effort (BE)
-  010 (2) = Excellent Effort (EE)
-  011 (3) = Critical Applications (CA)
-  100 (4) = Video (< 100ms latency)
-  101 (5) = Voice (< 10ms latency)
-  110 (6) = Internetwork Control (IC)
-  111 (7) = Network Control (NC)
+Bits[15:13] = PCP (Priority Code Point)
+  0 = Best Effort (BK)
+  1 = Background (BE)
+  2 = Excellent Effort (EE)
+  3 = Critical Applications (CA)
+  4 = Video (< 100ms latency)
+  5 = Voice (< 10ms latency)
+  6 = Internetwork Control (IC)
+  7 = Network Control (NC)
 
-Bit[12] = DEI (Drop Eligible Indicator) - 1 bit
+Bit[12] = DEI (Drop Eligible Indicator)
   0 = Not drop eligible
-  1 = Drop eligible when congestion
+  1 = Drop eligible when congested
 
-Bit[11:0] = VID (VLAN Identifier) - 12 bits
-  0x000 = Null VLAN (untagged frame on ingress, native VLAN)
+Bits[11:0] = VID (VLAN Identifier)
+  0x000 = Null VLAN (untagged)
   0x001 = Default VLAN
-  0x002-0xFFE = Normal VLAN IDs (1-4094)
   0xFFF = Reserved
+  0x001-0xFFE = Normal VLAN IDs (4094 available)
 
-VLAN Tag Insertion (4 bytes):
-  Byte 0: 0x81 (TPID upper)
-  Byte 1: 0x00 (TPID lower)  → TPID = 0x8100 (C-VLAN)
-  Byte 2: TCI[15:8] (PCP[2:0] + DEI + VID[11:8])
-  Byte 3: TCI[7:0] (VID[7:0])
-
-Double VLAN Tag (Q-in-Q, Stacked VLAN):
-  Outer Tag (S-TAG):
-    TPID = 0x88A8 (S-VLAN) or 0x9100 (old) or 0x9200/0x9300
-    TCI = {PCP[2:0], DEI, SVID[11:0]}
+VLAN Tag Insertion Format:
+  [DA: 6B] [SA: 6B] [TPID: 0x8100] [TCI: 2B] [Type/Length: 2B] [Payload] [FCS]
   
-  Inner Tag (C-TAG):
-    TPID = 0x8100
-    TCI = {PCP[2:0], DEI, CVID[11:0]}
-
-Frame with Double VLAN:
-  | DA | SA | S-TAG (4B) | C-TAG (4B) | Type | Payload | FCS |
-  Total overhead: 8 bytes
-```
-
-#### 2.6.2 Exact Filtering Logic (Perfect Match + Hash)
-
-```verilog
-// VLAN Filtering Module
-// Supports: Perfect match (up to 32 entries) + Hash filtering
-
-// Perfect Match Filter
-reg [11:0] vlan_perfect_match [0:31];  // 32 VLAN IDs
-reg        vlan_perfect_valid [0:31];  // Entry valid
-reg [2:0]  vlan_perfect_queue [0:31];  // Target queue mapping
-
-// Hash Filter
-reg [63:0] vlan_hash_table;  // 64-bit hash
-reg [5:0]  vlan_hash_bits;    // Number of hash bits (6 = 64 entries)
-
-// Hash Function (CRC-8 based)
-function [5:0] vlan_hash;
-  input [11:0] vid;
-  begin
-    // Simple hash: bits[5:0] of (VID XOR (VID >> 6))
-    vlan_hash = vid[5:0] ^ vid[11:6];
-    // Alternative: use CRC-8 of VID[11:0]
-    // vlan_hash = crc8_0x07(vid[11:0])[5:0];
-  end
-endfunction
-
-// Filtering Decision
-always @(*) begin
-  vlan_filter_pass = 0;
-  vlan_target_queue = 3'd0;
-  
-  // Perfect match check
-  for (i = 0; i < 32; i = i + 1) begin
-    if (vlan_perfect_valid[i] && (vid == vlan_perfect_match[i])) begin
-      vlan_filter_pass = 1;
-      vlan_target_queue = vlan_perfect_queue[i];
-    end
-  end
-  
-  // Hash match (if no perfect match)
-  if (!vlan_filter_pass) begin
-    hash_idx = vlan_hash(vid);
-    vlan_filter_pass = vlan_hash_table[hash_idx];
-  end
-  
-  // Promiscuous mode override
-  if (vlan_promiscuous)
-    vlan_filter_pass = 1;
-end
-```
-
-#### 2.6.3 Double VLAN Tag (Q-in-Q) Parsing Rules
-
-```
-Q-in-Q Parsing State Machine
-
-Ingress Parsing:
-  1. Check EtherType after SA:
-     If bytes[12:13] == 0x88A8 or 0x8100:
-       → VLAN tagged
-     
-  2. First tag:
-     If TPID == 0x88A8:
-       outer_tagged = 1
-       svid = TCI[11:0]
-       spcp = TCI[15:13]
-       sdei = TCI[12]
-     Else if TPID == 0x8100:
-       inner_tagged = 1  // Single tag
-       cvid = TCI[11:0]
-       
-  3. Check next 2 bytes:
-     If bytes[16:17] == 0x8100:
-       inner_tagged = 1
-       cvid = TCI[11:0]
-       cpcp = TCI[15:13]
-       cdei = TCI[12]
-     Else:
-       inner_tagged = 0
-
-Priority Mapping:
-  If double-tagged: use outer PCP (spcp) for queue mapping
-  If single-tagged: use inner PCP (cpcp)
-  If untagged: use port default PCP (port_pcp_default)
+Double VLAN (Q-in-Q):
+  [DA] [SA] [Outer TPID: 0x8100] [Outer TCI] [Inner TPID: 0x8100] [Inner TCI] [Type] [Payload] [FCS]
 
 RTL Implementation:
-  reg [11:0] parsed_svid, parsed_cvid;
-  reg [2:0]  parsed_spcp, parsed_cpcp;
-  reg        has_stag, has_ctag;
+  // TCI register
+  reg [2:0]  vlan_pcp;
+  reg        vlan_dei;
+  reg [11:0] vlan_vid;
   
-  // Parse pipeline (2 cycles)
-  always @(posedge clk_mac) begin
-    // Cycle 1: Detect TPID
-    if (frame_byte_12_13 == 16'h88A8) begin
-      has_stag <= 1;
-      parsed_spcp <= frame_byte_15[15:13];
-      parsed_svid <= {frame_byte_15[11:8], frame_byte_16[7:0]};
-    end else if (frame_byte_12_13 == 16'h8100) begin
-      has_ctag <= 1;
-      parsed_cpcp <= frame_byte_15[15:13];
-      parsed_cvid <= {frame_byte_15[11:8], frame_byte_16[7:0]};
-    end
-    
-    // Cycle 2: Check for inner tag
-    if (has_stag && frame_byte_16_17 == 16'h8100) begin
-      has_ctag <= 1;
-      parsed_cpcp <= frame_byte_19[15:13];
-      parsed_cvid <= {frame_byte_19[11:8], frame_byte_20[7:0]};
-    end
-  end
+  // VLAN tag detection
+  wire vlan_tagged = (frame_data[12:13] == 16'h8100);
+  wire [15:0] tci = frame_data[14:15];
+  
+  assign vlan_pcp = tci[15:13];
+  assign vlan_dei = tci[12];
+  assign vlan_vid = tci[11:0];
 ```
 
-#### 2.6.4 Hash Function for VLAN Filtering
+#### 2.6.2 VLAN Filtering Logic
 
-```verilog
-// VLAN Hash Function
-// CRC-8 based hash for 12-bit VLAN ID
+```
+VLAN Filtering Modes
 
-function [63:0] vlan_hash_compute;
-  input [11:0] vid;
-  reg [7:0] crc;
-  integer i;
-  begin
-    crc = 8'hFF;  // Initial value
-    
-    // Process VID byte by byte (12 bits = 2 bytes, upper 4 bits padded)
-    for (i = 0; i < 12; i = i + 1) begin
-      crc = crc ^ {7'b0, vid[i]};  // XOR LSB in
-      if (crc[0])
-        crc = {1'b0, crc[7:1]} ^ 8'h8C;  // Polynomial 0x8C for CRC-8
-      else
-        crc = {1'b0, crc[7:1]};
+1. Perfect Match Filtering:
+   - Up to 8 VLAN IDs can be programmed
+   - Frame passes if VID matches any programmed entry
+   - Enable: MAC_VLAN_Tag_Filter[0] = 1
+
+2. Hash Filtering:
+   - 6-bit hash of VID
+   - Hash = VID[5:0] XOR VID[11:6]
+   - 64-bit hash table (one bit per hash value)
+   - Frame passes if hash_table[hash] = 1
+
+3. Inverse Filtering:
+   - Frame passes if VID does NOT match programmed entries
+   - Enable: MAC_VLAN_Tag_Filter[1] = 1
+
+4. VLAN Tag Stripping:
+   - Remove outer VLAN tag before passing to upper layers
+   - Enable: MAC_VLAN_Tag_CTRL[0] = 1
+
+RTL Implementation:
+  // Perfect match filter
+  reg [11:0] vlan_perfect_match [0:7];
+  reg [7:0]  vlan_perfect_enable;
+  
+  wire vlan_perfect_pass = |({8{vlan_vid == vlan_perfect_match[7]} & vlan_perfect_enable[7],
+                              {8{vlan_vid == vlan_perfect_match[6]} & vlan_perfect_enable[6],
+                              ...});
+  
+  // Hash filter
+  wire [5:0] vlan_hash = vlan_vid[5:0] ^ vlan_vid[11:6];
+  reg [63:0] vlan_hash_table;
+  wire vlan_hash_pass = vlan_hash_table[vlan_hash];
+  
+  // Combined filter
+  wire vlan_pass = vlan_perfect_pass || vlan_hash_pass;
+  
+  // VLAN tag stripping
+  always @(posedge clk_mac) begin
+    if (vlan_strip_enable && vlan_tagged) begin
+      // Remove 4 bytes (TPID + TCI) from frame
+      stripped_frame <= {frame_data[0:11], frame_data[16:end]};
     end
-    
-    vlan_hash_compute = 64'h1 << crc[5:0];  // One-hot encode
   end
-endfunction
 ```
 
 ---
 
-### 2.7 IEEE 802.1CB - FRER - RTL-Coding Detail
+### 2.7 IEEE 802.1CB FRER - RTL-Coding Detail
 
-#### 2.7.1 Exact R-Tag Format
+#### 2.7.1 R-tag Format
 
 ```
-R-Tag (Redundancy Tag) Format - 6 bytes
+Redundancy Tag (R-tag) Format - 6 bytes
 
-Byte 0-1: TPID = 0xF1C1 (Redundancy Tag EtherType)
-Byte 2:   Flags
-  Bit[7:4]: Reserved (0)
-  Bit[3]:   ESEL (Encode Stream ID from Ethernet parameters)
-  Bit[2]:   EDE (Encode Discard Eligibility)
-  Bit[1]:   EPCP (Encode PCP from Ethernet parameters)
-  Bit[0]:   Reserved
-Byte 3:   Flags2
-  Bit[7]:   Reserved
-  Bit[6:4]: LAN ID (0-7, identifies redundant path)
-  Bit[3:0]: Reserved
-Byte 4-5: Sequence Number (16-bit unsigned)
-  Range: 0 - 65535, wraps to 0 after 65535
+Byte | Field              | Size | Description
+-----|--------------------|------|----------------------------------
+0-1  | TPID               | 2    | 0xF1C1 (Redundancy Tag Identifier)
+2-3  | R-PC               | 2    | {Reserved[3:0], SequenceNumber[11:0]}
+4-5  | Reserved           | 2    | 0x0000
 
-R-Tag Insertion Position:
-  Before VLAN tag if present:
-    | DA | SA | R-Tag (6B) | VLAN Tag (4B) | Type | Payload | FCS |
+Sequence Number: 12-bit unsigned
+  - Range: 0 to 4095
+  - Wraparound: 4095 → 0
+  - Increment: +1 per frame per stream
+
+RTL Implementation:
+  // R-tag detection
+  wire rtag_present = (frame_data[12:13] == 16'hF1C1);
+  wire [11:0] seq_num = frame_data[14][3:0] | (frame_data[15][7:0] << 4);
+```
+
+#### 2.7.2 Sequence Number Window Algorithm
+
+```
+Duplicate Detection - Sequence Number Window
+
+Window Size: 32 (configurable: 16/32/64/128)
+Window Position: advances as new sequence numbers are received
+
+Algorithm:
+  1. For each received frame with sequence number S:
+     a. If S is within current window and not seen before → ACCEPT
+     b. If S is within current window and seen before → DISCARD (duplicate)
+     c. If S is ahead of window → ADVANCE window to include S, ACCEPT
+     d. If S is behind window → DISCARD (late)
+
+Window Data Structure:
+  - Bit vector: 128 bits (one bit per sequence number in window)
+  - Base sequence number: oldest sequence number in window
+  - Window position: base + window_size
+
+RTL Implementation:
+  reg [127:0] seq_window;      // Bit vector of received sequence numbers
+  reg [11:0]  seq_base;        // Base sequence number
+  reg [11:0]  seq_window_size; // Configurable: 16/32/64/128
   
-  Without VLAN:
-    | DA | SA | R-Tag (6B) | Type | Payload | FCS |
+  function seq_accept;
+    input [11:0] seq;
+    begin
+      if (seq >= seq_base && seq < seq_base + seq_window_size) begin
+        // Within window
+        if (!seq_window[seq - seq_base]) begin
+          // Not seen before - accept
+          seq_window[seq - seq_base] <= 1;
+          seq_accept = 1;
+        end else begin
+          // Duplicate - discard
+          seq_accept = 0;
+        end
+      end else if (seq >= seq_base + seq_window_size) begin
+        // Ahead of window - advance
+        seq_base <= seq;
+        seq_window <= 0;  // Clear window
+        seq_window[0] <= 1;  // Mark current as received
+        seq_accept = 1;
+      end else begin
+        // Behind window - discard
+        seq_accept = 0;
+      end
+    end
+  endfunction
+```
+
+#### 2.7.3 Frame Replication
+
+```
+Frame Replication (at sender)
+
+For each stream configured for FRER:
+  1. Assign unique sequence number
+  2. Insert R-tag with sequence number
+  3. Replicate frame to N egress ports (typically 2)
+  4. Each replica carries same sequence number
 
 Sequence Number Generation:
-  - Per-stream sequence number
-  - 16-bit counter, increments by 1 for each frame in stream
-  - Wrap-around: 65535 → 0
-  - Initial value: 0 (or random to avoid startup duplicates)
+  - Per-stream counter
+  - Increment by 1 per frame
+  - Wrap at 4095
 
-Sequence Number Assignment:
-  Stream identification based on:
-    a) Null stream: Single sequence generator for all FRER traffic
-    b) SMAC/ DMAC-based: Per-source/destination pair
-    c) VLAN-based: Per-VLAN + PCP combination
-    d) IP-based: Per IP 5-tuple (if L3-aware)
-```
-
-#### 2.7.2 Sequence Number Generation (16-bit Space)
-
-```verilog
-// Sequence Number Generator
-// One per stream (up to 64 streams)
-
-reg [15:0] seq_num [0:63];     // Sequence number per stream
-reg [5:0]  stream_id_map [0:63]; // Stream ID lookup result
-reg        stream_valid [0:63];
-
-// Stream Identification
-function [5:0] identify_stream;
-  input [47:0] smac, dmac;
-  input [11:0] vid;
-  input [2:0]  pcp;
-  input [15:0] etype;
-  begin
-    // Hash-based stream identification
-    identify_stream = hash_stream(smac, dmac, vid, pcp, etype);
-  end
-endfunction
-
-// Sequence number assignment
-always @(posedge clk_mac) begin
-  if (frer_enable && tx_frame_valid) begin
-    stream_idx = identify_stream(smac, dmac, vid, pcp, etype);
-    
-    if (stream_valid[stream_idx]) begin
-      tx_r_tag[15:0] = seq_num[stream_idx];  // Insert into frame
-      seq_num[stream_idx] <= seq_num[stream_idx] + 1;
-      if (seq_num[stream_idx] == 16'hFFFF)
-        seq_num[stream_idx] <= 0;  // Wrap-around
+RTL Implementation:
+  reg [11:0] seq_counter [0:MAX_STREAMS-1];
+  
+  always @(posedge clk_mac) begin
+    if (frer_stream_enable[stream_id]) begin
+      // Insert R-tag
+      tx_data[12:13] = 16'hF1C1;  // TPID
+      tx_data[14] = {4'h0, seq_counter[stream_id][11:8]};
+      tx_data[15] = seq_counter[stream_id][7:0];
+      
+      // Increment counter
+      if (seq_counter[stream_id] == 12'hFFF)
+        seq_counter[stream_id] <= 12'h000;
+      else
+        seq_counter[stream_id] <= seq_counter[stream_id] + 1;
     end
   end
-end
-```
-
-#### 2.7.3 Duplicate Detection: Sequence Number Window Algorithm
-
-```verilog
-// Duplicate Detection Window Algorithm
-// Window size: 32 (configurable 16/32/64/128)
-
-localparam WINDOW_SIZE = 32;
-localparam WINDOW_BITS = 5;  // log2(32)
-
-reg [15:0] seq_history [0:WINDOW_SIZE-1];  // Circular buffer
-reg [WINDOW_BITS-1:0] seq_history_wr;      // Write pointer
-reg [15:0] seq_expected;                      // Expected next sequence
-
-// Duplicate check
-function is_duplicate;
-  input [15:0] rx_seq_num;
-  integer i;
-  begin
-    is_duplicate = 0;
-    
-    // Check if sequence number is in history window
-    for (i = 0; i < WINDOW_SIZE; i = i + 1) begin
-      if (rx_seq_num == seq_history[i])
-        is_duplicate = 1;
-    end
-    
-    // Also check for old sequences (outside window, very delayed)
-    if (!$isunknown(seq_expected)) begin
-      if ((rx_seq_num < seq_expected) && 
-          (seq_expected - rx_seq_num > WINDOW_SIZE))
-        is_duplicate = 1;  // Too old, must be duplicate
-    end
-  end
-endfunction
-
-// Window update
-always @(posedge clk_mac) begin
-  if (frer_rx_valid && !is_duplicate(rx_seq_num)) begin
-    // Accept frame, add to history
-    seq_history[seq_history_wr] <= rx_seq_num;
-    seq_history_wr <= seq_history_wr + 1;
-    
-    // Update expected sequence
-    if (rx_seq_num >= seq_expected)
-      seq_expected <= rx_seq_num + 1;
-  end
-end
-
-// Recovery (Vector Recovery Algorithm - optional)
-// For out-of-order but within-window frames:
-//   Accept if rx_seq_num > (seq_expected - WINDOW_SIZE)
-//   Update seq_expected = max(seq_expected, rx_seq_num + 1)
 ```
 
 ---
 
 ### 2.8 PHY Interfaces - RTL-Coding Detail
 
-#### 2.8.1 MII Interface
+#### 2.8.1 MII Interface (4-bit Nibble)
 
 ```
-Media Independent Interface (MII) - IEEE 802.3 Clause 22
+MII (Media Independent Interface) - 4-bit nibble, 25MHz
 
-Data Path:
-  TX: 4-bit nibble, TX_CLK synchronous
-  RX: 4-bit nibble, RX_CLK synchronous
+Signal        | Direction | Width | Description
+--------------|-----------|-------|-----------------------------------
+TX_CLK        | Input     | 1     | 25MHz (100M) or 2.5MHz (10M)
+TX_EN         | Output    | 1     | Transmit enable
+TXD[3:0]      | Output    | 4     | Transmit data (nibble)
+TX_ER         | Output    | 1     | Transmit error
+RX_CLK        | Input     | 1     | 25MHz (100M) or 2.5MHz (10M)
+RX_DV         | Input     | 1     | Receive data valid
+RXD[3:0]      | Input     | 4     | Receive data (nibble)
+RX_ER         | Input     | 1     | Receive error
+CRS           | Input     | 1     | Carrier sense
+COL           | Input     | 1     | Collision detect
 
-Clocks:
-  TX_CLK: 25 MHz @ 100M, 2.5 MHz @ 10M (from PHY to MAC)
-  RX_CLK: 25 MHz @ 100M, 2.5 MHz @ 10M (from PHY to MAC)
+Timing:
+  TX_CLK/RX_CLK: 25MHz ± 50ppm (100M), 2.5MHz (10M)
+  Setup time: 5ns (TXD to TX_CLK rising)
+  Hold time: 5ns (TXD from TX_CLK rising)
+  Clock duty cycle: 40%-60%
 
-Exact Timing Diagram:
+Data Rate:
+  100M: 25MHz × 4 bits = 100 Mbps
+  10M: 2.5MHz × 4 bits = 10 Mbps
 
-MII TX (100M mode, 25MHz TX_CLK):
-
-        | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10| 11| 12| 13| 14| 15| 16|
-TX_CLK  ‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|
-        |<- Preamble nibbles ->|<SFD>|<---- Data Byte 0 ---->|<- D1 ->
-TX_EN   ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-TXD[3:0]---| 5 | 5 | 5 | 5 | 5 | 5 | 5 | D | 5 |D[3:0] | D[7:4]|D[3:0] |
-        |<- 56 bits (14 nibbles) ->|4bit|<-- lower nibble --><- upp ->
-
-TX_EN setup to TX_CLK rising: ≥ 10ns
-TXD setup to TX_CLK rising: ≥ 10ns
-TXD hold from TX_CLK rising: ≥ 0ns
-
-MII RX (100M mode, 25MHz RX_CLK):
-
-RX_CLK  ‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|
-        |<- Preamble nibbles ->|<SFD>|<---- Data Byte 0 ---->|<- D1 ->
-RX_DV   ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-RXD[3:0]---| 5 | 5 | 5 | 5 | 5 | 5 | 5 | D | 5 |D[3:0] | D[7:4]|D[3:0] |
-
-RX_DV valid to RX_CLK rising: ≤ 10ns (clock-to-valid)
-RXD valid to RX_CLK rising: ≤ 25ns
-RXD hold: ≥ 10ns
-
-RTL Interface Module:
-  // MII TX (from MAC to PHY)
-  output reg [3:0] mii_txd,
-  output reg       mii_tx_en,
-  output reg       mii_tx_er,
-  input            mii_tx_clk,
+RTL Implementation:
+  // MII TX: convert byte to nibble
+  reg [3:0] tx_nibble;
+  reg       tx_nibble_sel;  // 0=LSN, 1=MSN
   
-  // MII RX (from PHY to MAC)
-  input      [3:0] mii_rxd,
-  input            mii_rx_dv,
-  input            mii_rx_er,
-  input            mii_rx_clk,
-  input            mii_crs,
-  input            mii_col,
-
-  // TX Nibble assembler
-  reg [7:0] tx_byte_buffer;
-  reg       tx_byte_valid;
-  reg       tx_nibble_sel;  // 0 = lower, 1 = upper
-  
-  always @(posedge mii_tx_clk) begin
-    if (mii_tx_en) begin
-      if (!tx_nibble_sel) begin
-        mii_txd <= tx_byte_buffer[3:0];  // Lower nibble
-      end else begin
-        mii_txd <= tx_byte_buffer[7:4];  // Upper nibble
-      end
+  always @(posedge tx_clk) begin
+    if (tx_en) begin
       tx_nibble_sel <= ~tx_nibble_sel;
-    end else begin
-      mii_txd <= 4'h0;  // Idle
+      tx_nibble <= tx_nibble_sel ? tx_byte[7:4] : tx_byte[3:0];
     end
   end
   
-  // RX Nibble assembler
-  reg [3:0] rx_nibble_lower;
-  reg       rx_nibble_valid;
+  // MII RX: convert nibble to byte
+  reg [3:0] rx_nibble_lsn;
+  reg [7:0] rx_byte;
+  reg       rx_byte_valid;
   
-  always @(posedge mii_rx_clk) begin
-    if (mii_rx_dv) begin
-      if (!rx_nibble_valid) begin
-        rx_nibble_lower <= mii_rxd;
-        rx_nibble_valid <= 1;
-      end else begin
-        rx_byte <= {mii_rxd, rx_nibble_lower};  // Upper + lower
-        rx_byte_valid <= 1;
-        rx_nibble_valid <= 0;
-      end
-    end else begin
-      rx_byte_valid <= 0;
-      rx_nibble_valid <= 0;
+  always @(posedge rx_clk) begin
+    if (rx_dv) begin
+      rx_nibble_lsn <= rxd;
+      rx_byte <= {rxd, rx_nibble_lsn};  // MSN + LSN
+      rx_byte_valid <= ~rx_byte_valid;   // Valid every 2 nibbles
     end
   end
 ```
 
-#### 2.8.2 RMII Interface
+#### 2.8.2 RMII Interface (2-bit, 50MHz REF_CLK)
 
 ```
-Reduced MII (RMII) - IEEE 802.3 Clause 22 (variant)
+RMII (Reduced MII) - 2-bit, 50MHz REF_CLK
 
-Data Path:
-  TX: 2-bit dibit, REF_CLK synchronous
-  RX: 2-bit dibit, REF_CLK synchronous
+Signal        | Direction | Width | Description
+--------------|-----------|-------|-----------------------------------
+REF_CLK       | Input     | 1     | 50MHz ± 50ppm
+TX_EN         | Output    | 1     | Transmit enable
+TXD[1:0]      | Output    | 2     | Transmit data
+RXD[1:0]      | Input     | 2     | Receive data
+CRS_DV        | Input     | 1     | Carrier sense + data valid
+RX_ER         | Input     | 1     | Receive error (optional)
 
-Clocks:
-  REF_CLK: 50 MHz (fixed, from PHY or external oscillator)
-  
-  Effective data rate:
-    100M: 50MHz × 2-bit = 100 Mbps
-    10M:  REF_CLK still 50MHz, but data repeated 10x (nibble every 500ns)
+Timing:
+  REF_CLK: 50MHz continuous
+  Setup time: 4ns
+  Hold time: 2ns
 
-Signal Mapping:
-  REF_CLK: 50MHz clock (input)
-  TXD[1:0]: 2-bit transmit data
-  TX_EN:    Transmit enable
-  RXD[1:0]: 2-bit receive data
-  CRS_DV:   Carrier sense / data valid (multiplexed)
-  RX_ER:    Receive error
+Data Rate:
+  100M: 50MHz × 2 bits = 100 Mbps
+  10M: 50MHz × 2 bits = 10 Mbps (with /10 decimation)
 
-CRS_DV Multiplexing:
-  CRS_DV = 0: No carrier, no data valid
-  CRS_DV = 1, RXD != 00: Data valid (reception active)
-  CRS_DV = 1, RXD = 00: Carrier sense (between frames)
-  CRS_DV transitions 0→1 with RXD=00: Start of frame (SFD pending)
-
-Exact Timing (50MHz REF_CLK, 20ns period):
-
-        | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10| 11| 12| 13| 14| 15| 16| 17| 18| 19| 20|
-REF_CLK ‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|
-        |<-- Preamble dibits (28 cycles) -->|<SFD>|<-- Data Byte 0 (4 cycles) -->|
-TX_EN   ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-TXD     --|01 |01 |01 |01 |01 |01 |01 |11 |01 |D[1:0]|D[3:2]|D[5:4]|D[7:6]|
-
-Note: RMII preamble = 28 bits (vs MII 56 bits) because dibit rate
-      is half of MII nibble rate at same REF_CLK frequency.
-      Actually: RMII has NO preamble on interface (preamble is generated
-      by PHY, not MAC). MAC starts with TX_EN assertion.
+CRS_DV Decoding:
+  CRS_DV transitions indicate start/end of frame
+  First transition: CRS asserted (start of frame)
+  Second transition: CRS deasserted, DV still high (end of frame)
 
 RTL Implementation:
-  input        rmii_ref_clk,  // 50MHz
-  output [1:0] rmii_txd,
-  output       rmii_tx_en,
-  input  [1:0] rmii_rxd,
-  input        rmii_crs_dv,
-  input        rmii_rx_er,
+  // RMII TX: convert byte to dibit
+  reg [1:0] tx_dibit;
+  reg [1:0] tx_dibit_cnt;
   
-  // 2-bit to 8-bit conversion (4 cycles per byte)
-  reg [1:0] rmii_rx_buffer [0:3];
-  reg [2:0] rmii_rx_cnt;
+  always @(posedge ref_clk) begin
+    if (tx_en) begin
+      tx_dibit_cnt <= tx_dibit_cnt + 1;
+      case (tx_dibit_cnt)
+        0: tx_dibit <= tx_byte[1:0];
+        1: tx_dibit <= tx_byte[3:2];
+        2: tx_dibit <= tx_byte[5:4];
+        3: tx_dibit <= tx_byte[7:6];
+      endcase
+    end
+  end
   
-  always @(posedge rmii_ref_clk) begin
-    if (rmii_crs_dv && (rmii_rxd != 2'b00 || rmii_rx_cnt > 0)) begin
-      rmii_rx_buffer[rmii_rx_cnt] <= rmii_rxd;
-      rmii_rx_cnt <= rmii_rx_cnt + 1;
-      if (rmii_rx_cnt == 3) begin
-        rx_byte <= {rmii_rx_buffer[3], rmii_rx_buffer[2],
-                     rmii_rx_buffer[1], rmii_rxd};
-        rx_byte_valid <= 1;
-        rmii_rx_cnt <= 0;
-      end
-    end else begin
-      rx_byte_valid <= 0;
-      if (!rmii_crs_dv)
-        rmii_rx_cnt <= 0;
+  // RMII RX: CRS_DV decode
+  reg crs_dv_prev;
+  reg [1:0] rx_dibit [0:3];
+  reg [7:0] rx_byte_rmii;
+  
+  always @(posedge ref_clk) begin
+    crs_dv_prev <= crs_dv;
+    if (!crs_dv_prev && crs_dv) begin
+      // Start of frame
+      rx_frame_start <= 1;
+    end
+    if (crs_dv_prev && !crs_dv) begin
+      // End of frame (CRS deasserted, DV still high)
+      rx_frame_end <= 1;
     end
   end
 ```
 
-#### 2.8.3 RGMII Interface
+#### 2.8.3 RGMII Interface (4-bit DDR, 125MHz)
 
 ```
-Reduced GMII (RGMII) - IEEE 802.3 (industry standard, not formal IEEE)
+RGMII (Reduced Gigabit MII) - 4-bit DDR, 125MHz
 
-Data Path:
-  TX: 4-bit DDR, both edges of TXC
-  RX: 4-bit DDR, both edges of RXC
+Signal        | Direction | Width | Description
+--------------|-----------|-------|-----------------------------------
+TXC           | Output    | 1     | 125MHz (from MAC)
+TXD[3:0]      | Output    | 4     | Data (DDR)
+TX_CTL        | Output    | 1     | Control (DDR)
+RXC           | Input     | 1     | 125MHz (from PHY)
+RXD[3:0]      | Input     | 4     | Data (DDR)
+RX_CTL        | Input     | 1     | Control (DDR)
 
-Clocks:
-  TXC: 125MHz @ 1G, 25MHz @ 100M, 2.5MHz @ 10M (from MAC to PHY)
-  RXC: 125MHz @ 1G, 25MHz @ 100M, 2.5MHz @ 10M (from PHY to MAC)
-
-Signal Mapping:
-  TXC:  Clock (output from MAC)
-  TXD[3:0]: Data, rising edge = [3:0], falling edge = [7:4]
-  TX_CTL: Control, rising = TX_EN, falling = TX_EN ^ TX_ER
-  RXC:  Clock (input from PHY)
-  RXD[3:0]: Data, rising edge = [3:0], falling edge = [7:4]
-  RX_CTL: Control, rising = RX_DV, falling = RX_DV ^ RX_ER
-
-Exact DDR Timing:
-
-RGMII TX (1G mode, 125MHz TXC):
-
-TXC     ‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|‾‾|__|
-        |Rise|Fall|Rise|Fall|Rise|Fall|Rise|Fall|Rise|Fall|Rise|Fall|Rise|Fall|
-        |<--- Byte 0 --->|<--- Byte 1 --->|<--- Byte 2 --->|
-TXD[3:0]---|D0L|D0U|D1L|D1U|D2L|D2U|D3L|D3U|
-           | [3:0]|[7:4]| [3:0]|[7:4]|
-TX_CTL   ___|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-           | TX_EN| TX_EN| TX_EN| TX_EN| ... (rising edges)
-           | TX_ER| TX_ER| TX_ER| TX_ER| ... (falling edges, if error)
-
-Skew Requirements:
-  - TX data to TXC skew: ±500ps (at MAC output)
-  - RX data to RXC skew: ±1.5ns (including PHY internal delay)
-  - Typical PHY internal delay: 1.5~2.0ns
-
-RGMII v2.0 added requirement:
-  - PHY can add internal delay to RXC (typically 2ns)
-  - Or MAC can delay RXC/TXC (IDELAY primitive)
+Timing:
+  TXC: 125MHz, duty cycle 45%-55%
+  RXC: 125MHz, delayed 1.5-2.0ns by PHY
   
+  Data-to-clock skew at transmitter: ±500ps
+  Total RX skew budget: ±1.5ns
+
+Data Encoding:
+  TXD[3:0] @ TXC rising edge = Data[3:0]
+  TXD[3:0] @ TXC falling edge = Data[7:4]
+  TX_CTL @ TXC rising edge = TX_EN
+  TX_CTL @ TXC falling edge = TX_EN ^ TX_ER
+
+  RXD[3:0] @ RXC rising edge = Data[3:0]
+  RXD[3:0] @ RXC falling edge = Data[7:4]
+  RX_CTL @ RXC rising edge = RX_DV
+  RX_CTL @ RXC falling edge = RX_DV ^ RX_ER
+
 RTL Implementation:
-  output       rgmii_txc,
-  output [3:0] rgmii_txd,
-  output       rgmii_tx_ctl,
-  input        rgmii_rxc,
-  input  [3:0] rgmii_rxd,
-  input        rgmii_rx_ctl,
-  
-  // TX DDR (using ODDR primitive)
-  ODDR #(
-    .DDR_CLK_EDGE("SAME_EDGE")
-  ) txc_oddr (
-    .Q(rgmii_txc),
-    .C(gtx_clk),
-    .CE(1'b1),
-    .D1(1'b1),  // Rising edge
-    .D2(1'b0),  // Falling edge
-    .R(1'b0),
-    .S(1'b0)
-  );
+  // RGMII TX: DDR output
+  ODDR txc_oddr (.Q(txc), .C(clk_125m), .CE(1'b1), .D1(1'b0), .D2(1'b1));
   
   genvar i;
   generate
-    for (i = 0; i < 4; i = i + 1) begin : txd_ddr
-      ODDR txd_oddr (
-        .Q(rgmii_txd[i]),
-        .C(gtx_clk),
-        .CE(1'b1),
-        .D1(tx_byte[i]),      // Rising: lower nibble
-        .D2(tx_byte[i+4]),    // Falling: upper nibble
-        .R(1'b0),
-        .S(1'b0)
-      );
+    for (i = 0; i < 4; i = i + 1) begin
+      ODDR txd_oddr (.Q(txd[i]), .C(clk_125m), .CE(1'b1),
+                     .D1(tx_byte[i]), .D2(tx_byte[i+4]));
     end
   endgenerate
   
-  ODDR tx_ctl_oddr (
-    .Q(rgmii_tx_ctl),
-    .C(gtx_clk),
-    .CE(1'b1),
-    .D1(tx_en),           // Rising
-    .D2(tx_en ^ tx_er),  // Falling
-    .R(1'b0),
-    .S(1'b0)
-  );
+  ODDR txctl_oddr (.Q(tx_ctl), .C(clk_125m), .CE(1'b1),
+                   .D1(tx_en), .D2(tx_en ^ tx_er));
   
-  // RX DDR recovery (using IDDR primitive)
-  wire [7:0] rx_byte_recovered;
-  wire       rx_dv_recovered;
-  wire       rx_er_recovered;
-  
+  // RGMII RX: DDR input
+  genvar j;
   generate
-    for (i = 0; i < 4; i = i + 1) begin : rxd_iddr
-      IDDR #(
-        .DDR_CLK_EDGE("SAME_EDGE_PIPELINED")
-      ) rxd_iddr (
-        .Q1(rx_byte_recovered[i]),      // Rising edge
-        .Q2(rx_byte_recovered[i+4]),    // Falling edge
-        .C(rgmii_rxc),
-        .CE(1'b1),
-        .D(rgmii_rxd[i]),
-        .R(1'b0),
-        .S(1'b0)
-      );
+    for (j = 0; j < 4; j = j + 1) begin
+      IDDR rxd_iddr (.Q1(rx_byte[j]), .Q2(rx_byte[j+4]),
+                     .C(rxc), .CE(1'b1), .D(rxd[j]));
     end
   endgenerate
   
-  IDDR ctl_iddr (
-    .Q1(rx_dv_recovered),
-    .Q2(rx_er_xor),
-    .C(rgmii_rxc),
-    .CE(1'b1),
-    .D(rgmii_rx_ctl),
-    .R(1'b0),
-    .S(1'b0)
-  );
+  IDDR rxctl_iddr (.Q1(rx_dv), .Q2(rx_er_raw),
+                   .C(rxc), .CE(1'b1), .D(rx_ctl));
   
-  assign rx_er_recovered = rx_dv_recovered ^ rx_er_xor;
+  assign rx_er = rx_dv ^ rx_er_raw;  // Decode
 ```
 
-#### 2.8.4 SGMII Interface
+#### 2.8.4 SGMII Interface (8b/10b, 1.25Gbps)
 
 ```
-Serial GMII (SGMII) - Cisco/Industry standard, IEEE 802.3 Clause 36 (adapted)
+SGMII (Serial Gigabit MII) - 8b/10b encoding, 1.25Gbps
 
-Data Path:
-  TX: 1 differential pair, 1.25 Gbps line rate
-  RX: 1 differential pair, 1.25 Gbps line rate
-
-Physical Layer:
-  8b/10b encoding (IBM code)
-  Line rate: 1.25 Gbps (1G Ethernet)
-  Effective data rate: 1 Gbps (20% overhead for 8b/10b)
-  
-  Reference clock: 125 MHz
-  SERDES: 10x serialization (125MHz × 10 = 1.25G)
+Physical Layer: SERDES
+Line Rate: 1.25 Gbps (1Gbps data + 8b/10b overhead)
+Reference Clock: 125MHz
 
 8b/10b Encoding:
-  Data characters: /Dxx.y/ (256 data codes + 12 control codes)
-  Control characters:
-    /K28.5/ = 0xBC (comma, used for alignment)
-    /K27.7/ = 0xFB (Start of frame, SOP)
-    /K29.7/ = 0xFD (End of frame, EOP)
-    /K30.7/ = 0xFE (Error, ERR)
+  - Each 8-bit data byte → 10-bit symbol
+  - Two code groups: Data (D) and Special (K)
+  - D codes: 256 data characters
+  - K codes: 12 control characters
 
-SGMII vs 1000BASE-X:
-  SGMII carries GMII signals over SERDES:
-    - /C/ ordered sets for configuration
-    - /S/ + data + /T/ for frame transmission
-  
-  1000BASE-X carries actual Ethernet:
-    - Native MAC frame encoding
-    - Auto-negotiation over in-band signaling
+Key K-codes:
+  K28.5 (0xBC) = Comma, used for alignment
+  K27.7 (0xFB) = Start of frame
+  K29.7 (0xFD) = End of frame
+  K30.7 (0xFE) = Error propagation
 
-RTL Interface:
-  Typically implemented with external SERDES/PHY:
-  - MAC provides GMII/8-bit interface to PCS
-  - PCS does 8b/10b encoding
-  - SERDES serializes to differential pair
+Code Group Format:
+  abcdei fghj (10 bits)
+  6b/5b + 4b/3b sub-blocks with running disparity
+
+Running Disparity (RD):
+  - RD+: Previous symbol had more 1s than 0s
+  - RD-: Previous symbol had more 0s than 1s
+  - Each valid symbol maintains RD rules
+
+RTL Implementation:
+  // 8b/10b encoder
+  module encode_8b10b (
+    input [7:0] data,
+    input       k_char,  // 1 = K-code, 0 = D-code
+    input       rd_in,   // Running disparity in
+    output [9:0] code_group,
+    output       rd_out  // Running disparity out
+  );
+    // Lookup table implementation
+    // (Standard 8b/10b tables available in public domain)
+  endmodule
   
-  Internal interface (MAC to PCS):
-    input        sgmii_tx_clk,     // 125MHz
-    output [7:0] sgmii_txd,
-    output       sgmii_tx_en,
-    output       sgmii_tx_er,
-    input        sgmii_rx_clk,     // 125MHz from CDR
-    input  [7:0] sgmii_rxd,
-    input        sgmii_rx_dv,
-    input        sgmii_rx_er,
-    
-  PCS Logic (if internal):
-    // 8b/10b encoder/decoder
-    // Comma detection and word alignment
-    // Ordered set generation (/C1/, /C2/ for config)
+  // 8b/10b decoder
+  module decode_8b10b (
+    input [9:0] code_group,
+    input       rd_in,
+    output [7:0] data,
+    output       k_char,
+    output       rd_out,
+    output       code_error,
+    output       disp_error
+  );
+    // Inverse lookup table
+  endmodule
 ```
 
-#### 2.8.5 USXGMII Interface
+#### 2.8.5 USXGMII Interface (64b/66b, 6.25Gbps)
 
 ```
-Universal Serial 10GE MII (USXGMII) - IEEE 802.3 Clause 162
+USXGMII (Universal Serial 10GE MII) - 64b/66b, 6.25Gbps
 
-Data Path:
-  TX: 1 differential pair, variable line rate
-  RX: 1 differential pair, variable line rate
+Physical Layer: SERDES
+Line Rate: 6.25 Gbps (10Gbps data + 64b/66b overhead)
+Reference Clock: 156.25MHz or 312.5MHz
 
-Line Rates:
-  2.5G: 3.125 Gbps line rate
-  5G:   6.25 Gbps line rate
-  10G:  10.3125 Gbps line rate
+64b/66b Encoding:
+  - 64-bit data block → 66-bit encoded block
+  - Sync header: 2 bits (01 = data, 10 = control)
+  - Invalid headers (00, 11) indicate error
 
-Encoding:
-  64b/66b (10G) or 64b/66b with RS-FEC (25G+)
+Block Types:
+  0x1E = Start of frame (C0)
+  0x2D = End of frame (C1-C7)
+  0x33 = Control frame
+  0x66 = Data frame
+  0x78 = Idle
+
+Scrambling:
+  - Self-synchronizing scrambler
+  - Polynomial: 1 + x^39 + x^58
+  - Scrambler runs continuously over all bits
+
+Alignment:
+  - 66-bit block boundary
+  - Search for valid sync headers
+  - Lock after 64 consecutive valid headers
+
+RTL Implementation:
+  // 64b/66b scrambler
+  module scrambler_64b66b (
+    input [65:0] data_in,
+    input        clk,
+    input        rst_n,
+    output [65:0] data_out
+  );
+    reg [57:0] state;  // Scrambler state
+    // x^58 + x^39 + 1
+    always @(posedge clk or negedge rst_n) begin
+      if (!rst_n) state <= 0;
+      else begin
+        state <= {state[56:0], state[57] ^ state[38]};
+      end
+    end
+    assign data_out = data_in ^ {state, state[57:0]};
+  endmodule
   
-  64b/66b block format:
-    Bit[65] = 1, Bit[64] = 0: Data block (D)
-      Bits[63:0] = 8 bytes data
-    Bit[65] = 0, Bit[64] = 1: Control block (C)
-      Bits[63:0] = control codes
-
-USXGMII Multiplexing:
-  Supports up to 8 virtual ports over single PHY
-  Frame format includes 2-byte USXGMII header:
-    Bits[15:13] = Port ID (0-7)
-    Bit[12] = Start of frame
-    Bit[11] = End of frame
-    Bits[10:8] = reserved
-    Bits[7:0] = data
-
-RTL Interface:
-  Typically external SERDES/PHY with USXGMII support:
-  
-  // MAC side (GMII-like, with port ID)
-  output [2:0] usxg_port_id,
-  output [7:0] usxg_txd,
-  output       usxg_tx_en,
-  output       usxg_tx_er,
-  output       usxg_start,
-  output       usxg_end,
-  input  [7:0] usxg_rxd,
-  input        usxg_rx_dv,
-  input        usxg_rx_er,
-  input        usxg_rx_start,
-  input        usxg_rx_end,
-  input  [2:0] usxg_rx_port_id,
+  // Block alignment
+  module block_align_66b (
+    input [65:0] raw_data,
+    input        clk,
+    output [65:0] aligned_block,
+    output        block_locked
+  );
+    // Search for valid sync headers (01 or 10)
+    // Shift until valid header found
+  endmodule
 ```
 
 ---
 
-### 2.9 Switch - RTL-Coding Detail
+### 2.9 Switch Core - RTL-Coding Detail
 
 #### 2.9.1 FDB Entry Format
 
 ```
 Forwarding Database (FDB) Entry Format
 
-Entry Size: 128 bits (16 bytes)
+Each FDB Entry: 128 bits (16 bytes)
 
-Bits[127:80] = MAC Address [47:0] (48 bits)
-Bits[79:68]  = VLAN ID [11:0] (12 bits)
-Bits[67:64]  = Port Mask [3:0] (4 bits, one per egress port)
-Bit[63]      = Static/Dynamic (1 = static, 0 = dynamic/learned)
-Bits[62:56]  = Age Counter [6:0] (7 bits, decrements every aging period)
-Bit[55]      = Valid
-Bit[54]      = Drop (1 = drop frames to this MAC)
-Bits[53:48]  = Reserved
-Bits[47:32]  = MAC Address Hash [15:0] (for collision detection)
-Bits[31:0]   = Timestamp/Sequence [31:0] (for LRU ordering)
+Bits[127:80] = MAC Address [47:0]
+Bits[79:68]  = VLAN ID [11:0]
+Bits[67:64]  = Port Mask [3:0]
+  Bit[i] = 1: Forward to port i
+Bits[63]     = Valid
+Bits[62]     = Static/Dynamic
+  0 = Dynamic (learned, can age out)
+  1 = Static (programmed, never ages out)
+Bits[61:48]  = Age Counter [13:0]
+  - Incremented every aging period (default 300 seconds)
+  - When age > max_age, entry invalidated
+Bits[47:32]  = Reserved
+Bits[31:0]   = Hash Value (for collision handling)
 
 FDB Memory:
-  - Capacity: 4096 / 8192 / 16384 entries (configurable)
-  - Organization: Hash table with 4-way or 8-way set associativity
-  - Hash input: {MAC[47:0], VID[11:0]} = 60 bits
-  - Hash output: Index into entry set
+  - Depth: 8K entries (configurable: 4K/8K/16K)
+  - Entry size: 16 bytes
+  - Total memory: 8K × 16 = 128KB
+  - ECC protection: SECDED per 128-bit entry
+  - Hash table: 16-way set associative
 
-Hash Function (for 60-bit {MAC, VID}):
-  hash[11:0] = crc12({mac, vid})  // 12-bit hash for 4K entries
-  hash[12:0] = crc13({mac, vid})  // 13-bit hash for 8K entries
-  
-  CRC polynomial for FDB hash: 0x80F (CRC-12)
-  
-  // Alternative: XOR-folding
-  hash = mac[47:24] ^ mac[23:0] ^ {20'b0, vid};
+Hash Function:
+  hash = {MAC[47:24] XOR MAC[23:0]} XOR {VLAN[11:0], 12'b0}
+  index = hash[12:0]  // 8K entries → 13-bit index
 
 RTL Implementation:
-  // FDB Entry Structure
+  // FDB entry structure
   typedef struct packed {
     logic [47:0] mac_addr;
-    logic [11:0] vid;
+    logic [11:0] vlan_id;
     logic [3:0]  port_mask;
-    logic        is_static;
-    logic [6:0]  age_counter;
     logic        valid;
-    logic        drop;
-    logic [15:0] hash_check;
-    logic [31:0] timestamp;
+    logic        static_entry;
+    logic [13:0] age_counter;
+    logic [15:0] reserved;
+    logic [31:0] hash;
   } fdb_entry_t;
   
-  fdb_entry_t fdb_mem [0:FDB_SIZE-1];
+  // FDB memory
+  fdb_entry_t fdb_mem [0:FDB_DEPTH-1];
   
-  // Lookup (combinatorial, 2-cycle latency)
-  wire [11:0] fdb_hash = crc12({rx_dmac, rx_vid});
-  wire [3:0]  fdb_set = fdb_hash[3:0];  // 16 sets
-  wire [7:0]  fdb_way_idx;  // 8-way associative
-  
-  // Parallel comparison across all ways in set
-  always @(*) begin
-    fdb_hit = 0;
-    fdb_hit_mask = 4'b0000;
-    for (i = 0; i < 8; i = i + 1) begin
-      if (fdb_mem[fdb_set * 8 + i].valid &&
-          fdb_mem[fdb_set * 8 + i].mac_addr == rx_dmac &&
-          fdb_mem[fdb_set * 8 + i].vid == rx_vid) begin
-        fdb_hit = 1;
-        fdb_hit_mask = fdb_mem[fdb_set * 8 + i].port_mask;
-      end
-    end
-  end
+  // Hash calculation
+  wire [23:0] mac_hi = mac_addr[47:24];
+  wire [23:0] mac_lo = mac_addr[23:0];
+  wire [23:0] mac_xor = mac_hi ^ mac_lo;
+  wire [11:0] vlan_shift = vlan_id;
+  wire [23:0] hash_val = mac_xor ^ {12'b0, vlan_shift};
+  wire [12:0] fdb_index = hash_val[12:0];
 ```
 
-#### 2.9.2 Exact L2 Forwarding FSM
+#### 2.9.2 L2 Forwarding FSM
 
 ```verilog
-// L2 Forwarding State Machine (per ingress frame)
-localparam FWD_IDLE        = 4'd0;
-localparam FWD_PARSE_DA    = 4'd1;
-localparam FDB_LOOKUP      = 4'd2;
-localparam FDB_WAIT        = 4'd3;
-localparam VLAN_CHECK      = 4'd4;
-localparam FWD_DECISION    = 4'd5;
-localparam FWD_CROSSBAR    = 4'd6;
-localparam FWD_BROADCAST   = 4'd7;
-localparam FWD_MULTICAST   = 4'd8;
-localparam FWD_DROP        = 4'd9;
-localparam FWD_HOST        = 4'd10;
+// L2 Forwarding State Machine
+localparam FWD_IDLE      = 3'd0;
+localparam FWD_PARSE     = 3'd1;  // Parse DA, SA, VLAN
+localparam FWD_LOOKUP    = 3'd2;  // FDB lookup
+localparam FWD_DECISION  = 3'd3;  // Forwarding decision
+localparam FWD_FORWARD   = 3'd4;  // Forward to egress port(s)
+localparam FWD_LEARN     = 3'd5;  // Self-learning (update FDB)
+localparam FWD_DROP      = 3'd6;  // Drop frame
 
 case (fwd_state)
 
 FWD_IDLE:
   if (ingress_frame_valid) begin
-    fwd_state <= FWD_PARSE_DA;
+    fwd_state <= FWD_PARSE;
     ingress_port <= ingress_port_id;
   end
 
-FWD_PARSE_DA:
-  // Extract DA and first VLAN tag
-  dmac <= frame_da;
-  vid <= frame_vid;
+FWD_PARSE:
+  // Extract DA, SA, VLAN from frame header
+  da <= frame_data[0:5];
+  sa <= frame_data[6:11];
+  if (vlan_tagged) begin
+    vid <= frame_data[14][3:0] | (frame_data[15][7:0] << 4);
+  end else begin
+    vid <= default_vlan;
+  end
+  fwd_state <= FWD_LOOKUP;
+
+FWD_LOOKUP:
+  // Hash calculation
+  fdb_hash <= hash_function(da, vid);
+  fdb_index <= fdb_hash[12:0];
   
-  // Check special addresses
-  if (dmac[40] == 1'b1) begin  // Group address (broadcast/multicast)
-    if (dmac == 48'hFFFFFFFF_FFFF)
-      fwd_state <= FWD_BROADCAST;
-    else
-      fwd_state <= FWD_MULTICAST;
-  end else begin
-    fwd_state <= FDB_LOOKUP;
-  end
-
-FDB_LOOKUP:
-  // Initiate hash computation
-  fdb_hash <= compute_hash(dmac, vid);
-  fwd_state <= FDB_WAIT;
-
-FDB_WAIT:
-  // Wait for memory read (1 cycle for synchronous SRAM)
-  fwd_state <= VLAN_CHECK;
-
-VLAN_CHECK:
-  // Check VLAN membership for ingress port
-  vlan_member <= vlan_table[vid].port_mask[ingress_port];
-  if (!vlan_member && !vlan_ingress_filter_bypass) begin
-    fwd_state <= FWD_DROP;
-    drop_reason <= VLAN_MEMBER_ERR;
-  end else begin
-    fwd_state <= FWD_DECISION;
-  end
+  // Read FDB entry
+  fdb_entry <= fdb_mem[fdb_index];
+  
+  // Check for hit
+  fdb_hit <= (fdb_entry.valid &&
+              fdb_entry.mac_addr == da &&
+              fdb_entry.vlan_id == vid);
+  
+  fwd_state <= FWD_DECISION;
 
 FWD_DECISION:
   if (fdb_hit) begin
-    if (fdb_entry.drop) begin
+    // FDB hit - forward to port mask
+    egress_mask <= fdb_entry.port_mask;
+    fwd_state <= FWD_FORWARD;
+  end else if (da == broadcast_mac) begin
+    // Broadcast - flood to all ports except ingress
+    egress_mask <= 4'b1111 & ~{4{ingress_port}};
+    fwd_state <= FWD_FORWARD;
+  end else begin
+    // Unknown unicast - flood or drop (configurable)
+    if (unknown_unicast_flood)
+      egress_mask <= 4'b1111 & ~{4{ingress_port}};
+    else
       fwd_state <= FWD_DROP;
-    end else begin
-      egress_mask <= fdb_entry.port_mask;
-      // Remove ingress port from egress (no loopback)
-      egress_mask[ingress_port] <= 0;
-      fwd_state <= FWD_CROSSBAR;
+  end
+  
+  // Always learn SA (if enabled)
+  if (learning_enable) begin
+    fwd_state <= FWD_LEARN;
+  end
+
+FWD_FORWARD:
+  // Forward frame to egress ports
+  for (i = 0; i < 4; i = i + 1) begin
+    if (egress_mask[i]) begin
+      egress_fifo[i].wen <= 1;
+      egress_fifo[i].wdata <= frame_data;
     end
-  end else begin
-    // Unknown unicast → flood to all VLAN members except ingress
-    egress_mask <= vlan_table[vid].port_mask & ~(1 << ingress_port);
-    fwd_state <= FWD_CROSSBAR;
   end
-
-FWD_CROSSBAR:
-  // Request Crossbar for each egress port
-  for (p = 0; p < PORT_COUNT; p = p + 1) begin
-    if (egress_mask[p])
-      crossbar_req[p] <= 1;
-  end
-  fwd_state <= FWD_IDLE;  // Wait for crossbar grant
-
-FWD_BROADCAST:
-  // Flood to all ports in VLAN except ingress
-  egress_mask <= vlan_table[vid].port_mask & ~(1 << ingress_port);
-  fwd_state <= FWD_CROSSBAR;
-
-FWD_MULTICAST:
-  // Check multicast group table
-  if (mcg_table_hit) begin
-    egress_mask <= mcg_entry.port_mask;
-  end else begin
-    egress_mask <= vlan_table[vid].port_mask & ~(1 << ingress_port);
-  end
-  fwd_state <= FWD_CROSSBAR;
-
-FWD_DROP:
-  // Increment drop counter
-  drop_cnt <= drop_cnt + 1;
   fwd_state <= FWD_IDLE;
 
-FWD_HOST:
-  // Frame to CPU (management)
-  host_req <= 1;
+FWD_LEARN:
+  // Update FDB with SA
+  if (!fdb_entry.static_entry) begin
+    fdb_mem[fdb_index].mac_addr <= sa;
+    fdb_mem[fdb_index].vlan_id <= vid;
+    fdb_mem[fdb_index].port_mask <= {4{ingress_port}};
+    fdb_mem[fdb_index].valid <= 1;
+    fdb_mem[fdb_index].static_entry <= 0;
+    fdb_mem[fdb_index].age_counter <= 0;
+  end
+  fwd_state <= FWD_IDLE;
+
+FWD_DROP:
+  // Discard frame
+  drop_counter <= drop_counter + 1;
   fwd_state <= FWD_IDLE;
 
 endcase
 ```
 
-#### 2.9.3 L3 Routing Lookup (if supported)
+#### 2.9.3 Crossbar Arbitration
 
 ```
-Layer 3 IP Routing Table Entry
+Crossbar Switch Arbitration
 
-Entry Size: 256 bits (32 bytes)
+4-port Crossbar: Each ingress can connect to any egress
+Concurrent forwarding: Up to 4 simultaneous transfers
 
-Bits[255:224] = IP Prefix (IPv4) or Upper 32 bits (IPv6)
-Bits[223:192] = IP Lower (IPv4: don't care, IPv6: lower 96 bits in separate table)
-Bits[191:160] = Next Hop IP Address (IPv4)
-Bits[159:128] = Next Hop MAC Address [47:16]
-Bits[127:112] = Next Hop MAC Address [15:0]
-Bits[111:108] = Egress Port [3:0]
-Bits[107]     = Valid
-Bits[106]     = Is IPv6 (1 = IPv6, 0 = IPv4)
-Bits[105:96]  = Prefix Length (0-32 for IPv4, 0-128 for IPv6)
-Bits[95:80]   = VLAN ID (egress VLAN)
-Bits[79:64]   = MTU
-Bits[63:32]   = Route Metric/Priority
-Bits[31:0]    = Age/Last Used Timestamp
+Arbitration Priority:
+  1. TSN traffic (time-critical)
+  2. High priority (PCP 6-7)
+  3. Medium priority (PCP 3-5)
+  4. Low priority (PCP 0-2)
 
-Lookup Algorithm:
-  Longest Prefix Match (LPM)
+Port Conflict Resolution:
+  - If multiple ingress ports target same egress:
+    a. TSN traffic wins
+    b. Higher PCP wins
+    c. Round-robin for same priority
+
+RTL Implementation:
+  // Crossbar request matrix
+  reg [3:0] crossbar_req [0:3];  // req[src][dst]
+  reg [3:0] crossbar_grant [0:3]; // grant[src][dst]
   
-  Method 1: TCAM (Ternary CAM)
-    - Direct LPM in hardware
-    - < 50ns lookup time
-    - Higher area/power
-    
-  Method 2: Trie/Radix tree in SRAM
-    - Multi-cycle lookup
-    - 200-500ns typical
-    - Lower area/power
-
-RTL Implementation (TCAM-based):
-  // TCAM key: {IP Address, Prefix Length} with mask
-  // TCAM entry: {Prefix, Mask, Next Hop Info}
-  
-  wire [31:0] l3_dst_ip = extracted_ip_dst;
-  wire [4:0]  l3_prefix_len;
-  wire [47:0] l3_next_hop_mac;
-  wire [3:0]  l3_egress_port;
-  
-  // TCAM match
-  tcam_l3_lookup #(
-    .DEPTH(1024),
-    .KEY_WIDTH(32)
-  ) l3_tcam (
-    .key(l3_dst_ip),
-    .match(l3_tcam_match),
-    .match_index(l3_tcam_idx),
-    .entry_data({l3_next_hop_mac, l3_egress_port})
-  );
-```
-
-#### 2.9.4 Crossbar Arbitration Algorithm
-
-```verilog
-// Crossbar Switch Matrix
-// N ingress ports × N egress ports
-// Supports concurrent non-conflicting transfers
-
-// Arbitration: Round-Robin per egress port
-// Priority: TT traffic > AVB > BE
-
-module crossbar_arbiter #(
-  parameter PORT_COUNT = 4
-)(
-  input  clk,
-  input  rst_n,
-  // Requests: req[src][dst] = 1 means port src wants to send to dst
-  input  [PORT_COUNT-1:0] req [0:PORT_COUNT-1],
-  // Grants: grant[src][dst] = 1 means src→dst authorized
-  output [PORT_COUNT-1:0] grant [0:PORT_COUNT-1],
-  // Egress busy
-  input  [PORT_COUNT-1:0] egress_busy
-);
-
-  // Per-egress-port round-robin pointer
-  reg [PORT_COUNT-1:0] rr_ptr [0:PORT_COUNT-1];
-  
-  // Two-level arbitration
-  // Level 1: Per-egress, select one ingress among requestors
-  // Level 2: Check for conflicts (one ingress can only go to one egress)
-  
-  genvar dst, src;
+  // Arbitration per egress port
+  genvar dst;
   generate
-    for (dst = 0; dst < PORT_COUNT; dst = dst + 1) begin : egress_arb
-      
-      // Collect all requests to this egress
-      wire [PORT_COUNT-1:0] req_to_dst;
-      for (src = 0; src < PORT_COUNT; src = src + 1) begin
-        assign req_to_dst[src] = req[src][dst] && !egress_busy[dst];
-      end
-      
-      // Round-robin arbitration
-      wire [PORT_COUNT-1:0] grant_to_dst;
-      round_robin_arb #(
-        .WIDTH(PORT_COUNT)
-      ) rr_arb (
-        .req(req_to_dst),
-        .grant(grant_to_dst),
-        .pointer(rr_ptr[dst]),
-        .clk(clk),
-        .rst_n(rst_n)
-      );
-      
-      // Assign grants back
-      for (src = 0; src < PORT_COUNT; src = src + 1) begin
-        assign grant[src][dst] = grant_to_dst[src];
+    for (dst = 0; dst < 4; dst = dst + 1) begin
+      // Priority arbiter for each egress
+      always @(*) begin
+        crossbar_grant[0][dst] = 0;
+        crossbar_grant[1][dst] = 0;
+        crossbar_grant[2][dst] = 0;
+        crossbar_grant[3][dst] = 0;
+        
+        // Check TSN first
+        for (src = 0; src < 4; src = src + 1) begin
+          if (crossbar_req[src][dst] && tsn_priority[src]) begin
+            crossbar_grant[src][dst] = 1;
+            break;
+          end
+        end
+        
+        // Then check PCP priority
+        if (!|crossbar_grant[dst]) begin
+          highest_pcp = 0;
+          selected_src = 0;
+          for (src = 0; src < 4; src = src + 1) begin
+            if (crossbar_req[src][dst] && ingress_pcp[src] > highest_pcp) begin
+              highest_pcp = ingress_pcp[src];
+              selected_src = src;
+            end
+          end
+          crossbar_grant[selected_src][dst] = 1;
+        end
       end
     end
   endgenerate
-  
-  // Conflict resolution: if one ingress granted to multiple egress,
-  // keep highest priority and clear others
-  // Priority order: dst 0 > dst 1 > dst 2 > dst 3 (configurable)
-  
-  always @(posedge clk) begin
-    for (dst = 0; dst < PORT_COUNT; dst = dst + 1) begin
-      if (|grant_to_dst)
-        rr_ptr[dst] <= next_rr_pointer(rr_ptr[dst], grant_to_dst);
-    end
-  end
-
-endmodule
 ```
 
-#### 2.9.5 AVTP Filter Format
+#### 2.9.4 L3 Routing (if supported)
 
 ```
-AVTP (IEEE 1722) Filter Format
+L3 Routing Table Entry Format (Optional)
 
-AVTP Common Header:
-  Byte 0:    cd_field (1 bit) + subtype (7 bits)
-             cd=1: control, cd=0: data
-             subtype: 0x00 = 61883, 0x01 = CRF, 0x02 = AVC,
-                      0x03 = AAF, 0x04 = CVF, 0x05 = CLF,
-                      0x06 = MAAP
-  Byte 1:    sv_field (1 bit) + version (3 bits) + mr_field (1 bit) +
-             gv_field (1 bit) + tv_field (1 bit) + reserved (1 bit)
-  Bytes 2-3: sequence_num (16 bits)
-  Bytes 4-7: timestamp (32 bits, nanoseconds)
-  Bytes 8-9: stream_id_upper (16 bits)
-  Bytes 10-17: stream_id_lower (64 bits)
+Each L3 Entry: 256 bits (32 bytes)
 
-AVTP Filter Entry (per stream):
-  Bits[63:0]  = Stream ID (match against bytes 8-17)
-  Bits[79:64] = VLAN ID (for stream isolation)
-  Bits[87:80] = PCP (priority mapping)
-  Bits[95:88] = Target DMA Queue
-  Bits[103:96] = Subtype filter (0xFF = any)
-  Bit[104]    = Valid
-  Bit[105]    = Timestamp capture enable
-  Bit[106]    = RX separation enable (route to dedicated queue)
-  Bits[127:107] = reserved
+Bits[255:224] = Destination IP Address (IPv4) or MSB (IPv6)
+Bits[223:192] = Subnet Mask
+Bits[191:160] = Next Hop IP Address
+Bits[159:128] = Next Hop MAC Address (for ARP)
+Bits[127:96]  = Output Port Mask
+Bits[95:64]   = Route Metric / Cost
+Bits[63]      = Valid
+Bits[62]      = Static/Dynamic
+Bits[61:48]   = Age Counter
+Bits[47:0]    = Reserved
 
-Filter Lookup:
-  Key = {VLAN ID, Stream ID} (80 bits)
-  Match → Route to configured DMA queue + optional timestamp capture
+L3 Forwarding Process:
+  1. Check EtherType = 0x0800 (IPv4) or 0x86DD (IPv6)
+  2. Extract destination IP from packet
+  3. Lookup routing table (longest prefix match)
+  4. Determine next hop
+  5. Rewrite DA with next hop MAC
+  6. Decrement TTL
+  7. Recalculate IP header checksum
+  8. Forward to output port
 
 RTL Implementation:
-  typedef struct packed {
-    logic [63:0] stream_id;
-    logic [11:0] vid;
-    logic [2:0]  pcp;
-    logic [2:0]  target_queue;
-    logic [7:0]  subtype;
-    logic        valid;
-    logic        ts_capture;
-    logic        rx_separate;
-  } avtp_filter_t;
+  // L3 route lookup
+  reg [31:0] route_table [0:ROUTE_DEPTH-1];
   
-  avtp_filter_t avtp_filters [0:31];  // 32 streams
-  
-  // AVTP detection and filtering
-  wire is_avtp = (frame_etype == 16'h22F0);  // IEEE 1722 EtherType
-  
-  always @(*) begin
-    avtp_match = 0;
-    avtp_queue = 0;
-    for (i = 0; i < 32; i = i + 1) begin
-      if (avtp_filters[i].valid &&
-          avtp_filters[i].stream_id == frame_stream_id &&
-          avtp_filters[i].vid == frame_vid) begin
-        avtp_match = 1;
-        avtp_queue = avtp_filters[i].target_queue;
+  function route_lookup;
+    input [31:0] dest_ip;
+    begin
+      for (i = 0; i < ROUTE_DEPTH; i = i + 1) begin
+        if (route_table[i].valid &&
+            (dest_ip & route_table[i].subnet_mask) ==
+            (route_table[i].dest_ip & route_table[i].subnet_mask)) begin
+          route_lookup = i;
+          break;
+        end
       end
     end
-  end
+  endfunction
 ```
 
 ---
 
-## 3. Protocol-to-Function Mapping
-
-### 3.1 Function-Protocol Correspondence
-
-| GETH Function | Protocol | Implementation Module | RTL Complexity |
-|---------------|----------|----------------------|---------------|
-| 10M~5G MAC | 802.3 | XGMAC-CORE | Medium |
-| Full/Half Duplex | 802.3 | XGMAC-CORE | Low |
-| VLAN tag insert/strip/filter | 802.1Q | XGMAC-CORE | Medium |
-| Stacked VLAN (Q-in-Q) | 802.1Q | XGMAC-CORE | Medium |
-| gPTP time sync | 802.1AS | XGMAC-CORE (TS module) | High |
-| IEEE 1588 PTP | 1588 | XGMAC-CORE | Medium |
-| Credit-Based Shaper | 802.1Qav | XGMAC-MTL | Medium |
-| Frame Preemption | 802.1Qbu/802.3br | XGMAC-CORE | High |
-| Scheduled Traffic (EST) | 802.1Qbv | XGMAC-MTL (GCL Memory) | High |
-| Stream-Gate Filtering | 802.1Qci | XGMAC-CORE | High |
-| FRER (frame replication/elimination) | 802.1CB | Bridge / XGMAC-CORE | High |
-| MACsec | 802.1AE | XGMAC-CORE / Security Engine | High |
-| EEE | 802.3az | XGMAC-CORE | Low |
-| Checksum Offload | - | XGMAC-CORE | Medium |
-| L3/L4 Filtering | - | XGMAC-CORE | Medium |
-| Multichannel DMA (8ch) | - | XGMAC-DMA | High |
-| **Switch Core (4-port L2/L3)** | **802.1D/802.1Q** | **Switch Core** | **High** |
-| FDB self-learning | 802.1D | Switch Core | Medium |
-| VLAN forwarding | 802.1Q | Switch Core | Medium |
-| L3 IP routing | - | Switch Core | High |
-| Multicast filtering / IGMP Snooping | - | Switch Core | Medium |
-| **Switch-level TAS** | **802.1Qbv** | **Switch Core** | **High** |
-| **Switch-level gPTP Relay** | **802.1AS** | **Switch Core + PTP** | **High** |
-| PHY interfaces (MII/RMII/RGMII/SGMII/USXGMII) | 802.3 | HSPHY | Medium |
-| ECC/Parity/Timeout | - | Global | Medium |
-| RMON/MIB counters | RFC2819/2665 | XGMAC-CORE | Low |
-
-### 3.2 Module-Level Protocol Coverage
+## 3. RTL Module Partitioning Summary
 
 ```
-XGMAC-CORE (MAC Core)
-├── 802.3 MAC Tx/Rx (exact FSM states defined in §2.1)
-├── 802.1Q VLAN processing (TCI bit layout in §2.6)
-├── 802.1AS/1588 timestamp (80-bit format, SFD capture in §2.2)
-├── 802.1Qbu frame preemption (mPacket format, SMD values in §2.5)
-├── 802.1Qci flow filtering
-├── 802.1AE MACsec (optional)
-├── 802.3az EEE
-├── Address filtering (32 DA + 32 SA perfect match)
-├── L3/L4 filtering (8 filters)
-└── RMON counters
-
-XGMAC-MTL (MAC Transaction Layer)
-├── 32KB Tx FIFO
-├── 32KB Rx FIFO
-├── 802.1Qav CBS (credit formula, fixed-point in §2.4)
-├── 802.1Qbv EST (GCL entry format, execution FSM in §2.3)
-└── Queue management (8 TxQ / 8 RxQ)
-
-XGMAC-DMA
-├── 8-channel Tx/Rx DMA
-├── Descriptor ring management
-├── Timestamp delivery
-└── Interrupt management
-
-Switch Core (optional, 2~8 ports)
-├── **L2 switching**: MAC self-learning, VLAN forwarding, multicast filtering
-├── **L3 routing**: IP lookup, ARP cache (optional)
-├── **802.1CB FRER**: Frame replication/elimination, multi-port parallel
-├── **802.1Qbv Switch-level TAS**: Ingress port gate control scheduling
-├── **802.1Qci Switch-level PSFP**: Per-stream filtering and policing
-├── **802.1AS multi-port Relay**: BC/TC, dual PHC binding
-├── **FDB**: 4K/8K/16K entries, hardware hash table, auto-aging
-├── **VLAN Table**: VID → port mask, tag processing
-└── **Crossbar + Arbiter**: Multi-port full concurrent forwarding
-
-HSPHY (High Speed PHY Interface)
-├── MII (4-bit nibble, 25MHz, exact timing in §2.8.1)
-├── RMII (2-bit, 50MHz REF_CLK in §2.8.2)
-├── RGMII (4-bit DDR, 125MHz, skew requirements in §2.8.3)
-├── SGMII (8b/10b, 1.25Gbps in §2.8.4)
-└── USXGMII (64b/66b, 6.25Gbps in §2.8.5)
+ethernet_top
+├── mac_core
+│   ├── tx_engine        # 802.3 Tx FSM (§2.1.2), VLAN insert, preemption
+│   ├── rx_engine        # 802.3 Rx FSM (§2.1.3), VLAN strip/filter
+│   ├── crc32            # CRC-32 polynomial (§2.1.4)
+│   └── pause_ctrl       # PAUSE frame handling (§2.1.5)
+├── phy_interface
+│   ├── mii_if           # 4-bit nibble timing (§2.8.1)
+│   ├── rmii_if          # 2-bit 50MHz (§2.8.2)
+│   ├── rgmii_if         # DDR 125MHz skew (§2.8.3)
+│   ├── sgmii_if         # 8b/10b encoding (§2.8.4)
+│   └── usxgmii_if       # 64b/66b scrambling (§2.8.5)
+├── timestamp_unit
+│   ├── ptp_counter      # 80-bit timestamp (§2.2.3)
+│   ├── addend_accum     # 32-bit fractional (§2.2.3)
+│   ├── timestamp_cap    # SFD capture (§2.2.2)
+│   ├── bmca_fsm         # Best Master Clock (§2.2.4)
+│   └── pps_gen          # PPS output (§2.2.6)
+├── mtl_scheduler
+│   ├── cbs_shaper       # Credit formula (§2.4.1)
+│   ├── tas_gate_ctrl    # GCL execution FSM (§2.3.2)
+│   ├── queue_arbiter    # Priority/WRR (§2.4.2)
+│   └── preempt_ctrl     # mPacket format (§2.5.1)
+├── flow_filter
+│   ├── stream_id        # Stream identification
+│   ├── psfp_gate        # Stream gate control
+│   └── meter            # Token bucket metering
+├── frer_engine
+│   ├── seq_gen          # Sequence number (§2.7.3)
+│   ├── seq_check        # Window algorithm (§2.7.2)
+│   └── rtag_insert      # R-tag format (§2.7.1)
+├── switch_core (optional)
+│   ├── fdb_lookup       # Hash table (§2.9.1)
+│   ├── l2_forward       # Forwarding FSM (§2.9.2)
+│   ├── crossbar         # Arbitration (§2.9.3)
+│   ├── vlan_proc        # VLAN processing
+│   └── l3_route         # IP routing (§2.9.4)
+├── dma_engine
+│   ├── desc_fetch       # Descriptor format
+│   ├── data_xfer        # AXI Master
+│   └── ch_arbiter       # Channel arbitration
+├── csr_block
+│   └── reg_file         # AXI4-Lite register map
+└── safety_monitor
+    ├── ecc_checker      # SECDED
+    ├── parity_gen       # FSM parity
+    └── timeout_watch    # CSR timeout
 ```
 
 ---
@@ -2846,4 +2299,137 @@ ethernet_top
 ├── mac_core
 │   ├── tx_engine        # 802.3 Tx FSM (§2.1.2), VLAN insert, preemption
 │   ├── rx_engine        # 802.3 Rx FSM (§2.1.3), VLAN strip/filter
-│   ├── crc
+│   ├── crc32            # CRC-32 polynomial (§2.1.4)
+│   └── pause_ctrl       # PAUSE frame handling (§2.1.5)
+├── phy_interface
+│   ├── mii_if           # 4-bit nibble timing (§2.8.1)
+│   ├── rmii_if          # 2-bit 50MHz (§2.8.2)
+│   ├── rgmii_if         # DDR 125MHz skew (§2.8.3)
+│   ├── sgmii_if         # 8b/10b encoding (§2.8.4)
+│   └── usxgmii_if       # 64b/66b scrambling (§2.8.5)
+├── timestamp_unit
+│   ├── ptp_counter      # 80-bit timestamp (§2.2.3)
+│   ├── addend_accum     # 32-bit fractional (§2.2.3)
+│   ├── timestamp_cap    # SFD capture (§2.2.2)
+│   ├── bmca_fsm         # Best Master Clock (§2.2.4)
+│   └── pps_gen          # PPS output (§2.2.6)
+├── mtl_scheduler
+│   ├── cbs_shaper       # Credit formula (§2.4.1)
+│   ├── tas_gate_ctrl    # GCL execution FSM (§2.3.2)
+│   ├── queue_arbiter    # Priority/WRR (§2.4.2)
+│   └── preempt_ctrl     # mPacket format (§2.5.1)
+├── flow_filter
+│   ├── stream_id        # Stream identification
+│   ├── psfp_gate        # Stream gate control
+│   └── meter            # Token bucket metering
+├── frer_engine
+│   ├── seq_gen          # Sequence number (§2.7.3)
+│   ├── seq_check        # Window algorithm (§2.7.2)
+│   └── rtag_insert      # R-tag format (§2.7.1)
+├── switch_core (optional)
+│   ├── fdb_lookup       # Hash table (§2.9.1)
+│   ├── l2_forward       # Forwarding FSM (§2.9.2)
+│   ├── crossbar         # Arbitration (§2.9.3)
+│   ├── vlan_proc        # VLAN processing
+│   └── l3_route         # IP routing (§2.9.4)
+├── dma_engine
+│   ├── desc_fetch       # Descriptor format
+│   ├── data_xfer        # AXI Master
+│   └── ch_arbiter       # Channel arbitration
+├── csr_block
+│   └── reg_file         # AXI4-Lite register map
+└── safety_monitor
+    ├── ecc_checker      # SECDED
+    ├── parity_gen       # FSM parity
+    └── timeout_watch    # CSR timeout
+```
+
+---
+
+## 7. Protocol Implementation Checklist
+
+### 7.1 802.3 MAC Implementation Checklist
+
+- [ ] Frame format: Preamble (7B), SFD (1B), DA (6B), SA (6B), Type/Length (2B), Payload (46-1500B), FCS (4B)
+- [ ] TX FSM: IDLE → PREAMBLE → SFD → DATA → PAD → FCS → IFG
+- [ ] RX FSM: IDLE → PREAMBLE → SFD → DATA → FCS → IFG
+- [ ] CRC-32: Polynomial 0x04C11DB7, LSB-first, magic residue 0xC704DD7B
+- [ ] Padding: Minimum 46 bytes payload, 60 bytes total excluding FCS
+- [ ] IFG: Minimum 96 bit-times, programmable 64-224
+- [ ] PAUSE frame: DA=01:80:C2:00:00:01, Type=0x8808, Opcode=0x0001, Quanta=512 bit-times
+- [ ] MII timing: 25MHz, 4-bit nibble, setup/hold 5ns
+- [ ] GMII timing: 125MHz, 8-bit byte, setup 2.5ns, hold 0.5ns
+- [ ] RGMII timing: 125MHz DDR, skew ±500ps at transmitter, ±1.5ns at receiver
+
+### 7.2 802.1AS gPTP Implementation Checklist
+
+- [ ] Message formats: Sync, Follow_Up, Delay_Req, Delay_Resp, Pdelay_Req, Pdelay_Resp, Pdelay_Resp_Follow_Up, Announce
+- [ ] Timestamp: 80-bit (48b seconds + 32b nanoseconds), SFD capture point
+- [ ] BMCA: 8 states, priority vector comparison, 8 fields lexicographic
+- [ ] Peer delay: ((t4-t1)-(t3-t2)-correctionField)/2
+- [ ] PPS: 1Hz, programmable width, target time registers
+- [ ] Clock: 250MHz clk_ts, Addend=0x4000_0000, 32-bit fractional accumulator
+
+### 7.3 802.1Qbv EST Implementation Checklist
+
+- [ ] GCL entry: 64-bit {GateStateVector[7:0], TimeInterval[23:0], Reserved[31:0]}
+- [ ] GCL depth: 256 entries (configurable 64/128/256/512)
+- [ ] GCL FSM: IDLE → WAIT_BASE → RUNNING → PENDING → COMPLETE
+- [ ] Cycle time: 32-bit nanoseconds, BaseTime 80-bit PTP timestamp
+- [ ] Gate control: 8 queues, OPEN/CLOSED per entry
+
+### 7.4 802.1Qav CBS Implementation Checklist
+
+- [ ] Credit formula: credit + (idleSlope × delta_t) - (sendSlope × frameSize)
+- [ ] Fixed-point: 48-bit signed credit (16.32), 32-bit slopes (8.24)
+- [ ] Credit bounds: hiCredit, loCredit=0
+- [ ] Integration: CBS queue priority in scheduler
+
+### 7.5 802.1Qbu Preemption Implementation Checklist
+
+- [ ] mPacket format: SMD-S(0xE6), SMD-E(0xE5), SMD-C(0x61)
+- [ ] Express vs preemptable classification
+- [ ] Fragmentation FSM: TRANSMIT → FRAGMENT → EXPRESS → RESUME
+- [ ] mCRC: 3-byte CRC per fragment
+- [ ] Reassembly: sequence check, mCRC verify, timeout
+
+### 7.6 802.1Q VLAN Implementation Checklist
+
+- [ ] TCI layout: PCP[15:13], DEI[12], VID[11:0]
+- [ ] Perfect match: 8 entries, 32-bit hash table
+- [ ] Hash filter: 6-bit hash, 64-bit table
+- [ ] Double VLAN: Q-in-Q parsing
+- [ ] Tag stripping: configurable removal
+
+### 7.7 802.1CB FRER Implementation Checklist
+
+- [ ] R-tag: TPID=0xF1C1, R-PC={Reserved[3:0], SeqNum[11:0]}
+- [ ] Sequence number: 12-bit, per-stream counter
+- [ ] Window algorithm: 32-entry window, bit vector tracking
+- [ ] Replication: same sequence number to multiple ports
+- [ ] Elimination: duplicate detection, sequence recovery
+
+### 7.8 PHY Interface Implementation Checklist
+
+- [ ] MII: 4-bit nibble, 25MHz, 14 nibbles preamble, setup/hold 5ns
+- [ ] RMII: 2-bit, 50MHz REF_CLK, CRS_DV decode
+- [ ] RGMII: 4-bit DDR, 125MHz, ODDR/IDDR primitives, skew control
+- [ ] SGMII: 8b/10b, 1.25Gbps, K-codes, running disparity
+- [ ] USXGMII: 64b/66b, 6.25Gbps, scrambling, block alignment
+
+### 7.9 Switch Implementation Checklist
+
+- [ ] FDB entry: 128-bit {MAC[48], VID[12], PortMask[4], Valid, Static, Age[14]}
+- [ ] FDB depth: 8K entries, 16-way set associative
+- [ ] Hash function: MAC XOR, 13-bit index
+- [ ] L2 FSM: PARSE → LOOKUP → DECISION → FORWARD/LEARN/DROP
+- [ ] Crossbar: 4-port, priority arbitration, TSN first
+- [ ] L3 route: IP lookup, longest prefix match, next hop MAC
+
+---
+
+*Document Status: RTL-Coding Detail Complete*
+*Version: v2.0*
+*Date: 2026-05-12*
+*Author: Arch Agent + RTL Coding Agent*
+*Project: Ethernet IP (IP_20260502_001)*
