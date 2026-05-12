@@ -384,7 +384,7 @@
 | `clk_mac` | 150-300 MHz | MAC Core、MTL 控制逻辑 |
 | `clk_tx_phy` | 25/125/312.5 MHz | TX PHY 接口时钟 |
 | `clk_rx_phy` | 25/125/312.5 MHz | RX PHY 接口时钟 |
-| `clk_ts` | 100 MHz (典型) | PTP 时间戳、Addend 精调 |
+| `clk_ts` | **250 MHz** | PTP 时间戳、Addend 精调 |
 | `clk_pcs` | 62.5/156.25/312.5/625 MHz | PCS/PMA 串行接口 |
 
 ### 3.2 复位策略概要
@@ -393,6 +393,118 @@
 - **模块级复位**: 各子系统独立软复位，通过 CSR 控制
 - **DMA 通道复位**: 单通道独立复位，不影响其他通道
 - **安全复位**: SMU 触发的紧急复位（ASIL-D 要求）
+
+---
+
+## 3.3 PTP 时间子系统 (gPTP / 1588)
+
+本节描述 IEEE 1588-2008 / 802.1AS-2020 gPTP 的硬件时间同步实现，对标 TC4x GETH 的 ns 级同步能力。
+
+### 3.3.1 PHC 架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    PTP Hardware Clock (PHC)                │
+│                                                             │
+│   ┌─────────────┐      ┌─────────────┐                     │
+│   │   PHC 0     │      │   PHC 1     │                     │
+│   │  64-bit     │◄────►│  64-bit     │                     │
+│   │  计数器     │ 同步  │  计数器     │                     │
+│   └──────┬──────┘      └──────┬──────┘                     │
+│          │                    │                             │
+│          └────────┬───────────┘                             │
+│                   │ Crossbar                                │
+│          ┌────────┼────────┬────────┐                       │
+│          ▼        ▼        ▼        ▼                       │
+│      Port 0    Port 1   Port 2   Port 3 (Switch/独立 MAC)   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+- **PHC0/PHC1**: 独立 64-bit 计数器，同源 `clk_ts`（同一时钟域，无时钟偏差）
+- **Crossbar**: 每端口独立绑定任意 PHC，无菊花链限制（规避 LETH_TC.010）
+- **vPHC**: 基于 Xen IO Rings，每 VM 虚拟时间域（`SUPPORT_VPHC=1` 时启用）
+
+### 3.3.2 时钟与计数器
+
+| 参数 | 值 | 说明 |
+|------|------|------|
+| `clk_ts` | **250 MHz** | PHC 参考时钟 |
+| **Tick 周期** | **4 ns** | 1 / 250MHz = 4ns |
+| **计数器格式** | 64-bit | 秒[32] + 纳秒[32] |
+| **纳秒字段范围** | 0 ~ 999,999,999 | 标准纳秒，非 raw tick |
+| **Addend 位宽** | 32-bit | Fractional accumulator |
+
+**TC4x 对标**: TC4x 使用 ~375MHz (2.67ns)。本 IP 选 250MHz (4ns) 的原因：
+- 易从 1GHz 时钟源 ÷4 派生，时钟树更简单
+- 功耗更低（车规热预算）
+- 配合 fractional addend 精调，同步精度仍可达 **±10ns**（满足 802.1AS 要求）
+
+### 3.3.3 Addend 精调机制
+
+Addend 寄存器实现 fractional frequency adjustment，消除本地时钟与 Grand Master 的频率偏差。
+
+**硬件公式**:
+
+```
+addend = (2^32) / (clk_ts_freq / 1e9)
+       = (2^32) / (250,000,000 / 1,000,000,000)
+       = (2^32) / 0.25
+       = 17,179,869,184  (0x4000_0000)
+```
+
+**频率调整**: 软件通过 `ptp_adjfine(scaled_ppm)` 写入 Addend 偏移，硬件 accumulator 每 tick 累加一次，产生 sub-4ns 的精调分辨率。
+
+**实际分辨率**: 32-bit fractional → 理论分辨率 = 4ns / 2^32 ≈ **0.93 fs**（远小于实际需求，足够平滑）
+
+### 3.3.4 硬件时间戳捕获
+
+**捕获点**: MII/GMII/RGMII 接口的 **SFD (Start Frame Delimiter)** 起始边沿
+
+| 方向 | 触发条件 | 锁存值 | 存储位置 |
+|------|----------|--------|----------|
+| **RX** | MII RX_DV 上升沿 + SFD 字节检测 | PHC 当前值 | RX 时间戳 FIFO |
+| **TX** | MII TX_EN 上升沿 + SOP (Start of Packet) | PHC 当前值 | TX 时间戳 FIFO |
+
+**回写路径**: 时间戳随 DMA 描述符回写（`descriptor.tstamp` 字段），channel_id 独立路由，规避 TC4x LETH_AI.024 Bridge 时间戳错误。
+
+**精度**: SFD 级捕获 + MII 传播延迟补偿 → 精度 **±10ns**（目标）
+
+### 3.3.5 P2P 路径延迟测量 (Peer Delay)
+
+802.1AS gPTP 强制使用 P2P (Peer-to-Peer) 路径延迟机制，逐跳测量，不累积误差。
+
+**软件实现** (默认):
+- SYNC/PDELAY_REQ/PDELAY_RESP 报文携带时间戳
+- 软件计算: `peer_delay = ((t4 - t1) - (t3 - t2)) / 2`
+- 适用于普通终端节点 (OC)
+
+**硬件 Transparent Clock** (可选, `SUPPORT_GPTP=1`):
+- Switch Core 自动测量 residence time（报文 ingress→egress 时间）
+- residence time 直接修正到 Follow_Up 报文的 correctionField
+- **验证目标**: 4-port TC 模式下 residence time 误差 < ±20ns（见 §6.2.6）
+
+### 3.3.6 同步精度目标
+
+| 场景 | 目标精度 | 实现方式 | 对标 |
+|------|----------|----------|------|
+| 单域 gPTP (1 Grand Master) | **±10 ns** | SFD 时间戳 + Addend 精调 | TC4x 同类水平 |
+| 双域 gPTP (2 PHC 独立域) | **±15 ns** | 双 PHC + Crossbar 独立绑定 | TC4x 无此能力 |
+| 4-port TC Relay | **±20 ns** | 硬件 residence time 修正 | R-Car S4 水平 |
+| SDV 虚拟化 (vPHC) | **±25 ns** | Xen IO Ring + PHC 虚拟化 | 本 IP 独有 |
+
+> **注**: ±10ns 是 802.1AS 对车载以太网的基本要求（典型值 50ns，本 IP 目标更激进）。实际精度受 PHY 传播延迟抖动、电缆长度、温度漂移影响，需软件层补偿。
+
+### 3.3.7 寄存器映射 (概要)
+
+| 寄存器 | 偏移 | 说明 |
+|--------|------|------|
+| `PHC_CURRENT_SEC` | 0x800 | PHC 当前秒[31:0] |
+| `PHC_CURRENT_NS` | 0x804 | PHC 当前纳秒[31:0] |
+| `PHC_ADDEND` | 0x808 | Addend 值[31:0] |
+| `PHC_INCREMENT` | 0x80C | 每 tick 增量（默认 4ns = 0x04） |
+| `PHC_ADJUST_NS` | 0x810 | 粗调偏移（纳秒级步进） |
+| `PHC_TS_CTRL` | 0x814 | 时间戳使能 / 捕获模式 |
+| `PHC_PPS_CTRL` | 0x818 | PPS 输出配置（周期/脉宽） |
 
 ---
 
