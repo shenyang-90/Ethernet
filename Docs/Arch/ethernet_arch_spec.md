@@ -2,11 +2,11 @@
 
 > **项目**: Ethernet IP (IP_20260502_001)
 > **模块/系统**: Gigabit Ethernet MAC + PHY Subsystem
-> **版本**: v1.5
+> **版本**: v1.6
 > **日期**: 2026-05-12
 > **作者**: Arch Agent
 > **评审状态**: Draft → 待评审
-> **变更**: v1.1 新增可配置参数矩阵; v1.2 重构 MAC/PHY 参数; v1.3 分析 ISSUE-001/003/004/005; v1.4 基于 R-Car S4 Gap Analysis 升级: 4-port Switch + vPHC + AVTP 硬件感知; **v1.5 基于 TC4x Errata 设计规避: 13 项已知 erratum 的 RTL/架构级修改方案**
+> **变更**: v1.1 新增可配置参数矩阵; v1.2 重构 MAC/PHY 参数; v1.3 分析 ISSUE-001/003/004/005; v1.4 基于 R-Car S4 Gap Analysis 升级: 4-port Switch + vPHC + AVTP 硬件感知; v1.5 基于 TC4x Errata 设计规避: 13 项已知 erratum 的 RTL/架构级修改方案; **v1.6 DMA 全局通道池设计 + 带宽评估计算器**
 
 ---
 
@@ -17,7 +17,7 @@
 本项目旨在设计一款面向车规级应用的 Ethernet IP 子系统，对标 Infineon AURIX TC4x 系列 GETH/LETH 架构**与 Renesas R-Car S4 中央网关方案**。IP 支持 10M/100M/1G/2.5G/5G/10G 全双工速率，集成完整的 TSN（Time-Sensitive Networking）协议栈、**4-port L2/L3 Switch**、**双 PHC + vPHC 虚拟化**、硬件安全加速接口以及多 PHY 接口适配能力。
 
 核心设计目标：
-- **高性能**: 支持 5Gbps 线速，8 路独立 DMA 通道，64-bit AXI Master 接口
+- **高性能**: 支持 5Gbps 线速，**全局 DMA 通道池 (8/16/32 通道) 所有 MAC 共享复用**，64-bit/128-bit AXI Master 接口
 - **确定性**: 硬件级 gPTP 时间同步、TAS 门控调度、CBS 信用整形
 - **可交换性**: **4-port L2/L3 Switch** 支持 MAC 自学习、VLAN 转发、多播过滤
 - **虚拟化**: **双 PHC + vPHC** 支持 SDV/Hypervisor 多 VM 时间域隔离
@@ -42,7 +42,7 @@
 | **双 XGMAC 架构** | 2 个独立 5G MAC，支持 **Switch 转发** | XGMAC Core |
 | **4-port L2/L3 Switch** | **MAC 自学习、VLAN 转发、多播过滤、L3 路由** | Switch Core |
 | **双 PHC + vPHC** | **2 个独立 PHC，Xen IO Rings 虚拟化** | PTP/Timestamp |
-| **8 路 DMA 通道** | 独立 TX/RX Engine，3 级流水线 | DMA Engine |
+| **全局 DMA 通道池** | **8/16/32 通道全局池，所有 MAC 共享复用，每 MAC 动态分配** | DMA Engine |
 | **32KB FIFO** | TX/RX 各 32KB MTL 缓冲 | MTL Layer |
 | **TSN 协议栈** | 802.1AS/802.1Qav/802.1Qbv/802.1Qbu **硬件实现** | MAC Core + MTL |
 | **Switch 级 TAS** | **802.1Qbv 在 Switch 入口端口硬件调度** | Switch Core |
@@ -112,7 +112,8 @@
 
 | 参数名 | 类型 | 默认值 | 可配置范围 | 说明 | 影响 |
 |--------|------|--------|------------|------|------|
-| `DMA_CH_COUNT` | int | 8 | 1, 2, 4, 8 | DMA 通道数量（每 MAC） | DMA Engine, 描述符内存 |
+| `DMA_CH_COUNT` | int | **8** | **1, 2, 4, 8, 16, 32** | **全局 DMA 通道数量（所有 MAC 共享池）** | DMA Engine, 描述符内存 |
+| `DMA_CH_PER_MAC` | int | **4** | **1 ~ 8** | **每 MAC 可分配的 DMA 通道数上限** | DMA Engine, 仲裁器 |
 | `MTL_TX_FIFO_DEPTH` | int | 32 | 8, 16, 32, 64 | TX FIFO 深度（KB） | MTL TX, SRAM |
 | `MTL_RX_FIFO_DEPTH` | int | 32 | 8, 16, 32, 64 | RX FIFO 深度（KB） | MTL RX, SRAM |
 | `MTL_TX_QUEUES` | int | 8 | 1, 2, 4, 8 | TX 队列数量（每 MAC） | MTL Scheduler |
@@ -123,8 +124,17 @@
 | `CSR_ADDR_WIDTH` | int | 12 | 10, 12, 14 | AXI-Lite Slave 地址位宽 | CSR 寄存器数量 |
 | `MAX_BURST_LEN` | int | 16 | 8, 16 | AXI 最大 Burst 长度 | DMA, AXI 效率 |
 
-> **配置约束**：
-> - `DMA_CH_COUNT` 必须 ≥ `MTL_TX_QUEUES` 且 ≥ `MTL_RX_QUEUES`
+> **DMA 全局通道池设计**:
+> - `DMA_CH_COUNT` 定义全局 DMA 通道池总数，所有 MAC 共享，而非每 MAC 专属
+> - 每 MAC 可分配 `DMA_CH_PER_MAC` 个通道（通过可配置映射表），支持动态/静态绑定
+> - 例如：8 通道全局池，2 个 MAC，每 MAC 分配 4 通道；或 1 个 MAC 独占 8 通道
+> - **配置约束**:
+>   - `DMA_CH_COUNT` 必须 ≥ `MAC_COUNT` × `DMA_CH_PER_MAC`（所有 MAC 的最小需求）
+>   - 推荐 `DMA_CH_COUNT = MAC_COUNT × DMA_CH_PER_MAC`，最大化并行度
+>   - 支持 DMA 通道动态重分配（通过 `DMA_CH_REMAP` 寄存器），但不支持运行时迁移（需复位后生效）
+> - **带宽评估**: 见 §4.4 带宽评估计算器
+
+> **其他配置约束**：
 > - `MTL_TX_FIFO_DEPTH` + `MTL_RX_FIFO_DEPTH` × `MAC_COUNT` ≤ 总 SRAM 预算
 > - `AXI_DATA_WIDTH` 需与 SoC 总线位宽匹配
 
@@ -148,17 +158,17 @@
 
 ### 1.4.4 参数配置矩阵 — 典型应用场景
 
-| 场景 | MAC_COUNT | MAC_TYPE | PHY_COUNT | PHY_TYPE | PHY_SPEED | DMA_CH | TSN | 1588 | **Switch** | ASIL | 估算门数 |
+| **场景** | **MAC_COUNT** | **MAC_TYPE** | **PHY_COUNT** | **PHY_TYPE** | **PHY_SPEED** | **DMA_CH (全局池)** | **TSN** | **1588** | **Switch** | **ASIL** | **估算门数** |
 |------|-----------|----------|-----------|----------|-----------|--------|-----|------|--------|------|----------|
-| **中央网关 (Switch)** | **4** | **GMAC** | **4** | **1000BASE-T1** | **1G** | **4** | **✅** | **✅** | **✅** | **B** | **~480k** |
-| ADAS 传感器汇聚 | 2 | XGMAC | 2 | Multi-Gigabit | 5G | 8 | ✅ | ✅ | ❌ | B | ~190k |
-| Zone Controller 骨干 | 2 | XGMAC | 2 | Multi-Gigabit | 5G | 8 | ✅ | ✅ | ✅ | B | ~205k |
-| **SDV 中央网关 (Switch+vPHC)** | **4** | **GMAC** | **4** | **1000BASE-T1** | **1G** | **4** | **✅** | **✅** | **✅** | **B** | **~520k** |
-| CAN-Ethernet 网关 | 1 | GMAC | 1 | 1000BASE-T1 | 1G | 4 | ❌ | ✅ | ❌ | B | ~120k |
-| **域内边缘节点 (10BASE-T1S)** | 1 | MAC | 1 | 10BASE-T1S | 10M | 2 | ❌ | ❌ | ❌ | QM | ~45k |
-| **车身传感器网络** | 1 | MAC | 1 | 10BASE-T1S | 10M | 2 | ❌ | ❌ | ❌ | QM | ~40k |
-| **OTA 更新节点** | 1 | GMAC | 1 | 1000BASE-T1 | 1G | 4 | ❌ | ❌ | ❌ | A | ~80k |
-| **信息娱乐域 (AVB)** | 1 | GMAC | 1 | 1000BASE-T1 | 1G | 4 | ✅ | ✅ | ❌ | QM | ~110k |
+| **中央网关 (Switch)** | **4** | **GMAC** | **4** | **1000BASE-T1** | **1G** | **8** | **✅** | **✅** | **✅** | **B** | **~480k** |
+| ADAS 传感器汇聚 | 2 | XGMAC | 2 | Multi-Gigabit | 5G | **16** | ✅ | ✅ | ❌ | B | ~190k |
+| Zone Controller 骨干 | 2 | XGMAC | 2 | Multi-Gigabit | 5G | **16** | ✅ | ✅ | ✅ | B | ~205k |
+| **SDV 中央网关 (Switch+vPHC)** | **4** | **GMAC** | **4** | **1000BASE-T1** | **1G** | **8** | **✅** | **✅** | **✅** | **B** | **~520k** |
+| CAN-Ethernet 网关 | 1 | GMAC | 1 | 1000BASE-T1 | 1G | **4** | ❌ | ✅ | ❌ | B | ~120k |
+| **域内边缘节点 (10BASE-T1S)** | 1 | MAC | 1 | 10BASE-T1S | 10M | **2** | ❌ | ❌ | ❌ | QM | ~45k |
+| **车身传感器网络** | 1 | MAC | 1 | 10BASE-T1S | 10M | **2** | ❌ | ❌ | ❌ | QM | ~40k |
+| **OTA 更新节点** | 1 | GMAC | 1 | 1000BASE-T1 | 1G | **4** | ❌ | ❌ | ❌ | A | ~80k |
+| **信息娱乐域 (AVB)** | 1 | GMAC | 1 | 1000BASE-T1 | 1G | **4** | ✅ | ✅ | ❌ | QM | ~110k |
 
 ---
 
@@ -203,7 +213,7 @@
 |  |          |          |  |     |      |  |     |      |  |     |                    |
 |  |  +-------v-------+  |  | +---v----+ |  | +---v----+ |  | +---v----+               |
 |  |  |  DMA Engine   |  |  | |  DMA   | |  | |  DMA   | |  | |  DMA   |               |
-|  |  | (8 Channels)  |  |  | |(4/8ch) | |  | |(4/8ch) | |  | |(4/8ch) |               |
+|  |  | (CH[n] 全局池)  |  |  | |(4/8ch) | |  | |(4/8ch) | |  | |(4/8ch) |               |
 |  |  +---------------+  |  | +--------+ |  | +--------+ |  | +--------+               |
 |  +----------|----------+  +------------+  +------------+  +------------+              |
 |             |              |              |              |                             |
@@ -292,6 +302,117 @@
 | Safety/ECC | ~15 | 0 | 校验逻辑 |
 | HSPHY IF | ~25 | 0 | 接口逻辑 |
 | **总计** | **~205** | **~82** | — |
+
+---
+
+### 4.4 带宽评估计算器
+
+> **设计原则**: 根据所有 MAC 线速、TSN 整形需求、突发流量模型，计算最小 DMA 通道数、AXI 总线位宽和频率需求。
+
+#### 4.4.1 输入参数
+
+| 参数 | 符号 | 单位 | 说明 |
+|------|------|------|------|
+| MAC 数量 | N_mac | — | `MAC_COUNT` |
+| 每 MAC 速率 | R_mac | Mbps | `PHY_SPEED` × 1000 |
+| TSN 使能 | TSN_en | — | `SUPPORT_TSN` |
+| CBS 队列数 | N_cbs | — | `MTL_TX_QUEUES` (若 `SUPPORT_CBS=1`) |
+| TAS 门控周期 | T_tas | μs | GCL 周期 (若 `SUPPORT_TAS=1` 或 `SWITCH_TAS=1`) |
+| 最大帧长 | L_max | Byte | 1518 (标准) / 1522 (VLAN) / 9018 (Jumbo) |
+| 最小帧长 | L_min | Byte | 64 |
+| AXI 数据位宽 | W_axi | bit | `AXI_DATA_WIDTH` |
+| AXI 频率 | F_axi | MHz | `clk_sys` |
+| 目标带宽利用率 | U_target | % | 通常 80% (留 20% 余量给开销) |
+
+#### 4.4.2 计算公式
+
+**步骤 1: 单 MAC 有效数据率**
+```
+R_eff_mac = R_mac × (L_max / (L_max + 20))  // 20 = preamble(8) + IPG(12)
+```
+
+**步骤 2: 总线线速需求**
+```
+R_total = Σ(N_mac × R_eff_mac)  // 所有 MAC 线速之和
+```
+
+**步骤 3: TSN 整形余量**
+```
+// CBS: 信用整形引入约 0.1% 开销 (已规避 TC4x erratum)
+// TAS: 门控切换引入约 0.5% 开销 (周期边界调度)
+R_tsn = R_total × 1.005  // TAS 余量
+```
+
+**步骤 4: AXI 总线带宽需求**
+```
+B_axi_min = R_tsn / U_target  // 例如: 2×5Gbps / 0.8 = 12.5Gbps
+```
+
+**步骤 5: AXI 位宽/频率验证**
+```
+B_axi_actual = W_axi × F_axi  // 例如: 128-bit × 200MHz = 25.6Gbps
+```
+
+**步骤 6: DMA 通道数需求**
+```
+// 每通道最小有效带宽: 支持至少 1Gbps (用于 1G MAC)
+// 每通道最大带宽: 受限于 AXI 通道仲裁
+DMA_CH_MIN = ceil(R_total / 1Gbps)  // 每 Gbps 至少 1 通道
+
+// 考虑 TSN 隔离: CBS/TAS 队列需要独立通道
+DMA_CH_TSN = N_mac × max(N_cbs, 2)  // 每 MAC 至少 2 通道 (TX/RX 分离)
+
+// 最终需求
+DMA_CH_COUNT = max(DMA_CH_MIN, DMA_CH_TSN)
+```
+
+**步骤 7: Switch 转发额外带宽**
+```
+// 若 SWITCH 使能: 内部转发占用 AXI 带宽 (read from 内存 + write to 内存)
+// 最坏情况: 所有端口全转发 → 2×R_total (读 + 写)
+R_switch = R_total × 2  // 全转发场景
+
+// 若 Switch Core 支持 cut-through: 降低至 R_total × 1.2
+R_switch_ct = R_total × 1.2
+```
+
+#### 4.4.3 典型场景计算示例
+
+| 场景 | MAC_COUNT | PHY_SPEED | R_total | DMA_CH_MIN | DMA_CH_TSN | **DMA_CH_REC** | W_axi | F_axi | B_axi_actual | 裕量 |
+|------|-----------|-----------|---------|------------|------------|----------------|-------|-------|--------------|------|
+| 中央网关 (4×1G) | 4 | 1G | 4 Gbps | 4 | 8 | **8** | 128 | 200 | 25.6 Gbps | **6.4×** |
+| ADAS (2×5G) | 2 | 5G | 10 Gbps | 10 | 16 | **16** | 128 | 300 | 38.4 Gbps | **3.84×** |
+| Zone 骨干 (2×5G+Switch) | 2 | 5G | 10 Gbps | 10 | 16 | **16** | 128 | 300 | 38.4 Gbps | **3.2×** (含 Switch 转发) |
+| 边缘节点 (1×10M) | 1 | 10M | 10 Mbps | 1 | 2 | **2** | 32 | 100 | 3.2 Gbps | **320×** |
+| OTA (1×1G) | 1 | 1G | 1 Gbps | 1 | 4 | **4** | 64 | 100 | 6.4 Gbps | **6.4×** |
+
+#### 4.4.4 配置推荐矩阵
+
+| 总线带宽需求 | AXI_DATA_WIDTH | clk_sys (F_axi) | 适用场景 |
+|-------------|----------------|-----------------|----------|
+| < 1 Gbps | 32-bit | 100 MHz | 10/100M 边缘节点 |
+| 1 ~ 5 Gbps | 64-bit | 100 ~ 150 MHz | 1G 单 MAC / CAN 网关 |
+| 5 ~ 20 Gbps | 128-bit | 150 ~ 250 MHz | 多端口 1G / 5G ADAS |
+| 20 ~ 40 Gbps | 128-bit | 250 ~ 300 MHz | 5G+Switch / 中央网关 |
+| > 40 Gbps | 256-bit | 300+ MHz | 10G+ 多端口 (未来扩展) |
+
+#### 4.4.5 设计决策
+
+```
+[DMA 全局通道池架构]
+- DMA_CH_COUNT: 全局共享池 (1/2/4/8/16/32 通道)
+- DMA_CH_PER_MAC: 每 MAC 可分配上限 (1~8)
+- 分配方式:
+  静态分配 (复位时配置): MAC0→CH[0:3], MAC1→CH[4:7]
+  动态分配 (运行时): 通过 DMA_CH_MAP[n] 寄存器重映射
+  
+- 仲裁策略:
+  Round-Robin (默认): 各通道均分 AXI 带宽
+  Weighted: 高优先级通道 (TSN/AVTP) 分配更多带宽权重
+  
+- QoS 支持:
+  AXI AWQOS/ARQOS: TSN 队列 = 0xF, 普通队列 = 0x8, 背景 = 0x0
+```
 
 ---
 
@@ -604,7 +725,7 @@ v
 | v1.1 | 2026-05-11 | Arch Agent | 新增 1.4 可配置参数矩阵（协议/DMA/安全参数） |
 | v1.2 | 2026-05-11 | Arch Agent | 重构参数：MAC_COUNT 1-8, MAC_TYPE (MAC/GMAC/XGMAC), PHY_COUNT 独立 1-8, PHY_SPEED 解耦 |
 | v1.4 | 2026-05-12 | Arch Agent | **基于 R-Car S4 Gap Analysis 升级**: 4-port L2/L3 Switch (替换 Bridge), 双 PHC + vPHC 虚拟化, AVTP 硬件感知, Switch 级 TAS/PSFP, 更新应用场景矩阵和资源估算 |
-| **v1.5** | **2026-05-12** | **Arch Agent** | **TC4x Errata 设计规避**: 13 项已知 erratum 的 RTL/架构级修改方案纳入 (CBS IPG credit, TAS CDC, TX threshold, underflow 终止, DMA stall 恢复, VLAN fail queue, 双 PHC Crossbar, 无 DRE 瓶颈, 温度自适应链路) |
+| **v1.6** | **2026-05-12** | **Arch Agent** | **DMA 全局通道池设计**: 所有 MAC 共享 DMA 通道池 (8/16/32)，非每 MAC 专属；新增 §4.4 带宽评估计算器；参数矩阵 DMA_CH 列更新为全局池视角 |
 | v1.4.1 | 2026-05-12 | Arch Agent | ISSUE-006~009 参数化定义: TAS 互斥规则 (Switch 级优先), 双 PHC/vPHC 寄存器接口, L3 路由表/ARP 缓存, AVTP RX Filter/DMA 队列映射 |
 
 ### 9.2 待解决问题
