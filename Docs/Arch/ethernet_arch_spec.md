@@ -409,6 +409,7 @@ v
 | Interface Spec | `Docs/Arch/ethernet_interface_spec.md` | 信号定义与时序要求 |
 | Clock/Reset Spec | `Docs/Arch/ethernet_clock_reset_spec.md` | 时钟域与复位策略 |
 | **MCU Ethernet 研究** | `Reference/Kimi_Agent_MCU_Ethernet/` | **Kimi Agent 车规MCU Ethernet深度研究（TC4x/S32G/S32K3/R-Car S4 对比分析）** |
+| **R-Car S4 差距分析** | `Docs/Arch/gap_analysis_rcar_s4.md` | **本 IP vs R-Car S4 功能差距分析：Switch/PHC/AVTP/FFI/IDS** |
 | TC4x GETH 研究 | `Reference/Kimi_Agent_TC4x_Ethernet/` | Kimi Agent TC4x 专项研究材料 |
 
 ---
