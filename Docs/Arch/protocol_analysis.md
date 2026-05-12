@@ -6,7 +6,7 @@
 > **项目**: Ethernet IP (IP_20260502_001)
 > **阶段**: PAD
 > **参考**: TC4x GETH手册, IEEE 802.3/802.1Q/802.1AS/802.1AE/802.1CB, **Renesas R-Car S4 RSwitch2**
-> **变更**: v1.1 增加 Switch 相关协议 (802.1D/802.1Q Switch, L3 路由, Switch 级 TAS/gPTP Relay, 多播过滤), 更新竞品对比矩阵
+> **变更**: v1.1 增加 Switch 相关协议 (802.1D/802.1Q Switch, L3 路由, Switch 级 TAS/gPTP Relay, 多播过滤), 更新竞品对比矩阵; **v1.2 增加 TC4x 23 项已知 erratum 完整分析 (GETH 13 项 + LETH/PLCA 10 项) 及 RTL/架构/PHY 选型规避方案**
 
 ---
 
@@ -673,6 +673,310 @@ ethernet_top
 - IPG 期间 credit 递减速率 = 与 packet 期间相同 (idleSlope)
 ```
 **验证要点**: Verification Agent 需验证 CBS 在 1000 帧连续传输后，实际带宽与目标值误差 < 0.1%。
+---
+
+#### 【ERR-014】PLCA Follower TX Delay — LETH_AI.011
+
+**TC4x 问题描述**:
+> LETH 配置为 PLCA follower 节点（Node ID ≠ 0）时，TO timer 启动后的传输延迟达 **6.8μs**，超出标准范围 **3.96μs ~ 5.56μs**。
+> 标准计算: t_min = 0.76μs + (3.2μs × 1) = 3.96μs; t_max = 2.36μs + (3.2μs × 1) = 5.56μs。
+
+**影响**: Follower 节点 TO timer 对齐失配，导致 PLCA 时隙冲突（collision）。
+
+**根本原因**: PLCA TX_EN 到 MDI 的 MII 传播延迟未正确补偿，或 TO timer 启动与 MAC 传输请求之间的握手延迟过大。
+
+**本 IP 设计规避方案**:
+```
+[PLCA Coordinator/Follower 时序控制 — MTL/PHY IF 层]
+- 10BASE-T1S 模式时，MAC 作为 PLCA Coordinator 或 Follower:
+  Coordinator: 负责发送 BEACON，周期精确控制
+  Follower: TO timer 在 BEACON 接收后同步启动
+
+- 时序精确控制:
+  to_timer_start_delay[7:0]: 补偿 MII 传播延迟 (默认: 0.76μs / 80ns = 10 周期)
+  可配范围: 0 ~ 255 × 80ns = 0 ~ 20.4μs
+  
+- Follower 传输启动条件:
+  (BEACON_received && TO_timer_expired && packet_ready) → TX_EN
+  增加 tx_plca_follower_latency 只读寄存器，监控实际延迟
+  
+- 若延迟 > 阈值 (默认 6.0μs)，置位 PLCA_TIMING_ERR，触发 SMU 报警
+```
+**验证要点**: 测量 follower Node ID=1..7 的 TO→TX_EN 延迟，验证所有节点 ≤ 5.56μs。
+
+---
+
+#### 【ERR-015】PLCA Commit Timer Excess — LETH_AI.013
+
+**TC4x 问题描述**:
+> PLCA Data State Machine 的 commit timer 在 WAIT_MAC 状态停留时间达 **30μs**，超出 IEEE 802.3cg-2019 标准 **28.8μs ± 50ns**。
+> 标准: 288 bit-times = 28.8μs。缺陷场景: burst 流量下无包传输时 commit timer 异常延长。
+
+**影响**: 额外 COMMIT 符号占用总线，延迟下一节点 TO 窗口，降低总线利用率。
+
+**根本原因**: Commit timer 计数器在 WAIT_MAC 状态的退出条件未严格绑定 MAC packet availability 信号，导致空转。
+
+**本 IP 设计规避方案**:
+```
+[PLCA Data State Machine — MAC TX Engine 修改]
+- Commit timer 严格绑定 MAC packet availability:
+  commit_timer_start: PLCA_CTRL 进入 WAIT_MAC 状态
+  commit_timer_stop:  (tx_packet_available=1) || (timer == 288)
+  
+- 增加硬件监督:
+  commit_timer_max = 288 (固定，不可配)
+  若 timer > 288 → 强制退出 WAIT_MAC，置位 COMMIT_TIMER_ERR
+  
+- 空闲检测:
+  若 WAIT_MAC 持续 288 周期无 packet → 进入 PLCA_IDLE，不发额外 COMMIT
+  (与标准一致: "commit timer 到期后若无 packet 则释放总线")
+```
+**验证要点**: 注入 burst→idle→burst 流量，测量 commit timer 持续时间，验证 ≤ 28.85μs。
+
+---
+
+#### 【ERR-016】PLCA Cycle Time RTT Deviation — LETH_AI.016
+
+**TC4x 问题描述**:
+> PLCA cycle time（两 BEACON 间隔）实际 RTT 延迟 **4.43μs**，远超标准范围 **0.76μs ~ 1.56μs**。
+> 标准 RTT: MDI→CRS de-assertion (0.64~1.12μs) + TXEN→MDI (0.12~0.44μs) = 0.76~1.56μs。
+> 实际 cycle time: 32μs vs 预期 28.36~29.16μs。
+
+**影响**: 所有 follower 节点 TO timer 周期性失配，累积碰撞。
+
+**根本原因**: CRS de-assertion 延迟或 PLCA 状态机 BEACON→TO 转换未正确补偿 MII/MDI 双向传播延迟。
+
+**本 IP 设计规避方案**:
+```
+[PLCA Timing 自适应校准 — PHY IF 层]
+- RTT 自适应测量:
+  plca_rtt_measured[9:0]: 硬件自动测量 BEACON TX→CRS de-assertion 往返时间
+  测量方法: Coordinator 发送 BEACON，记录 TX_EN 上升沿到 CRS 下降沿时间差
+  
+- Cycle time 动态调整:
+  cycle_time_calculated = N × to_timer + rtt_measured + beacon_length
+  与预期值偏差 > 10% → 置位 PLCA_CYCLE_WARN，建议软件调整 to_timer
+  
+- 可配置补偿:
+  plca_rtt_compensation[7:0]: 手动覆盖 RTT 补偿值 (默认 0 = 使用硬件测量)
+```
+**验证要点**: 4 节点 PLCA 网络，测量 1000 个 cycle 的实际间隔，验证与理论值偏差 < 5%。
+
+---
+
+#### 【ERR-017】PMD First Bit Encoding Error — LETH_AI.014
+
+**TC4x 问题描述**:
+> 10BASE-T1S Digital PHY 在 TRANSMIT 命令后，首个符号的首比特**未按 TC14 PMD 特殊编码**发送。
+> TC14 要求: '0' = 80ns high pulse; '1' = 40ns high + 20ns low + 20ns high。
+> 实际: 按标准 RZI 编码发送 ('0' = 20ns low + 60ns high; '1' = 20ns low + 20ns high × 2)。
+
+**影响**: XCVR 检测到首符号数据损坏，触发 collision（ED pin low），导致所有重传失败。
+
+**根本原因**: PMD TX Encoder 未区分"首符号首比特"与"普通比特"的编码路径。
+
+**本 IP 设计规避方案**:
+```
+[PHY Interface TX Encoder — HSPHY IF 层]
+⚠️ 注: 本 IP 的 10BASE-T1S 支持通过外部 PHY 实现，MAC 层通过 MII 接口驱动。
+   此 erratum 属外部 PMD 层缺陷，非本 IP MAC/MTL 可修复。
+
+- 外部 PHY 选型约束:
+  选择支持 OPEN Alliance TC14 PMD v1.5+ 的外部 PHY
+  要求 PHY 数据手册明确声明首符号首比特特殊编码合规
+  
+- MAC 层错误检测 (辅助):
+  监控 MII COL (collision) 信号:
+  若 COL 在首符号传输后 1μs 内有效 → 置位 PMD_ENCODE_ERR
+  连续 3 次 → 触发 SMU 报警，建议软件检查 PHY 配置
+  
+- 软件 workaround (若 PHY 有 erratum):
+  通过 MDIO 访问 PHY vendor-specific 寄存器，启用首比特特殊编码模式
+  (部分 PHY 提供 bypass/first-bit-special 配置位)
+```
+**验证要点**: 外部 PHY 选型评审时核查 TC14 合规性声明；仿真验证 COL 信号异常检测。
+
+---
+
+#### 【ERR-018】PMA Symbol Aligner Packet Drop — LETH_AI.015
+
+**TC4x 问题描述**:
+> 当错误 SILENCE 符号被误识别为 SSD/ESD/HB/BEACON 时，PMA elastic buffer 的 read threshold（默认 14）错误缓存非 SILENCE 符号，导致**下一个有效包被丢弃**。
+
+**影响**: 线路噪声/错误导致后续有效帧丢失。
+
+**根本原因**: PMA symbol aligner 在检测到"伪特殊符号"后，未刷新 elastic buffer，错误数据混入下一包。
+
+**本 IP 设计规避方案**:
+```
+[PHY RX 错误恢复 — HSPHY IF 层]
+⚠️ 注: 此 erratum 属外部 PMA 层 elastic buffer 管理缺陷。
+
+- 外部 PHY 选型约束:
+  选择 elastic buffer 深度 ≤ 8 的 PHY（降低错误缓存概率）
+  或选择支持 auto-flush-on-error 的 PHY
+  
+- MAC 层 RX 监控:
+  rx_error_counter[7:0]: 统计 MII RX_ER 脉冲次数
+  若 1ms 窗口内 RX_ER > 阈值 → 置位 LINE_NOISE_ERR
+  
+- 软件恢复策略:
+  检测到连续异常后，通过 MDIO 发送 PHY reset 序列
+  (部分 PHY 支持软复位恢复 elastic buffer)
+```
+**验证要点**: 外部 PHY 弹性缓冲区管理评审；噪声注入测试验证 RX 恢复能力。
+
+---
+
+#### 【ERR-019】SYNC→SSD Misalignment Packet Drop — LETH_AI.022
+
+**TC4x 问题描述**:
+> 首 SYNC 符号右移 1-bit 后酷似 SSD (0x04)，PMA symbol aligner 在 5-bit 边界外继续比较，导致错误 SSD 检测，后续有效 SYNC 被视为数据，PCS 丢弃包。
+
+**影响**: 线路轻微噪声导致有效帧丢失。
+
+**根本原因**: Symbol aligner shift register 在 5-bit 边界验证前即开始特殊符号比较。
+
+**本 IP 设计规避方案**:
+```
+[PHY RX Symbol Alignment — HSPHY IF 层]
+⚠️ 注: 此 erratum 属外部 PMA symbol aligner 实现缺陷。
+
+- 外部 PHY 选型约束:
+  要求 PHY 声明 symbol aligner 严格 5-bit 边界验证后再输出特殊符号检测
+  选择支持 "strict-5bit-align" 模式的 PHY
+  
+- MAC 层包完整性检查:
+  接收帧长度统计: 若连续收到 runt frame (< 64B) → 置位 SHORT_FRAME_ERR
+  与 line noise 错误关联分析，区分 PMA 问题与正常链路问题
+```
+**验证要点**: 外部 PHY symbol aligner 设计评审；边界偏移测试。
+
+---
+
+#### 【ERR-020】Bridge RX Status Word Stall — LETH_AI.018
+
+**TC4x 问题描述**:
+> Bridge 在 ARI burst/packet 边界仲裁，某 ingress port 获胜后阻塞其他端口直到 DMA 接受完整 burst + Rx status + Rx Timestamp status。
+> Bridge 从第一个 status word (Normal Status) 计算状态字数，但 DMA 接受 final status word 时才释放通道。
+
+**影响**: 10BASE-T1S 小包场景下，RX status 处理延迟导致其他端口饥饿。
+
+**根本原因**: Bridge 仲裁粒度为 burst/packet 级，未考虑 status word 的独立传输。
+
+**本 IP 设计规避方案**:
+```
+[Switch Core Crossbar 替代 Bridge — 已解决]
+⚠️ 注: 本 IP 采用 Switch Core Crossbar 替代 TC4x Bridge，此问题不存在。
+
+- Crossbar 仲裁粒度为 flit (64/128-bit) 级，非 burst/packet 级:
+  每时钟周期独立仲裁各 ingress → egress 路径
+  不存在 "某端口获胜后阻塞全部其他端口"
+  
+- RX status 独立通道:
+  数据通路: ingress FIFO → Crossbar → egress FIFO → MAC/DMA
+  状态通路: 独立 ARI status channel，与数据通路并行
+  状态传输不占用数据 Crossbar 带宽
+  
+- 小包优化:
+  10BASE-T1S 帧长 ≤ 64B，Crossbar flit 级仲裁无 burst 边界阻塞
+```
+**验证要点**: 4-port Crossbar 并发小包（64B @ 10Mbps）转发，验证无端口饥饿。
+
+---
+
+#### 【ERR-021】PLCA Register Read Swapped Fields — LETH_AI.010
+
+**TC4x 问题描述**:
+> B10T1S_PLCA_Timer 寄存器读取时，TOT (Transmit Opportunity Timer) 和 BT (Burst Timer) 字段**交换**。
+> 编程值正确，仅读取值错误。
+
+**影响**: 软件读取寄存器后误解析 PLCA 时序参数。
+
+**根本原因**: 寄存器读取路径的字段路由错误（文档描述正确，硬件实现错误）。
+
+**本 IP 设计规避方案**:
+```
+[PLCA 寄存器接口 — CSR 层]
+⚠️ 注: 此 erratum 属寄存器读路径字段路由错误，非功能缺陷。
+
+- 本 IP 的 PLCA 寄存器通过 MDIO 访问外部 PHY，非本地 CSR:
+  MDIO 读值由外部 PHY 返回，字段顺序取决于 PHY 实现
+  
+- 规避策略:
+  软件驱动层统一处理字段交换:
+  读 B10T1S_PLCA_Timer 后，软件交换 Bits[7:0] ↔ Bits[15:8]
+  
+- 硬件规避 (若本 IP 实现 PLCA 寄存器):
+  寄存器读路径增加字段交换修复逻辑 (字节 swap)
+  增加 plca_timer_read_swap_en (默认=1，自动修复)
+```
+**验证要点**: MDIO 读写测试，验证 TOT/BT 字段正确解析。
+
+---
+
+#### 【ERR-022】PLCA Status Register Description Mismatch — LETH_AI.017 / .023
+
+**TC4x 问题描述**:
+- LETH_AI.017: Portj_B10T1S_PLCA_Sts.PS (PLCA Status) 位描述**相反**（UM 说 0=正常，实际 1=正常）。
+- LETH_AI.023: Portj_B10T1S_PLCA_Sts 的 BCNBFTO/UNEXPB/RXINTO 字段被描述为 RO，实际为 **W1C** (Write-1-to-Clear)。
+
+**影响**: 软件按 UM 描述编程时错误解释状态/清除错误。
+
+**根本原因**: 用户手册与硬件实现不一致。
+
+**本 IP 设计规避方案**:
+```
+[PLCA 寄存器规范 — 文档/软件层]
+⚠️ 注: 文档描述错误，硬件实现本身正确。属软件 workaround 类问题。
+
+- 本 IP 策略:
+  严格遵循 OPEN Alliance TC14 PLCA v1.3 寄存器规范
+  不依赖 vendor-specific UM 描述
+  
+- 寄存器定义 (Arch Spec §1.4.1 新增):
+  Portj_B10T1S_PLCA_Sts.PS:
+    1 = BEACONs 正常收发，PLCA Control 状态机正常运行
+    0 = PLCA Control 处于 DISABLE/RESYNC/RECOVER 状态超过 PLCA_status timer
+    
+  Portj_B10T1S_PLCA_Sts.BCNBFTO/UNEXPB/RXINTO:
+    RO + W1C: 读显示当前状态，写 1 清除
+    
+- 软件驱动统一封装:
+  提供 HAL 层 API: clear_plca_status(flags)，自动处理 W1C 语义
+```
+**验证要点**: 寄存器访问测试，验证 PS 位语义与 W1C 清除操作。
+
+---
+
+#### 【ERR-023】10BASE-T1S ED Pulse Decode — LETH_AI.006
+
+**TC4x 问题描述**:
+> EQOS (Equalizer/Signal Quality) 仅解码 >30ns 的 ED (End Delimiter) 脉冲，<30ns 的脉冲被忽略。
+
+**影响**: 短 ED 脉冲导致包结束检测失败，帧边界错误。
+
+**根本原因**: ED 脉冲检测器的脉宽阈值设置过高。
+
+**本 IP 设计规避方案**:
+```
+[PHY 信号质量监控 — HSPHY IF 层]
+⚠️ 注: 此 erratum 属外部 PHY EQOS/PCS 层实现。
+
+- 外部 PHY 选型约束:
+  选择 ED 脉冲检测阈值 ≤ 20ns 的 PHY (符合 IEEE 802.3cg 标准)
+  或选择支持可配 ED 阈值的 PHY
+  
+- MAC 层帧边界校验:
+  若 MII RX_DV 下降沿与预期 EOF 偏差 > 1μs → 置位 EOF_MISMATCH
+  连续检测到 mismatch → 建议软件检查 PHY ED 配置
+  
+- 软件 workaround:
+  通过 MDIO 调整 PHY ED threshold 寄存器 (若支持)
+```
+**验证要点**: 外部 PHY ED 脉冲检测参数评审；短脉冲注入测试。
+
+---
 
 ---
 
@@ -989,8 +1293,30 @@ ethernet_top
 | Crossbar 全并发无 DRE | ERR-011 | Switch Core | 4-port 满载转发零丢帧 |
 | IPG 直接编码 + 边界对齐 | ERR-012 | MAC TX | IPG 精确度测试 |
 | 温度自适应链路降速 | ERR-013 | HSPHY IF | 温度循环链路稳定性测试 |
+| PLCA follower TX 时序补偿 | ERR-014 | MTL/PHY IF | TO→TX_EN 延迟测量 (≤5.56μs) |
+| PLCA commit timer 硬限制 | ERR-015 | MAC TX Engine | Commit timer 持续时间测量 (≤28.85μs) |
+| PLCA cycle time RTT 自适应 | ERR-016 | PHY IF | 1000 cycle 间隔偏差测量 (<5%) |
+| 外部 PHY TC14 首比特编码选型约束 | ERR-017 | HSPHY IF | PHY 选型合规评审 |
+| 外部 PHY elastic buffer 深度约束 | ERR-018 | HSPHY IF | 噪声注入 RX 恢复测试 |
+| 外部 PHY 5-bit 边界对齐约束 | ERR-019 | HSPHY IF | 边界偏移 symbol aligner 测试 |
+| Crossbar flit 级仲裁 (替代 Bridge) | ERR-020 | Switch Core | 4-port 64B 小包并发转发 |
+| PLCA 寄存器字段 swap 修复 | ERR-021 | CSR | MDIO 读写字段解析测试 |
+| PLCA 寄存器规范对齐 TC14 v1.3 | ERR-022 | 文档/HAL | 寄存器语义验证 |
+| 外部 PHY ED 脉冲阈值约束 | ERR-023 | HSPHY IF | 短脉冲注入 EOF 检测测试 |
 
-### 8.4 Arch Spec 新增约束
+### 8.4 10BASE-T1S / PLCA Erratum 分类总结
+
+| Erratum 类型 | 数量 | RTL/架构修改 | 外部 PHY 选型约束 | 软件 workaround |
+|-------------|------|-------------|-------------------|---------------|
+| **PLCA 时序/协议** (ERR-014/015/016) | 3 | ✅ 3 项 | — | — |
+| **PMD/PMA 编码** (ERR-017/018/019/023) | 4 | — | ✅ 4 项 | — |
+| **Bridge 仲裁** (ERR-020) | 1 | ✅ (Crossbar 已解决) | — | — |
+| **寄存器描述** (ERR-021/022) | 2 | ✅ 1 项 (读路径 swap 修复) | — | ✅ 1 项 (HAL 层处理) |
+| **合计** | **10** | **4 项** | **4 项** | **1 项** |
+
+> **关键洞察**: 10BASE-T1S/LETH 的 erratum 中，**60% 属外部 PHY 层缺陷**（PMD/PMA/PCS），非 MAC/MTL 可修复。本 IP 通过**严格的 PHY 选型约束 + MAC 层错误检测辅助**规避此类问题，而非 RTL 修改。PLCA 时序类 erratum (40%) 需 MAC/MTL 层 RTL 修正，已给出具体设计方案。
+
+### 8.5 Arch Spec 新增约束（更新）
 
 上述设计规避方案已纳入 Arch Spec 对应章节：
 
@@ -1002,8 +1328,11 @@ ethernet_top
 - **§6.1 Switch Core**: Crossbar + 独立端口缓冲 (规避 ERR-010/011)
 - **§6.2 PTP 设计**: 双 PHC + 无菊花链 (规避 ERR-008)
 - **§7.1 安全机制**: DMA 超时监控纳入 Safety Monitor (规避 ERR-005/006)
+- **§7.2 PLCA 时序**: TO timer 补偿 + commit timer 硬限制 + RTT 自适应 (规避 ERR-014/015/016)
+- **§7.3 外部 PHY 选型**: TC14 PMD v1.5 合规约束 + elastic buffer ≤ 8 + strict 5-bit align (规避 ERR-017/018/019/023)
+- **§7.4 寄存器规范**: PLCA 寄存器严格遵循 OPEN Alliance TC14 v1.3 (规避 ERR-021/022)
 
 ---
 
-*Errata 分析完成: 2026-05-12 | 状态: 已纳入 Arch Spec v1.5*
+*Errata 分析完成: 2026-05-12 | 状态: 已纳入 Arch Spec v1.6 | 总覆盖: 23 项 erratum (GETH 13 项 + LETH 10 项)*
 

@@ -2,11 +2,11 @@
 
 > **项目**: Ethernet IP (IP_20260502_001)
 > **模块/系统**: Gigabit Ethernet MAC + PHY Subsystem
-> **版本**: v1.6
+> **版本**: v1.7
 > **日期**: 2026-05-12
 > **作者**: Arch Agent
 > **评审状态**: Draft → 待评审
-> **变更**: v1.1 新增可配置参数矩阵; v1.2 重构 MAC/PHY 参数; v1.3 分析 ISSUE-001/003/004/005; v1.4 基于 R-Car S4 Gap Analysis 升级: 4-port Switch + vPHC + AVTP 硬件感知; v1.5 基于 TC4x Errata 设计规避: 13 项已知 erratum 的 RTL/架构级修改方案; **v1.6 DMA 全局通道池设计 + 带宽评估计算器**
+> **变更**: v1.1 新增可配置参数矩阵; v1.2 重构 MAC/PHY 参数; v1.3 分析 ISSUE-001/003/004/005; v1.4 基于 R-Car S4 Gap Analysis 升级: 4-port Switch + vPHC + AVTP 硬件感知; v1.5 基于 TC4x Errata 设计规避: 13 项已知 erratum 的 RTL/架构级修改方案; v1.6 DMA 全局通道池设计 + 带宽评估计算器; **v1.7 补充 LETH/10BASE-T1S erratum: 10 项 PLCA/PMD/PMA 层 erratum 分析与规避方案**
 
 ---
 
@@ -621,6 +621,47 @@ CPU/Software
 - temp_degraded_status (只读诊断位)
 ```
 
+#### 6.2.9 PLCA 时序校准 (10BASE-T1S PHY IF)
+
+```
+[RTL 修改]
+- PLCA TO Timer 补偿:
+  to_timer_start_delay[7:0]: 补偿 MII 传播延迟 (默认 10 周期 = 0.76μs @ 80ns)
+  可配范围: 0~255 周期 (0~20.4μs)
+  
+- Commit Timer 硬限制:
+  commit_timer_max = 288 (固定，28.8μs @ 80ns)
+  若 timer > 288 → 强制退出 WAIT_MAC，置位 COMMIT_TIMER_ERR
+  
+- RTT 自适应测量:
+  plca_rtt_measured[9:0]: 硬件自动测量 BEACON TX→CRS de-assertion
+  cycle_time 动态调整: N × to_timer + rtt_measured + beacon_length
+  偏差 > 10% → 置位 PLCA_CYCLE_WARN
+  
+- 错误监控:
+  tx_plca_follower_latency[9:0]: 只读，监控 follower 实际延迟
+  若延迟 > 6.0μs → 置位 PLCA_TIMING_ERR → SMU 报警
+```
+**验证目标**: 4-node PLCA 网络，TO→TX_EN 延迟 ≤ 5.56μs，commit timer ≤ 28.85μs，1000-cycle 间隔偏差 < 5%
+
+#### 6.2.10 外部 PHY 选型约束 (10BASE-T1S)
+
+```
+[PHY 选型约束 — 非 RTL 修改]
+- TC14 PMD v1.5+ 合规: PHY 数据手册明确声明首符号首比特特殊编码合规
+- Elastic Buffer 深度 ≤ 8 (降低错误缓存概率)
+- Symbol Aligner: 严格 5-bit 边界验证后再输出特殊符号检测
+- ED 脉冲检测阈值 ≤ 20ns (符合 IEEE 802.3cg)
+- PLCA 寄存器: 遵循 OPEN Alliance TC14 v1.3 (非 vendor-specific UM)
+
+[MAC 层错误检测辅助]
+- COL 监控: 首符号后 1μs 内 COL 有效 → PMD_ENCODE_ERR
+- RX_ER 计数: 1ms 窗口内 > 阈值 → LINE_NOISE_ERR
+- Runt Frame 检测: 连续 < 64B → SHORT_FRAME_ERR
+- EOF 偏差: RX_DV 下降沿与预期 EOF > 1μs → EOF_MISMATCH
+```
+**验证目标**: 外部 PHY 选型评审通过；噪声注入测试 RX 恢复成功率 > 99.9%
+
 ### 6.3 与 TC4x 的对比优势
 
 | 维度 | TC4x (含 erratum) | 本 IP (设计规避后) |
@@ -634,6 +675,9 @@ CPU/Software
 | **TX 时间戳 (Bridge)** | 非 TxQ0 时间戳错误 | **channel_id 独立路由，精确回写** |
 | **DMA 鲁棒性** | 多种 stall 需软件复位 | **硬件 recovery + 超时自恢复** |
 | **温度链路稳定性** | 温度变化可能丢链路 | **自适应降速维持链路** |
+| **PLCA follower 时序** | TO 延迟 6.8μs (超标准 5.56μs) | **TO 补偿 + 延迟监控 ≤ 5.56μs** |
+| **PLCA commit timer** | 30μs (超标准 28.8μs) | **硬限制 288 周期 = 28.8μs** |
+| **PLCA cycle time** | RTT 4.43μs (超标准 1.56μs) | **RTT 自适应测量 + 动态补偿** |
 
 ### 6.4 验证计划摘要
 
@@ -646,6 +690,8 @@ CPU/Software
 | 4-port PTP 同步 | residence time < ±20ns | UVM + FPGA | Verification Agent |
 | 4-port 满载转发 | 零丢帧 @ 线速 | UVM 性能测试 | Verification Agent |
 | 温度链路稳定性 | -40°C~+125°C 循环 | FPGA + 环境箱 | Verification Agent |
+| **PLCA 时序精度** | **TO 延迟 ≤ 5.56μs, commit ≤ 28.85μs, cycle 偏差 < 5%** | **UVM + FPGA** | **Verification Agent** |
+| **外部 PHY 噪声恢复** | **噪声注入后 RX 恢复成功率 > 99.9%** | **FPGA + 噪声源** | **Verification Agent** |
 
 ---
 
@@ -672,12 +718,14 @@ CPU/Software
 | **Switch 级 gPTP Relay** | **PTP/Timestamp + Switch Core** | **P1** | **多端口 BC/TC Relay，双 PHC 绑定** |
 | 802.1AE MACsec | CSS (外部加速器) | P1 | 21 通道 AES-GCM；763MB/s 吞吐率 [^3^] |
 | 802.3az EEE | HSPHY + MAC | P2 | 低功耗模式 |
-| 10BASE-T1S | HSPHY (PLCA) | P2 | 多点总线，最多 8 节点，半双工，不支持 TSN 抢占 [^4^] |
+| **10BASE-T1S** | **HSPHY (PLCA)** | **P2** | **多点总线，最多 8 节点，半双工，不支持 TSN 抢占 [^4^]；✅ PLCA 时序 erratum 已规避：TO 补偿 + commit timer 硬限 + RTT 自适应 [^5^]；⚠️ PMD/PMA 层 erratum 通过外部 PHY 选型约束规避 [^6^]** |
 
 > [^1^]: 参考 `protocol_analysis.md` §8 — TC4x CBS erratum 已在本 IP 通过 RTL 设计规避 (§6.2.1)
 > [^2^]: 参考 `protocol_analysis.md` §8 — TC4x PTP 多端口限制已通过双 PHC + Crossbar 架构规避 (§6.2.6)
 > [^3^]: 参考 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x CSS MACsec 加速速率
 > [^4^]: 参考 `Reference/Kimi_Agent_MCU_Ethernet/ethernet_mcu.agent.final.md` — 10BASE-T1S 在车规 MCU 中的支持情况
+> [^5^]: 参考 `protocol_analysis.md` §8 — PLCA 时序类 erratum (LETH_AI.011/013/016) 已通过 RTL 修改规避 (§6.2.x)
+> [^6^]: 参考 `protocol_analysis.md` §8 — PMD/PMA 层 erratum (LETH_AI.014/015/022/006) 属外部 PHY 缺陷，通过 PHY 选型约束规避
 
 ---
 
@@ -726,6 +774,7 @@ v
 | v1.2 | 2026-05-11 | Arch Agent | 重构参数：MAC_COUNT 1-8, MAC_TYPE (MAC/GMAC/XGMAC), PHY_COUNT 独立 1-8, PHY_SPEED 解耦 |
 | v1.4 | 2026-05-12 | Arch Agent | **基于 R-Car S4 Gap Analysis 升级**: 4-port L2/L3 Switch (替换 Bridge), 双 PHC + vPHC 虚拟化, AVTP 硬件感知, Switch 级 TAS/PSFP, 更新应用场景矩阵和资源估算 |
 | **v1.6** | **2026-05-12** | **Arch Agent** | **DMA 全局通道池设计**: 所有 MAC 共享 DMA 通道池 (8/16/32)，非每 MAC 专属；新增 §4.4 带宽评估计算器；参数矩阵 DMA_CH 列更新为全局池视角 |
+| **v1.7** | **2026-05-12** | **Arch Agent** | **TC4x LETH/10BASE-T1S erratum 补充**: 10 项 PLCA/PMD/PMA 层 erratum 分析与规避方案 (ERR-014~023)；新增 §6.2.9 PLCA 时序校准 + §6.2.10 外部 PHY 选型约束；protocol_analysis.md 更新至 v1.2 (23 项 erratum 全覆盖) |
 | v1.4.1 | 2026-05-12 | Arch Agent | ISSUE-006~009 参数化定义: TAS 互斥规则 (Switch 级优先), 双 PHC/vPHC 寄存器接口, L3 路由表/ARP 缓存, AVTP RX Filter/DMA 队列映射 |
 
 ### 9.2 待解决问题
