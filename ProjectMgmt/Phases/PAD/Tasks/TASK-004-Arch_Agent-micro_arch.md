@@ -37,4 +37,4 @@
 ## 执行状态
 
 - **2026-05-12**: 依赖TASK-003已关闭（COMPLETED），本任务由PAD Orchestrator自动解阻塞并标记为IN_PROGRESS
-- **当前工作**: 基于ethernet_arch_spec.md v1.3 和 Kimi Agent TC4x研究材料，开始编写微架构设计Spec
+- **当前工作**: 基于ethernet_arch_spec.md **v1.8d** 和 Kimi Agent TC4x研究材料，开始编写微架构设计Spec

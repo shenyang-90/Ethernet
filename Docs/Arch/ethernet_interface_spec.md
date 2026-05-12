@@ -352,7 +352,7 @@
 | `clk_mac` | Input | 150-300 MHz | MAC 核心时钟 |
 | `clk_tx_phy` | Input | 25-312.5 MHz | TX PHY 接口时钟 |
 | `clk_rx_phy` | Input | 25-312.5 MHz | RX PHY 接口时钟 |
-| `clk_ts` | Input | 100 MHz | PTP 时间戳时钟 |
+| `clk_ts` | Input | **250 MHz** | PTP 时间戳时钟 |
 | `clk_pcs` | Input | 62.5-625 MHz | PCS 串行时钟 |
 
 ### 8.2 复位接口

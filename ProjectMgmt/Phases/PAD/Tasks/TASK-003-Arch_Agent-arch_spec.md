@@ -10,10 +10,10 @@
   "status": "COMPLETED",
   "status_detail": "FINAL_APPROVAL_GRANTED_TASK_CLOSED",
   "deliverables_status": {
-    "protocol_analysis.md": "COMPLETE (v1.0, 555+ lines, references Kimi Agent research)",
-    "ethernet_arch_spec.md": "COMPLETE (v1.3, all sections filled)",
-    "ethernet_interface_spec.md": "COMPLETE (v1.0, detailed signal definitions)",
-    "ethernet_clock_reset_spec.md": "COMPLETE (v1.0, CDC/reset/clock gating detailed)"
+    "protocol_analysis.md": "COMPLETE (v1.2, 800+ lines, 23 errata full coverage)",
+    "ethernet_arch_spec.md": "COMPLETE (v1.8d, PTP §3.3 + Switch loss + low power + ASIL-D clarification)",
+    "ethernet_interface_spec.md": "COMPLETE (v1.0, per-instance params + SWITCH_CONNECTED_MAC_x arrays)",
+    "ethernet_clock_reset_spec.md": "COMPLETE (v1.0, clk_ts=250MHz + PTP clock domain)"
   },
   "assigned_to": "Arch_Agent",
   "assigned_by": "PM_Agent",

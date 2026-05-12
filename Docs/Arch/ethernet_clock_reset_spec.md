@@ -18,7 +18,7 @@
 | `MAC_CLK` | 150-300 MHz | SoC PLL / 独立 PLL | MAC Core、MTL 控制 | < 30 ps RMS |
 | `TX_PHY_CLK` | 2.5/25/125/312.5 MHz | PHY / DLL | TX 并行数据 | < 100 ps |
 | `RX_PHY_CLK` | 2.5/25/125/312.5 MHz | PHY CDR | RX 并行数据 | < 100 ps |
-| `TS_CLK` | 100 MHz (典型) | 独立低抖动 PLL | PTP 时间戳、Addend | < 10 ps RMS |
+| `TS_CLK` | **250 MHz** | 独立低抖动 PLL | PTP 时间戳、Addend | < 10 ps RMS |
 | `PCS_CLK` | 62.5/156.25/312.5/625 MHz | SERDES PLL | PCS 串行编码 | < 5 ps RMS |
 | `REF_CLK_25M` | 25 MHz | 晶振 | SGMII/USXGMII 参考 | < 50 ppm |
 | `REF_CLK_50M` | 50 MHz | 晶振 | RMII 参考 | < 50 ppm |
@@ -62,7 +62,7 @@
 |  +---------------------+         +---------------------+            |
 |                                                                    |
 |  +---------------------+                                            |
-|  |    clk_ts           |  (100 MHz)                                 |
+|  |    clk_ts           |  (**250 MHz**)                                 |
 |  |  +---------------+  |                                            |
 |  |  | PTP Timestamp |  |                                            |
 |  |  | Time Counter  |  |                                            |

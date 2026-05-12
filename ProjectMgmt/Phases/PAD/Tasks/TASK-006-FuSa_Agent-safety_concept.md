@@ -1,5 +1,47 @@
 # TASK-006: FuSa Agent - Safety Concept for Ethernet IP
 
+```json
+{
+  "task_id": "TASK-006",
+  "project_id": "IP_20260502_001",
+  "phase": "PAD",
+  "task_type": "doc_writing",
+  "priority": "P1",
+  "status": "COMPLETED",
+  "status_detail": "FINAL_APPROVAL_GRANTED_TASK_CLOSED",
+  "assigned_to": "FuSa_Agent",
+  "assigned_by": "PM_Agent",
+  "deadline": "2026-05-13",
+  "title": "功能安全概念文档 (Safety Concept)",
+  "requirements": "为 Ethernet IP 编写 PAD 阶段功能安全概念文档，作为 EDR 阶段 FMEDA 分析的输入。依赖 TASK-003 Arch Spec 安全架构章节完成。",
+  "acceptance_criteria": [
+    "安全目标 (SG) 定义完成，覆盖所有关键失效模式",
+    "安全机制清单与 ASIL-B 基线策略确定",
+    "诊断覆盖 (DC) 量化，满足 ISO 26262-5 Table D 要求",
+    "FHTI 定义，所有路径延迟预算 <100 μs",
+    "ASIL 分解策略：基线 B + 可选 C/D 升级路径",
+    "竞品功能安全对标完成",
+    "故障注入测试策略规划"
+  ],
+  "deliverables": {
+    "files": [
+      "Docs/FuSa/safety_concept.md",
+      "Docs/Arch/gap_analysis_rcar_s4.md"
+    ],
+    "reports": [
+      "ProjectMgmt/Phases/PAD/Reviews/safety_review_checklist.md"
+    ]
+  },
+  "dependencies": {
+    "pre_tasks": ["TASK-003"],
+    "blocks": ["TASK-EDR-FMEDA"]
+  },
+  "working_directory": "sandbox/ethernet/Docs/FuSa/",
+  "ai_assist": true,
+  "human_review_required": true
+}
+```
+
 > **任务ID**: TASK-006
 > **阶段**: PAD
 > **负责人**: FuSa Agent
@@ -22,7 +64,7 @@
 |--------|------|------|------|
 | Safety Concept | `Docs/FuSa/safety_concept.md` | ✅ **已完成** | 安全目标、诊断覆盖、FHTI、ASIL 分解、竞品对标 |
 | Gap Analysis (R-Car S4) | `Docs/Arch/gap_analysis_rcar_s4.md` | ✅ **已完成** | Switch/PHC/AVTP/FFI/IDS 差距分析 |
-| **Arch Spec v1.4** | **`Docs/Arch/ethernet_arch_spec.md`** | **✅ 已完成** | **4-port Switch + vPHC + AVTP 硬件感知参数化** |
+| **Arch Spec v1.8d** | **`Docs/Arch/ethernet_arch_spec.md`** | **✅ 已完成** | **PTP §3.3 + Switch loss + low power + ASIL-D clarification** |
 
 ## 完成标准
 
@@ -59,4 +101,4 @@
 
 ---
 
-*更新: 2026-05-11 — Safety Concept v1.0 初稿完成*
+*更新: 2026-05-12 — Safety Concept v1.1+ 完成 (同步 Arch Spec v1.8d 变更)*
