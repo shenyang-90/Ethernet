@@ -7,8 +7,11 @@
   "phase": "PAD",
   "task_type": "doc_writing",
   "priority": "P1",
-  "status": "IN_PROGRESS",
-  "status_detail": "GATE_CHECK_PASSED_DEPENDENCY_UNBLOCKED_AUTO_STARTED",
+  "status": "COMPLETED",
+  "status_detail": "FINAL_APPROVAL_GRANTED_TASK_CLOSED",
+  "deliverables_status": {
+    "ethernet_design_spec.md": "COMPLETE (v1.0, 基于 Arch Spec v1.8d: Switch混合架构 + 双PHC+Crossbar + vPHC + 全局DMA池 + 低功耗模式 + ASIL-B基线)"
+  },
   "assigned_to": "Arch_Agent",
   "assigned_by": "PM_Agent",
   "deadline": "TBD",
@@ -37,4 +40,10 @@
 ## 执行状态
 
 - **2026-05-12**: 依赖TASK-003已关闭（COMPLETED），本任务由PAD Orchestrator自动解阻塞并标记为IN_PROGRESS
-- **当前工作**: 基于ethernet_arch_spec.md **v1.8d** 和 Kimi Agent TC4x研究材料，开始编写微架构设计Spec
+- **2026-05-12 20:45**: 微架构设计Spec **v1.0 完成**，基于 Arch Spec v1.8d 全面升级:
+  - Switch Core (4-port L2/L3) + 混合架构 (`SWITCH_CONNECTED_MAC_x`)
+  - 双 PHC + Crossbar + vPHC 虚拟化
+  - 全局 DMA 通道池 (8/16/32)
+  - 低功耗模式 (EEE/WoL/Deep Sleep)
+  - ASIL-B 基线安全架构
+- **交付物**: `Docs/Design/ethernet/ethernet_design_spec.md` v1.0
