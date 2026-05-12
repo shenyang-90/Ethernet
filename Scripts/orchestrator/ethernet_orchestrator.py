@@ -19,12 +19,83 @@ Author: AI Yang
 import json
 import argparse
 import subprocess
+import hashlib
 from pathlib import Path
 from datetime import datetime
 
 PROJECT_ROOT = Path("/root/.openclaw/workspace/sandbox/ethernet")
 TASKS_DIR = PROJECT_ROOT / "ProjectMgmt" / "Phases" / "PAD" / "Tasks"
 DOCS_DIR = PROJECT_ROOT / "Docs" / "Arch"
+STATE_FILE = PROJECT_ROOT / "ProjectMgmt" / ".orchestrator_state.json"
+
+# ─── File fingerprint cache ──────────────────────────────────────
+
+def _file_fingerprint(path: Path):
+    """Return a compact fingerprint: {mtime, size, hash} for a file."""
+    stat = path.stat()
+    h = hashlib.md5(path.read_bytes()).hexdigest()[:12]
+    return {"mtime": stat.st_mtime, "size": stat.st_size, "hash": h}
+
+def load_state():
+    """Load last-known fingerprints and summary hash."""
+    if STATE_FILE.exists():
+        try:
+            return json.loads(STATE_FILE.read_text())
+        except Exception:
+            pass
+    return {}
+
+def save_state(state):
+    """Persist fingerprints to disk."""
+    STATE_FILE.write_text(json.dumps(state, indent=2))
+
+def compute_input_fingerprints():
+    """Fingerprint every task file + the Dashboard itself."""
+    fps = {}
+    for f in sorted(TASKS_DIR.glob("*.md")):
+        fps[str(f.relative_to(PROJECT_ROOT))] = _file_fingerprint(f)
+    dashboard = PROJECT_ROOT / "ProjectMgmt" / "Dashboard.md"
+    if dashboard.exists():
+        fps[str(dashboard.relative_to(PROJECT_ROOT))] = _file_fingerprint(dashboard)
+    return fps
+
+def has_changes_since_last_run(force=False):
+    """Return (changed: bool, state_to_save: dict, change_summary: str).
+
+    If `force` is True, always report changed.
+    """
+    if force:
+        fps = compute_input_fingerprints()
+        h = hashlib.md5(json.dumps(fps, sort_keys=True).encode()).hexdigest()[:16]
+        return True, {"fingerprints": fps, "last_hash": h, "last_run": datetime.now().isoformat()}, "forced"
+
+    old = load_state()
+    fps = compute_input_fingerprints()
+    h = hashlib.md5(json.dumps(fps, sort_keys=True).encode()).hexdigest()[:16]
+
+    if not old:
+        return True, {"fingerprints": fps, "last_hash": h, "last_run": datetime.now().isoformat()}, "first-run"
+
+    if old.get("last_hash") != h:
+        # Determine *which* files changed for the summary
+        changed_files = []
+        for path, fp in fps.items():
+            old_fp = old.get("fingerprints", {}).get(path)
+            if not old_fp:
+                changed_files.append(f"+{path}")
+            elif old_fp["hash"] != fp["hash"]:
+                changed_files.append(path)
+        for path in old.get("fingerprints", {}):
+            if path not in fps:
+                changed_files.append(f"-{path}")
+        summary = ", ".join(changed_files[:5])
+        if len(changed_files) > 5:
+            summary += f" (+{len(changed_files)-5} more)"
+        return True, {"fingerprints": fps, "last_hash": h, "last_run": datetime.now().isoformat()}, summary
+
+    return False, old, "no-change"
+
+# ─── Original helpers ───────────────────────────────────────────
 
 def run_cmd(cmd, cwd=None):
     """运行命令并返回输出"""
@@ -131,8 +202,15 @@ def get_next_action(tasks):
     best["task_id"] = best["data"]["task_id"]  # 确保有 task_id
     return best
 
-def generate_dashboard(tasks):
-    """生成 Dashboard"""
+def generate_dashboard(tasks, force=False):
+    """生成 Dashboard (若无输入文件变化则跳过，除非 force=True)."""
+    changed, new_state, summary = has_changes_since_last_run(force=force)
+
+    if not changed:
+        print(f"[DASHBOARD] NO_CHANGE — 输入文件自上次运行以来无变化 (上次: {new_state.get('last_run', '?')})")
+        print(f"            使用 --force 强制刷新，或修改任务文件后重试。")
+        return None
+
     dashboard_path = PROJECT_ROOT / "ProjectMgmt" / "Dashboard.md"
     
     # 统计
@@ -187,6 +265,7 @@ def generate_dashboard(tasks):
 ---
 
 *自动生成: ethernet_orchestrator.py*
+*输入变化: {summary}*
 """
     
     dashboard_path.write_text(content)
@@ -194,7 +273,10 @@ def generate_dashboard(tasks):
     # git commit
     ok, _, _ = run_cmd("git add ProjectMgmt/Dashboard.md && git commit -m 'auto: update dashboard' || true", cwd=PROJECT_ROOT)
     
-    print(f"[DASHBOARD] Generated: {dashboard_path}")
+    # 保存新的指纹
+    save_state(new_state)
+    
+    print(f"[DASHBOARD] Generated: {dashboard_path} (变化: {summary})")
     return dashboard_path
 
 def main():
@@ -204,9 +286,20 @@ def main():
     parser.add_argument("--dashboard", action="store_true", help="更新Dashboard")
     parser.add_argument("--watch", action="store_true", help="持续监控")
     parser.add_argument("--interval", type=int, default=60, help="监控间隔(秒)")
+    parser.add_argument("--force", action="store_true", help="强制刷新（忽略变化检测）")
     args = parser.parse_args()
     
+    # 变化检测（供 scan / dashboard 使用）
+    changed, _, summary = has_changes_since_last_run(force=args.force)
+    
     if args.scan or (not any([args.step, args.dashboard, args.watch])):
+        if not changed and not args.force:
+            print("=== 任务状态扫描 ===")
+            print(f"[SKIP] 自上次运行以来无文件变化 (上次: {load_state().get('last_run', '?')})")
+            print(f"       变化检测摘要: {summary}")
+            print(f"       使用 --force 强制刷新")
+            return
+        
         print("=== 任务状态扫描 ===")
         tasks = scan_tasks()
         for tid, t in sorted(tasks.items()):
@@ -218,10 +311,15 @@ def main():
             print(f"\n[下一步] {next_action['task_id']}: {next_action['title']}")
         else:
             print("\n[下一步] 无")
+        
+        # 保存状态指纹（供下次变化检测使用）
+        if changed:
+            _, new_state, _ = has_changes_since_last_run(force=args.force)
+            save_state(new_state)
     
     if args.dashboard:
         tasks = scan_tasks()
-        generate_dashboard(tasks)
+        generate_dashboard(tasks, force=args.force)
     
     if args.step:
         tasks = scan_tasks()
