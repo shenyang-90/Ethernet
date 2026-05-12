@@ -2,11 +2,11 @@
 
 > **项目**: Ethernet IP (IP_20260502_001)
 > **模块/系统**: Gigabit Ethernet MAC + PHY Subsystem
-> **版本**: v1.7
+> **版本**: v1.8
 > **日期**: 2026-05-12
 > **作者**: Arch Agent
 > **评审状态**: Draft → 待评审
-> **变更**: v1.1 新增可配置参数矩阵; v1.2 重构 MAC/PHY 参数; v1.3 分析 ISSUE-001/003/004/005; v1.4 基于 R-Car S4 Gap Analysis 升级: 4-port Switch + vPHC + AVTP 硬件感知; v1.5 基于 TC4x Errata 设计规避: 13 项已知 erratum 的 RTL/架构级修改方案; v1.6 DMA 全局通道池设计 + 带宽评估计算器; **v1.7 补充 LETH/10BASE-T1S erratum: 10 项 PLCA/PMD/PMA 层 erratum 分析与规避方案**
+> **变更**: v1.1 新增可配置参数矩阵; v1.2 重构 MAC/PHY 参数; v1.3 分析 ISSUE-001/003/004/005; v1.4 基于 R-Car S4 Gap Analysis 升级: 4-port Switch + vPHC + AVTP 硬件感知; v1.5 基于 TC4x Errata 设计规避: 13 项已知 erratum 的 RTL/架构级修改方案; v1.6 DMA 全局通道池设计 + 带宽评估计算器; v1.7 补充 LETH/10BASE-T1S erratum: 10 项 PLCA/PMD/PMA 层 erratum 分析与规避方案; v1.8 每实例独立配置: MAC_x_TYPE/PHY_x_TYPE/PHY_x_SPEED 数组化; **v1.8a 保守方向 + Switch 混合架构: 默认 2 MAC, 支持 Switch 连接 4 MAC + 独立 MAC 扩展**
 
 ---
 
@@ -60,15 +60,12 @@
 
 本 IP 支持通过顶层 Verilog/SystemVerilog `parameter` 进行编译时裁剪，以适配不同应用场景（Zone Controller / ADAS HUB / 网关 / 边缘节点）的资源与功能需求。
 
-### 1.4.1 协议相关参数
+### 1.4.1 协议相关参数 — 全局配置
 
 | 参数名 | 类型 | 默认值 | 可配置范围 | 说明 | 影响模块 |
 |--------|------|--------|------------|------|----------|
-| `MAC_COUNT` | int | 2 | **1 ~ 8** | MAC 实例数量 | XGMAC-CORE, DMA, MTL |
-| `MAC_TYPE` | int | 2 | **0: MAC (10/100M)<br>1: GMAC (1G)<br>2: XGMAC (2.5G/5G/10G)** | MAC 核心类型，决定 MAC 层能力等级 | XGMAC-CORE, HSPHY IF |
-| `PHY_COUNT` | int | 2 | **1 ~ 8** | PHY 实例总数量（**独立于 MAC 数量**） | HSPHY IF, PHY MUX |
-| `PHY_TYPE` | int | 1 | **0: 10BASE-T1S (多点总线, PLCA)<br>1: 10/100BASE-T1 (点对点)<br>2: 1000BASE-T1 (点对点)<br>3: Multi-Gigabit (2.5G/5G/10G)** | PHY 接口类型，决定物理层拓扑和支持的速率等级 | HSPHY IF, PCS/PMA |
-| `PHY_SPEED` | int | 3 | **0: 10M (10BASE-T1S)<br>1: 100M<br>2: 1G<br>3: 2.5G<br>4: 5G<br>5: 10G** | 每个 PHY 支持的最高速率（**按 PHY 独立配置**） | HSPHY IF, PCS/PMA |
+| `MAC_COUNT` | int | **4** | **1 ~ 8** | MAC 实例数量 | XGMAC-CORE, DMA, MTL |
+| `PHY_COUNT` | int | **4** | **1 ~ 8** | PHY 实例总数量（**独立于 MAC 数量**） | HSPHY IF, PHY MUX |
 | `SUPPORT_1588` | bit | 1 | 0 / 1 | 是否支持 IEEE 1588 / gPTP 时间同步 | PTP/Timestamp |
 | `SUPPORT_GPTP` | bit | 1 | 0 / 1 | 是否支持 802.1AS gPTP（依赖 SUPPORT_1588=1） | PTP/Timestamp |
 | `SUPPORT_TSN` | bit | 1 | 0 / 1 | 是否支持 TSN 协议栈总开关 | MTL, MAC Core |
@@ -80,33 +77,50 @@
 | **`SWITCH_PORT_COUNT`** | int | **4** | **2 ~ 8** | **Switch 端口数量** | **Switch Core** |
 | **`SWITCH_TAS`** | bit | **1** | 0 / 1 | **是否支持 Switch 级 802.1Qbv TAS（依赖 SUPPORT_SWITCH=1）** | **Switch Core** |
 | **`SWITCH_L3`** | bit | **0** | 0 / 1 | **是否支持 Layer 3 IP 路由（依赖 SUPPORT_SWITCH=1）** | **Switch Core** |
+| **`SWITCH_CONNECTED_MAC_0` ~ `SWITCH_CONNECTED_MAC_7`** | bit[8] | **`{1,1,1,1,0,0,0,0}`** | **0 / 1** | **每 MAC 是否接入 Switch（`1`=接入 Switch, `0`=独立直连）** | **Switch Core, DMA 路由** |
 | `SUPPORT_VLAN` | bit | 1 | 0 / 1 | 是否支持 802.1Q VLAN 处理 | TBU, RX Filter, Switch |
 | `SUPPORT_MACSEC` | bit | 0 | 0 / 1 | 是否支持 802.1AE MACsec（需外部 CSS 加速器） | HSPHY IF (安全通道) |
-| `SUPPORT_AVTP` | bit | 0 | 0 / 1 | 是否支持 IEEE 1722 AVTP（⚠️ 所有车规MCU均无硬件卸载，但支持**AVTP 硬件感知**） | RX Filter + DMA |
+| `SUPPORT_AVTP` | bit | 0 | 0 / 1 | 是否支持 IEEE 1722 AVTP | RX Filter + DMA |
 | **`SUPPORT_AVTP_AWARE`** | bit | **0** | 0 / 1 | **是否支持 AVTP 流识别与 RX 分离（依赖 SUPPORT_AVTP=1）** | **RX Filter, Switch** |
-| **`PHC_COUNT`** | int | **1** | **1, 2** | **PTP Hardware Clock 数量** | **PTP/Timestamp** |
+| **`PHC_COUNT`** | int | **2** | **1, 2** | **PTP Hardware Clock 数量** | **PTP/Timestamp** |
 | **`SUPPORT_VPHC`** | bit | **0** | 0 / 1 | **是否支持 vPHC 虚拟化（依赖 PHC_COUNT=2）** | **PTP/Timestamp, Xen IO Rings** |
 
-> **配置约束**：
-> - `SUPPORT_GPTP=1` 要求 `SUPPORT_1588=1`
-> - `SUPPORT_FRER=1` 要求 `SUPPORT_SWITCH=1` 且 `MAC_COUNT ≥ 2`
-> - `SUPPORT_FP=1` 要求 `MAC_TYPE ≥ 1` (GMAC/XGMAC)
-> - **`SUPPORT_TAS` 与 `SWITCH_TAS` 互斥**：
->   - 当 `SUPPORT_SWITCH=1` 时，**TAS 统一为 Switch 级**（`SWITCH_TAS=1`, `SUPPORT_TAS=0`）
->   - 当 `SUPPORT_SWITCH=0` 时，TAS 为端点级（`SUPPORT_TAS=1`, `SWITCH_TAS=0`）
->   - 两者不可同时使能，硬件互锁：`SWITCH_TAS=1 → SUPPORT_TAS=0`
-> - `SUPPORT_TAS=1` 要求 `SUPPORT_CBS=1`（推荐，非强制）
-> - **`SWITCH_TAS=1` 要求 `SUPPORT_SWITCH=1` 且 `SUPPORT_TSN=1`**
-> - **`SWITCH_L3=1` 要求 `SUPPORT_SWITCH=1` 且 `MAC_TYPE ≥ 1`**
-> - **`SUPPORT_VPHC=1` 要求 `PHC_COUNT=2` 且 `SUPPORT_GPTP=1`**
-> - **`SUPPORT_AVTP_AWARE=1` 要求 `SUPPORT_AVTP=1` 且 `SUPPORT_VLAN=1`**
-> - `SUPPORT_MACSEC=1` 要求外部 CSS 安全加速器连接
-> - **MAC 与 PHY 解耦**：`PHY_COUNT` 可以大于 `MAC_COUNT`（通过 PHY MUX 共享 MAC），也可以小于（通过 Switch 扩展）
-> - **Switch 端口约束**：`SWITCH_PORT_COUNT ≤ MAC_COUNT`（每 Switch 端口绑定一个 MAC）
-> - **MAC_TYPE 与 PHY_SPEED 独立配置**：MAC_TYPE 决定 MAC 层能力，PHY_SPEED 决定物理层速率。例如 XGMAC (MAC_TYPE=2) 可通过降频运行在 1G PHY (PHY_SPEED=2) 上
-> - **PHY_TYPE 与 PHY_SPEED 配对约束**：`PHY_TYPE=0` (10BASE-T1S) 仅支持 `PHY_SPEED=0` (10M)；`PHY_TYPE=1` 支持 `PHY_SPEED=0~1` (10M/100M)；`PHY_TYPE=2` 支持 `PHY_SPEED=0~2` (10M/100M/1G)；`PHY_TYPE=3` 支持 `PHY_SPEED=0~5` (10M~10G)
-> - **10BASE-T1S 特殊约束**：`PHY_TYPE=0` 时，PHY 支持多点总线拓扑（PLCA），最多 8 个节点；不支持全双工（仅半双工），因此 `SUPPORT_FP` (帧抢占) 和 `SUPPORT_TAS` 在此 PHY 上自动关闭
-> - **Switch 级 TAS 约束**：`SWITCH_TAS=1` 时，端点 MAC 的 `SUPPORT_TAS` 自动关闭（端点无需感知门控周期，由 Switch 统一调度）
+### 1.4.1a 协议相关参数 — **每 MAC 独立配置**
+
+> 每个 MAC 实例 (x = 0..`MAC_COUNT`-1) 拥有独立类型配置，支持混合架构（如 MAC0=XGMAC/5G, MAC1=GMAC/1G, MAC2=MAC/10M）
+
+| 参数名 | 类型 | 默认值 | 可配置范围 | 说明 | 影响 |
+|--------|------|--------|------------|------|------|
+| `MAC_0_TYPE` ~ `MAC_7_TYPE` | int[8] | `{2,2,1,1,1,1,1,1}` | **0: MAC (10/100M)<br>1: GMAC (1G)<br>2: XGMAC (2.5G/5G/10G)** | 每 MAC 核心类型，独立配置 | XGMAC-CORE, HSPHY IF |
+| `MAC_0_SPEED` ~ `MAC_7_SPEED` | int[8] | `{4,4,2,2,2,2,2,2}` | **0: 10M<br>1: 100M<br>2: 1G<br>3: 2.5G<br>4: 5G<br>5: 10G** | 每 MAC 线速率，受限于 `MAC_x_TYPE` | XGMAC-CORE, DMA |
+
+> **MAC 类型/速率约束**:
+> - `MAC_x_TYPE = 0 (MAC)`: `MAC_x_SPEED` 仅支持 0~1 (10M/100M)
+> - `MAC_x_TYPE = 1 (GMAC)`: `MAC_x_SPEED` 支持 0~2 (10M/100M/1G)
+> - `MAC_x_TYPE = 2 (XGMAC)`: `MAC_x_SPEED` 支持 0~5 (10M~10G)
+> - `MAC_x_SPEED > MAC_x_TYPE 最大支持速率` → 硬件自动 clamp 到该类型最大速率，并置位 `MAC_SPEED_CLAMPED[x]` 诊断位
+
+### 1.4.1b 协议相关参数 — **每 PHY 独立配置**
+
+> 每个 PHY 实例 (x = 0..`PHY_COUNT`-1) 拥有独立类型和速率配置
+
+| 参数名 | 类型 | 默认值 | 可配置范围 | 说明 | 影响 |
+|--------|------|--------|------------|------|------|
+| `PHY_0_TYPE` ~ `PHY_7_TYPE` | int[8] | `{3,3,2,2,2,2,2,2}` | **0: 10BASE-T1S<br>1: 10/100BASE-T1<br>2: 1000BASE-T1<br>3: Multi-Gigabit** | 每 PHY 接口类型 | HSPHY IF, PCS/PMA |
+| `PHY_0_SPEED` ~ `PHY_7_SPEED` | int[8] | `{4,4,2,2,2,2,2,2}` | **0: 10M<br>1: 100M<br>2: 1G<br>3: 2.5G<br>4: 5G<br>5: 10G** | 每 PHY 最高速率，受限于 `PHY_x_TYPE` | HSPHY IF, PCS/PMA |
+
+> **PHY 类型/速率约束**:
+> - `PHY_x_TYPE = 0` (10BASE-T1S): `PHY_x_SPEED` 仅支持 0 (10M)
+> - `PHY_x_TYPE = 1` (10/100BASE-T1): `PHY_x_SPEED` 支持 0~1 (10M/100M)
+> - `PHY_x_TYPE = 2` (1000BASE-T1): `PHY_x_SPEED` 支持 0~2 (10M/100M/1G)
+> - `PHY_x_TYPE = 3` (Multi-Gigabit): `PHY_x_SPEED` 支持 0~5 (10M~10G)
+> - 半双工约束：`PHY_x_TYPE = 0` 时自动关闭该 PHY 对应 MAC 的 `SUPPORT_FP` 和 `SUPPORT_TAS`
+
+> **MAC-PHY 绑定约束**:
+> - 默认一对一绑定：`MAC_x` ↔ `PHY_x` (x < min(MAC_COUNT, PHY_COUNT))
+> - 若 `PHY_COUNT > MAC_COUNT`：多余 PHY 通过 PHY MUX 共享 MAC（时分复用）
+> - 若 `PHY_COUNT < MAC_COUNT`：多余 MAC 通过 Switch 内部环回或预留
+> - `PHY_x_SPEED` 与 `MAC_x_SPEED` 不匹配时，MAC 自动降频到 PHY 速率，置位 `SPEED_MISMATCH[x]` 诊断位
 
 ### 1.4.2 非协议相关 — DMA/缓冲参数
 
@@ -137,6 +151,21 @@
 > **其他配置约束**：
 > - `MTL_TX_FIFO_DEPTH` + `MTL_RX_FIFO_DEPTH` × `MAC_COUNT` ≤ 总 SRAM 预算
 > - `AXI_DATA_WIDTH` 需与 SoC 总线位宽匹配
+> - **每 MAC 类型/速率独立**: `MAC_x_TYPE` 和 `MAC_x_SPEED` 按实例独立配置，不同 MAC 可混合类型（如 MAC0=XGMAC/5G, MAC1=GMAC/1G, MAC2=MAC/10M）
+> - **每 PHY 类型/速率独立**: `PHY_x_TYPE` 和 `PHY_x_SPEED` 按实例独立配置
+> - **DMA 通道按 MAC 类型加权**: XGMAC 实例默认分配更多通道（`DMA_CH_PER_MAC_XGMAC = 4`, `DMA_CH_PER_MAC_GMAC = 2`, `DMA_CH_PER_MAC = 1`），可通过 `DMA_CH_MAP` 覆盖
+> - **AXI 位宽按最大 MAC 速率选择**: `AXI_DATA_WIDTH` 应满足 `max(MAC_x_SPEED)` 的线速需求，见 §4.4.4 配置推荐矩阵
+> - **Switch 连接约束**:
+>   - `SWITCH_PORT_COUNT` ≤ count(`SWITCH_CONNECTED_MAC_x == 1`)（Switch 端口数 ≤ 接入 Switch 的 MAC 数）
+>   - `SUPPORT_SWITCH=0` 时，`SWITCH_PORT_COUNT` 和 `SWITCH_CONNECTED_MAC_x` 被忽略
+>   - **独立 MAC（`SWITCH_CONNECTED_MAC_x=0`）**：不经过 Switch，直接由 Host/DMA 访问（标准端点模式）
+>   - **Switch MAC（`SWITCH_CONNECTED_MAC_x=1`）**：所有 TX/RX 流量经过 Switch Core 转发
+>   - Switch 内部有独立 Host 端口（用于管理帧和 CPU 收发），不计入 `SWITCH_PORT_COUNT`
+>   - **混合架构示例**：`MAC_COUNT=6`, `SWITCH_CONNECTED_MAC={1,1,1,1,0,0}` → MAC0~3 接入 4-port Switch，MAC4~5 独立直连
+>   - **MAC 与 PHY 解耦**：`PHY_COUNT` 可以大于 `MAC_COUNT`（通过 PHY MUX 共享 MAC），也可以小于（通过 Switch 扩展）
+> - **PHY_TYPE 与 PHY_SPEED 配对约束**：`PHY_x_TYPE=0` (10BASE-T1S) 仅支持 `PHY_x_SPEED=0` (10M)；`PHY_x_TYPE=1` 支持 `PHY_x_SPEED=0~1` (10M/100M)；`PHY_x_TYPE=2` 支持 `PHY_x_SPEED=0~2` (10M/100M/1G)；`PHY_x_TYPE=3` 支持 `PHY_x_SPEED=0~5` (10M~10G)
+> - **10BASE-T1S 特殊约束**：`PHY_x_TYPE=0` 时，PHY 支持多点总线拓扑（PLCA），最多 8 个节点；不支持全双工（仅半双工），因此 `SUPPORT_FP` (帧抢占) 和 `SUPPORT_TAS` 在此 PHY 上自动关闭
+> - **Switch 级 TAS 约束**：`SWITCH_TAS=1` 时，端点 MAC 的 `SUPPORT_TAS` 自动关闭（端点无需感知门控周期，由 Switch 统一调度）
 
 ### 1.4.3 非协议相关 — 功能安全参数
 
@@ -158,17 +187,98 @@
 
 ### 1.4.4 参数配置矩阵 — 典型应用场景
 
-| **场景** | **MAC_COUNT** | **MAC_TYPE** | **PHY_COUNT** | **PHY_TYPE** | **PHY_SPEED** | **DMA_CH (全局池)** | **TSN** | **1588** | **Switch** | **ASIL** | **估算门数** |
-|------|-----------|----------|-----------|----------|-----------|--------|-----|------|--------|------|----------|
-| **中央网关 (Switch)** | **4** | **GMAC** | **4** | **1000BASE-T1** | **1G** | **8** | **✅** | **✅** | **✅** | **B** | **~480k** |
-| ADAS 传感器汇聚 | 2 | XGMAC | 2 | Multi-Gigabit | 5G | **16** | ✅ | ✅ | ❌ | B | ~190k |
-| Zone Controller 骨干 | 2 | XGMAC | 2 | Multi-Gigabit | 5G | **16** | ✅ | ✅ | ✅ | B | ~205k |
-| **SDV 中央网关 (Switch+vPHC)** | **4** | **GMAC** | **4** | **1000BASE-T1** | **1G** | **8** | **✅** | **✅** | **✅** | **B** | **~520k** |
-| CAN-Ethernet 网关 | 1 | GMAC | 1 | 1000BASE-T1 | 1G | **4** | ❌ | ✅ | ❌ | B | ~120k |
-| **域内边缘节点 (10BASE-T1S)** | 1 | MAC | 1 | 10BASE-T1S | 10M | **2** | ❌ | ❌ | ❌ | QM | ~45k |
-| **车身传感器网络** | 1 | MAC | 1 | 10BASE-T1S | 10M | **2** | ❌ | ❌ | ❌ | QM | ~40k |
-| **OTA 更新节点** | 1 | GMAC | 1 | 1000BASE-T1 | 1G | **4** | ❌ | ❌ | ❌ | A | ~80k |
-| **信息娱乐域 (AVB)** | 1 | GMAC | 1 | 1000BASE-T1 | 1G | **4** | ✅ | ✅ | ❌ | QM | ~110k |
+> **注**: 以下配置为推荐默认，实际可自由组合每 MAC/PHY 类型。`MAC_x_TYPE` 和 `PHY_x_TYPE` 按实例独立配置。
+
+| **场景** | **MAC 配置摘要** | **PHY 配置摘要** | **DMA_CH (全局池)** | **TSN** | **1588** | **Switch** | **ASIL** | **估算门数** |
+|------|-----------------|-----------------|--------|-----|------|--------|------|----------|
+| **中央网关 (4-port Switch)** | **4 MAC: GMAC/1G ×4** | **4 PHY: 1000BASE-T1/1G ×4** | **16** | **✅** | **✅** | **✅** | **B** | **~480k** |
+| ADAS 传感器汇聚 | 2 MAC: **XGMAC/5G ×2** | 2 PHY: **Multi-Gigabit/5G ×2** | **16** | ✅ | ✅ | ❌ | B | ~190k |
+| Zone Controller 骨干 | 2 MAC: **XGMAC/5G ×2** | 2 PHY: **Multi-Gigabit/5G ×2** | **16** | ✅ | ✅ | ✅ | B | ~205k |
+| **SDV 中央网关 (Switch+vPHC)** | **4 MAC: GMAC/1G ×4** | **4 PHY: 1000BASE-T1/1G ×4** | **16** | **✅** | **✅** | **✅** | **B** | **~520k** |
+| **混合网关 (ADAS+车身)** | **2 MAC: XGMAC/5G + GMAC/1G** | **2 PHY: Multi-Gigabit/5G + 1000BASE-T1/1G** | **12** | **✅** | **✅** | **✅** | **B** | **~260k** |
+| CAN-Ethernet 网关 | 1 MAC: **GMAC/1G** | 1 PHY: **1000BASE-T1/1G** | **4** | ❌ | ✅ | ❌ | B | ~120k |
+| **域内边缘节点 (10BASE-T1S)** | 1 MAC: **MAC/10M** | 1 PHY: **10BASE-T1S/10M** | **2** | ❌ | ❌ | ❌ | QM | ~45k |
+| **车身传感器网络** | 1 MAC: **MAC/10M** | 1 PHY: **10BASE-T1S/10M** | **2** | ❌ | ❌ | ❌ | QM | ~40k |
+| **OTA 更新节点** | 1 MAC: **GMAC/1G** | 1 PHY: **1000BASE-T1/1G** | **4** | ❌ | ❌ | ❌ | A | ~80k |
+| **信息娱乐域 (AVB)** | 1 MAC: **GMAC/1G** | 1 PHY: **1000BASE-T1/1G** | **4** | ✅ | ✅ | ❌ | QM | ~110k |
+| **混合边缘 (1G+10M)** | **2 MAC: GMAC/1G + MAC/10M** | **2 PHY: 1000BASE-T1/1G + 10BASE-T1S/10M** | **6** | **✅** | **✅** | **❌** | **B** | **~135k** |
+| **中央网关+独立端口 (6MAC 混合)** | **6 MAC: GMAC/1G ×4 + GMAC/1G ×2 独立** | **6 PHY: 1000BASE-T1/1G ×6** | **24** | **✅** | **✅** | **✅ (4-port)** | **B** | **~560k** |
+
+> **详细参数展开示例**（中央网关）:
+> ```verilog
+> MAC_COUNT       = 4;
+> MAC_0_TYPE      = 1;   MAC_0_SPEED = 2;  // GMAC, 1G
+> MAC_1_TYPE      = 1;   MAC_1_SPEED = 2;  // GMAC, 1G
+> MAC_2_TYPE      = 1;   MAC_2_SPEED = 2;  // GMAC, 1G
+> MAC_3_TYPE      = 1;   MAC_3_SPEED = 2;  // GMAC, 1G
+> PHY_COUNT       = 4;
+> PHY_0_TYPE      = 2;   PHY_0_SPEED = 2;  // 1000BASE-T1, 1G
+> PHY_1_TYPE      = 2;   PHY_1_SPEED = 2;  // 1000BASE-T1, 1G
+> PHY_2_TYPE      = 2;   PHY_2_SPEED = 2;  // 1000BASE-T1, 1G
+> PHY_3_TYPE      = 2;   PHY_3_SPEED = 2;  // 1000BASE-T1, 1G
+> DMA_CH_COUNT    = 16;  DMA_CH_PER_MAC = 4;
+> SUPPORT_SWITCH  = 1;   SWITCH_PORT_COUNT = 4;
+> PHC_COUNT       = 2;  SUPPORT_VPHC = 1;  // SDV 场景
+> ```
+
+> **详细参数展开示例**（混合网关 ADAS+车身）:
+> ```verilog
+> MAC_COUNT       = 2;
+> MAC_0_TYPE      = 2;   MAC_0_SPEED = 4;  // XGMAC, 5G (ADAS 骨干)
+> MAC_1_TYPE      = 1;   MAC_1_SPEED = 2;  // GMAC, 1G (车身域)
+> PHY_COUNT       = 2;
+> PHY_0_TYPE      = 3;   PHY_0_SPEED = 4;  // Multi-Gigabit, 5G
+> PHY_1_TYPE      = 2;   PHY_1_SPEED = 2;  // 1000BASE-T1, 1G
+> DMA_CH_COUNT    = 12;  // XGMAC 6ch + GMAC 4ch + Switch 2ch
+> SUPPORT_SWITCH  = 1;   SWITCH_PORT_COUNT = 2;
+> PHC_COUNT       = 2;   // gPTP 双域同步
+> ```
+
+> **详细参数展开示例**（中央网关 + 独立端口 — 6MAC 混合架构）:
+> ```verilog
+> // 保守方向: 默认 2 MAC, 但支持扩展到 6 MAC 混合架构
+> // MAC0~3: 接入 4-port Switch (中央网关域)
+> // MAC4~5: 独立直连 (OTA/诊断/日志端口)
+> MAC_COUNT       = 6;
+> MAC_0_TYPE      = 1;   MAC_0_SPEED = 2;  // GMAC, 1G (Switch Port 0)
+> MAC_1_TYPE      = 1;   MAC_1_SPEED = 2;  // GMAC, 1G (Switch Port 1)
+> MAC_2_TYPE      = 1;   MAC_2_SPEED = 2;  // GMAC, 1G (Switch Port 2)
+> MAC_3_TYPE      = 1;   MAC_3_SPEED = 2;  // GMAC, 1G (Switch Port 3)
+> MAC_4_TYPE      = 1;   MAC_4_SPEED = 2;  // GMAC, 1G (独立 — OTA)
+> MAC_5_TYPE      = 1;   MAC_5_SPEED = 2;  // GMAC, 1G (独立 — 诊断)
+> PHY_COUNT       = 6;
+> PHY_0_TYPE      = 2;   PHY_0_SPEED = 2;  // 1000BASE-T1, 1G
+> PHY_1_TYPE      = 2;   PHY_1_SPEED = 2;  // 1000BASE-T1, 1G
+> PHY_2_TYPE      = 2;   PHY_2_SPEED = 2;  // 1000BASE-T1, 1G
+> PHY_3_TYPE      = 2;   PHY_3_SPEED = 2;  // 1000BASE-T1, 1G
+> PHY_4_TYPE      = 2;   PHY_4_SPEED = 2;  // 1000BASE-T1, 1G
+> PHY_5_TYPE      = 2;   PHY_5_SPEED = 2;  // 1000BASE-T1, 1G
+> DMA_CH_COUNT    = 24;  // 6 MAC × 4 ch
+> SUPPORT_SWITCH  = 1;   SWITCH_PORT_COUNT = 4;
+> // Switch 连接配置: MAC0~3 接入 Switch, MAC4~5 独立
+> SWITCH_CONNECTED_MAC_0 = 1;
+> SWITCH_CONNECTED_MAC_1 = 1;
+> SWITCH_CONNECTED_MAC_2 = 1;
+> SWITCH_CONNECTED_MAC_3 = 1;
+> SWITCH_CONNECTED_MAC_4 = 0;  // 独立 OTA 端口
+> SWITCH_CONNECTED_MAC_5 = 0;  // 独立诊断端口
+> PHC_COUNT       = 2;   // gPTP 双域同步
+> ```
+
+> **详细参数展开示例**（保守默认 — 2 MAC 入门级）:
+> ```verilog
+> // 保守方向默认配置: 2 MAC, 无 Switch, 1G 入门
+> MAC_COUNT       = 2;
+> MAC_0_TYPE      = 1;   MAC_0_SPEED = 2;  // GMAC, 1G
+> MAC_1_TYPE      = 1;   MAC_1_SPEED = 2;  // GMAC, 1G
+> PHY_COUNT       = 2;
+> PHY_0_TYPE      = 2;   PHY_0_SPEED = 2;  // 1000BASE-T1, 1G
+> PHY_1_TYPE      = 2;   PHY_1_SPEED = 2;  // 1000BASE-T1, 1G
+> DMA_CH_COUNT    = 8;   // 2 MAC × 4 ch
+> SUPPORT_SWITCH  = 0;   // 默认无 Switch
+> SWITCH_PORT_COUNT = 0;
+> PHC_COUNT       = 1;   // 单 PHC 入门
+> ```
 
 ---
 
@@ -228,15 +338,23 @@
 
 ### 2.2 子系统划分
 
-| 子系统 | 功能 | ASIL |
-|--------|------|------|
-| **XGMAC-CORE** | IEEE 802.3 MAC 层实现、帧过滤、VLAN 处理 | B |
-| **MTL** | FIFO 缓冲、队列管理、流量整形 (CBS/TAS) | B |
-| **DMA** | 描述符管理、数据搬运、时间戳回写 | B |
-| **Switch Core** | **L2/L3 帧交换、FDB 自学习、VLAN 转发、多播过滤、Switch 级 TAS** | **B** |
-| **PTP/Timestamp** | 1588/gPTP 时间同步、**双 PHC + vPHC 虚拟化**、PPS 输出 | B |
-| **Safety Monitor** | ECC/Parity/Timeout 检测与报警 | B |
-| **HSPHY Interface** | PHY 接口适配 (RGMII/SGMII/USXGMII) | B |
+> **混合架构说明**: 每个 MAC 实例通过 `MAC_x_TYPE` 独立配置类型，支持同一 IP 内混合 XGMAC/GMAC/MAC。例如中央网关可配置 MAC0/MAC1=XGMAC (5G ADAS)，MAC2/MAC3=GMAC (1G 车身域)。资源按实际实例累加（见 §4.3）。
+
+> **Switch 连接架构说明**: 通过 `SWITCH_CONNECTED_MAC_x` 参数，灵活配置哪些 MAC 接入 Switch、哪些独立直连：
+> - **Switch MAC** (`SWITCH_CONNECTED_MAC_x=1`): TX/RX 经过 Switch Core 转发，参与 L2/L3 交换
+> - **独立 MAC** (`SWITCH_CONNECTED_MAC_x=0`): 不经过 Switch，直接由 Host CPU/DMA 访问（标准端点模式）
+> - **典型混合架构**: `MAC_COUNT=6`, `SWITCH_CONNECTED_MAC={1,1,1,1,0,0}` → MAC0~3 接入 4-port Switch，MAC4~5 独立直连（如 ADAS 骨干 + OTA/诊断端口）
+> - Switch Core 内部包含独立 Host 端口（CPU 管理/收发），不计入 `SWITCH_PORT_COUNT`
+
+| 子系统 | 功能 | ASIL | 实例数 |
+|--------|------|------|--------|
+| **XGMAC-CORE** | IEEE 802.3 MAC 层实现、帧过滤、VLAN 处理 | B | 1~8 (按 `MAC_COUNT`) |
+| **MTL** | FIFO 缓冲、队列管理、流量整形 (CBS/TAS) | B | 1~8 (每 MAC 一个) |
+| **DMA** | 描述符管理、数据搬运、时间戳回写 | B | 1~8 (每 MAC 一个) |
+| **Switch Core** | **L2/L3 帧交换、FDB 自学习、VLAN 转发、多播过滤、Switch 级 TAS** | **B** | 0~1 (可选) |
+| **PTP/Timestamp** | 1588/gPTP 时间同步、**双 PHC + vPHC 虚拟化**、PPS 输出 | B | 1~2 (按 `PHC_COUNT`) |
+| **Safety Monitor** | ECC/Parity/Timeout 检测与报警 | B | 1 |
+| **HSPHY Interface** | PHY 接口适配 (RGMII/SGMII/USXGMII) | B | 1~8 (按 `PHY_COUNT`) |
 
 ---
 
@@ -291,17 +409,27 @@
 
 ### 4.3 资源估算
 
-| 模块 | 门数 (kGE) | SRAM (KB) | 备注 |
-|------|-----------|-------------|------|
-| XGMAC-CORE ×2 | ~80 | 8 | 不含 FIFO |
-| MTL ×2 | ~20 | 64 (32K×2) | TX/RX FIFO |
-| DMA ×2 | ~40 | 4 | 描述符缓存 |
-| Switch Core | **~80** | **16** | **FDB + VLAN + L3 Route + TAS GCL** |
-| PTP/Timestamp | ~15 | 2 | 时间戳 FIFO |
-| PTP/Timestamp (双 PHC) | **~25** | **4** | **双 PHC + vPHC 虚拟化** |
-| Safety/ECC | ~15 | 0 | 校验逻辑 |
-| HSPHY IF | ~25 | 0 | 接口逻辑 |
-| **总计** | **~205** | **~82** | — |
+> **公式化估算**（按实际实例累加，非固定乘数）
+
+| 模块 | 每实例门数 (kGE) | 每实例 SRAM (KB) | 累加公式 | 备注 |
+|------|-----------------|-----------------|----------|------|
+| XGMAC-CORE | ~40 | 4 | `40 × N_xgmac` | N_xgmac = count(MAC_x_TYPE==2) |
+| GMAC-CORE | ~25 | 2 | `25 × N_gmac` | N_gmac = count(MAC_x_TYPE==1) |
+| MAC-CORE (10/100M) | ~15 | 1 | `15 × N_mac` | N_mac = count(MAC_x_TYPE==0) |
+| MTL | ~10 | 32 | `10 × MAC_COUNT` | TX/RX FIFO 各 32KB |
+| DMA | ~20 | 2 | `20 × MAC_COUNT` | 描述符缓存 |
+| Switch Core | **~80** | **16** | 固定（若 SUPPORT_SWITCH=1） | FDB + VLAN + L3 Route + TAS GCL |
+| PTP/Timestamp | ~10 | 2 | `10 + 10×(PHC_COUNT-1)` | 基础 + 每额外 PHC |
+| vPHC 虚拟化 | ~5 | 1 | `5 × SUPPORT_VPHC` | Xen IO Ring 逻辑 |
+| Safety/ECC | ~15 | 0 | 固定 | 校验逻辑 |
+| HSPHY IF | ~5 | 0 | `5 × PHY_COUNT` | 每 PHY 接口逻辑 |
+| **总计（典型）** | **~205** | **~82** | — | 4×GMAC + 4-port Switch + 双 PHC |
+
+> **典型场景快速估算**:
+> - **中央网关 (4 GMAC/1G + Switch + vPHC)**: ~205 kGE, ~82 KB SRAM
+> - **ADAS (2 XGMAC/5G)**: ~160 kGE, ~58 KB SRAM
+> - **混合 (1 XGMAC/5G + 1 GMAC/1G + Switch)**: ~175 kGE, ~64 KB SRAM
+> - **边缘节点 (1 MAC/10M)**: ~65 kGE, ~35 KB SRAM
 
 ---
 
@@ -314,7 +442,7 @@
 | 参数 | 符号 | 单位 | 说明 |
 |------|------|------|------|
 | MAC 数量 | N_mac | — | `MAC_COUNT` |
-| 每 MAC 速率 | R_mac | Mbps | `PHY_SPEED` × 1000 |
+| 每 MAC 速率 | R_mac | Mbps | `MAC_x_SPEED` × 1000 |
 | TSN 使能 | TSN_en | — | `SUPPORT_TSN` |
 | CBS 队列数 | N_cbs | — | `MTL_TX_QUEUES` (若 `SUPPORT_CBS=1`) |
 | TAS 门控周期 | T_tas | μs | GCL 周期 (若 `SUPPORT_TAS=1` 或 `SWITCH_TAS=1`) |
@@ -378,7 +506,7 @@ R_switch_ct = R_total × 1.2
 
 #### 4.4.3 典型场景计算示例
 
-| 场景 | MAC_COUNT | PHY_SPEED | R_total | DMA_CH_MIN | DMA_CH_TSN | **DMA_CH_REC** | W_axi | F_axi | B_axi_actual | 裕量 |
+| 场景 | MAC_COUNT | `MAC_x_SPEED` | R_total | DMA_CH_MIN | DMA_CH_TSN | **DMA_CH_REC** | W_axi | F_axi | B_axi_actual | 裕量 |
 |------|-----------|-----------|---------|------------|------------|----------------|-------|-------|--------------|------|
 | 中央网关 (4×1G) | 4 | 1G | 4 Gbps | 4 | 8 | **8** | 128 | 200 | 25.6 Gbps | **6.4×** |
 | ADAS (2×5G) | 2 | 5G | 10 Gbps | 10 | 16 | **16** | 128 | 300 | 38.4 Gbps | **3.84×** |
@@ -789,7 +917,7 @@ v
 | ISSUE-007 | 双 PHC + vPHC 的 Xen IO Ring 接口定义与 SoC 集成 | P1 | Arch Agent | **✅ 已关闭** | **PAD 结论**: PHC0/PHC1 寄存器接口定义完成（64-bit 纳秒 + 32-bit 亚纳秒，+0x000/+0x100 偏移）；vPHC IO Ring 格式 64B（8B 时间戳 + 4B 域ID + 4B 序列号 + 48B 保留）；权限控制 Region ID 分级；中断 `vphc_update_irq`。SoC 集成方提供 Hypervisor 适配层。**EDR 后续**: Design Agent 实现 PHC 寄存器模块和 vPHC IO Ring 控制器 |
 | ISSUE-008 | L3 路由表容量、查表机制与 ARP 缓存定义 | P2 | Design Agent | **✅ 已关闭** | **PAD 结论**: 路由表 256/512/1K 条目可配（`L3_ROUTE_TABLE_SIZE`），哈希表默认（4-way 组相联，<200ns），TCAM 可选（<50ns）。ARP 缓存 128 条目，600s 老化。默认路由 0.0.0.0/0 → Host。**EDR 后续**: Design Agent 实现路由表哈希引擎/TCAM 接口；Verification Agent 验证 1K 满载查表延迟和冲突率 |
 | ISSUE-009 | AVTP 硬件感知的 RX Filter 位定义与 DMA 队列映射 | P2 | Arch Agent | **✅ 已关闭** | **PAD 结论**: AVTP 识别：以太类型 0x22F0 或 VLAN+PCP 匹配（PCP=2/3 掩码可配），64-bit Stream ID 白名单 16 条目。DMA 独立队列 `RX_Q_AVTP`（默认 Queue 7）。寄存器 `AVTP_CTRL`/`AVTP_VLAN_PCP_MASK`/`AVTP_STREAM_ID[n]`。默认支持 IEEE 1722-2016。**EDR 后续**: Design Agent 实现 AVTP RX Filter 模块；Verification Agent 验证 AVTP 流识别精度和 DMA 队列隔离 |
-| **ISSUE-005** | **10BASE-T1S PHY 集成决策** | **P2** | **PM Agent** | **✅ 已关闭** | **PAD 结论**: 10BASE-T1S 纳入本 IP 范围，作为 `PHY_SPEED=0` 选项，通过 `PHY_TYPE=0` 参数独立配置。支持 PLCA 多点总线（最多 8 节点），半双工，不支持帧抢占/TAS。应用场景：域内边缘节点、车身传感器网络。与 100BASE-T1S 区别：10BASE-T1S 多点总线，100BASE-T1S 仅点对点。参考 `Reference/Kimi_Agent_MCU_Ethernet/ethernet_mcu.agent.final.md` |
+| **ISSUE-005** | **10BASE-T1S PHY 集成决策** | **P2** | **PM Agent** | **✅ 已关闭** | **PAD 结论**: 10BASE-T1S 纳入本 IP 范围，作为 `PHY_x_SPEED=0` 选项，通过 `PHY_x_TYPE=0` 参数独立配置（按 PHY 实例）。支持 PLCA 多点总线（最多 8 节点），半双工，不支持帧抢占/TAS。应用场景：域内边缘节点、车身传感器网络。与 100BASE-T1S 区别：10BASE-T1S 多点总线，100BASE-T1S 仅点对点。参考 `Reference/Kimi_Agent_MCU_Ethernet/ethernet_mcu.agent.final.md` |
 
 > **PAD 阶段已知问题清零声明**
 >
