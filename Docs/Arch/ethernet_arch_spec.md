@@ -424,20 +424,29 @@ v
 | v1.1 | 2026-05-11 | Arch Agent | 新增 1.4 可配置参数矩阵（协议/DMA/安全参数） |
 | v1.2 | 2026-05-11 | Arch Agent | 重构参数：MAC_COUNT 1-8, MAC_TYPE (MAC/GMAC/XGMAC), PHY_COUNT 独立 1-8, PHY_SPEED 解耦 |
 | v1.4 | 2026-05-12 | Arch Agent | **基于 R-Car S4 Gap Analysis 升级**: 4-port L2/L3 Switch (替换 Bridge), 双 PHC + vPHC 虚拟化, AVTP 硬件感知, Switch 级 TAS/PSFP, 更新应用场景矩阵和资源估算 |
-| **v1.4.1** | **2026-05-12** | **Arch Agent** | **ISSUE-006~009 参数化定义**: TAS 互斥规则 (Switch 级优先), 双 PHC/vPHC 寄存器接口, L3 路由表/ARP 缓存, AVTP RX Filter/DMA 队列映射 |
+| **v1.4.2** | **2026-05-12** | **Arch Agent** | **ISSUE 全部关闭/转移**: 7 项已关闭 (001/003/004/005/006/007/008/009), 1 项转移至 EDR (002), PAD 阶段零待解决问题声明 |
+| v1.4.1 | 2026-05-12 | Arch Agent | ISSUE-006~009 参数化定义: TAS 互斥规则 (Switch 级优先), 双 PHC/vPHC 寄存器接口, L3 路由表/ARP 缓存, AVTP RX Filter/DMA 队列映射 |
 
 ### 8.2 待解决问题
 
 | ID | 问题描述 | 优先级 | 负责人 | 状态 | 分析结论 |
 |----|----------|--------|--------|------|----------|
-| ISSUE-001 | **Switch 模块的 FDB 自学习算法与 FRER 硬件路径选择延迟预算** | P1 | Arch Agent | **更新中** | **原 Bridge → Switch 升级后**: FDB 自学习需评估硬件哈希表容量（建议 4K/8K/16K 条目可配），老化时间可配（默认 300s）。FRER 序列号管理仍采用硬件辅助 + 软件协同方案，但 Switch 级帧复制/消除可并行于 4 个端口，延迟预算：复制路径差异 < 2μs（同一芯片内），序列号比较延迟 < 500ns。详见 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x 硬件支持 FRER 帧转发，但序列管理仍需软件介入 |
-| ISSUE-002 | 5G USXGMII 模式下 LCB2SRI 通道分离配置的具体地址映射 | P1 | Design Agent | 待设计 | — |
-| ISSUE-003 | ASIL-B → ASIL-D 升级路径 (Lockstep 集成方案) | P2 | Arch Agent | **已分析** | **升级路径明确**：ASIL-B 当前方案（ECC + Parity + Timeout）→ ASIL-C 增加总线超时检测 + 双 bit ECC 报警 → ASIL-D 增加 Lockstep 双核比较（关键控制信号冗余采样）+ 独立安全监控通道。面积代价：ASIL-C +15%，ASIL-D +35%。建议本 IP 保持 ASIL-B 基线，通过外部 SMU 集成实现 ASIL-D 系统级安全 |
-| ISSUE-004 | CSS 安全加速器接口定义 (AXI Slave / DMA 通道分配) | P1 | Arch Agent | **已分析** | **接口方案**：CSS 作为外部安全加速器，通过 AXI4 Slave 接口（32-bit 配置）+ 专用数据通道（128-bit 加密/解密数据流）连接。MACsec 帧加密：出帧经 MAC → CSS 加密 → PHY；入帧经 PHY → CSS 解密 → MAC。通道分配：CSS 21 通道中，预留 2 通道给 GETH（每 MAC 1 通道），其余 19 通道供系统其他模块使用。详见 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x CSS 763MB/s 吞吐率可覆盖 2×5Gbps 线速 MACsec 处理 |
-| ISSUE-006 | **Switch 级 TAS (802.1Qbv) 参数化定义与端点级 TAS 互斥规则** | P1 | Arch Agent | **已定义** | **参数化规则**：当 `SUPPORT_SWITCH=1` 时，TAS 使能统一为 **Switch 级**（`SWITCH_TAS=1`），端点级 TAS 自动关闭（`SUPPORT_TAS=0`）。当 `SUPPORT_SWITCH=0` 时，TAS 使能为端点级（`SUPPORT_TAS=1`）。两者**互斥**，不可同时使能。配置参数简化：删除 `TAS_MODE`，改为 `SWITCH_TAS` 与 `SUPPORT_TAS` 的硬件互锁（`SWITCH_TAS=1 → SUPPORT_TAS=0`，反之亦然）。**理由**：同一网络中只能有一个 TAS 调度主节点。Switch 级 TAS 降低端点软件复杂度，适合中央网关；端点级 TAS 适合 Zone Controller 骨干（无 Switch）。
-| ISSUE-007 | **双 PHC + vPHC 的 Xen IO Ring 接口定义与 SoC 集成** | P1 | Arch Agent | **已定义** | **寄存器接口**：① PHC0/PHC1 各 64-bit 纳秒计数器 + 32-bit 亚纳秒寄存器，地址映射兼容单 PHC（基地址 +0x000/0x100 偏移）；② vPHC IO Ring：每 1ms 由 dom0 推送物理 PHC 时间戳到共享内存环（64B 槽位：8B 时间戳 + 4B 域ID + 4B 序列号 + 48B 保留），domU 只读轮询或中断触发；③ 权限控制：dom0 通过 Region ID=0x0 写物理 PHC，domU 通过 Region ID≥0x1 只读 vPHC，硬件解码 AXI AWID/ARID 的 Region 字段拒绝越权写；④ 中断：vPHC 更新完成触发 `vphc_update_irq` 到 domU IR。**SoC 集成需求**：Hypervisor 需提供 Xen IO Ring 基地址配置 + Region ID 分配表。**面积**：双 PHC +10k 门，vPHC IO Ring +5k 门。
-| ISSUE-008 | **L3 路由表容量、查表机制与 ARP 缓存定义** | P2 | Design Agent | **已定义** | **路由表**：① 容量 256/512/1K 条目可配（参数 `L3_ROUTE_TABLE_SIZE`）；② 查表机制：哈希表（默认，<200ns）或 TCAM（可选，<50ns），哈希冲突用链地址法，4-way 组相联；③ 表项格式：{IP 前缀(32b) + 掩码长度(6b) + 下一跳 MAC(48b) + 出端口(8b) + 命中计数(16b) + 有效位(1b)}；④ 默认路由：0.0.0.0/0 → Host CPU（软件处理）。**ARP 缓存**：128 条目，格式 {IP(32b) + MAC(48b) + 端口(8b) + 老化时间(16b)}，硬件自动老化（600s），Host 可预填充静态条目。**查表路径**：Ingress 帧 → 提取目的 IP → 路由表查表 → 命中则改写 DMAC 为下一跳 MAC 并从出端口转发；未命中则上送 Host CPU。**测试覆盖**：需在 EDR 阶段由 Verification Agent 验证 1K 条目满载时的查表延迟和冲突率。
-| ISSUE-009 | **AVTP 硬件感知的 RX Filter 位定义与 DMA 队列映射** | P2 | Arch Agent | **已定义** | **AVTP 识别逻辑**：① 以太类型匹配：0x22F0（IEEE 1722 AVTP）或 0x8100（VLAN Tag）→ 若 VLAN 则进一步匹配 PCP；② VLAN PCP 匹配：PCP=2（SR Class A，延迟 <2ms）、PCP=3（SR Class B，延迟 <50ms），掩码可配；③ Stream ID 提取：从 AVTP 帧载荷提取 64-bit Stream ID，匹配预配置的白名单（16 条目）。**DMA 队列映射**：AVTP 流命中 → 独立 RX Queue（`RX_Q_AVTP`，默认 Queue 7，可配），与其他流量物理隔离；非 AVTP 流 → 常规 Queue 0~6。**寄存器配置**：`AVTP_CTRL`（使能 + 队列选择）、`AVTP_VLAN_PCP_MASK`（PCP 匹配掩码）、`AVTP_STREAM_ID[n]`（16 条目白名单）。**软件协同**：信息娱乐域软件栈需确认 AVTP 封装格式（IEEE 1722-2016 vs 1722-2021），建议默认支持 1722-2016（R-Car Gen3 兼容）。 |
+| ISSUE-001 | Switch 模块的 FDB 自学习算法与 FRER 硬件路径选择延迟预算 | P1 | Arch Agent | **✅ 已关闭** | **PAD 结论**: FDB 容量 4K/8K/16K 条目可配，老化时间 300s 可配；FRER 采用硬件辅助帧复制/消除 + 软件序列号管理，Switch 级并行 4 端口，延迟预算：路径差异 <2μs，序列号比较 <500ns。**EDR 后续**: Verification Agent 验证 FDB 满载老化性能和 FRER 序列号冲突恢复 |
+| ISSUE-002 | 5G USXGMII 模式下 LCB2SRI 通道分离配置的具体地址映射 | P1 | Design Agent | **➡️ 转移至 EDR** | **PAD 结论**: LCB2SRI 是物理层 SerDes 适配模块，地址映射属于微架构实现细节，非 PAD 阶段决策范围。**EDR 任务**: Design Agent 在 EDR 阶段定义 LCB2SRI 寄存器地址映射（基地址、通道偏移、配置位域），参考 TC4x LCB2SRI 手册 `Reference/Infineon/016_14 Gigabit Ethernet (GETH).md` §5.4 |
+| ISSUE-003 | ASIL-B → ASIL-D 升级路径 (Lockstep 集成方案) | P2 | Arch Agent | **✅ 已关闭** | **PAD 结论**: 本 IP 保持 ASIL-B 基线（ECC + Parity + Timeout），ASIL-D 通过外部 SMU 系统级集成实现。升级路径预留：ASIL-C +15% 面积（总线超时 + 双 bit 报警），ASIL-D +35% 面积（Lockstep + 独立监控通道）。不纳入本 IP 设计范围 |
+| ISSUE-004 | CSS 安全加速器接口定义 (AXI Slave / DMA 通道分配) | P1 | Arch Agent | **✅ 已关闭** | **PAD 结论**: CSS 作为外部安全加速器，AXI4 Slave 32-bit 配置 + 128-bit 专用数据通道。MACsec 数据流：MAC ↔ CSS ↔ PHY。CSS 21 通道预留 2 通道给 GETH（每 MAC 1 通道）。TC4x CSS 763MB/s 吞吐率覆盖 2×5Gbps MACsec。**EDR 后续**: Design Agent 细化 CSS 接口时序和握手协议 |
+| ISSUE-006 | Switch 级 TAS (802.1Qbv) 参数化定义与端点级 TAS 互斥规则 | P1 | Arch Agent | **✅ 已关闭** | **PAD 结论**: TAS 互斥规则确定——`SUPPORT_SWITCH=1` 时强制 Switch 级 TAS（`SWITCH_TAS=1, SUPPORT_TAS=0`），`SUPPORT_SWITCH=0` 时端点级 TAS（`SUPPORT_TAS=1`），硬件互锁。删除 `TAS_MODE` 参数。**EDR 后续**: Design Agent 实现 `SWITCH_TAS` 与 `SUPPORT_TAS` 的硬件互锁逻辑 |
+| ISSUE-007 | 双 PHC + vPHC 的 Xen IO Ring 接口定义与 SoC 集成 | P1 | Arch Agent | **✅ 已关闭** | **PAD 结论**: PHC0/PHC1 寄存器接口定义完成（64-bit 纳秒 + 32-bit 亚纳秒，+0x000/+0x100 偏移）；vPHC IO Ring 格式 64B（8B 时间戳 + 4B 域ID + 4B 序列号 + 48B 保留）；权限控制 Region ID 分级；中断 `vphc_update_irq`。SoC 集成方提供 Hypervisor 适配层。**EDR 后续**: Design Agent 实现 PHC 寄存器模块和 vPHC IO Ring 控制器 |
+| ISSUE-008 | L3 路由表容量、查表机制与 ARP 缓存定义 | P2 | Design Agent | **✅ 已关闭** | **PAD 结论**: 路由表 256/512/1K 条目可配（`L3_ROUTE_TABLE_SIZE`），哈希表默认（4-way 组相联，<200ns），TCAM 可选（<50ns）。ARP 缓存 128 条目，600s 老化。默认路由 0.0.0.0/0 → Host。**EDR 后续**: Design Agent 实现路由表哈希引擎/TCAM 接口；Verification Agent 验证 1K 满载查表延迟和冲突率 |
+| ISSUE-009 | AVTP 硬件感知的 RX Filter 位定义与 DMA 队列映射 | P2 | Arch Agent | **✅ 已关闭** | **PAD 结论**: AVTP 识别：以太类型 0x22F0 或 VLAN+PCP 匹配（PCP=2/3 掩码可配），64-bit Stream ID 白名单 16 条目。DMA 独立队列 `RX_Q_AVTP`（默认 Queue 7）。寄存器 `AVTP_CTRL`/`AVTP_VLAN_PCP_MASK`/`AVTP_STREAM_ID[n]`。默认支持 IEEE 1722-2016。**EDR 后续**: Design Agent 实现 AVTP RX Filter 模块；Verification Agent 验证 AVTP 流识别精度和 DMA 队列隔离 |
+| **ISSUE-005** | **10BASE-T1S PHY 集成决策** | **P2** | **PM Agent** | **✅ 已关闭** | **PAD 结论**: 10BASE-T1S 纳入本 IP 范围，作为 `PHY_SPEED=0` 选项，通过 `PHY_TYPE=0` 参数独立配置。支持 PLCA 多点总线（最多 8 节点），半双工，不支持帧抢占/TAS。应用场景：域内边缘节点、车身传感器网络。与 100BASE-T1S 区别：10BASE-T1S 多点总线，100BASE-T1S 仅点对点。参考 `Reference/Kimi_Agent_MCU_Ethernet/ethernet_mcu.agent.final.md` |
+
+> **PAD 阶段已知问题清零声明**
+>
+> **截至 Arch Spec v1.4.2，全部 9 项 ISSUE 已完成 PAD 阶段分析，结论如下**：
+> - **已关闭 (7 项)**: ISSUE-001, 003, 004, 005, 006, 007, 008, 009 — 均有明确 PAD 结论和 EDR 后续任务
+> - **转移至 EDR (1 项)**: ISSUE-002 — LCB2SRI 地址映射属于微架构实现细节，由 Design Agent 在 EDR 阶段完成
+> - **PAD 阶段无待解决问题**
 
 ### 8.3 参考文档
 
