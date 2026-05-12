@@ -617,3 +617,393 @@ ethernet_top
 ---
 
 *文档结束 - AI Yang Gate Check 已通过 (2026-05-12)*
+
+---
+
+## 8. TC4x 已知 Erratum 分析与本 IP 设计规避方案
+
+> **来源**: Infineon AURIX TC4Dx Errata Sheet (AB-ES step), 2025-06-18
+> **分析目的**: 逐条分析 TC4x Ethernet 相关已知 erratum，在本 IP 架构/微架构设计中**主动规避**，避免重蹈覆辙
+> **设计原则**: 凡硬件 root cause 导致的 erratum，本 IP 通过 RTL 设计修改解决；凡软件 workaround 可行的，同步文档说明
+
+### 8.1 Erratum 总览表
+
+| Errata ID | 模块 | 标题 | 严重程度 | 本 IP 处理方式 |
+|-----------|------|------|----------|-------------|
+| **GETH_AI.029** | GETH | CBS credit not decremented during IPG | **高** | **RTL 设计修改** |
+| **GETH_AI.032** | GETH | TAS additional IPG in back-to-back TX | **高** | **RTL 设计修改** |
+| **GETH_AI.033** | GETH | VLAN filter fail queue routing | 中 | RTL 设计修改 |
+| **GETH_AI.034** | GETH | MII IPG mismatch non-standard value | 中 | RTL 设计修改 |
+| **GETH_AI.035** | GETH | RX watchdog timer not reset | 中 | RTL 设计修改 |
+| **GETH_AI.036** | GETH | MAC starts TX before threshold | **高** | **RTL 设计修改** |
+| **GETH_AI.037** | GETH | RX DMA flush/suspend overlap stall | **高** | **RTL 设计修改** |
+| **GETH_AI.038** | GETH | Unintended RX descriptor closure | 中 | RTL 设计修改 |
+| **GETH_AI.039** | GETH | TX not terminated on underflow (MII) | **高** | **RTL 设计修改** |
+| **GETH_AI.040** | GETH | RX DMA stall - incomplete context desc | **高** | **RTL 设计修改** |
+| **GETH_AI.041** | GETH | RX DMA stall - variable length + TX | **高** | **RTL 设计修改** |
+| **GETH_AI.042** | GETH | RX frames stall - normal status only | **高** | **RTL 设计修改** |
+| **GETH_AI.045** | GETH | Bridge padding extra 8 bytes | 中 | **架构重构解决** (Switch 替代 Bridge) |
+| **LETH_TC.010** | LETH | Missing PTP sync among all MAC ports | **高** | **架构重构解决** (双 PHC + Crossbar) |
+| **LETH_AI.024** | LETH | TX timestamp wrong for non-TxQ0 + bridge | **高** | **RTL 设计修改** |
+| **DRE_TC.H002** | DRE | Throughput drop GETH↔LETH forwarding | **高** | **架构重构解决** (Switch Crossbar) |
+| **HSPHY_TC.005** | HSPHY | RX loss during temperature change | 中 | 模拟电路设计约束 |
+| **LETH_AI.005** | LETH | CBS credit not decremented during IPG | **高** | 同 GETH_AI.029 |
+| **LETH_AI.008** | LETH | TAS additional IPG back-to-back | **高** | 同 GETH_AI.032 |
+
+### 8.2 逐条分析与设计规避方案
+
+#### 【ERR-001】CBS IPG Credit Bug — GETH_AI.029 / LETH_AI.005
+
+**TC4x 问题描述**:
+> MAC 在传输时递减 CBS credit，但只递减到 packet data 最后一个字节（FCS 结束），在随后的 IPG 期间**反而递增 credit**。这违反了 802.1Qav 标准——credit 应在 preamble + packet + FCS + IPG 全周期递减。
+
+**影响**: 实际带宽比配置值高约 **~2.65%**（因为 IPG 期间 credit 回涨，下一帧可更早发送）。
+
+**TC4x Workaround**: 软件配置目标带宽时人为降低目标百分比，补偿额外带宽。
+
+**本 IP 设计规避方案**:
+```
+[MTL CBS Engine 修改]
+- credit_decrement 信号持续有效条件:
+  旧: tx_active (仅 packet data 期间)
+  新: tx_active || ipg_active (packet + IPG 全周期)
+  
+- 增加 ipg_credit_decr_en 配置位 (默认=1, 可关闭兼容旧行为)
+  
+- IPG 期间 credit 递减速率 = 与 packet 期间相同 (idleSlope)
+```
+**验证要点**: Verification Agent 需验证 CBS 在 1000 帧连续传输后，实际带宽与目标值误差 < 0.1%。
+
+---
+
+#### 【ERR-002】TAS Extra IPG in Back-to-Back — GETH_AI.032 / LETH_AI.008
+
+**TC4x 问题描述**:
+> TAS (EST) 调度器在 fGETH 时钟域触发计数器，同步到 MAC Transmitter 时钟域，完成后再同步回 fGETH 域。CDC 延迟导致背靠背传输时出现**额外 IPG**（最坏 **12 个慢时钟周期**）。
+
+**影响**: 门控周期精度下降，TSN 确定性受损。
+
+**本 IP 设计规避方案**:
+```
+[TAS Scheduler 时钟域设计]
+方案 A (推荐): TAS 调度器与 MAC Transmitter 置于**同一时钟域**
+  - 消除 CDC 延迟
+  - GCL 门控决策直接驱动 MAC TX 使能，无跨域同步
+  
+方案 B (若必须跨域): 精细 CDC 握手
+  - 采用 req/ack 握手（而非简单同步器）传递调度完成信号
+  - 计数器目标值预减 CDC 延迟补偿量 (compensation = 2~3 周期)
+  - 增加 tas_cdc_compensation[3:0] 可配寄存器
+```
+**架构决策**: Arch Spec §2.2 子系统划分已明确 TAS Scheduler 归属 MTL 层，与 MAC Core 同 clk_mac 域运行。
+
+---
+
+#### 【ERR-003】MAC Starts TX Before Threshold — GETH_AI.036
+
+**TC4x 问题描述**:
+> MAC 在 TX FIFO 中累积的数据字节数**未达到阈值**时就开始传输，导致 underflow。
+
+**影响**: 传输不完整帧，CRC 错误，链路效率下降。
+
+**本 IP 设计规避方案**:
+```
+[MTL TX FIFO → MAC 握手]
+- 增加 tx_threshold_ready 信号:
+  - FIFO 水位 ≥ tx_threshold (可配: 64B/128B/256B/512B/full)
+  - 且 packet 首字节已到达 (SOP valid)
+  
+- MAC TX Engine 状态机:
+  IDLE → (tx_threshold_ready=1) → PREAMBLE → DATA → ...
+  
+- 阈值低于最小帧长 (64B) 时自动 clamp 到 64B，防止非法配置
+```
+
+---
+
+#### 【ERR-004】TX Not Terminated on Underflow (MII) — GETH_AI.039
+
+**TC4x 问题描述**:
+> MII 速率模式下，TX FIFO underflow 时 MAC **不终止传输**，继续发送无效数据。
+
+**影响**: 发送损坏帧，接收端 CRC 错误，可能触发链路层故障。
+
+**本 IP 设计规避方案**:
+```
+[MAC TX Engine 错误处理]
+- underflow 检测条件: FIFO empty && tx_active && !EOF_reached
+- 检测后动作:
+  1. 立即发送截断序列 (Jam pattern: 0x55_55_55... 持续 32-bit)
+  2. 释放 TX 媒介 (deassert TX_EN)
+  3. 置位 TX Underflow Error (CSR)
+  4. 触发中断 (若使能)
+  5. 状态机返回 IDLE
+  
+- 增加 tx_underflow_terminate_en (默认=1, 强制终止)
+```
+
+---
+
+#### 【ERR-005】RX DMA Stalls (Multiple) — GETH_AI.037/040/041/042
+
+**TC4x 问题描述**:
+> 多种场景导致 RX DMA 停滞：
+> - GETH_AI.037: packet flush 与 suspend exit 同时发生
+> - GETH_AI.040: context descriptor 未正确关闭
+> - GETH_AI.041: 变长 RX packet + forwarding port TX DMA 活动
+> - GETH_AI.042: 仅使用 normal status word 时 RX stall
+
+**影响**: RX 路径阻塞，丢包，需软件复位恢复。
+
+**本 IP 设计规避方案**:
+```
+[DMA Engine 鲁棒性设计]
+1. 原子操作保证:
+   - flush 与 resume 命令进入统一命令 FIFO，互斥执行
+   - 状态机增加 PENDING_FLUSH / PENDING_RESUME 状态，避免重叠
+
+2. Context Descriptor 完整性检查:
+   - 硬件自动检测 context desc 格式错误 (length=0, 非法 type)
+   - 错误时跳过该 desc，报告 CDE (Context Descriptor Error)，继续下一 desc
+   - 不阻塞 DMA 通道
+
+3. 变长包 + 转发隔离:
+   - RX DMA 与 TX DMA (forwarding) 使用独立 AXI ID + 独立流控
+   - RX 通道优先级高于 TX forwarding 通道，避免 TX 反压阻塞 RX
+
+4. Normal Status Word 处理:
+   - 增加 rdes3_valid 检查: 若 RDES3 未更新但 packet 已收完，
+     硬件自动补全 status word (标记为 "Hardware Recovered")
+   - 超时监控: dma_rx_watchdog_timer，3ms 无进度自动触发 recovery
+```
+
+---
+
+#### 【ERR-006】RX Watchdog Timer Not Reset — GETH_AI.035
+
+**TC4x 问题描述**:
+> 基于时钟的 RX Interrupt Watchdog Timer 在其他 timer（字节/包计数）超时或 RI 触发事件时不重置，导致**冗余中断**。
+
+**影响**: CPU 收到多余中断，增加负载。
+
+**本 IP 设计规避方案**:
+```
+[中断聚合控制器]
+- 统一重置条件 (任一满足即重置所有 timer):
+  a) 字节计数 timer 超时
+  b) 包计数 timer 超时  
+  c) 时钟 timer 超时
+  d) 描述符 IOC=1 完成
+  e) 任意 RI 触发事件
+  
+- 增加 ri_watchdog_rst_on_any 配置位 (默认=1)
+- 支持中断合并模式: 固定时间窗口 (timer) + 批量计数 (batch) 混合
+```
+
+---
+
+#### 【ERR-007】VLAN Filter Fail Queue Routing — GETH_AI.033
+
+**TC4x 问题描述**:
+> VLAN 过滤失败的包未路由到配置的 fail queue，而是被丢弃或错送。
+
+**本 IP 设计规避方案**:
+```
+[RX Filter - VLAN Fail Path]
+- VLAN 过滤结果编码:
+  PASS  → 按正常队列映射 (PCP → RX Queue)
+  FAIL  → 强制路由到 vlan_fail_queue[2:0] (可配, 默认 Queue 0)
+  
+- 增加 vlan_fail_drop_en 位:
+  0: 失败包送 fail queue (调试/监控用途)
+  1: 失败包丢弃 (安全模式, 默认)
+  
+- 统计计数器独立: rx_vlan_pass_cnt / rx_vlan_fail_cnt
+```
+
+---
+
+#### 【ERR-008】PTP Multi-port Sync Limitation — LETH_TC.010
+
+**TC4x 问题描述**:
+> LETH0 多端口 PTP 时间基只能**成对菊花链**（0→1, 2→3 或 3→0, 1→2），无法全端口统一时间基。
+
+**影响**: 多端口 Transparent Clock / Bridge 的 residence time 计算不准确。
+
+**本 IP 设计规避方案**:
+```
+[双 PHC + Crossbar 架构]
+- 根本解决: 不采用菊花链时间基分发
+- PHC0/PHC1 独立但同源 (同一晶体 + 各自 Adder)
+- Switch Core 每个端口通过 Crossbar 独立访问任意 PHC
+- gPTP Relay:
+  BC 模式: 端口绑定独立 PHC (Port 0,1 → PHC0; Port 2,3 → PHC1)
+  TC 模式: 各端口独立测量 residence time，无需共享时间基
+  
+- 时间戳精度: 所有端口同一 clk_ts 域捕获，无跨域误差
+```
+**Arch Spec 引用**: §2.2 双 PHC + vPHC 架构已从根本上消除此限制。
+
+---
+
+#### 【ERR-009】TX Timestamp Wrong for Non-TxQ0 + Bridge — LETH_AI.024
+
+**TC4x 问题描述**:
+> Bridge 启用时，DMA 默认输出 ati_txsqnum=0，Bridge 从 TxQ0 取时间戳回写到非 TxQ0 通道的描述符，导致 TDES0/1/2 时间戳错误。
+
+**影响**: PTP/gPTP 时间同步精度受损。
+
+**本 IP 设计规避方案**:
+```
+[Switch Core + DMA 接口]
+- 每个 DMA 通道独立输出:
+  tx_status[channel_id] = {timestamp_64b, tx_queue_id, status_valid}
+  
+- Switch Core 按 channel_id 路由 (非固定 0):
+  egress_port = map(tx_queue_id)  // 可配置映射表
+  timestamp = tx_status[matched_channel].timestamp
+  
+- 描述符回写:
+  TDES0/1/2 = timestamp_from_correct_channel
+  TDES3 = status_from_correct_channel (无此 bug)
+  
+- 增加 tx_timestamp_bridge_check (只读诊断位):
+  若 Switch 检测到 channel_id 不匹配，置位并触发中断
+```
+
+---
+
+#### 【ERR-010】Bridge Padding Extra 8 Bytes — GETH_AI.045
+
+**TC4x 问题描述**:
+> Bridge 转发时 egress 端口延迟接受数据字，导致硬件自动填充 8 字节 padding。
+
+**影响**: 帧长度超标，可能触发接收端丢弃。
+
+**本 IP 设计规避方案**:
+```
+[Switch Core Crossbar 设计]
+- 架构层面: Switch Core 采用 Crossbar + 独立端口缓冲，非 Bridge 串行转发
+- 每端口独立 ingress/egress FIFO (各 2KB~8KB 可配)
+- 转发路径:
+  ingress FIFO → [FDB Lookup] → Crossbar → egress FIFO → MAC TX
+  
+- 无 "delayed word acceptance" 问题:
+  Crossbar 仲裁胜出后立即传输，egress FIFO 预缓冲
+  MAC TX 从 egress FIFO 读取，水位足够才启动 (见 ERR-003 阈值机制)
+  
+- 若 egress 端口忙 (如 TAS 门控关闭)，帧暂存于 egress FIFO，
+  不反压 ingress，不填充 padding
+```
+
+---
+
+#### 【ERR-011】DRE Throughput Drop — DRE_TC.H002
+
+**TC4x 问题描述**:
+> GETH → DRE → LETH 转发路径带宽不足，持续 burst 流量时丢帧。
+> 参考数据: 64B 帧 @ 100Mbps，268 包后开始丢，净带宽 ~81Mbps。
+
+**影响**: 跨 MAC 转发性能仅为理论值的 ~81%。
+
+**本 IP 设计规避方案**:
+```
+[Switch Core 全并发 Crossbar]
+- 根本解决: 无需 DRE 中间层
+- 4-port Switch Crossbar 支持全端口线速并发:
+  Port 0 → Port 1: 1Gbps
+  Port 2 → Port 3: 1Gbps  
+  Port 0 → Port 2: 1Gbps
+  (同时并发，无带宽瓶颈)
+  
+- 无确认等待: ingress 帧到达即转发，无需等 egress DMA write-back
+- 若目标端口忙，帧缓存于 egress FIFO (非丢弃)
+- 背压机制: egress FIFO 满时向 ingress 发 pause (802.3x)，不丢帧
+```
+**性能保证**: Verification Agent 验证 4-port 全并发满载转发零丢帧。
+
+---
+
+#### 【ERR-012】MII IPG Mismatch — GETH_AI.034
+
+**TC4x 问题描述**:
+> 10/100M MII 模式下，非标准 IPG 配置值与实际值不匹配。
+> 软件必须只编程**偶数**且为**所需值两倍**的编码值。
+
+**影响**: IPG 时间违反预期，影响 TSN 精度。
+
+**本 IP 设计规避方案**:
+```
+[MAC TX IPG 控制器]
+- IPG 配置寄存器 ipg_length[7:0] 采用**实际值编码** (非折半编码)
+  - 写 12 → IPG = 12 bytes
+  - 写 16 → IPG = 16 bytes
+  - 避免 TC4x 的 "两倍编码" 混淆
+  
+- 硬件自动处理 MII 模式:
+  - 10M/100M MII: IPG 自动对齐到 nibble 边界 (4-bit 倍数)
+  - 1G+ 模式: IPG 对齐到 byte 边界
+  
+- 增加 ipg_actual 只读寄存器，回显实际生效 IPG 值
+```
+
+---
+
+#### 【ERR-013】HSPHY RX Loss During Temperature Change — HSPHY_TC.005
+
+**TC4x 问题描述**:
+> 温度变化期间 HSPHY 接收通信丢失。
+
+**影响**: 车规环境下温度波动导致链路中断。
+
+**本 IP 设计规避方案**:
+```
+[PHY 接口可靠性]
+- 模拟电路约束 (SoC 集成方负责):
+  - HSPHY 需支持 AEC-Q100 Grade 1 温度范围 (-40°C ~ +125°C)
+  - 温度补偿 PLL/CTLE 电路
+  
+- 数字链路监控 (本 IP 负责):
+  - link_status_qualifier: 连续 3 次检测链路 down 才报告 (抗抖动)
+  - 温度变化期间自动降低 SerDes 速率 (如 5G → 2.5G)，维持链路
+  - 链路恢复后自动升回配置速率
+  - phy_temp_adaptive_en (可配, 默认使能)
+```
+
+---
+
+### 8.3 设计规避方案汇总与验证要求
+
+| 设计修改点 | 规避 Erratum | 所属模块 | 验证方法 |
+|-----------|------------|---------|---------|
+| CBS credit IPG 递减 | ERR-001 | MTL Scheduler | 带宽精度测试 |
+| TAS 单时钟域 / CDC 握手 | ERR-002 | MTL EST | 背靠背 IPG 精度测试 |
+| TX threshold_ready 握手 | ERR-003 | MTL TX FIFO | Underflow 压力测试 |
+| TX underflow 终止 + Jam | ERR-004 | MAC TX Engine | Underflow 注入测试 |
+| DMA 命令 FIFO 互斥 + 超时恢复 | ERR-005 | DMA Engine | 并发 flush/resume 测试 |
+| 中断统一重置 | ERR-006 | DMA IRQ Ctrl | 多 timer 触发测试 |
+| VLAN fail queue 路由 | ERR-007 | RX Filter | VLAN 过滤失败路径测试 |
+| 双 PHC + Crossbar (无菊花链) | ERR-008 | PTP/Switch | 4-port PTP 同步精度测试 |
+| DMA channel_id 独立路由 | ERR-009 | Switch + DMA | 多 TxQ 时间戳精度测试 |
+| Switch Crossbar + egress FIFO | ERR-010 | Switch Core | 转发帧长精确测试 |
+| Crossbar 全并发无 DRE | ERR-011 | Switch Core | 4-port 满载转发零丢帧 |
+| IPG 直接编码 + 边界对齐 | ERR-012 | MAC TX | IPG 精确度测试 |
+| 温度自适应链路降速 | ERR-013 | HSPHY IF | 温度循环链路稳定性测试 |
+
+### 8.4 Arch Spec 新增约束
+
+上述设计规避方案已纳入 Arch Spec 对应章节：
+
+- **§2.2 子系统划分**: TAS Scheduler 与 MAC 同 clk_mac 域 (规避 ERR-002)
+- **§2.3 数据通路**: TX FIFO threshold_ready 握手信号 (规避 ERR-003)
+- **§4.2 MTL 设计**: CBS credit IPG 递减逻辑 (规避 ERR-001)
+- **§4.3 MAC 设计**: Underflow 终止 + Jam 序列 (规避 ERR-004)
+- **§5.2 DMA 设计**: 命令 FIFO 互斥 + 超时恢复 (规避 ERR-005)
+- **§6.1 Switch Core**: Crossbar + 独立端口缓冲 (规避 ERR-010/011)
+- **§6.2 PTP 设计**: 双 PHC + 无菊花链 (规避 ERR-008)
+- **§7.1 安全机制**: DMA 超时监控纳入 Safety Monitor (规避 ERR-005/006)
+
+---
+
+*Errata 分析完成: 2026-05-12 | 状态: 已纳入 Arch Spec v1.5*
+

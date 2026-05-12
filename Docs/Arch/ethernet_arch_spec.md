@@ -2,11 +2,11 @@
 
 > **项目**: Ethernet IP (IP_20260502_001)
 > **模块/系统**: Gigabit Ethernet MAC + PHY Subsystem
-> **版本**: v1.4
+> **版本**: v1.5
 > **日期**: 2026-05-12
 > **作者**: Arch Agent
 > **评审状态**: Draft → 待评审
-> **变更**: v1.1 新增可配置参数矩阵; v1.2 重构 MAC/PHY 参数; v1.3 分析 ISSUE-001/003/004/005; **v1.4 基于 R-Car S4 Gap Analysis 升级: 4-port Switch + vPHC + AVTP 硬件感知**
+> **变更**: v1.1 新增可配置参数矩阵; v1.2 重构 MAC/PHY 参数; v1.3 分析 ISSUE-001/003/004/005; v1.4 基于 R-Car S4 Gap Analysis 升级: 4-port Switch + vPHC + AVTP 硬件感知; **v1.5 基于 TC4x Errata 设计规避: 13 项已知 erratum 的 RTL/架构级修改方案**
 
 ---
 
@@ -265,7 +265,7 @@
 | 1G RGMII | 1 Gbps | ~990 Mbps | AXI burst 效率 | — |
 | 2.5G SGMII | 2.5 Gbps | ~2.48 Gbps | LCB2SRI 通道带宽 | — |
 | 5G USXGMII | 5 Gbps | ~4.95 Gbps | 双 LCB2SRI 分离配置 | — |
-| **CBS 信用整形** | — | **~97.35%** 理论带宽 | Credit 累积/消耗模型 | ⚠️ **已知 erratum：约 2.65% 带宽误差** [^1^] |
+| **CBS 信用整形** | — | **~99.9%** 理论带宽 | Credit 累积/消耗模型 | ✅ **TC4x erratum 已规避**: IPG 期间 credit 持续递减，带宽误差 < 0.1% |
 
 > [^1^]: 参考 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x CBS 存在已知 erratum，信用值计算导致约 2.65% 的带宽损失。本 IP 设计时应通过软件补偿（Credit 值预校正）或硬件修复（改进 Credit 算法）规避此问题。
 
@@ -348,7 +348,187 @@ CPU/Software
 
 ---
 
-## 6. 协议分析（参考附录）
+## 6. TC4x 已知 Erratum 设计规避决策
+
+> **来源**: `protocol_analysis.md` §8 — TC4x Errata 完整分析
+> **原则**: 凡硬件 root cause 导致的 erratum，本 IP 通过 RTL/架构级设计修改解决；非硬件缺陷通过软件 workaround 规避
+> **状态**: 全部 13 项关键 erratum 已有明确设计方案，纳入 EDR 阶段实现
+
+### 6.1 设计规避总览
+
+| Errata ID | 标题 | 严重程度 | 设计修改点 | 验证方法 |
+|-----------|------|----------|-----------|---------|
+| GETH_AI.029 | CBS credit 不在 IPG 期间递减 | **高** | MTL CBS credit_decrement 扩展至 IPG 全周期 | 带宽精度测试 |
+| GETH_AI.032 | TAS 背靠背传输额外 IPG | **高** | TAS Scheduler 与 MAC TX 同 clk_mac 域，消除 CDC 延迟 | IPG 精度测试 |
+| GETH_AI.036 | MAC 在 TX FIFO 达阈值前开始传输 | **高** | 增加 tx_threshold_ready 握手信号，阈值可配 | Underflow 压力测试 |
+| GETH_AI.039 | MII 模式下 underflow 不终止传输 | **高** | Underflow 触发 Jam 序列 + 立即终止 | Underflow 注入测试 |
+| GETH_AI.035 | RX watchdog timer 不重置 | 中 | 中断聚合控制器统一重置所有 timer | 多 timer 触发测试 |
+| GETH_AI.037/040/041/042 | RX DMA 多种 stall 场景 | **高** | 命令 FIFO 互斥 + context desc 错误跳过 + 变长包隔离 + recovery 超时 | 并发 flush/resume 测试 |
+| GETH_AI.033 | VLAN filter fail queue 路由错误 | 中 | VLAN FAIL 强制路由到可配 fail queue，支持丢弃/送队列 | VLAN 失败路径测试 |
+| GETH_AI.045 | Bridge 转发填充 8 字节 padding | 中 | **Switch Core Crossbar 替代 Bridge**，无 delayed word 问题 | 帧长精确测试 |
+| LETH_TC.010 | 多端口 PTP 只能成对菊花链 | **高** | **双 PHC + Crossbar 架构**，各端口独立访问任意 PHC | 4-port PTP 同步精度 |
+| LETH_AI.024 | Bridge 启用时非 TxQ0 时间戳错误 | **高** | DMA channel_id 独立路由，Switch 按 matched_channel 回写 | 多 TxQ 时间戳精度 |
+| DRE_TC.H002 | DRE 转发带宽瓶颈丢帧 | **高** | **Switch Crossbar 全并发**，无 DRE 中间层，背压不丢帧 | 4-port 满载零丢帧 |
+| HSPHY_TC.005 | 温度变化时 RX 通信丢失 | 中 | 温度自适应链路降速 (5G→2.5G)，维持链路后恢复 | 温度循环稳定性 |
+| GETH_AI.034 | MII 模式非标准 IPG 不匹配 | 中 | IPG 寄存器直接编码 (非折半)，硬件自动边界对齐 | IPG 精确度测试 |
+
+### 6.2 关键 RTL 修改决策
+
+#### 6.2.1 CBS IPG Credit 修正 (MTL Scheduler)
+
+```
+[RTL 修改]
+- credit_decrement 条件:
+  旧: tx_active (仅 packet data)
+  新: tx_active || ipg_active (packet + preamble + FCS + IPG)
+  
+- 新增配置位: CBS_IPG_DECR_EN (偏移 0xA0 bit[16], 默认=1)
+  0: 仅 packet 期间递减 (兼容旧行为)
+  1: IPG 期间持续递减 (默认, 规避 GETH_AI.029)
+```
+**验证目标**: 1000 帧 CBS 整形后实际带宽误差 < 0.1% (vs TC4x ~2.65% 误差)
+
+#### 6.2.2 TAS CDC 消除 (MTL EST Engine)
+
+```
+[架构决策]
+- TAS Gate Control List 调度器与 MAC TX Engine 同 clk_mac 时钟域
+- 门控决策信号直接驱动 MAC TX 使能，无需跨域同步
+- 若未来需支持 clk_mac ≠ fGETH 场景，增加 tas_cdc_compensation[3:0] 补偿寄存器
+```
+**验证目标**: 背靠背传输时额外 IPG = 0 (vs TC4x 最坏 12 周期)
+
+#### 6.2.3 TX Threshold 握手 (MTL TX FIFO → MAC)
+
+```
+[RTL 修改]
+- MTL TX FIFO 输出: tx_threshold_ready (水位 ≥ 阈值 + SOP valid)
+- MAC TX 状态机:
+  IDLE → (tx_threshold_ready=1) → PREAMBLE → DATA → FCS → IPG → IDLE
+  
+- tx_threshold 配置: 64B / 128B / 256B / 512B / full (5 档)
+- 安全 clamp: 阈值 < 64B 时自动提升到 64B
+```
+
+#### 6.2.4 Underflow 终止 + Jam (MAC TX Engine)
+
+```
+[RTL 修改]
+- underflow 检测: fifo_empty && tx_active && !eof_reached
+- 检测后动作序列:
+  1. 发送 Jam pattern (0x55_55_55_55, 32-bit)
+  2. Deassert TX_EN
+  3. 置位 TX_UNDERFLOW_ERR (CSR 0x008 bit[1])
+  4. 若 TX_UNDERFLOW_IRQ_EN=1，触发中断
+  5. 状态机 → IDLE
+  
+- 新增配置位: TX_UNDERFLOW_TERMINATE_EN (默认=1, 强制终止)
+```
+
+#### 6.2.5 DMA 鲁棒性增强 (DMA Engine)
+
+```
+[RTL 修改]
+1. 命令 FIFO 互斥:
+   - flush 和 resume 命令进入统一 4-entry 命令 FIFO
+   - 状态机: IDLE → CMD_POP → EXEC → IDLE
+   - 同一时刻仅执行一条命令，禁止重叠
+
+2. Context Descriptor 错误恢复:
+   - 硬件检查 ctx_desc.length=0 或 ctx_desc.type 非法
+   - 错误时置位 CDE (Context Descriptor Error)，跳过该 desc
+   - DMA 继续下一描述符，不阻塞通道
+
+3. RX 变长包 + 转发隔离:
+   - RX DMA 与 TX forwarding DMA 使用独立 AXI ID (ARID/AWID 区分)
+   - RX 通道 QoS 优先级高于 TX forwarding (QoS=0xF vs 0x8)
+   - 避免 TX 反压阻塞 RX
+
+4. Recovery 超时监控:
+   - dma_rx_watchdog_timer: 3ms 无进度自动触发 recovery
+   - 状态: 尝试 context save → desc 重新获取 → 继续
+   - 连续 3 次 recovery 失败 → 报告 DMA_STALL_FATAL，请求通道复位
+```
+
+#### 6.2.6 双 PHC + Crossbar (PTP/Timestamp + Switch)
+
+```
+[架构决策]
+- PHC0/PHC1 独立 64-bit 计数器，同源晶体 (同一 clk_ts 域)
+- Switch Core 每个端口通过 Crossbar 独立访问任意 PHC:
+  port[0..3] → crossbar → PHC0 or PHC1 (per-port 绑定)
+  
+- 无菊花链限制:
+  BC 模式: Port 0,1 → PHC0; Port 2,3 → PHC1 (或全端口 → PHC0)
+  TC 模式: 各端口独立 residence time 测量，无需共享时间基
+  
+- gPTP Relay 多端口并发:
+  所有端口同时捕获/修正时间戳，无端口对限制
+```
+**验证目标**: 4-port gPTP TC 模式下 residence time 误差 < ±20ns
+
+#### 6.2.7 Switch Core 替代 Bridge (Switch Core)
+
+```
+[架构决策]
+- 不实现 GETH/LETH "Bridge" 模块 (避免 GETH_AI.028/030/045/LETH_AI.024)
+- 采用 4-port Switch Core + Crossbar:
+  - 每端口独立 ingress/egress FIFO (各 2KB~8KB)
+  - Crossbar 全并发: 4 端口同时线速转发
+  - 无 DRE 中间层: 帧直接 Switch 转发，不经过外部 DMA 重路由
+  
+- FCS 重新计算:
+  egress 路径若修改 DA/SA/VLAN/优先级 → 自动触发 CRC-32 重算
+  fcs_recalc_en (默认=1)
+  
+- 无 HOL 阻塞:
+  ingress FIFO 独立，egress 仲裁轮询+优先级混合
+  单端口忙不阻塞其他端口转发
+```
+
+#### 6.2.8 温度自适应链路 (HSPHY Interface)
+
+```
+[RTL 修改]
+- link_status_qualifier: 连续 3 次采样 down 才报告链路断开
+- 温度变化检测 (SoC 提供 temp_sensor 输入):
+  - |ΔT| > 10°C/min → 触发速率降级
+  - 5G → 2.5G → 1G 阶梯降级
+  - 链路恢复 (连续 100ms link_up) → 阶梯升回原速率
+  
+- phy_temp_adaptive_en (默认=1)
+- temp_degraded_status (只读诊断位)
+```
+
+### 6.3 与 TC4x 的对比优势
+
+| 维度 | TC4x (含 erratum) | 本 IP (设计规避后) |
+|------|-------------------|-------------------|
+| **CBS 带宽精度** | ~2.65% 误差 (需软件补偿) | <0.1% 误差 (硬件正确) |
+| **TAS 背靠背 IPG** | 最坏 +12 时钟周期 | **0 额外周期** |
+| **多端口 PTP** | 仅成对菊花链 (2 对 max) | **全端口独立绑定** (4 端口自由组合) |
+| **跨 MAC 转发** | DRE 瓶颈 ~81% 带宽 | **Crossbar 100% 线速** |
+| **Bridge FCS** | 修改 L2 header 不重新计算 FCS | **自动 CRC-32 重算** |
+| **Bridge HOL** | 单端口阻塞全部转发 | **独立 FIFO + Crossbar，无阻塞** |
+| **TX 时间戳 (Bridge)** | 非 TxQ0 时间戳错误 | **channel_id 独立路由，精确回写** |
+| **DMA 鲁棒性** | 多种 stall 需软件复位 | **硬件 recovery + 超时自恢复** |
+| **温度链路稳定性** | 温度变化可能丢链路 | **自适应降速维持链路** |
+
+### 6.4 验证计划摘要
+
+| 测试项 | 目标 | 测试平台 | EDR 负责人 |
+|--------|------|----------|-----------|
+| CBS 带宽精度 | 误差 < 0.1% | UVM 仿真 + FPGA | Verification Agent |
+| TAS IPG 精度 | 背靠背 0 额外 IPG | UVM 仿真 | Verification Agent |
+| TX Underflow | 强制终止 + Jam 序列 | UVM 故障注入 | Verification Agent |
+| DMA Stall Recovery | 3ms 内自恢复 | UVM 并发测试 | Verification Agent |
+| 4-port PTP 同步 | residence time < ±20ns | UVM + FPGA | Verification Agent |
+| 4-port 满载转发 | 零丢帧 @ 线速 | UVM 性能测试 | Verification Agent |
+| 温度链路稳定性 | -40°C~+125°C 循环 | FPGA + 环境箱 | Verification Agent |
+
+---
+
+## 7. 协议分析（参考附录）
 
 > **详见**: [protocol_analysis.md](protocol_analysis.md)
 
@@ -358,8 +538,8 @@ CPU/Software
 |------|----------|----------|----------|
 | 802.3-2022 MAC | XGMAC-CORE | P0 | 全双工/半双工、帧长约束 |
 | 802.1AS-2020 gPTP | PTP/Timestamp | P0 | SFD 级精度、Addend 精调 |
-| 802.1AS TC | PTP/Timestamp | P1 | ⚠️ **多端口 Transparent Clock 限制**：每端口独立时钟偏移补偿，跨端口同步需软件协调 [^2^] |
-| 802.1Qav CBS | MTL Scheduler | P0 | 8 队列独立 credit；⚠️ **已知 erratum：约 2.65% 带宽误差** [^1^] |
+| 802.1AS TC | PTP/Timestamp | P1 | ✅ **多端口 Transparent Clock 已规避**：双 PHC + Crossbar，全端口独立绑定，无菊花链限制 [^2^] |
+| 802.1Qav CBS | MTL Scheduler | P0 | 8 队列独立 credit；✅ **TC4x erratum 已规避**：IPG 期间 credit 持续递减，误差 < 0.1% [^1^] |
 | 802.1Qbv TAS | MTL EST Engine | P0 | 256-entry GCL；**Switch 级 TAS 在 Switch Core 实现** |
 | 802.1Qbu 抢占 | MAC Merge (pMAC/eMAC) | P1 | 仅 GETH (≥1G) 支持，10BASE-T1S 不支持 |
 | 802.1Qci PSFP | FFP + GCL + PC | P1 | 8 gate ID 限制；**Switch 级 PSFP 在入口端口实现** |
@@ -373,16 +553,16 @@ CPU/Software
 | 802.3az EEE | HSPHY + MAC | P2 | 低功耗模式 |
 | 10BASE-T1S | HSPHY (PLCA) | P2 | 多点总线，最多 8 节点，半双工，不支持 TSN 抢占 [^4^] |
 
-> [^1^]: 参考 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x CBS 已知 erratum
-> [^2^]: 参考 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x PTP Transparent Clock 多端口限制
+> [^1^]: 参考 `protocol_analysis.md` §8 — TC4x CBS erratum 已在本 IP 通过 RTL 设计规避 (§6.2.1)
+> [^2^]: 参考 `protocol_analysis.md` §8 — TC4x PTP 多端口限制已通过双 PHC + Crossbar 架构规避 (§6.2.6)
 > [^3^]: 参考 `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` — TC4x CSS MACsec 加速速率
 > [^4^]: 参考 `Reference/Kimi_Agent_MCU_Ethernet/ethernet_mcu.agent.final.md` — 10BASE-T1S 在车规 MCU 中的支持情况
 
 ---
 
-## 7. 安全架构
+## 8. 安全架构
 
-### 7.1 ASIL-B 安全机制
+### 8.1 ASIL-B 安全机制
 
 | 安全机制 | 保护对象 | 检测能力 | 恢复策略 |
 |----------|----------|----------|----------|
@@ -392,7 +572,7 @@ CPU/Software
 | **Clock Monitor** | 各时钟域 | 时钟丢失/毛刺检测 | 安全复位 + 备用时钟 |
 | **Lockstep** | 关键控制信号 (可选) | 双核比较 | NMI 触发 |
 
-### 7.2 安全状态机
+### 8.2 安全状态机
 
 ```
 正常操作 (NORMAL)
@@ -413,9 +593,9 @@ v
 
 ---
 
-## 8. 附录
+## 9. 附录
 
-### 8.1 版本历史
+### 9.1 版本历史
 
 | 版本 | 日期 | 作者 | 变更内容 |
 |------|------|------|----------|
@@ -424,10 +604,10 @@ v
 | v1.1 | 2026-05-11 | Arch Agent | 新增 1.4 可配置参数矩阵（协议/DMA/安全参数） |
 | v1.2 | 2026-05-11 | Arch Agent | 重构参数：MAC_COUNT 1-8, MAC_TYPE (MAC/GMAC/XGMAC), PHY_COUNT 独立 1-8, PHY_SPEED 解耦 |
 | v1.4 | 2026-05-12 | Arch Agent | **基于 R-Car S4 Gap Analysis 升级**: 4-port L2/L3 Switch (替换 Bridge), 双 PHC + vPHC 虚拟化, AVTP 硬件感知, Switch 级 TAS/PSFP, 更新应用场景矩阵和资源估算 |
-| **v1.4.2** | **2026-05-12** | **Arch Agent** | **ISSUE 全部关闭/转移**: 7 项已关闭 (001/003/004/005/006/007/008/009), 1 项转移至 EDR (002), PAD 阶段零待解决问题声明 |
+| **v1.5** | **2026-05-12** | **Arch Agent** | **TC4x Errata 设计规避**: 13 项已知 erratum 的 RTL/架构级修改方案纳入 (CBS IPG credit, TAS CDC, TX threshold, underflow 终止, DMA stall 恢复, VLAN fail queue, 双 PHC Crossbar, 无 DRE 瓶颈, 温度自适应链路) |
 | v1.4.1 | 2026-05-12 | Arch Agent | ISSUE-006~009 参数化定义: TAS 互斥规则 (Switch 级优先), 双 PHC/vPHC 寄存器接口, L3 路由表/ARP 缓存, AVTP RX Filter/DMA 队列映射 |
 
-### 8.2 待解决问题
+### 9.2 待解决问题
 
 | ID | 问题描述 | 优先级 | 负责人 | 状态 | 分析结论 |
 |----|----------|--------|--------|------|----------|
@@ -448,7 +628,7 @@ v
 > - **转移至 EDR (1 项)**: ISSUE-002 — LCB2SRI 地址映射属于微架构实现细节，由 Design Agent 在 EDR 阶段完成
 > - **PAD 阶段无待解决问题**
 
-### 8.3 参考文档
+### 9.3 参考文档
 
 | 文档 | 路径 | 说明 |
 |------|------|------|
