@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>IEEE 802.1AE-2018 MACsec 协议学习笔记 (RTL设计参考)</title>
+<style>
+  :root { --bg:#f8f9fa; --fg:#212529; --accent:#0056b3; --code:#e9ecef; --warn:#fff3cd; --crit:#f8d7da; --ok:#d4edda; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; line-height:1.7; max-width:1100px; margin:0 auto; padding:20px; background:var(--bg); color:var(--fg); }
+  h1 { color:var(--accent); border-bottom:3px solid var(--accent); padding-bottom:8px; }
+  h2 { color:var(--accent); margin-top:36px; border-left:6px solid var(--accent); padding-left:12px; }
+  h3 { margin-top:28px; color:#004494; }
+  h4 { margin-top:20px; color:#333; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:0.95em; }
+  th,td { border:1px solid #bbb; padding:8px 10px; text-align:left; }
+  th { background:#e2e6ea; }
+  code,pre { font-family: "Consolas", "Courier New", monospace; background:var(--code); padding:2px 6px; border-radius:4px; font-size:0.92em; }
+  pre { padding:14px; overflow-x:auto; line-height:1.5; }
+  .note { background:#e7f3ff; border-left:4px solid var(--accent); padding:10px 14px; margin:12px 0; }
+  .warn { background:var(--warn); border-left:4px solid #856404; padding:10px 14px; margin:12px 0; }
+  .crit { background:var(--crit); border-left:4px solid #721c24; padding:10px 14px; margin:12px 0; }
+  .ok { background:var(--ok); border-left:4px solid #155724; padding:10px 14px; margin:12px 0; }
+  .toc { background:#fff; border:1px solid #ccc; padding:16px 20px; border-radius:8px; }
+  .toc ul { list-style:none; padding-left:0; }
+  .toc li { margin:6px 0; }
+  .toc a { text-decoration:none; color:var(--accent); }
+  .toc a:hover { text-decoration:underline; }
+  .rtl-box { background:#fff; border:2px dashed var(--accent); padding:14px 18px; border-radius:8px; margin:14px 0; }
+  .rtl-box h4 { margin-top:0; color:var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>IEEE 802.1AE-2018 MACsec 协议学习笔记</h1>
+<p style="color:#666;font-size:0.9em;">本文档基于 IEEE Std 802.1AE-2018 整理，详细程度可作为 RTL 设计参考。生成日期: 2026-05-11</p>
+
+<div class="toc">
+<h3>目录</h3>
+<ul>
+  <li><a href="#sec-overview">1. 协议概述</a></li>
+  <li><a href="#sec-sectag">2. SecTAG 格式</a></li>
+  <li><a href="#sec-sci">3. SCI / SA / SC / PN</a></li>
+  <li><a href="#sec-secy">4. SecY 架构</a></li>
+  <li><a href="#sec-tx">5. Secure Frame Generation (发送)</a></li>
+  <li><a href="#sec-rx">6. Secure Frame Verification (接收)</a></li>
+  <li><a href="#sec-replay">7. Replay Protection</a></li>
+  <li><a href="#sec-cipher">8. Cipher Suites</a></li>
+  <li><a href="#sec-mka">9. Key Agreement (MKA) 概述</a></li>
+  <li><a href="#sec-counters">10. 计数器</a></li>
+  <li><a href="#sec-rtl">11. RTL 设计要点</a></li>
+</ul>
+</div>
+
+<h2 id="sec-overview">1. 协议概述</h2>
+<p>IEEE 802.1AE-2018 定义了 <strong>MAC Security (MACsec)</strong>，在 MAC 层提供数据机密性、数据完整性、数据源认证和重放保护。MACsec 在两个直接相连的 peer 之间操作（ hop-by-hop 安全）。</p>
+
+<div class="ok">
+<strong>核心功能</strong>：对以太网帧进行认证加密 (AEAD)，在帧中插入 SecTAG，接收端验证后解密/递送。
+</div>
+
+<h3>1.1 协议范围</h3>
+<table>
+<tr><th>功能</th><th>说明</th></tr>
+<tr><td>Confidentiality</td><td>加密用户数据，防止窃听</td></tr>
+<tr><td>Integrity</td><td>完整性校验 (ICV)，防止篡改</td></tr>
+<tr><td>Data Origin Authenticity</td><td>源认证 (基于共享密钥)</td></tr>
+<tr><td>Replay Protection</td><td>基于 PN 的防重放机制</td></tr>
+<tr><td>Hop-by-hop Security</td><td>逐跳安全，每跳独立加解密</td></tr>
+</table>
+
+<div class="warn">
+MACsec 是 <strong>hop-by-hop</strong> 安全，不是 end-to-end。中间 Bridge 必须解密再重新加密（若该 Bridge 也支持 MACsec）。
+</div>
+
+<h2 id="sec-sectag">2. SecTAG 格式</h2>
+
+<h3>2.1 SecTAG 结构</h3>
+<table>
+<tr><th>字段</th><th>长度</th><th>说明</th></tr>
+<tr><td>MACsec EtherType</td><td>2 bytes</td><td><code>0x88E5</code></td></tr>
+<tr><td>TCI</td><td>1 byte</td><td>Tag Control Information (V|E|C|SC|ES|SCB|C)</td></tr>
+<tr><td>AN (Association Number)</td><td>1/2 nibble</td><td>4-bit SA 编号 (与 SCI 一起标识 SA)</td></tr>
+<tr><td>SL (Short Length)</td><td>1 byte</td><td>User Data 长度 (若 < 48 bytes)</td></tr>
+<tr><td>PN (Packet Number)</td><td>4 bytes</td><td>PN 低 32 位 (扩展 PN 时高 32 位由算法恢复)</td></tr>
+<tr><td>SCI (optional)</td><td>8 bytes</td><td>Secure Channel Identifier，条件性携带</td></tr>
+</table>
+
+<h3>2.2 TCI 位定义</h3>
+<table>
+<tr><th>位</th><th>名称</th><th>说明</th></tr>
+<tr><td>8</td><td>V (Version)</td><td>协议版本，当前 = 0</td></tr>
+<tr><td>7</td><td>ES (End Station)</td><td>SCI 由 SMAC + 默认 PortID 推导</td></tr>
+<tr><td>6</td><td>SC (SC present)</td><td>SecTAG 中显式携带 SCI</td></tr>
+<tr><td>5</td><td>SCB (Single Copy Broadcast)</td><td>EPON SCB 专用</td></tr>
+<tr><td>4</td><td>E (Encryption)</td><td>E=1 且 C=1：加密+完整性；E=0 且 C=0：仅完整性</td></tr>
+<tr><td>3</td><td>C (Changed Text)</td><td>C=0：Secure Data = User Data (仅完整性且 ICV=16B)</td></tr>
+</table>
+
+<h3>2.3 SCI 编码规则</h3>
+<table>
+<tr><th>条件</th><th>SC bit</th><th>ES bit</th><th>SCI 来源</th></tr>
+<tr><td>alwaysIncludeSCI=True</td><td>1</td><td>0</td><td>显式编码</td></tr>
+<tr><td>transmit SCs > 1</td><td>1</td><td>0</td><td>显式编码</td></tr>
+<tr><td>useES=True, 单 SC</td><td>0</td><td>1</td><td>SMAC + PortID=0x0001</td></tr>
+<tr><td>useSCB=True</td><td>0</td><td>0</td><td>SCB 模式，PortID=0x0000</td></tr>
+<tr><td>默认单 SC</td><td>0</td><td>0</td><td>KaY 配置的默认 SCI</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：SecTAG 处理</h4>
+<ul>
+  <li><strong>位置</strong>：SecTAG 紧跟在 SMAC 之后（若帧无 VLAN tag），或在 VLAN tag 之后</li>
+  <li><strong>解析顺序</strong>：EtherType 0x88E5 → 读取 TCI → 提取 AN/PN → 条件读取 SCI</li>
+  <li><strong>AN 提取</strong>：TCI+AN 共 2 bytes，AN 在低 4 bits</li>
+  <li><strong>长度变化</strong>：加密封装后帧长增加 SecTAG(6/14B) + ICV(8/16B)</li>
+</ul>
+</div>
+
+<h2 id="sec-sci">3. SCI / SA / SC / PN</h2>
+
+<h3>3.1 关键术语</h3>
+<table>
+<tr><th>术语</th><th>定义</th></tr>
+<tr><td>SecY</td><td>MAC Security Entity，执行加解密的核心实体</td></tr>
+<tr><td>CA (Connectivity Association)</td><td>两个 peer SecY 之间的安全关联</td></tr>
+<tr><td>SC (Secure Channel)</td><td>单向安全通道，每个 CA 有两个 SC (Tx/Rx)</td></tr>
+<tr><td>SCI (SC Identifier)</td><td>64-bit = SMAC(48) + Port Identifier(16)</td></tr>
+<tr><td>SA (Secure Association)</td><td>SC 的时序分量，对应一个 SAK 和一组 PN</td></tr>
+<tr><td>AN (Association Number)</td><td>4-bit，标识 SC 内的不同 SA</td></tr>
+<tr><td>PN (Packet Number)</td><td>32-bit 或 64-bit，每帧递增，用于 IV 和重放保护</td></tr>
+<tr><td>SAK (SA Key)</td><td>用于保护帧的对称密钥</td></tr>
+</table>
+
+<h3>3.2 SC / SA 关系</h3>
+<pre>
+CA (两个 SecY 之间)
+├── Transmit SC (本端发送)
+│   ├── SA[AN=0] : SAK_A, PN=0..N
+│   ├── SA[AN=1] : SAK_B, PN=0..N  (密钥更新时切换)
+│   └── encodingSA : 当前用于发送的 SA
+└── Receive SC (对端发送)
+    ├── SA[AN=0] : SAK_A
+    ├── SA[AN=1] : SAK_B
+    └── lowestAcceptablePN : 重放保护窗口下界
+</pre>
+
+<h3>3.3 PN 管理</h3>
+<ul>
+  <li>发送：每帧使用 nextPN，发送后 nextPN++</li>
+  <li>nextPN 回绕到 0 (或 2^32/2^64) 时，MAC_Operational → False，停止发送</li>
+  <li>接收：从 SecTAG 提取 PN，进行重放检查</li>
+  <li>扩展 PN (64-bit)：SecTAG 只传低 32 位，高 32 位由接收算法恢复</li>
+</ul>
+
+<h2 id="sec-secy">4. SecY 架构</h2>
+
+<h3>4.1 端口模型</h3>
+<pre>
+[Upper Layer / Bridge]
+       |
+       v
+[Controlled Port]  <-- 受保护的流量
+       |
+       v
+[SecY]
+  ├── Uncontrolled Port  <-- MKA / 控制帧 (不经加密)
+  ├── Controlled Port    <-- 用户数据帧
+  ├── Secure Frame Generation (Tx)
+  ├── Secure Frame Verification (Rx)
+  └── Cipher Suite Engine
+       |
+       v
+[Common Port] <-- 物理 MAC
+</pre>
+
+<h3>4.2 端口状态</h3>
+<table>
+<tr><th>参数</th><th>条件</th></tr>
+<tr><td>MAC_Enabled (Controlled)</td><td>ControlledPortEnabled=True AND MAC_Enabled(Common)=True AND Tx SC transmitting=True AND Rx SC receiving=True</td></tr>
+<tr><td>MAC_Operational (Controlled)</td><td>MAC_Enabled=True AND MAC_Operational(Common)=True</td></tr>
+</table>
+
+<h2 id="sec-tx">5. Secure Frame Generation (发送)</h2>
+
+<h3>5.1 发送流程</h3>
+<ol>
+  <li><strong>SA 分配</strong>：选择 encodingSA 对应的 SA (当前活动的 transmit SA)</li>
+  <li><strong>PN 分配</strong>：使用 SA 的 nextPN 作为本帧 PN，然后 nextPN++</li>
+  <li><strong>SecTAG 编码</strong>：根据 TCI/AN/PN/SCI 规则生成 SecTAG</li>
+  <li><strong>加密保护</strong>：调用 Cipher Suite，输入 {SAK, SCI, PN, SecTAG, User Data} → 输出 {Secure Data, ICV}</li>
+  <li><strong>组装发送</strong>：DA | SA | SecTAG | Secure Data | ICV → Common Port</li>
+</ol>
+
+<h3>5.2 Traffic Class Table (可选)</h3>
+<p>若实现 Traffic Class Table，可根据用户优先级 (0~7) 选择不同的 transmit SC（最多 8 个），实现不同优先级的独立 PN 空间。</p>
+
+<div class="note">
+若 protectFrames=False，SecY 透传帧，仅递增 OutPktsUntagged 计数器。
+</div>
+
+<h2 id="sec-rx">6. Secure Frame Verification (接收)</h2>
+
+<h3>6.1 接收流程</h3>
+<ol>
+  <li><strong>SecTAG 检测</strong>：检查用户数据是否以 0x88E5 开头</li>
+  <li><strong>SecTAG 解码</strong>：提取 TCI/AN/PN/SCI</li>
+  <li><strong>SA 定位</strong>：根据 SCI + AN 查找 receive SA
+    <ul>
+      <li>无 SCI 时，使用 KaY 配置的默认 peer SCI</li>
+      <li>找不到 SA 时：Strict/C-bit 置位则丢弃，否则透传 (InPktsNoSA)</li>
+    </ul>
+  </li>
+  <li><strong>PN 恢复与重放预检</strong>：恢复完整 PN，若 replayProtect 使能且 PN < lowestAcceptablePN，丢弃 (InPktsLate)</li>
+  <li><strong>密码学验证</strong>：调用 Cipher Suite 验证/解密 → 返回 VALID/INVALID</li>
+  <li><strong>重放检查更新</strong>：若 VALID，更新 nextPN 和 lowestAcceptablePN</li>
+  <li><strong>递送</strong>：VALID 帧递送到 Controlled Port；INVALID 帧根据 validateFrames 配置决定丢弃或透传</li>
+</ol>
+
+<h3>6.2 validateFrames 模式</h3>
+<table>
+<tr><th>模式</th><th>无 Tag 帧</th><th>Invalid Tag 帧</th><th>Valid Tag 帧</th></tr>
+<tr><td>Strict</td><td>丢弃</td><td>丢弃</td><td>解密递送</td></tr>
+<tr><td>Check</td><td>透传</td><td>透传</td><td>解密递送</td></tr>
+<tr><td>Disabled</td><td>透传</td><td>透传 (不解密)</td><td>不解密透传</td></tr>
+<tr><td>Null</td><td>透传</td><td>透传</td><td>透传 (SecY 不生效)</td></tr>
+</table>
+
+<h2 id="sec-replay">7. Replay Protection</h2>
+
+<h3>7.1 机制</h3>
+<ul>
+  <li>每个 receive SA 维护 <code>lowestAcceptablePN</code></li>
+  <li>接收帧的 PN < lowestAcceptablePN → 丢弃 (重放包)</li>
+  <li>验证通过的有效帧更新：nextPN = PN + 1；lowestAcceptablePN = max(原值, nextPN - replayWindow)</li>
+</ul>
+
+<h3>7.2 replayWindow</h3>
+<table>
+<tr><th>Cipher Suite</th><th>最大 replayWindow</th></tr>
+<tr><td>标准 PN (32-bit)</td><td>2^32 - 1</td></tr>
+<tr><td>扩展 PN (64-bit)</td><td>2^30 - 1</td></tr>
+</table>
+<div class="note">
+默认 replayWindow = 0（严格按序）。在存在 QoS 重排序的网络中，可适当增大窗口。
+</div>
+
+<h3>7.3 扩展 PN 恢复算法</h3>
+<p>SecTAG 只传 32-bit PN，接收端恢复 64-bit PN：</p>
+<pre>
+// 假设高 32 位与 lowestAcceptablePN 相同
+high_32 = lowestAcceptablePN[63:32];
+if (lowestAcceptablePN[31] == 1 && received_PN[31] == 0)
+    high_32 = high_32 + 1;  // 低 32 位回绕
+full_PN = {high_32, received_PN};
+</pre>
+<div class="warn">
+该恢复算法在丢失超过 2^31 个连续帧时可能失效，此时需 MKA 重新同步高 32 位。
+</div>
+
+<h2 id="sec-cipher">8. Cipher Suites</h2>
+
+<h3>8.1 支持的 Cipher Suite</h3>
+<table>
+<tr><th>名称</th><th>算法</th><th>密钥长度</th><th>ICV 长度</th><th>PN 位数</th></tr>
+<tr><td>GCM-AES-128 (默认)</td><td>AES-128-GCM</td><td>128 bit</td><td>16 bytes</td><td>32 bit</td></tr>
+<tr><td>GCM-AES-256</td><td>AES-256-GCM</td><td>256 bit</td><td>16 bytes</td><td>32 bit</td></tr>
+<tr><td>GCM-AES-XPN-128</td><td>AES-128-GCM</td><td>128 bit</td><td>16 bytes</td><td>64 bit (扩展)</td></tr>
+<tr><td>GCM-AES-XPN-256</td><td>AES-256-GCM</td><td>256 bit</td><td>16 bytes</td><td>64 bit (扩展)</td></tr>
+</table>
+
+<h3>8.2 IV (Nonce) 构造</h3>
+<pre>
+IV = SCI(64-bit) || PN(32/64-bit)  // 按 Cipher Suite 定义
+// 对于默认 Cipher Suite (GCM-AES-128):
+// IV = SCI || PN (32-bit) = 96-bit
+</pre>
+
+<h3>8.3 GCM 操作</h3>
+<table>
+<tr><th>输入</th><th>说明</th></tr>
+<tr><td>Key (SAK)</td><td>128/256 bit</td></tr>
+<tr><td>IV</td><td>96 bit (SCI+PN)</td></tr>
+<tr><td>Plaintext</td><td>User Data</td></tr>
+<tr><td>AAD</td><td>DA || SA || SecTAG (TCI+AN+SL+PN，不含 EtherType)</td></tr>
+</table>
+<p>输出：Ciphertext (Secure Data) + Auth Tag (ICV)</p>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：Cipher Engine</h4>
+<ul>
+  <li><strong>AES-GCM 加速</strong>：必须硬件加速 (AES core + GHASH)。纯软件无法满足 1G+ 线速</li>
+  <li><strong>Key 管理</strong>：SAK 存储在专用安全内存/OTP，禁止软件直接读取</li>
+  <li><strong>IV 生成</strong>：IV = SCI || PN，硬件自动拼接</li>
+  <li><strong>AAD 构造</strong>：DA(6) + SA(6) + SecTAG(6/14) = 18/26 bytes，注意不包含 EtherType</li>
+  <li><strong>流水线</strong>：GCM 加密有 10~14 轮 AES，需要深度流水线或多通道并行以满足线速</li>
+  <li><strong>吞吐量</strong>：10G 线速最小帧 64B @ 14.88Mpps，每帧 GCM 需处理 ~80 bytes。AES-GCM @ 500MHz 约可满足 10G</li>
+</ul>
+</div>
+
+<h2 id="sec-mka">9. Key Agreement (MKA) 概述</h2>
+<p>MACsec 自身不定义密钥分发协议，依赖 <strong>IEEE 802.1X MKA (MACsec Key Agreement)</strong>：</p>
+<ul>
+  <li>基于 802.1X EAPOL 帧交换密钥参数</li>
+  <li>生成/分发 SAK (Secure Association Key)</li>
+  <li>管理 SCI、AN、PN 空间</li>
+  <li>支持密钥更新 (Key Rotation) 和重认证</li>
+</ul>
+<div class="note">
+RTL 实现中，MKA 通常由嵌入式 CPU/软件处理，SecY 通过 LMI (Local Management Interface) 接收配置。
+</div>
+
+<h2 id="sec-counters">10. 计数器</h2>
+
+<h3>10.1 发送计数器 (Secure Frame Generation)</h3>
+<table>
+<tr><th>计数器</th><th>说明</th></tr>
+<tr><td>OutPktsUntagged</td><td>protectFrames=False 时透传的帧数</td></tr>
+<tr><td>OutPktsTooLong</td><td>加密后超过 MTU 的帧数</td></tr>
+<tr><td>OutOctetsEncrypted</td><td>加密输出的字节数</td></tr>
+<tr><td>OutOctetsProtected</td><td>完整性保护输出的字节数</td></tr>
+</table>
+
+<h3>10.2 接收计数器 (Secure Frame Verification)</h3>
+<table>
+<tr><th>计数器</th><th>说明</th></tr>
+<tr><td>InPktsNoTag</td><td>无 SecTAG 的帧数 (Strict 模式下丢弃)</td></tr>
+<tr><td>InPktsBadTag</td><td>SecTAG 格式错误的帧数</td></tr>
+<tr><td>InPktsNoSA</td><td>找不到对应 SA 的帧数</td></tr>
+<tr><td>InPktsNoSAError</td><td>找不到 SA 且被丢弃的帧数</td></tr>
+<tr><td>InPktsLate</td><td>PN < lowestAcceptablePN 的帧数 (重放)</td></tr>
+<tr><td>InPktsOverrun</td><td>解密器过载丢弃的帧数</td></tr>
+<tr><td>InPktsNotValid</td><td>ICV 验证失败的帧数</td></tr>
+<tr><td>InPktsInvalid</td><td>Invalid 但 Check 模式下递送的帧数</td></tr>
+<tr><td>InPktsUnchecked</td><td>Disabled 模式下递送的帧数</td></tr>
+<tr><td>InPktsOK</td><td>验证通过的正常帧数</td></tr>
+</table>
+
+<h2 id="sec-rtl">11. RTL 设计要点</h2>
+
+<h3>11.1 顶层模块划分</h3>
+<pre>
+macsec_top
+├── rx_parser               // 检测 0x88E5，提取 SecTAG/AN/PN/SCI
+├── rx_sa_manager           // SCI+AN → SA 查表，获取 SAK
+├── rx_pn_replay_check      // PN 恢复、重放窗口检查
+├── rx_crypto_engine        // AES-GCM 解密/验证
+├── rx_validate_ctrl        // validateFrames 模式处理
+├── tx_sa_manager           // encodingSA 选择，获取 SAK/nextPN
+├── tx_pn_alloc             // nextPN 分配、回绕检测
+├── tx_sectag_gen           // SecTAG 组装
+├── tx_crypto_engine        // AES-GCM 加密
+├── tx_protect_ctrl         // protectFrames 控制
+├── secy_management         // LMI、计数器、配置寄存器
+└── key_store_secure        // SAK 安全存储 (仅硬件可访问)
+</pre>
+
+<h3>11.2 关键设计决策</h3>
+<table>
+<tr><th>决策点</th><th>选项 A</th><th>选项 B</th></tr>
+<tr><td>Cipher Suite</td><td>GCM-AES-128 (面积小)</td><td>GCM-AES-256 (安全性高)</td></tr>
+<tr><td>扩展 PN</td><td>32-bit (兼容性好)</td><td>64-bit XPN (高速链路防回绕)</td></tr>
+<tr><td>并发通道</td><td>单通道 (面积小)</td><td>多通道并行 (高吞吐)</td></tr>
+<tr><td>SA 数量</td><td>4 Rx + 1 Tx (最小)</td><td>32+ Rx + 8 Tx (多 peer)</td></tr>
+<tr><td>replayWindow</td><td>0 (严格)</td><td>2^16 (允许重排序)</td></tr>
+</table>
+
+<h3>11.3 性能指标</h3>
+<ul>
+  <li><strong>线速</strong>：加密/解密不能造成背压丢包</li>
+  <li><strong>延迟</strong>：GCM 加解密引入的延迟，10G 场景约 1~2us</li>
+  <li><strong>PN 回绕</strong>：32-bit PN @ 10G 最小帧约 8.5 分钟回绕，需 MKA 及时更新密钥</li>
+  <li><strong>密钥更新</strong>：支持在线密钥切换 (encodingSA 切换，不中断流量)</li>
+</ul>
+
+<div class="ok">
+<strong>最小可裁剪实现</strong>：单 SA (AN=0) + GCM-AES-128 + 32-bit PN + Strict 验证 + 无 Traffic Class Table。覆盖端到端 MACsec 最基本场景。
+</div>
+
+<hr>
+<p style="color:#888;font-size:0.85em;text-align:center;">文档基于 IEEE Std 802.1AE-2018 整理 | 仅供学习参考</p>
+
+</body>
+</html>

@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>IEEE 802.1CB-2017 FRER 协议学习笔记 (RTL设计参考)</title>
+<style>
+  :root { --bg:#f8f9fa; --fg:#212529; --accent:#0056b3; --code:#e9ecef; --warn:#fff3cd; --crit:#f8d7da; --ok:#d4edda; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; line-height:1.7; max-width:1100px; margin:0 auto; padding:20px; background:var(--bg); color:var(--fg); }
+  h1 { color:var(--accent); border-bottom:3px solid var(--accent); padding-bottom:8px; }
+  h2 { color:var(--accent); margin-top:36px; border-left:6px solid var(--accent); padding-left:12px; }
+  h3 { margin-top:28px; color:#004494; }
+  h4 { margin-top:20px; color:#333; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:0.95em; }
+  th,td { border:1px solid #bbb; padding:8px 10px; text-align:left; }
+  th { background:#e2e6ea; }
+  code,pre { font-family: "Consolas", "Courier New", monospace; background:var(--code); padding:2px 6px; border-radius:4px; font-size:0.92em; }
+  pre { padding:14px; overflow-x:auto; line-height:1.5; }
+  .note { background:#e7f3ff; border-left:4px solid var(--accent); padding:10px 14px; margin:12px 0; }
+  .warn { background:var(--warn); border-left:4px solid #856404; padding:10px 14px; margin:12px 0; }
+  .crit { background:var(--crit); border-left:4px solid #721c24; padding:10px 14px; margin:12px 0; }
+  .ok { background:var(--ok); border-left:4px solid #155724; padding:10px 14px; margin:12px 0; }
+  .toc { background:#fff; border:1px solid #ccc; padding:16px 20px; border-radius:8px; }
+  .toc ul { list-style:none; padding-left:0; }
+  .toc li { margin:6px 0; }
+  .toc a { text-decoration:none; color:var(--accent); }
+  .toc a:hover { text-decoration:underline; }
+  .rtl-box { background:#fff; border:2px dashed var(--accent); padding:14px 18px; border-radius:8px; margin:14px 0; }
+  .rtl-box h4 { margin-top:0; color:var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>IEEE 802.1CB-2017 帧复制与消除可靠性 (FRER) 协议学习笔记</h1>
+<p style="color:#666;font-size:0.9em;">本文档基于 IEEE Std 802.1CB-2017 整理，详细程度可作为 RTL 设计参考。生成日期: 2026-05-11</p>
+
+<div class="toc">
+<h3>目录</h3>
+<ul>
+  <li><a href="#sec-overview">1. 协议概述与目标</a></li>
+  <li><a href="#sec-concepts">2. 核心概念</a></li>
+  <li><a href="#sec-stream-id">3. Stream Identification (流识别)</a></li>
+  <li><a href="#sec-frer-arch">4. FRER 功能架构</a></li>
+  <li><a href="#sec-seq-gen">5. Sequence Generation (序列生成)</a></li>
+  <li><a href="#seq-recovery">6. Sequence Recovery (序列恢复)</a>
+    <ul>
+      <li><a href="#sec-base-recovery">6.1 Base Recovery Function</a></li>
+      <li><a href="#sec-vector-alg">6.2 VectorRecoveryAlgorithm</a></li>
+      <li><a href="#sec-match-alg">6.3 MatchRecoveryAlgorithm</a></li>
+    </ul>
+  </li>
+  <li><a href="#sec-individual">7. Individual Recovery Function</a></li>
+  <li><a href="#sec-latent">8. Latent Error Detection (潜在错误检测)</a></li>
+  <li><a href="#sec-rtag">9. R-TAG (Redundancy Tag) 格式</a></li>
+  <li><a href="#sec-enc-dec">10. Sequence Encode/Decode</a></li>
+  <li><a href="#sec-split">11. Stream Splitting (流拆分)</a></li>
+  <li><a href="#sec-mo">12. 管理对象与配置表 (Managed Objects)</a></li>
+  <li><a href="#sec-counters">13. 计数器 (Counters)</a></li>
+  <li><a href="#sec-rtl">14. RTL 设计要点与建议</a></li>
+  <li><a href="#sec-pics">15. PICS 符合性要求摘要</a></li>
+</ul>
+</div>
+
+<!-- =================== 1. 协议概述 =================== -->
+<h2 id="sec-overview">1. 协议概述与目标</h2>
+<p>IEEE 802.1CB-2017 定义了<strong>帧复制与消除可靠性 (Frame Replication and Elimination for Reliability, FRER)</strong> 机制，用于降低以太网中由于设备故障导致的丢包概率。FRER <strong>不创建</strong>冗余路径，仅负责在已有冗余路径上进行帧的复制、标识和去重。</p>
+
+<div class="ok">
+<strong>核心思想</strong>：在发送端对数据包进行序列编号并复制到多条路径传输，在接收端或中间节点根据序列号消除重复包。
+</div>
+
+<h3>1.1 FRER 的目标与约束</h3>
+<table>
+<tr><th>目标</th><th>说明</th></tr>
+<tr><td>Packet replication</td><td>复制数据包，通过多条路径发送，降低丢包概率</td></tr>
+<tr><td>Multicast/Unicast</td><td>支持单播和组播路径</td></tr>
+<tr><td>Intermittent Streams</td><td>任意路径上同时最多只有1个包在传输</td></tr>
+<tr><td>Bulk Streams</td><td>路径上可同时有多个包在传输</td></tr>
+<tr><td>Flexible positioning</td><td>FRER 功能可部署在端系统、中继系统或代理系统中</td></tr>
+<tr><td>Latent error detection</td><td>检测某条冗余路径静默失效的情况</td></tr>
+<tr><td>Backward compatibility</td><td>支持与非 FRER 感知设备共存</td></tr>
+<tr><td>Zero congestion loss</td><td>与 TSN/AVB 等零拥塞丢失机制兼容</td></tr>
+</table>
+
+<div class="warn">
+<strong>明确非目标</strong>：<br>
+• <strong>In-order delivery</strong>：FRER <strong>不保证</strong> Compound Stream 的包按原始顺序到达。如果路径长度差异大，即使各 Member Stream 内部有序，合并后也可能乱序。若需要保序，需要在上层或外部增加重排序缓存。
+</div>
+
+<!-- =================== 2. 核心概念 =================== -->
+<h2 id="sec-concepts">2. 核心概念</h2>
+
+<h3>2.1 关键术语</h3>
+<table>
+<tr><th>术语</th><th>定义</th></tr>
+<tr><td>Compound Stream</td><td>逻辑上的完整数据流，由多个 Member Stream 组成</td></tr>
+<tr><td>Member Stream</td><td>Compound Stream 的物理分量，在单条路径上传输</td></tr>
+<tr><td>stream_handle</td><td>本地整数，标识一个 Stream。仅本地有效，不体现在报文字段中</td></tr>
+<tr><td>sequence_number</td><td>无符号整数，标识同一 Compound Stream 中包的传输顺序</td></tr>
+<tr><td>in-facing / out-facing</td><td>相对于端口的方向：in-facing=接收侧(ingress)，out-facing=发送侧(egress)</td></tr>
+</table>
+
+<h3>2.2 Stream 服务子参数 (6.1)</h3>
+<p>Stream identification 服务接口包含以下关键子参数：</p>
+<ul>
+  <li><code>stream_handle</code>：整数，标识包所属的 Stream</li>
+  <li><code>sequence_number</code>：无符号整数，标识包在 Compound Stream 中的顺序</li>
+</ul>
+<div class="note">
+sequence_number 可以由 Stream identification function 编码/解码，也可以由独立的 Sequence encode/decode function (如 R-TAG) 处理。
+</div>
+
+<!-- =================== 3. Stream Identification =================== -->
+<h2 id="sec-stream-id">3. Stream Identification (流识别)</h2>
+<p>Stream Identification 是 FRER 的前提，负责将接收到的数据包映射到 <code>stream_handle</code>，并在发送时根据 <code>stream_handle</code> 修改包内容（如添加/删除 tag、修改 MAC 地址等）。</p>
+
+<h3>3.1 四种 Stream Identification 方法</h3>
+<table>
+<tr><th>方法</th><th>匹配字段</th><th>被动/主动</th><th>Rtl 设计影响</th></tr>
+<tr><td>Null Stream ID (6.4)</td><td>无匹配，所有包都属于同一 Stream</td><td>被动</td><td>最简单，无需匹配逻辑</td></tr>
+<tr><td>Source MAC + VLAN (6.5)</td><td>{Source MAC, VLAN ID}</td><td>被动</td><td>需要解析 MAC SA 和 VLAN tag</td></tr>
+<tr><td>Active Destination MAC + VLAN (6.6)</td><td>{Dest MAC, VLAN ID}，可修改目的MAC/VLAN</td><td>主动</td><td>需要查表+改写逻辑</td></tr>
+<tr><td>IP Stream ID (6.7)</td><td>{IP Source, IP Dest, DSCP, Protocol, Port}</td><td>被动</td><td>需要深解析到 L3/L4</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：Stream Identification 模块</h4>
+<ul>
+  <li><strong>查表结构</strong>：需要一个可配置的 CAM/TCAM 表 (tsnStreamIdEntry)，支持按不同字段匹配</li>
+  <li><strong>流水线</strong>：建议采用报文头解析流水线，逐级提取 {DMAC, SMAC, VLAN, IP, Port}，最后一级查表输出 stream_handle</li>
+  <li><strong>主动修改</strong>：Active DMAC+VLAN 方式需要在查表后修改报文头，注意 checksum 重算</li>
+  <li><strong>Default</strong>：未匹配到的包，stream_handle = null，sequence_number = null</li>
+</ul>
+</div>
+
+<!-- =================== 4. FRER 功能架构 =================== -->
+<h2 id="sec-frer-arch">4. FRER 功能架构</h2>
+
+<h3>4.1 FRER 核心功能模块 (Clause 7)</h3>
+<table>
+<tr><th>功能</th><th>位置</th><th>作用</th></tr>
+<tr><td>Sequence Generation (7.4.1)</td><td>Talker / 中继系统出端口</td><td>为每个包分配递增的 sequence_number</td></tr>
+<tr><td>Sequence Recovery (7.4.2)</td><td>Listener / 中继系统入端口</td><td>合并多条 Member Stream，消除重复包</td></tr>
+<tr><td>Individual Recovery (7.5)</td><td>任意端口</td><td>对单条 Member Stream 去重，防 stuck transmitter</td></tr>
+<tr><td>Sequence Encode/Decode (7.6)</td><td>端口收发侧</td><td>将 sequence_number 编码到报文中 / 从报文解码</td></tr>
+<tr><td>Stream Splitting (7.7)</td><td>出端口</td><td>将 Compound Stream 拆分为多个 Member Stream</td></tr>
+<tr><td>Latent Error Detection (7.4.4)</td><td>Sequence Recovery 内部</td><td>检测冗余路径是否静默失效</td></tr>
+</table>
+
+<h3>4.2 数据流示例</h3>
+<pre>
+[Upper Layer]
+     |
+     v
+[Stream Identification]  --&gt; 输出 stream_handle + sequence_number
+     |
+     v
+[Stream Splitting]       --&gt; 复制包到多个 Member Stream (不同 stream_handle)
+     |
+     v
+[Sequence Generation]    --&gt; 为每个包分配 sequence_number
+     |
+     v
+[Sequence Encode/Decode] --&gt; 将 seq_num 编码为 R-TAG/HSR/PRP
+     |
+     v
+[Lower Layer / Port]     --&gt; 发送
+</pre>
+
+<pre>
+[Lower Layer / Port]     --&gt; 接收
+     |
+     v
+[Sequence Encode/Decode] --&gt; 从 R-TAG/HSR/PRP 解码 seq_num
+     |
+     v
+[Stream Identification]  --&gt; 识别 stream_handle
+     |
+     v
+[Individual Recovery]    --&gt; 单条 Member Stream 去重 (可选)
+     |
+     v
+[Sequence Recovery]      --&gt; 合并多条 Member Stream，消除重复
+     |
+     v
+[Upper Layer]
+</pre>
+
+<!-- =================== 5. Sequence Generation =================== -->
+<h2 id="sec-seq-gen">5. Sequence Generation (序列生成)</h2>
+
+<h3>5.1 功能描述</h3>
+<p>Sequence Generation Function 为每个 Stream 的每个发送包分配一个递增的 <code>sequence_number</code>。每个端口每个 stream_handle 每个方向 (in-facing/out-facing) 最多只有一个 Sequence Generation 实例。</p>
+
+<h3>5.2 内部变量</h3>
+<table>
+<tr><th>变量</th><th>类型/范围</th><th>说明</th></tr>
+<tr><td>GenSeqSpace</td><td>常量 = 65536</td><td>sequence_number 空间大小 (16-bit)</td></tr>
+<tr><td>GenSeqNum</td><td>0 ~ 65535</td><td>当前待发送的序列号，发完后 +1 (mod 65536)</td></tr>
+</table>
+
+<h3>5.3 事件</h3>
+<table>
+<tr><th>事件</th><th>触发</th></tr>
+<tr><td>BEGIN</td><td>全局复位，触发 SequenceGenerationReset()</td></tr>
+<tr><td>DATA_REQUEST</td><td>上层请求发送包，触发 SequenceGenerationAlgorithm()</td></tr>
+<tr><td>SEND_DATA</td><td>序列号分配完成后，将包下发到下一层</td></tr>
+</table>
+
+<h3>5.4 伪代码 (RTL 可直接翻译)</h3>
+<pre>
+// ========== SequenceGenerationReset() ==========
+void SequenceGenerationReset() {
+    GenSeqNum = 0;
+    frerCpsSeqGenResets++;   // 计数器
+}
+
+// ========== SequenceGenerationAlgorithm() ==========
+void SequenceGenerationAlgorithm() {
+    unsigned int sequence_number = GenSeqNum;
+    if (GenSeqNum >= (GenSeqSpace - 1))
+        GenSeqNum = 0;
+    else
+        GenSeqNum = GenSeqNum + 1;
+    SEND_DATA;  // Pass packet & sequence_number down stack
+}
+</pre>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：Sequence Generation</h4>
+<ul>
+  <li><strong>核心逻辑</strong>：每个 stream_handle 维护一个 16-bit 计数器 GenSeqNum，接收到发送请求时输出当前值并自增</li>
+  <li><strong>Wrap-around</strong>：计数器从 65535 回到 0，RTL 中直接用 16-bit 无符号加法自然回绕</li>
+  <li><strong>多 Stream 支持</strong>：需要为每个 stream_handle 维护独立的 GenSeqNum，可用 RAM/RegFile 存储</li>
+  <li><strong>表项配置</strong>：frerSeqGenStreamList 决定哪些 stream_handle 需要序列生成，frerSeqGenDirection 决定方向</li>
+  <li><strong>复位</strong>：软件写 frerSeqGenReset (或全局 BEGIN) 时，对应计数器清零</li>
+  <li><strong>面积优化</strong>：若系统支持 N 个 Stream，则需要 N x 16-bit 寄存器/存储器</li>
+</ul>
+</div>
+
+<!-- =================== 6. Sequence Recovery =================== -->
+<h2 id="seq-recovery">6. Sequence Recovery (序列恢复)</h2>
+<p>Sequence Recovery Function 运行在合并后的 Compound Stream 上，负责消除来自不同 Member Stream 的重复包。</p>
+
+<h3>6.1 两种应用场景</h3>
+<table>
+<tr><th>场景</th><th>说明</th><th>适用算法</th></tr>
+<tr><td>Intermittent Stream</td><td>任意路径上同时最多只有1个包在传输，seq_num 差值不会超过1</td><td>MatchRecoveryAlgorithm (frerSeqRcvyHistoryLength=1 时 Vector 也适用)</td></tr>
+<tr><td>Bulk Stream</td><td>路径上可同时有多个包，seq_num 差值可能很大</td><td>VectorRecoveryAlgorithm (frerSeqRcvyHistoryLength &gt;= 2)</td></tr>
+</table>
+
+<h3>6.2 Base Recovery Function 通用变量 (7.4.3)</h3>
+<table>
+<tr><th>变量</th><th>类型/范围</th><th>说明</th></tr>
+<tr><td>RecovSeqSpace</td><td>常量 = 65536</td><td>序列号空间</td></tr>
+<tr><td>RecovSeqNum</td><td>0 ~ 65535</td><td>最近一次接受的序列号</td></tr>
+<tr><td>SequenceHistory[]</td><td>位向量，长度 = frerSeqRcvyHistoryLength</td><td>记录最近 HistoryLength 个序列号的接收状态</td></tr>
+<tr><td>RemainingTicks</td><td>无符号整数</td><td>超时倒计时，减到0触发 RECOVERY_TIMEOUT</td></tr>
+<tr><td>TicksPerSecond</td><td>&gt;= 100</td><td>Tick 频率，由实现提供</td></tr>
+<tr><td>TakeAny</td><td>Boolean</td><td>复位后第一条包无条件接受</td></tr>
+</table>
+
+<h3>6.3 通用事件</h3>
+<table>
+<tr><th>事件</th><th>触发</th></tr>
+<tr><td>BEGIN</td><td>全局复位，触发 SequenceRecoveryReset()</td></tr>
+<tr><td>DATA_INDICATION</td><td>下层收到包，触发 Vector/Match Recovery Algorithm</td></tr>
+<tr><td>RECOVERY_TIMEOUT</td><td>RemainingTicks 减到 0，触发 SequenceRecoveryReset()</td></tr>
+<tr><td>PRESENT_DATA</td><td>算法判定包有效，向上层递交</td></tr>
+</table>
+
+<h3>6.4 SequenceRecoveryReset 伪代码</h3>
+<pre>
+void SequenceRecoveryReset() {
+    if (frerSeqRcvyAlgorithm == Vector_Alg) {
+        RecovSeqNum = RecovSeqSpace - 1;   // = 65535
+        for (i = 0; i &lt; frerSeqRcvyHistoryLength; i++)
+            SequenceHistory[i] = 0;
+    }
+    TakeAny = true;
+    frerCpsSeqRcvyResets++;
+}
+</pre>
+<div class="note">
+MatchRecoveryAlgorithm 不需要 SequenceHistory，因此 reset 时只需设置 TakeAny。
+</div>
+
+<!-- ========== 6.2 VectorRecoveryAlgorithm ========== -->
+<h3 id="sec-vector-alg">6.5 VectorRecoveryAlgorithm (7.4.3.4)</h3>
+<p>适用于 <strong>Bulk Streams</strong>，使用滑动窗口 (SequenceHistory) 记录最近 <code>frerSeqRcvyHistoryLength</code> 个序列号的接收状态。</p>
+
+<h4>核心逻辑</h4>
+<ol>
+  <li>检查 sequence_number 是否为有效值（不是 frerSeqRcvyInvalidSequenceValue）</li>
+  <li>计算有符号差值 <code>delta = sequence_number - RecovSeqNum</code>（模 65536 运算）</li>
+  <li>如果 <code>TakeAny == true</code>：接受该包，设置 RecovSeqNum = sequence_number，SequenceHistory[0]=1，TakeAny=false</li>
+  <li>如果 <code>delta &gt;= HistoryLength</code> 或 <code>delta &lt;= -HistoryLength</code>：丢弃（Rogue packet）</li>
+  <li>如果 <code>delta &lt;= 0</code>：检查 SequenceHistory[-delta]，为0则接受（Out-of-order），为1则丢弃（Duplicate）</li>
+  <li>如果 <code>delta &gt; 0</code>：新包，接受。先 shift SequenceHistory delta-1 次（补0），再 shift 1 次（补1），更新 RecovSeqNum</li>
+</ol>
+
+<h4>伪代码</h4>
+<pre>
+void VectorRecoveryAlgorithm() {
+    unsigned int sequence_number;
+    // === 检查序列号有效性 ===
+    if (sequence_number == frerSeqRcvyInvalidSequenceValue) {
+        frerCpsSeqRcvyTaglessPackets++;
+        if (frerSeqRcvyTakeNoSequence) {
+            frerCpsSeqRcvyPassedPackets++;
+            frerCpSeqRcvyPassedPackets++;
+            RemainingTicks = ((frerSeqRcvyResetMSec * TicksPerSecond) + 999) / 1000;
+            PRESENT_DATA;
+        } else {
+            frerCpsSeqRcvyDiscardedPackets++;
+            frerCpSeqRcvyDiscardPackets++;
+        }
+        return;
+    }
+
+    // === 计算有符号差值 (modulo RecovSeqSpace) ===
+    int delta = (sequence_number - RecovSeqNum) &amp; (RecovSeqSpace - 1);
+    if (0 != (delta &amp; (RecovSeqSpace / 2)))
+        delta = delta - RecovSeqSpace;
+    // 结果范围: -(RecovSeqSpace/2) &lt;= delta &lt;= (RecovSeqSpace/2 - 1)
+
+    // === 复位后第一条包 ===
+    if (TakeAny) {
+        TakeAny = false;
+        SequenceHistory[0] = 1;
+        RecovSeqNum = sequence_number;
+        frerCpsSeqRcvyPassedPackets++;
+        frerCpSeqRcvyPassedPackets++;
+        RemainingTicks = ((frerSeqRcvyResetMSec * TicksPerSecond) + 999) / 1000;
+        PRESENT_DATA;
+    }
+    // === Rogue packet: 超出 History 窗口 ===
+    else if (delta &gt;= frerSeqRcvyHistoryLength || delta &lt;= -frerSeqRcvyHistoryLength) {
+        frerCpsSeqRcvyRoguePackets++;
+        frerCpSeqRcvyDiscardPackets++;
+        if (frerSeqRcvyIndividualRecovery)
+            RemainingTicks = ((frerSeqRcvyResetMSec * TicksPerSecond) + 999) / 1000;
+    }
+    // === 老包 (delta &lt;= 0): 检查是否已接收 ===
+    else if (delta &lt;= 0) {
+        if (0 == SequenceHistory[-delta]) {
+            // 未见过，接受 (out-of-order)
+            SequenceHistory[-delta] = 1;
+            frerCpsSeqRcvyOutOfOrderPackets++;
+            frerCpsSeqRcvyPassedPackets++;
+            frerCpSeqRcvyPassedPackets++;
+            RemainingTicks = ((frerSeqRcvyResetMSec * TicksPerSecond) + 999) / 1000;
+            PRESENT_DATA;
+        } else {
+            // 重复包，丢弃
+            frerCpsSeqRcvyDiscardedPackets++;
+            frerCpSeqRcvyDiscardPackets++;
+            if (frerSeqRcvyIndividualRecovery)
+                RemainingTicks = ((frerSeqRcvyResetMSec * TicksPerSecond) + 999) / 1000;
+        }
+    }
+    // === 新包 (delta &gt; 0): 正常前进 ===
+    else {
+        if (delta != 1)
+            frerCpsSeqRcvyOutOfOrderPackets++;
+        while (0 != (delta = delta - 1))
+            ShiftSequenceHistory(0);  // 补 "未收到"
+        ShiftSequenceHistory(1);       // 当前包标记 "已收到"
+        RecovSeqNum = sequence_number;
+        frerCpsSeqRcvyPassedPackets++;
+        frerCpSeqRcvyPassedPackets++;
+        RemainingTicks = ((frerSeqRcvyResetMSec * TicksPerSecond) + 999) / 1000;
+        PRESENT_DATA;
+    }
+}
+
+// ========== ShiftSequenceHistory ==========
+void ShiftSequenceHistory(int newZeroValue) {
+    if (0 == SequenceHistory[frerSeqRcvyHistoryLength - 1])
+        frerCpsSeqRcvyLostPackets++;   // 滑出窗口的位是0，表示该seq_num从未收到
+    for (i = frerSeqRcvyHistoryLength - 1; i != 0; i--)
+        SequenceHistory[i] = SequenceHistory[i - 1];
+    SequenceHistory[0] = newZeroValue;
+}
+</pre>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：VectorRecoveryAlgorithm</h4>
+<ul>
+  <li><strong>SequenceHistory 存储</strong>：使用一个 <code>frerSeqRcvyHistoryLength</code> 位的寄存器/存储器。最小支持2位，典型值如16/32/64</li>
+  <li><strong>delta 计算</strong>：
+    <pre style="margin:4px 0;">delta = (seq_num - RecovSeqNum) &amp; 16'hFFFF;
+if (delta[15]) delta = delta - 16'd65536;  // 有符号化</pre>
+    结果范围为 -32768 ~ +32767
+  </li>
+  <li><strong>History 移位</strong>：当 delta &gt; 1 时，需要连续 shift delta 次。若 delta 可能很大，可用 barrel shifter 一次完成多位移位：<code>SequenceHistory = (SequenceHistory &lt;&lt; delta) | new_bits</code></li>
+  <li><strong>丢失检测</strong>：ShiftSequenceHistory 中，若最高位(即将移出的位)为0，则 frerCpsSeqRcvyLostPackets++。RTL 中可用组合逻辑判断</li>
+  <li><strong>超时定时器</strong>：RemainingTicks 以 TicksPerSecond 频率递减。建议用独立计数器生成 Tick，每个 recovery 实例维护一个 RemainingTicks 计数器</li>
+  <li><strong>多 Stream 支持</strong>：每个 port + stream_handle + direction 对应一个 recovery 实例，可用 RAM 存储状态 (RecovSeqNum, SequenceHistory, TakeAny, RemainingTicks)</li>
+  <li><strong>资源估算</strong>：假设支持 256 个 Stream，HistoryLength=32，每个实例需要 16(RecovSeqNum) + 32(History) + 1(TakeAny) + ~20(RemainingTicks) = ~69 bits。256 个实例约需 2.2 KB 存储</li>
+</ul>
+</div>
+
+<!-- ========== 6.3 MatchRecoveryAlgorithm ========== -->
+<h3 id="sec-match-alg">6.6 MatchRecoveryAlgorithm (7.4.3.5)</h3>
+<p>适用于 <strong>Intermittent Streams</strong>，仅记录上一个接受的序列号，新包序列号不同即接受，相同即丢弃。</p>
+
+<h4>伪代码</h4>
+<pre>
+void MatchRecoveryAlgorithm() {
+    unsigned int sequence_number;
+    // === 检查序列号有效性 ===
+    if (sequence_number == frerSeqRcvyInvalidSequenceValue) {
+        frerCpsSeqRcvyTaglessPackets++;
+        frerCpsSeqRcvyPassedPackets++;
+        frerCpSeqRcvyPassedPackets++;
+        PRESENT_DATA;
+        return;
+    }
+
+    // === 复位后第一条包 ===
+    if (TakeAny) {
+        TakeAny = false;
+        RecovSeqNum = sequence_number;
+        frerCpsSeqRcvyPassedPackets++;
+        frerCpSeqRcvyPassedPackets++;
+        RemainingTicks = ((frerSeqRcvyResetMSec * TicksPerSecond) + 999) / 1000;
+        PRESENT_DATA;
+    }
+    // === 序列号匹配 ===
+    else {
+        int delta = (sequence_number - RecovSeqNum) &amp; (RecovSeqSpace - 1);
+        if (delta == 0) {
+            // 重复包
+            frerCpsSeqRcvyDiscardedPackets++;
+            frerCpSeqRcvyDiscardPackets++;
+            if (frerSeqRcvyIndividualRecovery)
+                RemainingTicks = ((frerSeqRcvyResetMSec * TicksPerSecond) + 999) / 1000;
+        } else {
+            // 新包
+            if (delta != 1)
+                frerCpsSeqRcvyOutOfOrderPackets++;
+            RecovSeqNum = sequence_number;
+            frerCpsSeqRcvyPassedPackets++;
+            frerCpSeqRcvyPassedPackets++;
+            RemainingTicks = ((frerSeqRcvyResetMSec * TicksPerSecond) + 999) / 1000;
+            PRESENT_DATA;
+        }
+    }
+}
+</pre>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：MatchRecoveryAlgorithm</h4>
+<ul>
+  <li><strong>极简实现</strong>：仅需保存 RecovSeqNum (16-bit) + TakeAny (1-bit) + RemainingTicks，无需 SequenceHistory</li>
+  <li><strong>判断逻辑</strong>：只需判断 <code>sequence_number == RecovSeqNum</code>，相同则丢弃，不同则接受</li>
+  <li><strong>资源对比</strong>：相比 Vector 算法，Match 算法每个实例节省 HistoryLength 位存储，适合资源受限场景</li>
+  <li><strong>限制</strong>：无法检测丢包 (LostPackets)，不支持 Bulk Stream（路径差大于1会误丢弃或误接受）</li>
+</ul>
+</div>
+
+<!-- =================== 7. Individual Recovery =================== -->
+<h2 id="sec-individual">7. Individual Recovery Function (7.5)</h2>
+<p>Individual Recovery 作用于<strong>单条 Member Stream</strong>（而非合并后的 Compound Stream），用于检测并丢弃来自 stuck transmitter 的重复包。它使用与 Base Recovery 相同的算法，但 <code>frerSeqRcvyIndividualRecovery = True</code>。</p>
+
+<div class="warn">
+<strong>与 Sequence Recovery 的关键区别</strong>：
+<ul>
+  <li>Sequence Recovery 合并多条 Member Stream 并去重，包含 Latent Error Detection</li>
+  <li>Individual Recovery 仅处理单条 Member Stream，<strong>不包含</strong> Latent Error Detection</li>
+  <li>Individual Recovery 的 frerSeqRcvyPortList 可以包含多个端口（即跨端口对同一 Stream 做单独去重）</li>
+</ul>
+</div>
+
+<div class="ok">
+<strong>设计建议</strong>：在路径汇聚点前，对每条 Member Stream 先做一次 Individual Recovery，可以有效防止 stuck transmitter 污染 Sequence Recovery 的状态机。
+</div>
+
+<!-- =================== 8. Latent Error Detection =================== -->
+<h2 id="sec-latent">8. Latent Error Detection (7.4.4)</h2>
+<p>Latent Error Detection 检测冗余路径中是否存在<strong>静默失效</strong>（某条路径完全停止发送，但系统仍以为冗余有效）。它假设正常工作时，n 条路径中有 n-1 条路径的包会被丢弃，即 <code>Discarded ≈ Passed × (n-1)</code>。</p>
+
+<h3>8.1 核心算法</h3>
+<pre>
+// 周期复位 (由 RESET_LATENT_ERROR 事件触发)
+void LatentErrorReset() {
+    CurBaseDifference = (frerCpsSeqRcvyPassedPackets * (frerSeqRcvyLatentErrorPaths - 1))
+                        - frerCpsSeqRcvyDiscardedPackets;
+    frerCpsSeqRcvyLatentErrorResets++;
+}
+
+// 周期检测 (由 TRIGGER_LATENT_ERROR_TEST 事件触发)
+void LatentErrorTest() {
+    int diff = CurBaseDifference
+             - ((frerCpsSeqRcvyPassedPackets * (frerSeqRcvyLatentErrorPaths - 1))
+                - frerCpsSeqRcvyDiscardedPackets);
+    if (frerSeqRcvyLatentErrorPaths &gt; 1 &amp;&amp; frerSeqRcvyLatentErrorPeriod &gt; 0) {
+        if (diff &lt; 0) diff = -diff;
+        if (diff &gt; frerSeqRcvyLatentErrorDifference) {
+            SIGNAL_LATENT_ERROR;   // 触发告警
+        }
+    }
+}
+</pre>
+
+<h3>8.2 管理对象</h3>
+<table>
+<tr><th>对象</th><th>说明</th></tr>
+<tr><td>frerSeqRcvyLatentErrorDifference</td><td>阈值：允许的实际丢弃数与期望丢弃数的偏差</td></tr>
+<tr><td>frerSeqRcvyLatentErrorPeriod</td><td>检测周期（秒），最小建议值 1s</td></tr>
+<tr><td>frerSeqRcvyLatentErrorPaths</td><td>冗余路径数 n</td></tr>
+<tr><td>frerSeqRcvyLatentResetPeriod</td><td>复位周期（秒），用于重置 CurBaseDifference</td></tr>
+</table>
+
+<div class="note">
+该算法存在量化误差：若 LatentErrorTest 与 LatentErrorReset 时机不巧，可能需要 <code>2 × frerSeqRcvyLatentErrorDifference</code> 的偏差才能触发告警。
+</div>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：Latent Error Detection</h4>
+<ul>
+  <li><strong>独立定时器</strong>：需要两个独立定时器，分别以 LatentErrorPeriod 和 LatentResetPeriod 为周期</li>
+  <li><strong>乘法器</strong>：<code>Passed × (Paths-1)</code> 需要乘法器。若 Paths 为固定值（如2），可用移位/加法代替</li>
+  <li><strong>计数器位宽</strong>：Passed 和 Discarded 计数器需足够宽（标准建议 64-bit @ >650Mbps）</li>
+  <li><strong>可关闭</strong>：frerSeqRcvyLatentErrorPeriod=0 时关闭检测</li>
+</ul>
+</div>
+
+<!-- =================== 9. R-TAG =================== -->
+<h2 id="sec-rtag">9. R-TAG (Redundancy Tag) 格式 (7.8)</h2>
+<p>R-TAG 是 802.1CB 定义的<strong>必选</strong> Sequence Encode/Decode 格式，直接插入在 MAC 帧的 payload 最前端。</p>
+
+<h3>9.1 R-TAG 格式</h3>
+<table>
+<tr><th>字段</th><th>长度</th><th>值/说明</th></tr>
+<tr><td>EtherType (TPID)</td><td>2 bytes</td><td><code>0xF1C1</code> (R-TAG EtherType)</td></tr>
+<tr><td>Reserved</td><td>2 bytes</td><td>传输必须为 0，接收必须忽略</td></tr>
+<tr><td>Sequence Number</td><td>2 bytes</td><td>sequence_number 的低 16 位 (MSB first)</td></tr>
+</table>
+
+<p>总长度：<strong>6 bytes</strong>。插入后 MAC 帧 payload 增加 6 字节。</p>
+
+<h3>9.2 编码操作 (发送)</h3>
+<ol>
+  <li>将 sequence_number 的低 16 位写入 Sequence Number 字段</li>
+  <li>Reserved 字段填 0</li>
+  <li>将 6-byte R-TAG 插入到 mac_service_data_unit 的最前端</li>
+</ol>
+
+<h3>9.3 解码操作 (接收)</h3>
+<ol>
+  <li>检查 mac_service_data_unit 前 2 字节是否等于 <code>0xF1C1</code></li>
+  <li>若匹配且长度 >= 6 字节：
+    <ul>
+      <li>移除前 6 字节</li>
+      <li>将 Sequence Number 字段提取到 sequence_number 子参数</li>
+    </ul>
+  </li>
+  <li>若不匹配或长度 < 6：
+    <ul>
+      <li>sequence_number = frerSeqRcvyInvalidSequenceValue</li>
+      <li>frerCpsSeqEncErroredPackets++</li>
+    </ul>
+  </li>
+</ol>
+
+<div class="warn">
+<strong>R-TAG 位置注意</strong>：R-TAG 位于 payload 最前端，在 VLAN tag 之前。如果帧同时有 VLAN tag 和 R-TAG，顺序为：DMAC | SMAC | <strong>R-TAG</strong> | VLAN Tag | ...。这与常规 VLAN tag 位置 (DMAC | SMAC | VLAN | Type) 不同。
+</div>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：R-TAG 处理</h4>
+<ul>
+  <li><strong>插入位置</strong>：在 MAC 帧的 payload 头部，即 DMAC(6) + SMAC(6) + <strong>R-TAG(6)</strong> + ...</li>
+  <li><strong>字节序</strong>：Sequence Number 的高字节在前 (octet 4)</li>
+  <li><strong>流水线</strong>：建议在报文解析的第一级检查 EtherType = 0xF1C1，若是则提取 SeqNum 并跳过 6 字节</li>
+  <li><strong>带宽影响</strong>：每帧增加 6 字节，对千兆/万兆网络影响极小</li>
+  <li><strong>与其他 Tag 共存</strong>：需确保 parser 能识别 R-TAG 后紧跟 VLAN tag 的情况 (0xF1C1 后跟 0x8100)</li>
+</ul>
+</div>
+
+<!-- =================== 10. Sequence Encode/Decode =================== -->
+<h2 id="sec-enc-dec">10. Sequence Encode/Decode (7.6)</h2>
+<p>Sequence Encode/Decode Function 负责在报文中插入/提取 sequence_number。802.1CB 定义了三种格式：</p>
+
+<table>
+<tr><th>格式</th><th>要求</th><th>位置</th><th>用途</th></tr>
+<tr><td>R-TAG (7.8)</td><td><strong>必选</strong></td><td>Payload 头部</td><td>802.1CB 原生格式</td></tr>
+<tr><td>HSR Sequence Tag (7.9)</td><td>可选</td><td>Payload 头部</td><td>与 IEC 62439-3 HSR 互通</td></tr>
+<tr><td>PRP Sequence Trailer (7.10)</td><td>可选</td><td>Payload 尾部</td><td>与 IEC 62439-3 PRP 互通</td></tr>
+</table>
+
+<div class="note">
+三种格式通过 frerSeqEncEncapsType (10.5.1.5) 配置，使用 OUI=00-80-C2 区分。
+</div>
+
+<!-- =================== 11. Stream Splitting =================== -->
+<h2 id="sec-split">11. Stream Splitting (7.7)</h2>
+<p>Stream Splitting Function 将 Compound Stream 拆分为多个 Member Stream。它作用于出端口 (out-facing)，根据 frerSplitInputIdList 匹配 stream_handle，为每个匹配项复制一份包，并将 stream_handle 替换为 frerSplitOutputIdList 中的对应值。</p>
+
+<div class="ok">
+<strong>典型应用</strong>：Talker 产生一个 Compound Stream (stream_handle=1)，经过 Stream Splitting 后变成两个 Member Stream (stream_handle=10 和 11)，分别发往两个不同端口，各自再经过 Sequence Generation 和 R-TAG 编码。
+</div>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：Stream Splitting</h4>
+<ul>
+  <li><strong>包复制</strong>：需要报文缓存和描述符复制机制，确保同一包内容被发送到多个端口</li>
+  <li><strong>stream_handle 重写</strong>：输出时根据查表结果修改描述符中的 stream_handle</li>
+  <li><strong>与 Sequence Generation 配合</strong>：Split 后的各 Member Stream 共享同一个 Sequence Generation 实例（即 seq_num 一致）</li>
+</ul>
+</div>
+
+<!-- =================== 12. 管理对象 =================== -->
+<h2 id="sec-mo">12. 管理对象与配置表 (Managed Objects)</h2>
+
+<h3>12.1 Stream Identity Table (Clause 9)</h3>
+<table>
+<tr><th>对象</th><th>说明</th></tr>
+<tr><td>tsnStreamIdHandle</td><td>Stream 句柄 (整数)</td></tr>
+<tr><td>tsnStreamIdIdentificationType</td><td>识别类型 (Null/SMAC_VLAN/DMAC_VLAN/IP)</td></tr>
+<tr><td>tsnStreamIdInFacOutputPortList</td><td>入端口-出侧 应用该识别的端口列表</td></tr>
+<tr><td>tsnStreamIdOutFacOutputPortList</td><td>出端口-出侧 应用该识别的端口列表</td></tr>
+<tr><td>tsnStreamIdInFacInputPortList</td><td>入端口-入侧 应用该识别的端口列表</td></tr>
+<tr><td>tsnStreamIdOutFacInputPortList</td><td>出端口-入侧 应用该识别的端口列表</td></tr>
+</table>
+
+<h3>12.2 Sequence Generation Table (10.3)</h3>
+<table>
+<tr><th>对象</th><th>说明</th></tr>
+<tr><td>frerSeqGenStreamList</td><td>需要序列生成的 Stream 列表</td></tr>
+<tr><td>frerSeqGenDirection</td><td>True=out-facing, False=in-facing</td></tr>
+</table>
+
+<h3>12.3 Sequence Recovery Table (10.4)</h3>
+<table>
+<tr><th>对象</th><th>说明</th><th>默认值/范围</th></tr>
+<tr><td>frerSeqRcvyStreamList</td><td>Stream 列表</td><td>-</td></tr>
+<tr><td>frerSeqRcvyPortList</td><td>端口列表</td><td>-</td></tr>
+<tr><td>frerSeqRcvyDirection</td><td>True=out-facing, False=in-facing</td><td>-</td></tr>
+<tr><td>frerSeqRcvyReset</td><td>写 True 触发复位</td><td>读始终返回 False</td></tr>
+<tr><td>frerSeqRcvyAlgorithm</td><td>Vector_Alg(0) 或 Match_Alg(1)</td><td>默认 Vector_Alg</td></tr>
+<tr><td>frerSeqRcvyHistoryLength</td><td>Vector 算法的 History 长度</td><td>&gt;=2 (Bulk Stream)</td></tr>
+<tr><td>frerSeqRcvyResetMSec</td><td>超时复位时间 (毫秒)</td><td>-</td></tr>
+<tr><td>frerSeqRcvyInvalidSequenceValue</td><td>无效序列号标记值</td><td>只读，系统选择</td></tr>
+<tr><td>frerSeqRcvyTakeNoSequence</td><td>无序列号的包是否通过</td><td>默认 True</td></tr>
+<tr><td>frerSeqRcvyIndividualRecovery</td><td>True=Individual, False=Sequence</td><td>-</td></tr>
+<tr><td>frerSeqRcvyLatentErrorDetection</td><td>是否使能潜在错误检测</td><td>不能与 IndividualRecovery 同时为 True</td></tr>
+</table>
+
+<h3>12.4 Sequence Identification Table (10.5)</h3>
+<table>
+<tr><th>对象</th><th>说明</th></tr>
+<tr><td>frerSeqEncStreamList</td><td>Stream 列表</td></tr>
+<tr><td>frerSeqEncPort</td><td>端口号</td></tr>
+<tr><td>frerSeqEncDirection</td><td>方向</td></tr>
+<tr><td>frerSeqEncActive</td><td>是否激活</td></tr>
+<tr><td>frerSeqEncEncapsType</td><td>R-TAG(1) / HSR(2) / PRP(3)</td></tr>
+<tr><td>frerSeqEncPathIdLanId</td><td>HSR/PRP 的 PathId/LanId</td></tr>
+</table>
+
+<h3>12.5 Stream Split Table (10.6)</h3>
+<table>
+<tr><th>对象</th><th>说明</th></tr>
+<tr><td>frerSplitPort</td><td>端口号</td></tr>
+<tr><td>frerSplitDirection</td><td>方向</td></tr>
+<tr><td>frerSplitInputIdList</td><td>输入 stream_handle 列表</td></tr>
+<tr><td>frerSplitOutputIdList</td><td>输出 stream_handle 列表 (与输入一一对应)</td></tr>
+</table>
+
+<!-- =================== 13. 计数器 =================== -->
+<h2 id="sec-counters">13. 计数器 (Counters)</h2>
+<p>所有计数器达到最大值后回绕到 0。标准假设管理实体读取频率足够高，不会错过超过一次回绕。计数器位宽应足够大，使得回绕时间至少为 1 分钟。</p>
+
+<h3>13.1 Per-Stream-per-port Counters (10.8)</h3>
+<table>
+<tr><th>计数器</th><th>说明</th></tr>
+<tr><td>frerCpsSeqGenResets</td><td>Sequence Generation 复位次数</td></tr>
+<tr><td>frerCpsSeqRcvyOutOfOrderPackets</td><td>乱序接受的包数</td></tr>
+<tr><td>frerCpsSeqRcvyRoguePackets</td><td>Vector 算法丢弃的越界包数</td></tr>
+<tr><td>frerCpsSeqRcvyPassedPackets</td><td>通过 recovery 的包数</td></tr>
+<tr><td>frerCpsSeqRcvyDiscardedPackets</td><td>因重复而丢弃的包数</td></tr>
+<tr><td>frerCpsSeqRcvyLostPackets</td><td>Vector 算法检测到的丢失包数</td></tr>
+<tr><td>frerCpsSeqRcvyTaglessPackets</td><td>收到无序列号的包数</td></tr>
+<tr><td>frerCpsSeqRcvyResets</td><td>Sequence Recovery 复位次数</td></tr>
+<tr><td>frerCpsSeqRcvyLatentErrorResets</td><td>Latent Error Reset 次数</td></tr>
+<tr><td>frerCpsSeqEncErroredPackets</td><td>Sequence 编解码错误包数</td></tr>
+</table>
+
+<h3>13.2 Per-port Counters (10.9)</h3>
+<table>
+<tr><th>计数器</th><th>说明</th></tr>
+<tr><td>frerCpSeqRcvyPassedPackets</td><td>端口上通过 recovery 的包总数</td></tr>
+<tr><td>frerCpSeqRcvyDiscardPackets</td><td>端口上丢弃的包总数 (Rogue + Duplicate)</td></tr>
+<tr><td>frerCpSeqEncErroredPackets</td><td>端口上编解码错误的包总数</td></tr>
+</table>
+
+<div class="note">
+Per-port 计数器 = 对应端口上所有 Per-Stream 计数器的和 (模运算)。
+</div>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：Counters</h4>
+<ul>
+  <li><strong>位宽选择</strong>：千兆以上链路建议使用 64-bit 计数器。若仅统计低速流，32-bit 可能足够</li>
+  <li><strong>原子性</strong>：计数器递增操作需要对软件读取原子。可用影子寄存器或双缓冲机制</li>
+  <li><strong>多端口统计</strong>：若 Sequence Recovery 实例化在转发平面中央（而非每端口），丢弃一个包可能需要同时递增多个端口的计数器</li>
+  <li><strong>计数器存储</strong>：大量计数器需要专用 SRAM 区域，建议按 (port, stream, counter_type) 索引</li>
+</ul>
+</div>
+
+<!-- =================== 14. RTL 设计要点 =================== -->
+<h2 id="sec-rtl">14. RTL 设计要点与建议</h2>
+
+<h3>14.1 顶层模块划分建议</h3>
+<pre>
+frer_top
+├── stream_identification      // Clause 6: 流识别
+│   ├── header_parser          // 解析 DMAC/SMAC/VLAN/IP/Port
+│   ├── match_engine           // CAM/TCAM 查表
+│   └── header_modifier        // Active 模式下修改报文头
+├── stream_splitter            // Clause 7.7: 流拆分/复制
+├── sequence_generator         // Clause 7.4.1: 序列号生成
+│   └── seqnum_ram             // 每 stream_handle 一个 16-bit 计数器
+├── sequence_recovery          // Clause 7.4.2/7.5: 序列恢复
+│   ├── vector_recovery        // VectorRecoveryAlgorithm
+│   │   ├── delta_calculator   // 有符号差值计算
+│   │   ├── history_shifter    // SequenceHistory 移位
+│   │   └── timeout_timer      // RemainingTicks 倒计时
+│   ├── match_recovery         // MatchRecoveryAlgorithm
+│   └── state_ram              // 每实例状态存储
+├── latent_error_detector      // Clause 7.4.4: 潜在错误检测
+│   ├── periodic_timer         // LatentErrorPeriod / LatentResetPeriod
+│   └── diff_comparator        // 偏差比较
+├── rtag_encoder               // Clause 7.8: R-TAG 插入
+├── rtag_decoder               // Clause 7.8: R-TAG 提取
+├── counter_block              // Clause 10.8/10.9: 统计计数器
+└── config_registers           // Clause 9/10: 管理对象配置寄存器
+</pre>
+
+<h3>14.2 关键设计决策</h3>
+<table>
+<tr><th>决策点</th><th>选项 A (性能优先)</th><th>选项 B (面积优先)</th></tr>
+<tr><td>Recovery 实例化位置</td><td>每端口独立实例，全并行处理</td><td>中央共享实例，时分复用</td></tr>
+<tr><td>HistoryLength</td><td>64~128，支持大路径差</td><td>2~16，仅支持小路径差</td></tr>
+<tr><td>支持的 Stream 数</td><td>1024+，全硬件表项</td><td>64~256，软/硬混合</td></tr>
+<tr><td>计数器位宽</td><td>64-bit，自动回绕</td><td>32-bit，软件定期轮询</td></tr>
+<tr><td>Stream ID 匹配</td><td>TCAM，支持 IP 五元组</td><td>Hash 表，仅支持 MAC+VLAN</td></tr>
+</table>
+
+<h3>14.3 时序与性能考量</h3>
+<ul>
+  <li><strong>最低时钟</strong>：TicksPerSecond >= 100 Hz，建议用 1KHz 或更高精度定时器</li>
+  <li><strong>报文处理延迟</strong>：Sequence Recovery 需要完整解析 sequence_number 后才能判定通过/丢弃，不适合 cut-through（至少对丢弃的包）</li>
+  <li><strong>流水线深度</strong>：Stream Identification + Sequence Recovery 可能需要 3~5 级流水线，在 156.25MHz 下对 10G 线速是可接受的</li>
+  <li><strong>存储器需求</strong>：核心状态存储 = N_streams × (RecovSeqNum + History + Timer + Flags)。例如 512 Stream × 80 bits = 40 Kbit ≈ 5 KB</li>
+</ul>
+
+<h3>14.4 复位策略</h3>
+<ul>
+  <li><strong>全局复位 (BEGIN)</strong>：硬件复位时所有状态清零</li>
+  <li><strong>软件复位 (frerSeqRcvyReset)</strong>：写 True 触发对应实例的 SequenceRecoveryReset()</li>
+  <li><strong>超时复位 (RECOVERY_TIMEOUT)</strong>：RemainingTicks 减到 0 自动复位。这是防 stuck 的关键机制</li>
+</ul>
+
+<h3>14.5 边界条件处理</h3>
+<table>
+<tr><th>场景</th><th>处理</th></tr>
+<tr><td>Sequence number wrap-around (65535->0)</td><td>自然处理，delta 计算用有符号模运算</td></tr>
+<tr><td>无序列号的包 (InvalidSequenceValue)</td><td>由 frerSeqRcvyTakeNoSequence 决定：True=通过，False=丢弃</td></tr>
+<tr><td>第一条包到达 (TakeAny)</td><td>无条件接受，建立 RecovSeqNum 基准</td></tr>
+<tr><td>路径切换导致突发</td><td>Vector 算法会接受窗口内所有包，可能短暂双倍速率输出</td></tr>
+<tr><td>Stuck transmitter 重复同一包</td><td>Vector/Match 都会丢弃重复，但绕回后可能误判。建议配合 Individual Recovery</td></tr>
+</table>
+
+<!-- =================== 15. PICS =================== -->
+<h2 id="sec-pics">15. PICS 符合性要求摘要</h2>
+
+<h3>15.1 必选功能 (Mandatory)</h3>
+<table>
+<tr><th>组件</th><th>要求</th></tr>
+<tr><td>Stream Identification</td><td>支持 Null / Source MAC+VLAN / Active Dest MAC+VLAN 至少一种</td></tr>
+<tr><td>Talker End System</td><td>Sequence Generation + R-TAG 编码</td></tr>
+<tr><td>Listener End System</td><td>Sequence Recovery (支持 Match 算法) + R-TAG 解码</td></tr>
+<tr><td>Relay System</td><td>Sequence Recovery (支持 Match 和 Vector 算法，HistoryLength>=2)</td></tr>
+<tr><td>所有系统</td><td>R-TAG EtherType = 0xF1C1；Reserved 字段发0收忽略</td></tr>
+</table>
+
+<h3>15.2 可选功能 (Optional)</h3>
+<table>
+<tr><th>功能</th><th>说明</th></tr>
+<tr><td>IP Stream Identification</td><td>基于 IP 五元组的流识别</td></tr>
+<tr><td>HSR Sequence Tag</td><td>与 IEC 62439-3 HSR 互通</td></tr>
+<tr><td>PRP Sequence Trailer</td><td>与 IEC 62439-3 PRP 互通</td></tr>
+<tr><td>Individual Recovery</td><td>单条 Member Stream 去重</td></tr>
+<tr><td>Latent Error Detection</td><td>潜在错误检测 (要求支持，但可关闭)</td></tr>
+<tr><td>Autoconfiguration</td><td>自动配置流表 (7.11)</td></tr>
+<tr><td>Stream Splitting</td><td>流拆分</td></tr>
+</table>
+
+<!-- =================== 总结 =================== -->
+<h2>总结</h2>
+<p>IEEE 802.1CB-2017 FRER 协议通过序列编号 + 帧复制 + 去重机制，为以太网提供设备故障级别的可靠性保障。RTL 实现的核心在于：</p>
+<ol>
+  <li><strong>Stream Identification</strong>：灵活可配置的报文分类器</li>
+  <li><strong>Sequence Generation</strong>：简单的 16-bit 循环计数器</li>
+  <li><strong>Sequence Recovery</strong>：基于滑动窗口 (Vector) 或单值匹配 (Match) 的去重状态机</li>
+  <li><strong>R-TAG</strong>：6-byte 报文头插入/提取</li>
+  <li><strong>计数器与超时机制</strong>：完善的统计和故障恢复能力</li>
+</ol>
+
+<div class="ok">
+<strong>最小可裁剪实现</strong>：若仅需要基本 FRER 功能，可只实现：Null Stream ID + R-TAG + Sequence Generation + Match Recovery (HistoryLength=1)。这覆盖了 Talker/Listener 的核心需求，面积最小。
+</div>
+
+<hr>
+<p style="color:#888;font-size:0.85em;text-align:center;">文档基于 IEEE Std 802.1CB-2017 整理 | 仅供学习参考</p>
+
+</body>
+</html>
