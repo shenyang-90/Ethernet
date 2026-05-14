@@ -2,7 +2,7 @@
 
 > **项目**: IP_20260502_001  
 > **阶段**: PAD  
-> **更新时间**: 2026-05-14 22:15:01  
+> **更新时间**: 2026-05-14 22:30:01  
 > **自动更新**: `make dashboard`
 
 ---
@@ -33,4 +33,4 @@
 ---
 
 *自动生成: ethernet_orchestrator.py*
-*输入变化: ProjectMgmt/Dashboard.md, -ProjectMgmt/Reports/pad_orchestrator_report_20260514_2204.md*
+*输入变化: ProjectMgmt/Dashboard.md*
