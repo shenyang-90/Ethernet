@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>IEEE 802.1AB-2016 LLDP 协议学习笔记 (RTL设计参考)</title>
+<style>
+  :root { --bg:#f8f9fa; --fg:#212529; --accent:#0056b3; --code:#e9ecef; --warn:#fff3cd; --crit:#f8d7da; --ok:#d4edda; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; line-height:1.7; max-width:1100px; margin:0 auto; padding:20px; background:var(--bg); color:var(--fg); }
+  h1 { color:var(--accent); border-bottom:3px solid var(--accent); padding-bottom:8px; }
+  h2 { color:var(--accent); margin-top:36px; border-left:6px solid var(--accent); padding-left:12px; }
+  h3 { margin-top:28px; color:#004494; }
+  h4 { margin-top:20px; color:#333; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:0.95em; }
+  th,td { border:1px solid #bbb; padding:8px 10px; text-align:left; }
+  th { background:#e2e6ea; }
+  code,pre { font-family: "Consolas", "Courier New", monospace; background:var(--code); padding:2px 6px; border-radius:4px; font-size:0.92em; }
+  pre { padding:14px; overflow-x:auto; line-height:1.5; }
+  .note { background:#e7f3ff; border-left:4px solid var(--accent); padding:10px 14px; margin:12px 0; }
+  .warn { background:var(--warn); border-left:4px solid #856404; padding:10px 14px; margin:12px 0; }
+  .crit { background:var(--crit); border-left:4px solid #721c24; padding:10px 14px; margin:12px 0; }
+  .ok { background:var(--ok); border-left:4px solid #155724; padding:10px 14px; margin:12px 0; }
+  .toc { background:#fff; border:1px solid #ccc; padding:16px 20px; border-radius:8px; }
+  .toc ul { list-style:none; padding-left:0; }
+  .toc li { margin:6px 0; }
+  .toc a { text-decoration:none; color:var(--accent); }
+  .toc a:hover { text-decoration:underline; }
+  .rtl-box { background:#fff; border:2px dashed var(--accent); padding:14px 18px; border-radius:8px; margin:14px 0; }
+  .rtl-box h4 { margin-top:0; color:var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>IEEE 802.1AB-2016 LLDP 协议学习笔记</h1>
+<p style="color:#666;font-size:0.9em;">本文档基于 IEEE Std 802.1AB-2016 整理，详细程度可作为 RTL 设计参考。生成日期: 2026-05-11</p>
+
+<div class="toc">
+<h3>目录</h3>
+<ul>
+  <li><a href="#sec-overview">1. 协议概述</a></li>
+  <li><a href="#sec-addr">2. 地址与帧封装 (Clause 7)</a></li>
+  <li><a href="#sec-lldpdu">3. LLDPDU 帧格式 (Clause 8.2)</a></li>
+  <li><a href="#sec-tlv">4. TLV 通用格式与类型 (Clause 8.4)</a></li>
+  <li><a href="#sec-tlvs">5. 各 TLV 详解 (Clause 8.5–8.6)</a></li>
+  <li><a href="#sec-validation">6. LLDPDU 验证规则 (Clause 9.2.7.7)</a></li>
+  <li><a href="#sec-sm">7. LLDP Agent 状态机 (Clause 9)</a></li>
+  <li><a href="#sec-mib">8. 管理对象与 MIB (Clause 10)</a></li>
+  <li><a href="#sec-rtl">9. RTL 设计要点</a></li>
+</ul>
+</div>
+
+<h2 id="sec-overview">1. 协议概述</h2>
+<p>IEEE 802.1AB-2016 定义了 <strong>Link Layer Discovery Protocol (LLDP)</strong>，用于直连网络设备之间自动发现邻居信息并交换本地系统能力。LLDP 在数据链路层操作，无需 IP 层配置。</p>
+
+<div class="ok">
+<strong>核心功能</strong>：每个端口周期性地发送包含本地系统信息的 LLDPDU；接收并存储邻居信息，供网络管理系统查询。
+</div>
+
+<h3>1.1 协议范围</h3>
+<table>
+<tr><th>功能</th><th>说明</th></tr>
+<tr><td>邻居发现</td><td>自动发现直连设备身份与端口信息</td></tr>
+<tr><td>拓扑管理</td><td>构建二层网络拓扑图</td></tr>
+<tr><td>能力通告</td><td>通告系统能力（Bridge/Router/AP 等）</td></tr>
+<tr><td>故障定位</td><td>快速定位物理连接问题</td></tr>
+<tr><td>即插即用</td><td>无需手动配置即可交换管理信息</td></tr>
+</table>
+
+<div class="note">
+LLDP 是 <strong>单向</strong>协议：TX 和 RX 独立运行。接收到的信息存入本地 MIB，不向对方发送确认或响应。
+</div>
+
+<h2 id="sec-addr">2. 地址与帧封装 (Clause 7)</h2>
+
+<h3>2.1 目的 MAC 地址 (Table 7-1)</h3>
+<table>
+<tr><th>名称</th><th>MAC 地址</th><th>作用范围</th></tr>
+<tr><td>Nearest bridge</td><td><code>01-80-C2-00-00-0E</code></td><td>所有 Bridge 类型（C-VLAN/S-VLAN/TPMR/MAC Bridge）都会终止，仅限单 LAN 段</td></tr>
+<tr><td>Nearest non-TPMR bridge</td><td><code>01-80-C2-00-00-03</code></td><td>TPMR 会转发；C-VLAN/S-VLAN/MAC Bridge 终止</td></tr>
+<tr><td>Nearest Customer Bridge</td><td><code>01-80-C2-00-00-00</code></td><td>TPMR 和 S-VLAN 转发；C-VLAN/MAC Bridge 终止</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：目的地址过滤</h4>
+<ul>
+  <li>End Station 必须支持 <code>01-80-C2-00-00-0E</code>（Nearest bridge）</li>
+  <li>对 <code>03</code> 和 <code>00</code> 的支持为可选，取决于部署场景</li>
+  <li>接收模块的地址过滤器应可配置匹配哪个 DA</li>
+</ul>
+</div>
+
+<h3>2.2 源地址</h3>
+<p>发送端口/站的独立 MAC 地址（Individual MAC Address）。</p>
+
+<h3>2.3 EtherType</h3>
+<p>LLDP EtherType = <code>0x88CC</code>（Table 7-3），编码为 MSDU 中的 2-octet 头。</p>
+
+<h3>2.4 接收过滤条件 (Clause 7.4)</h3>
+<p>帧被递送给 LLDP 接收模块 <strong>当且仅当</strong>：</p>
+<ol>
+  <li>DA 匹配该 LLDP Agent 实例关联的 MAC 地址；</li>
+  <li>EtherType == <code>0x88CC</code>。</li>
+</ol>
+
+<h2 id="sec-lldpdu">3. LLDPDU 帧格式 (Clause 8.2)</h2>
+
+<h3>3.1 位/字节序 (Clause 8.1)</h3>
+<ul>
+  <li>所有 LLDPDU 包含 <strong>整数个八位组</strong>。</li>
+  <li>八位组从 1 开始编号，按传输顺序从左到右。</li>
+  <li>八位组内位从 1（LSB）到 8（MSB）编号。</li>
+  <li><strong>多八位组字段</strong>：低编号八位组 = 更高有效值（大端序）。</li>
+  <li><strong>八位组内位字段</strong>：高位号 = 更高有效值。</li>
+  <li>图示约定：bit 8 在左，bit 1 在右。</li>
+</ul>
+
+<h3>3.2 LLDPDU 结构</h3>
+<pre>
+[ Chassis ID TLV ] [ Port ID TLV ] [ TTL TLV ] [ Optional TLVs ... ] [ End of LLDPDU TLV (optional) ]
+</pre>
+
+<table>
+<tr><th>规则</th><th>说明</th></tr>
+<tr><td>前 3 个 TLV 为强制</td><td>必须按 Chassis ID → Port ID → TTL 的严格顺序出现</td></tr>
+<tr><td>可选 TLV 顺序</td><td>可选 TLV 可以以任意顺序跟随</td></tr>
+<tr><td>End TLV 位置</td><td>End of LLDPDU TLV（Type=0）如果存在必须位于最后</td></tr>
+<tr><td>End TLV 之后</td><td>End TLV 之后的任何八位组均被丢弃</td></tr>
+</table>
+
+<h3>3.3 最大长度</h3>
+<ul>
+  <li>IEEE 802.3：最大 1500 个八位组（基本无标签 MAC 帧数据字段）。</li>
+  <li>无定义的最小长度，除强制 TLV 外。</li>
+</ul>
+
+<div class="warn">
+<strong>注意</strong>：如果构造的 LLDPDU 超出最大帧长，Agent 必须仅发送强制 TLV（Chassis ID + Port ID + TTL），并丢弃多余的可选 TLV。
+</div>
+
+<h2 id="sec-tlv">4. TLV 通用格式与类型 (Clause 8.4)</h2>
+
+<h3>4.1 TLV 通用头 — 2 个八位组</h3>
+<pre>
+Octet 1:  [ Type[6:0] | Length[8] ]
+Octet 2:  [ Length[7:0] ]
+</pre>
+
+<table>
+<tr><th>字段</th><th>位数</th><th>说明</th></tr>
+<tr><td>TLV Type</td><td>7（头中的 bits 15:9）</td><td>标识 TLV 类型</td></tr>
+<tr><td>TLV Information String Length</td><td>9（头中的 bits 8:0）</td><td>载荷长度（八位组）</td></tr>
+</table>
+
+<p><strong>TLV 总大小 = 2 + Length 个八位组。</strong></p>
+
+<h3>4.2 TLV 类型值 (Table 8-1)</h3>
+<table>
+<tr><th>Type</th><th>名称</th><th>用途</th><th>参考</th></tr>
+<tr><td>0</td><td>End Of LLDPDU</td><td>可选</td><td>8.5.1</td></tr>
+<tr><td>1</td><td><strong>Chassis ID</strong></td><td><strong>强制</strong></td><td>8.5.2</td></tr>
+<tr><td>2</td><td><strong>Port ID</strong></td><td><strong>强制</strong></td><td>8.5.3</td></tr>
+<tr><td>3</td><td><strong>Time To Live</strong></td><td><strong>强制</strong></td><td>8.5.4</td></tr>
+<tr><td>4</td><td>Port Description</td><td>可选</td><td>8.5.5</td></tr>
+<tr><td>5</td><td>System Name</td><td>可选</td><td>8.5.6</td></tr>
+<tr><td>6</td><td>System Description</td><td>可选</td><td>8.5.7</td></tr>
+<tr><td>7</td><td>System Capabilities</td><td>可选</td><td>8.5.8</td></tr>
+<tr><td>8</td><td>Management Address</td><td>可选</td><td>8.5.9</td></tr>
+<tr><td>9–126</td><td>Reserved</td><td>—</td><td>—</td></tr>
+<tr><td>127</td><td>Organizationally Specific</td><td>可选</td><td>8.6</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：TLV 解析器</h4>
+<ul>
+  <li>硬件解析器应顺序读取 2-byte TLV 头，提取 Type（7b）和 Length（9b）</li>
+  <li>用 Length 字段跳转至下一个 TLV，无需解析未知 TLV 内容</li>
+  <li>Type=0（End）时停止解析；Type=127 时继续解析 OUI+subtype</li>
+  <li>验证总长度不超出帧边界</li>
+</ul>
+</div>
+
+<h2 id="sec-tlvs">5. 各 TLV 详解 (Clause 8.5–8.6)</h2>
+
+<h3>5.1 End Of LLDPDU TLV (Clause 8.5.1)</h3>
+<ul>
+  <li><strong>Type = 0, Length = 0</strong></li>
+  <li>2 个八位组，全零：<code>0x00 0x00</code></li>
+  <li>标记 TLV 序列结束，防止将填充字节解析为 TLV</li>
+</ul>
+
+<h3>5.2 Chassis ID TLV (Clause 8.5.2)</h3>
+<p><strong>位置</strong>：必须是 LLDPDU 中的 <strong>第一个</strong> TLV。</p>
+<pre>
+[ TLV Header (2B) ] [ chassis ID subtype (1B) ] [ chassis ID (1..255B) ]
+</pre>
+<ul>
+  <li>Information String Length = 1 + length(chassis ID)，范围 2 到 256</li>
+  <li>每个 LLDPDU 中恰好一个 Chassis ID TLV</li>
+  <li>值在端口运行期间必须保持不变</li>
+</ul>
+
+<h4>Chassis ID Subtypes (Table 8-2)</h4>
+<table>
+<tr><th>Subtype</th><th>基础</th><th>RTL 相关性</th></tr>
+<tr><td>4</td><td>MAC address</td><td><strong>硬件最常见</strong></td></tr>
+<tr><td>5</td><td>Network address</td><td>IPv4/IPv6 + AFN 前缀</td></tr>
+<tr><td>7</td><td>Locally assigned</td><td>用户自定义字符串/二进制</td></tr>
+<tr><td>其他</td><td>—</td><td>软件处理为主</td></tr>
+</table>
+
+<p><strong>Network address 编码（subtype 5）</strong>：</p>
+<ul>
+  <li>八位组 1：IANA Address Family Number</li>
+  <li>八位组 2..n：网络字节序的地址值</li>
+</ul>
+
+<h3>5.3 Port ID TLV (Clause 8.5.3)</h3>
+<p><strong>位置</strong>：必须是 LLDPDU 中的 <strong>第二个</strong> TLV。</p>
+<pre>
+[ TLV Header (2B) ] [ port ID subtype (1B) ] [ port ID (1..255B) ]
+</pre>
+<ul>
+  <li>Information String Length = 1 + length(port ID)，范围 2 到 256</li>
+  <li>每个 LLDPDU 中恰好一个 Port ID TLV</li>
+  <li>必须非空；值在端口运行期间保持不变</li>
+</ul>
+
+<h4>Port ID Subtypes (Table 8-3)</h4>
+<table>
+<tr><th>Subtype</th><th>基础</th></tr>
+<tr><td>3</td><td>MAC address</td></tr>
+<tr><td>4</td><td>Network address</td></tr>
+<tr><td>7</td><td>Locally assigned</td></tr>
+<tr><td>其他</td><td>软件处理为主</td></tr>
+</table>
+
+<h3>5.4 Time To Live TLV (Clause 8.5.4)</h3>
+<p><strong>位置</strong>：必须是 LLDPDU 中的 <strong>第三个</strong> TLV。</p>
+<pre>
+[ TLV Header (2B) ] [ TTL (2B, unsigned) ]
+</pre>
+<ul>
+  <li>Information String Length = 2</li>
+  <li>TTL 范围：0 到 65535 秒</li>
+  <li><strong>TTL = 0</strong>：shutdown 帧 — 接收方必须删除该 MSAP 的所有信息</li>
+  <li><strong>TTL > 0</strong>：正常帧 — 接收方替换该 MSAP 的所有现有信息</li>
+</ul>
+
+<div class="crit">
+<strong>关键规则</strong>：TTL=0 的 shutdown 帧只包含强制 TLV（Chassis ID + Port ID + TTL=0），不含任何可选 TLV。
+</div>
+
+<h3>5.5 Port Description TLV (Clause 8.5.5)</h3>
+<ul>
+  <li>Type = 4，可变长 UTF-8 字符串</li>
+  <li>每个 LLDPDU 最多一个</li>
+</ul>
+
+<h3>5.6 System Name TLV (Clause 8.5.6)</h3>
+<ul>
+  <li>Type = 5，可变长 UTF-8 字符串（建议使用 FQDN）</li>
+  <li>每个 LLDPDU 最多一个</li>
+</ul>
+
+<h3>5.7 System Description TLV (Clause 8.5.7)</h3>
+<ul>
+  <li>Type = 6，可变长 UTF-8 字符串</li>
+  <li>每个 LLDPDU 最多一个</li>
+</ul>
+
+<h3>5.8 System Capabilities TLV (Clause 8.5.8)</h3>
+<pre>
+[ TLV Header (2B) ] [ system capabilities (2B) ] [ enabled capabilities (2B) ]
+</pre>
+<ul>
+  <li>Type = 7，Information String Length = 4</li>
+  <li>两个 16-bit 位图</li>
+</ul>
+
+<h4>Capability Bits (Table 8-4)</h4>
+<table>
+<tr><th>Bit</th><th>能力</th></tr>
+<tr><td>0</td><td>Other</td></tr>
+<tr><td>1</td><td>Repeater</td></tr>
+<tr><td>2</td><td>MAC Bridge component</td></tr>
+<tr><td>3</td><td>802.11 Access Point</td></tr>
+<tr><td>4</td><td>Router</td></tr>
+<tr><td>5</td><td>Telephone</td></tr>
+<tr><td>6</td><td>DOCSIS cable device</td></tr>
+<tr><td>7</td><td>Station Only</td></tr>
+<tr><td>8</td><td>C-VLAN component</td></tr>
+<tr><td>9</td><td>S-VLAN component</td></tr>
+<tr><td>10</td><td>Two-port MAC Relay component</td></tr>
+<tr><td>11–15</td><td>Reserved</td></tr>
+</table>
+
+<div class="warn">
+<strong>验证规则</strong>：如果 enabled capabilities 中某位被置位但 system capabilities 中对应位未置位，该 TLV 出错，<strong>应被丢弃</strong>。
+</div>
+
+<h3>5.9 Management Address TLV (Clause 8.5.9)</h3>
+<pre>
+[ TLV Header (2B) ]
+[ mgmt addr string length (1B) ]
+[ mgmt addr subtype (1B) ]
+[ mgmt addr (1..31B) ]
+[ interface numbering subtype (1B) ]
+[ interface number (4B) ]
+[ OID string length (1B) ]
+[ OID (0..128B) ]
+</pre>
+<ul>
+  <li>Type = 8</li>
+  <li>Management address string length = 1 + length(mgmt addr)，最大 31</li>
+  <li>Interface numbering subtype：1=Unknown, 2=ifIndex, 3=system port number</li>
+  <li>Interface number：4 个八位组；subtype=Unknown 时设为 0</li>
+  <li>OID length = 0 表示 OID 不存在</li>
+  <li>至少应包含一个 Management Address TLV；允许多个，但地址必须唯一</li>
+</ul>
+
+<p><strong>验证</strong>：TLV info string length == mgmt addr string length + OID string length + 7。若不正确，忽略并终止该 TLV 的处理。</p>
+
+<h3>5.10 Organizationally Specific TLVs (Clause 8.6)</h3>
+<pre>
+[ TLV Header (2B) ] [ OUI (3B) ] [ subtype (1B) ] [ info string (0..507B) ]
+</pre>
+<ul>
+  <li><strong>Type = 127</strong></li>
+  <li>OUI：3 个八位组（IEEE 分配）</li>
+  <li>Subtype：1 个八位组，由组织定义</li>
+  <li>信息字符串最大 507 个八位组（以适应 Type 127 的 511 八位组 TLV info string 限制）</li>
+</ul>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：Org TLV 存储</h4>
+<ul>
+  <li>硬件无法预知所有 Type 127 TLV 的语义</li>
+  <li>建议按 (OUI, subtype) 索引存储原始字节</li>
+  <li>软件通过 (OUI, subtype) 查找并解释内容</li>
+  <li>限制每端口存储的 Org TLV 数量以节省资源</li>
+</ul>
+</div>
+
+<h2 id="sec-validation">6. LLDPDU 验证规则 (Clause 9.2.7.7)</h2>
+
+<h3>6.1 强制 TLV 验证 (rxProcessFrame)</h3>
+<table>
+<tr><th>步骤</th><th>检查项</th><th>失败动作</th></tr>
+<tr><td>第 1 个 TLV</td><td>Type 必须为 1 (Chassis ID)</td><td>丢弃帧，inc statsFramesDiscardedTotal, statsFramesInErrorsTotal, badFrame=TRUE</td></tr>
+<tr><td>第 1 个 TLV</td><td>Length 必须为 2 &lt; n &lt; 256</td><td>同上丢弃</td></tr>
+<tr><td>第 2 个 TLV</td><td>Type 必须为 2 (Port ID)</td><td>同上丢弃</td></tr>
+<tr><td>第 2 个 TLV</td><td>Length 必须为 2 &lt; n &lt; 256</td><td>同上丢弃</td></tr>
+<tr><td>第 3 个 TLV</td><td>Type 必须为 3 (TTL)</td><td>同上丢弃</td></tr>
+<tr><td>第 3 个 TLV</td><td>Length 必须 &gt;= 2</td><td>同上丢弃</td></tr>
+<tr><td>第 3 个 TLV</td><td>提取前 2 个八位组作为 rxTTL</td><td>若 rxTTL==0：shutdown 帧，传递 MSAP+rxTTL 给 MIB 管理器，停止验证</td></tr>
+</table>
+
+<h3>6.2 后续 TLV 验证</h3>
+<table>
+<tr><th>Type</th><th>处理</th></tr>
+<tr><td>0</td><td>End Of LLDPDU。将所有已验证 TLV 传递给 MIB 管理器。忽略之后的任何内容。</td></tr>
+<tr><td>1–7</td><td>基本管理 TLV。按通用规则 + 特定 TLV 规则验证。</td></tr>
+<tr><td>8–126</td><td>保留。未识别但假设有效。按 Type 索引存储。inc statsTLVsUnrecognizedTotal。</td></tr>
+<tr><td>127</td><td>组织特定。若 OUI+subtype 被识别 → 按组织规则验证；否则 inc statsTLVsUnrecognizedTotal，假设有效。</td></tr>
+</table>
+
+<h3>6.3 通用验证规则 (Clause 9.2.7.7.2)</h3>
+<ol>
+  <li><strong>重复强制 TLV</strong>（Chassis ID、Port ID、TTL）：丢弃整个帧。</li>
+  <li><strong>长度过短</strong>（info string length &lt; 定义字段长度之和）：丢弃整个帧。</li>
+  <li><strong>TLV 特定错误</strong>：仅丢弃该 TLV（不丢弃帧）。inc statsTLVsDiscardedTotal。使用 length 字段跳至下一个 TLV。</li>
+  <li><strong>字段长度超出范围</strong>：仅丢弃该 TLV。跳至下一个 TLV。</li>
+  <li><strong>TLV 超出帧尾</strong>：仅丢弃该 TLV。</li>
+  <li><strong>End TLV 之后的信息</strong>：忽略。</li>
+</ol>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：验证流水线</h4>
+<ul>
+  <li>第一阶段：验证强制 TLV（Type 顺序、Length 范围）</li>
+  <li>第二阶段：顺序解析可选 TLV，用 Length 跳转</li>
+  <li>错误分级：强制错误 → 整帧丢弃；可选错误 → 单 TLV 跳过</li>
+  <li>并行计数器更新：statsFramesInTotal 在帧接收时递增；错误/丢弃计数器在验证失败时递增</li>
+</ul>
+</div>
+
+<h2 id="sec-sm">7. LLDP Agent 状态机 (Clause 9)</h2>
+
+<h3>7.1 工作模式 (Table 9-1)</h3>
+<table>
+<tr><th>模式</th><th>TX 状态机</th><th>RX 状态机</th><th>TX Timer 状态机</th></tr>
+<tr><td>Tx and Rx</td><td>强制</td><td>强制</td><td>强制</td></tr>
+<tr><td>Tx only</td><td>强制</td><td>—</td><td>强制</td></tr>
+<tr><td>Rx only</td><td>—</td><td>强制</td><td>—</td></tr>
+</table>
+
+<h3>7.2 定时器规格 (Clause 9.2.2)</h3>
+<ul>
+  <li><strong>分辨率</strong>：1 秒</li>
+  <li><strong>范围</strong>：0 &lt; n &lt; 65535 秒</li>
+  <li><strong>倒计时</strong>：当 n &gt; 0 时每个 tick 减 1</li>
+  <li><strong>Tick 间隔</strong>：
+    <ul>
+      <li>点对点 LAN：精确 1 秒</li>
+      <li>共享介质 LAN：0.8 s + random(0.0 到 0.4 s)，平均值 = 1 s</li>
+    </ul>
+  </li>
+</ul>
+
+<h4>定时器默认值与范围</h4>
+<table>
+<tr><th>定时器 / 变量</th><th>默认值</th><th>范围</th><th>说明</th></tr>
+<tr><td>msgTxInterval</td><td>30 s</td><td>1–3600</td><td>正常发送间隔</td></tr>
+<tr><td>msgFastTx</td><td>1 s</td><td>1–3600</td><td>快速发送间隔</td></tr>
+<tr><td>msgTxHold</td><td>4</td><td>1–100</td><td>TTL 乘数</td></tr>
+<tr><td>txFastInit</td><td>4</td><td>1–8</td><td>快速发送突发次数</td></tr>
+<tr><td>txCreditMax</td><td>5</td><td>1–10</td><td>最大发送信用</td></tr>
+<tr><td>reinitDelay</td><td>2 s</td><td>—</td><td>禁用后重新初始化延迟</td></tr>
+<tr><td>txTTR</td><td>—</td><td>—</td><td>下次发送倒计时定时器</td></tr>
+<tr><td>txShutdownWhile</td><td>—</td><td>—</td><td>shutdown 延迟倒计时</td></tr>
+<tr><td>rxInfoTTL</td><td>—</td><td>—</td><td>每个活动邻居条目的老化定时器</td></tr>
+</table>
+
+<h3>7.3 关键变量</h3>
+<table>
+<tr><th>变量</th><th>范围</th><th>说明</th></tr>
+<tr><td>adminStatus</td><td>Per-Agent</td><td>enabledRxTx / enabledTxOnly / enabledRxOnly / disabled</td></tr>
+<tr><td>portEnabled</td><td>Per-Port</td><td>TRUE 若 MAC 服务运行中</td></tr>
+<tr><td>txCredit</td><td>Per-Agent</td><td>当前发送信用 (0..txCreditMax)</td></tr>
+<tr><td>txFast</td><td>Per-Agent</td><td>快速发送倒计时计数器</td></tr>
+<tr><td>txNow</td><td>Per-Agent</td><td>Timer SM 设置为 TRUE 时表示应发送</td></tr>
+<tr><td>txTick</td><td>Per-Port</td><td>系统 tick 每秒设置为 TRUE</td></tr>
+<tr><td>localChange</td><td>Per-Agent</td><td>本地 MIB 变化时设置为 TRUE</td></tr>
+<tr><td>newNeighbor</td><td>Per-Agent</td><td>检测到新邻居时设置为 TRUE</td></tr>
+<tr><td>rcvFrame</td><td>Per-Agent</td><td>识别到有效 LLDP 帧时设置为 TRUE</td></tr>
+<tr><td>rxTTL</td><td>Per-Frame</td><td>从接收帧提取的 TTL</td></tr>
+<tr><td>badFrame</td><td>Per-Agent</td><td>上一帧验证失败时为 TRUE</td></tr>
+<tr><td>tooManyNeighbors</td><td>Per-Agent</td><td>远程 MIB 已满时为 TRUE</td></tr>
+</table>
+
+<h3>7.4 TX TTL 计算 (Clause 9.2.5.22)</h3>
+<pre>
+txTTL = min( (msgTxInterval × msgTxHold) + 1 , 65535 )
+</pre>
+<p>若 adminStatus → disabled 或 portEnabled → FALSE：<code>txTTL = 0</code>。</p>
+
+<h3>7.5 发送定时器状态机伪代码 (Clause 9.2.10)</h3>
+<pre>
+// 每个 txTick 执行一次（1 秒）
+IF txTick THEN
+    txTick = FALSE
+
+    // 信用累积
+    IF txCredit &lt; txCreditMax THEN
+        txCredit++
+
+    // 快速发送处理
+    IF txFast &gt; 0 THEN
+        dec(txFast)
+        txTTR = msgFastTx
+    ELSE
+        txTTR = msgTxInterval
+
+    // 定时器倒计时
+    IF txTTR &gt; 0 THEN
+        dec(txTTR)
+
+    // 判断是否需要发送
+    IF txTTR == 0 THEN
+        IF txCredit &gt; 0 THEN
+            txNow = TRUE
+        // 否则等待信用累积
+
+    // 新邻居快速启动
+    IF newNeighbor THEN
+        newNeighbor = FALSE
+        IF remote MIB 可以容纳新邻居 THEN
+            txFast = txFastInit
+            txTTR = msgFastTx
+            txNow = TRUE   // 第一次快速发送立即执行
+
+    // 本地变化处理
+    IF localChange THEN
+        localChange = FALSE
+        txFast = txFastInit
+        txTTR = msgFastTx
+        IF txCredit &gt; 0 THEN
+            txNow = TRUE
+</pre>
+
+<h3>7.6 发送状态机伪代码 (Clause 9.2.8)</h3>
+<pre>
+STATE: IDLE（初始状态）
+
+EXIT CONDITIONS:
+    IF !portEnabled OR adminStatus == disabled THEN
+        GOTO SHUTDOWN
+
+    IF txNow AND txCredit &gt; 0 THEN
+        txNow = FALSE
+        GOTO TRANSMIT
+
+STATE: TRANSMIT
+    IF adminStatus 正在转为 disabled OR !portEnabled THEN
+        txTTL = 0
+        mibConstrShutdownLLDPDU()
+    ELSE IF txFast &gt; 0 THEN
+        txTTL = min((msgTxInterval × msgTxHold) + 1, 65535)
+        mibConstrInfoLLDPDU()
+    ELSE
+        txTTL = min((msgTxInterval × msgTxHold) + 1, 65535)
+        mibConstrInfoLLDPDU()
+
+    txFrame()
+    dec(txCredit)
+    statsFramesOutTotal++
+    GOTO IDLE
+
+STATE: SHUTDOWN
+    // 尝试发送 shutdown LLDPDU
+    IF txCredit &gt; 0 THEN
+        txTTL = 0
+        mibConstrShutdownLLDPDU()
+        txFrame()
+        dec(txCredit)
+    txShutdownWhile = reinitDelay
+    GOTO WAIT_FOR_REINIT
+
+STATE: WAIT_FOR_REINIT
+    IF txShutdownWhile &gt; 0 THEN
+        dec(txShutdownWhile)
+    IF txShutdownWhile == 0 THEN
+        GOTO IDLE   // 重新初始化
+</pre>
+
+<h3>7.7 接收状态机伪代码 (Clause 9.2.9)</h3>
+<pre>
+STATE: IDLE（初始状态）
+
+EXIT CONDITIONS:
+    IF !portEnabled THEN
+        rxInitializeLLDP()
+        // 清除 remote systems MIB
+        // tooManyNeighbors = FALSE
+        STAY in IDLE
+
+    IF rcvFrame THEN
+        rcvFrame = FALSE
+        GOTO PROCESS_FRAME
+
+STATE: PROCESS_FRAME
+    rxProcessFrame()   // 按 9.2.7.7 验证 TLV
+
+    IF badFrame THEN
+        badFrame = FALSE
+        GOTO IDLE
+
+    // 有效帧已处理
+    IF rxTTL == 0 THEN
+        // Shutdown 帧
+        mibDeleteObjects(MSAP)
+        somethingChangedRemote()
+    ELSE
+        // 正常帧
+        IF MSAP 存在于 remote MIB 中 THEN
+            IF TLV 值与存储值不同 THEN
+                rxChanges = TRUE
+                mibUpdateObjects()
+                somethingChangedRemote()
+            ELSE
+                rxChanges = FALSE
+        ELSE
+            // 新邻居
+            IF remote MIB 有足够空间 THEN
+                rxChanges = TRUE
+                tooManyNeighbors = FALSE
+                mibUpdateObjects()
+                newNeighbor = TRUE
+                somethingChangedRemote()
+            ELSE
+                // 邻居过多
+                tooManyNeighbors = TRUE
+                tooManyNeighborsTimer = max(tooManyNeighborsTimer, rxTTL)
+                // 丢弃帧或驱逐最旧邻居
+                statsFramesDiscardedTotal++
+
+    // 刷新老化定时器
+    rxInfoTTL = rxTTL
+    GOTO IDLE
+</pre>
+
+<h3>7.8 somethingChangedLocal() 过程 (Clause 9.2.7.8)</h3>
+<pre>
+somethingChangedLocal():
+    localChange = TRUE
+    txFast = txFastInit    // 触发快速发送周期
+    // 通知 PTOPO MIB 管理器和其他可选 MIB 管理器
+</pre>
+
+<h3>7.9 LLDPDU 过长处理 (Clause 9.2.7.2)</h3>
+<p>在 <code>mibConstrInfoLLDPDU()</code> 期间：</p>
+<ol>
+  <li>若选中的 TLV 超出最大 LLDPDU 长度：递增 <code>lldpduLengthErrors</code>。</li>
+  <li>仅发送强制 TLV（Chassis ID + Port ID + TTL）。</li>
+  <li>按顺序追加可选 TLV，直到达到长度限制。</li>
+  <li>若空间允许，可选择性追加 End Of LLDPDU TLV。</li>
+</ol>
+
+<h2 id="sec-mib">8. 管理对象与 MIB (Clause 10)</h2>
+
+<h3>8.1 操作状态/控制变量</h3>
+<table>
+<tr><th>变量</th><th>类型</th><th>访问</th><th>说明</th></tr>
+<tr><td>adminStatus</td><td>枚举</td><td>RW</td><td>enabledRxTx(默认) / enabledTxOnly / enabledRxOnly / disabled</td></tr>
+<tr><td>msgTxInterval</td><td>无符号 (1–3600s)</td><td>RW</td><td>正常发送间隔。默认：30 s</td></tr>
+<tr><td>msgFastTx</td><td>无符号 (1–3600s)</td><td>RW</td><td>快速发送间隔。默认：1 s</td></tr>
+<tr><td>msgTxHold</td><td>无符号 (1–100)</td><td>RW</td><td>TTL 乘数。默认：4</td></tr>
+<tr><td>txFastInit</td><td>无符号 (1–8)</td><td>RW</td><td>快速突发次数。默认：4</td></tr>
+<tr><td>txCreditMax</td><td>无符号 (1–10)</td><td>RW</td><td>最大发送信用。默认：5</td></tr>
+<tr><td>reinitDelay</td><td>无符号</td><td>RW</td><td>重新初始化前延迟。默认：2 s</td></tr>
+</table>
+
+<h3>8.2 TLV 发送使能控制</h3>
+<table>
+<tr><th>变量</th><th>说明</th></tr>
+<tr><td>mibBasicTLVsTxEnable</td><td>每端口位图，控制单实例基本 TLV（Port Desc, Sys Name, Sys Desc, Sys Cap, Mgmt Addr）</td></tr>
+<tr><td>mibMgmtAddrInstanceTxEnable</td><td>每端口位图，控制每个配置的管理地址/子类型的发送</td></tr>
+</table>
+
+<h3>8.3 本地系统 MIB — TLV 对象</h3>
+<table>
+<tr><th>TLV</th><th>对象</th></tr>
+<tr><td>Chassis ID</td><td>chassis ID subtype (1B), chassis ID (1–255B)</td></tr>
+<tr><td>Port ID</td><td>port ID subtype (1B), port ID (1–255B)</td></tr>
+<tr><td>Port Description</td><td>port description (UTF-8 字符串)</td></tr>
+<tr><td>System Name</td><td>system name (UTF-8 字符串)</td></tr>
+<tr><td>System Description</td><td>system description (UTF-8 字符串)</td></tr>
+<tr><td>System Capabilities</td><td>system capabilities (2B), enabled capabilities (2B)</td></tr>
+<tr><td>Management Address</td><td>mgmt addr length, subtype, addr, interface numbering subtype, interface number, OID length, OID</td></tr>
+</table>
+
+<h3>8.4 操作统计计数器 (32-bit 无符号，在 2^32 处回绕)</h3>
+<table>
+<tr><th>计数器</th><th>说明</th></tr>
+<tr><td>statsFramesOutTotal</td><td>发送的 LLDP 帧数</td></tr>
+<tr><td>statsFramesInTotal</td><td>接收的 LLDP 帧数</td></tr>
+<tr><td>statsFramesInErrorsTotal</td><td>检测到错误的帧数</td></tr>
+<tr><td>statsFramesDiscardedTotal</td><td>丢弃的帧数（强制 TLV 错误、MIB 已满）</td></tr>
+<tr><td>statsTLVsDiscardedTotal</td><td>丢弃的 TLV 数</td></tr>
+<tr><td>statsTLVsUnrecognizedTotal</td><td>接收到的未识别 TLV 数</td></tr>
+<tr><td>statsAgeoutsTotal</td><td>因 rxInfoTTL 到期而删除的邻居数</td></tr>
+<tr><td>lldpduLengthErrors</td><td>构造期间 LLDPDU 长度限制错误数</td></tr>
+</table>
+
+<h2 id="sec-rtl">9. RTL 设计要点</h2>
+
+<h3>9.1 模块划分建议</h3>
+<table>
+<tr><th>模块</th><th>功能</th></tr>
+<tr><td>LLDP TX Engine</td><td>状态机、定时器、帧构造、信用控制</td></tr>
+<tr><td>LLDP RX Parser</td><td>DA/EtherType 过滤、TLV 顺序验证、Length 检查</td></tr>
+<tr><td>Neighbor Table</td><td>MSAP 索引的 CAM/RAM 表、老化定时器</td></tr>
+<tr><td>Local MIB</td><td>Chassis ID、Port ID、Capabilities 等本地信息存储</td></tr>
+<tr><td>Config/Status Regs</td><td>adminStatus、定时器参数、统计计数器</td></tr>
+<tr><td>Tick Generator</td><td>1 Hz tick 生成（可配置 jitter 用于共享介质）</td></tr>
+</table>
+
+<h3>9.2 实现检查清单</h3>
+<table>
+<tr><th>项目</th><th>要求</th></tr>
+<tr><td>Parser</td><td>必须验证前 3 个 TLV 依次为 Type 1、2、3</td></tr>
+<tr><td>Length 检查</td><td>所有 TLV info string 长度必须在定义范围内</td></tr>
+<tr><td>MSAP 键</td><td>(Chassis ID subtype+value) + (Port ID subtype+value) 的拼接</td></tr>
+<tr><td>每邻居存储</td><td>Remote systems MIB 条目以 MSAP + DA 为键</td></tr>
+<tr><td>老化定时器</td><td>每个活动邻居条目一个 rxInfoTTL 倒计时定时器</td></tr>
+<tr><td>TX 调度器</td><td>1 秒 tick 驱动的定时器状态机，带基于信用的突发控制</td></tr>
+<tr><td>快速发送</td><td>新邻居或本地变化时，txFastInit(默认4) 次突发，间隔 msgFastTx(默认1s)</td></tr>
+<tr><td>Shutdown</td><td>禁用时在端口关闭前发送一帧 TTL=0；遵守 reinitDelay</td></tr>
+<tr><td>过长处理</td><td>若可选 TLV 超出最大帧大小，仅发送强制 TLV</td></tr>
+<tr><td>Org TLV</td><td>以 (OUI, subtype) 为索引存储未识别的 Type 127 TLV</td></tr>
+<tr><td>字节序</td><td>多八位组字段：大端序（低八位组编号 = MSB）</td></tr>
+</table>
+
+<div class="note">
+<strong>状态机图示</strong>：原始标准中的状态机图（Figures 9-1, 9-2, 9-3）为图形化表示，未在这些 Markdown 导出中作为文本提取。上面的伪代码根据 Clauses 9.2.8–9.2.10 中的详细变量定义、过程描述和转换规则重建，应足以进行 RTL 实现。
+</div>
+
+</body>
+</html>
