@@ -202,13 +202,17 @@ def get_next_action(tasks):
     best["task_id"] = best["data"]["task_id"]  # 确保有 task_id
     return best
 
-def generate_dashboard(tasks, force=False):
-    """生成 Dashboard (若无输入文件变化则跳过，除非 force=True)."""
+def generate_dashboard(tasks, force=False, quiet=False):
+    """生成 Dashboard (若无输入文件变化则跳过，除非 force=True).
+    quiet=True 时无变化只输出 NO_CHANGE，不写 Dashboard。"""
     changed, new_state, summary = has_changes_since_last_run(force=force)
 
     if not changed:
-        print(f"[DASHBOARD] NO_CHANGE — 输入文件自上次运行以来无变化 (上次: {new_state.get('last_run', '?')})")
-        print(f"            使用 --force 强制刷新，或修改任务文件后重试。")
+        if quiet:
+            print("NO_CHANGE")
+        else:
+            print(f"[DASHBOARD] NO_CHANGE — 输入文件自上次运行以来无变化 (上次: {new_state.get('last_run', '?')})")
+            print(f"            使用 --force 强制刷新，或修改任务文件后重试。")
         return None
 
     dashboard_path = PROJECT_ROOT / "ProjectMgmt" / "Dashboard.md"
@@ -287,6 +291,7 @@ def main():
     parser.add_argument("--watch", action="store_true", help="持续监控")
     parser.add_argument("--interval", type=int, default=60, help="监控间隔(秒)")
     parser.add_argument("--force", action="store_true", help="强制刷新（忽略变化检测）")
+    parser.add_argument("--quiet", action="store_true", help="静默模式：无变化时不输出长报告，仅打印一行 NO_CHANGE")
     args = parser.parse_args()
     
     # 变化检测（供 scan / dashboard 使用）
@@ -294,10 +299,13 @@ def main():
     
     if args.scan or (not any([args.step, args.dashboard, args.watch])):
         if not changed and not args.force:
-            print("=== 任务状态扫描 ===")
-            print(f"[SKIP] 自上次运行以来无文件变化 (上次: {load_state().get('last_run', '?')})")
-            print(f"       变化检测摘要: {summary}")
-            print(f"       使用 --force 强制刷新")
+            if args.quiet:
+                print("NO_CHANGE")
+            else:
+                print("=== 任务状态扫描 ===")
+                print(f"[SKIP] 自上次运行以来无文件变化 (上次: {load_state().get('last_run', '?')})")
+                print(f"       变化检测摘要: {summary}")
+                print(f"       使用 --force 强制刷新")
             return
         
         print("=== 任务状态扫描 ===")
@@ -319,7 +327,7 @@ def main():
     
     if args.dashboard:
         tasks = scan_tasks()
-        generate_dashboard(tasks, force=args.force)
+        generate_dashboard(tasks, force=args.force, quiet=args.quiet)
     
     if args.step:
         tasks = scan_tasks()
