@@ -1,8 +1,8 @@
 # Dashboard: Ethernet IP
 
 > **项目**: IP_20260502_001  
-> **阶段**: PAD  
-> **更新时间**: 2026-05-17 08:00:01  
+> **阶段**: PAD → EDR (阶段转换就绪)  
+> **更新时间**: 2026-05-17 08:04:01  
 > **自动更新**: `make dashboard`
 
 ---
@@ -11,12 +11,12 @@
 
 | 指标 | 数值 |
 |------|------|
-| 总任务 | 5 |
-| 已完成 | 5 (100%) |
+| 总任务 | 10 |
+| 已完成 | 5 (50%) |
 | 已分配 | 0 |
-| 待处理 | 0 |
+| 待处理 | 5 |
 
-## 当前阶段: PAD
+## PAD 阶段: ✅ COMPLETED
 
 | 任务ID | 任务 | 负责人 | 状态 | 优先级 |
 |--------|------|--------|------|--------|
@@ -26,11 +26,23 @@
 | TASK-004 | 微架构设计与模块划分 | Arch_Agent | ✅ COMPLETED | P1 |
 | TASK-006 | 功能安全概念文档 (Safety Concept) | FuSa_Agent | ✅ COMPLETED | P1 |
 
+## EDR 阶段: ⏳ PENDING (前置依赖已满足)
+
+| 任务ID | 任务 | 负责人 | 状态 | 优先级 |
+|--------|------|--------|------|--------|
+| TASK-005 | 编写Design Specification | Design_Agent | ⬜ PENDING | P0 |
+| TASK-006 | 编写验证计划 | Verification_Agent | ⬜ PENDING | P0 |
+| TASK-007 | 编写DFT Specification | DFT_Agent | ⬜ PENDING | P1 |
+| TASK-008 | 完成功能安全分析 (FMEDA) | FuSa_Agent | ⬜ PENDING | P1 |
+| TASK-EDR-002 | LCB2SRI通道分离配置地址映射 | Design_Agent | ⬜ PENDING | P1 |
+
 ## 下一步行动
 
-- 所有依赖满足的任务已完成或已分配
+- **PAD 阶段已完成**: 5/5 任务 COMPLETED，所有 Gate 交付物就绪
+- **EDR 阶段可启动**: 5 个任务前置依赖已全部满足，等待实体 Yang 确认后分配
+- **推荐启动顺序**: TASK-005 (Design Spec) → TASK-006 (VPlan) / TASK-EDR-002 (并行)
 
 ---
 
 *自动生成: ethernet_orchestrator.py*
-*输入变化: ProjectMgmt/Dashboard.md*
+*输入变化: PAD phase completed, EDR phase ready*
