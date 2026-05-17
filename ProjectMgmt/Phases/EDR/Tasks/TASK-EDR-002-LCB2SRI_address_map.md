@@ -3,11 +3,11 @@
 > **任务类型**: EDR 阶段设计任务 (由 PAD ISSUE-002 转移)
 > **任务ID**: TASK-EDR-002
 > **负责人**: Design Agent
-> **前置依赖**: PAD 阶段 Arch Spec v1.4.2 (ISSUE-002 已转移至 EDR)
+> **前置依赖**: PAD 阶段 Arch Spec v1.8d (已完成)
 > **关联 ISSUE**: ISSUE-002
 > **创建日期**: 2026-05-12
 > **计划完成**: EDR 阶段内
-> **状态**: ⏳ 待启动
+> **状态**: ✅ READY_TO_START (2026-05-18)
 
 ---
 
@@ -16,6 +16,8 @@
 PAD 阶段 ISSUE-002 提出：5G USXGMII 模式下 LCB2SRI 通道分离配置的具体地址映射未定义。
 
 **PAD 结论**: LCB2SRI（Lane Control Block to SerDes/Ring Interface）是物理层 SerDes 适配模块，地址映射属于微架构实现细节，非 PAD 阶段决策范围。转移至 EDR 阶段由 Design Agent 完成。
+
+**EDR 解阻塞**: 2026-05-18 PAD Orchestrator 扫描确认 Arch Spec v1.8d 已完成，本任务已解阻塞。
 
 ---
 
@@ -37,7 +39,7 @@ PAD 阶段 ISSUE-002 提出：5G USXGMII 模式下 LCB2SRI 通道分离配置的
 | 输入 | 路径 | 说明 |
 |------|------|------|
 | TC4x LCB2SRI 手册 | `Reference/Infineon/016_14 Gigabit Ethernet (GETH).md` §5.4 | 基线参考 |
-| Arch Spec v1.4.2 | `Docs/Arch/ethernet_arch_spec.md` | PHY_SPEED=5 (10G) / PHY_TYPE=3 (USXGMII) 配置 |
+| Arch Spec v1.8d | `Docs/Arch/ethernet_arch_spec.md` | PHY_SPEED=5 (10G) / PHY_TYPE=3 (USXGMII) 配置 |
 | ISSUE-002 PAD 结论 | `Docs/Arch/ethernet_arch_spec.md` §8.2 | PAD 阶段结论摘要 |
 
 ---
@@ -50,4 +52,5 @@ PAD 阶段 ISSUE-002 提出：5G USXGMII 模式下 LCB2SRI 通道分离配置的
 
 ---
 
-*由 PAD 阶段 ISSUE-002 转移创建 | Arch Spec v1.4.2 零问题声明附件*
+*由 PAD 阶段 ISSUE-002 转移创建 | Arch Spec v1.8d 零问题声明附件*  
+*状态更新: 2026-05-18 — 已由 PAD Orchestrator 解阻塞*

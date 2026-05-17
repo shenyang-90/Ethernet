@@ -7,7 +7,7 @@
   "phase": "EDR",
   "task_type": "doc_writing",
   "priority": "P0",
-  "status": "PENDING",
+  "status": "READY_TO_START",
   "assigned_to": "Design_Agent",
   "assigned_by": "PM_Agent",
   "deadline": "TBD",
@@ -23,8 +23,20 @@
       "Docs/Design/ethernet/ethernet_design_spec.md"
     ]
   },
+  "dependencies": {
+    "pre_tasks": ["TASK-003", "TASK-004"],
+    "blocks": ["TASK-007"]
+  },
   "working_directory": "sandbox/ethernet/Docs/Design/",
   "ai_assist": true,
   "human_review_required": true
 }
 ```
+
+## 状态更新
+
+- **2026-05-18 00:04**: PAD Orchestrator 扫描确认前置依赖已满足:
+  - TASK-003 (Arch Spec): ✅ COMPLETED (v1.8d)
+  - TASK-004 (Micro Arch): ✅ COMPLETED (v1.0)
+- **状态变更**: PENDING → READY_TO_START
+- **阻塞下游**: TASK-007 (DFT Spec)
