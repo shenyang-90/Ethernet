@@ -1,0 +1,1792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IEEE 802.3-2022 MII / GMII / XGMII / XAUI Deep-Dive RTL Reference</title>
+<style>
+:root { --bg:#f8f9fa; --fg:#212529; --accent:#0056b3; --code:#e9ecef; --warn:#fff3cd; --crit:#f8d7da; --ok:#d4edda; }
+body { font-family: "Segoe UI", system-ui, sans-serif; line-height:1.7; max-width:1100px; margin:0 auto; padding:20px; background:var(--bg); color:var(--fg); }
+h1 { color:var(--accent); border-bottom:3px solid var(--accent); padding-bottom:8px; }
+h2 { color:var(--accent); margin-top:36px; border-left:6px solid var(--accent); padding-left:12px; }
+h3 { margin-top:28px; color:#004494; }
+h4 { margin-top:20px; color:#333; }
+table { border-collapse:collapse; width:100%; margin:12px 0; font-size:0.95em; }
+th,td { border:1px solid #bbb; padding:8px 10px; text-align:left; }
+th { background:#e2e6ea; }
+code,pre { font-family: "Consolas", "Courier New", monospace; background:var(--code); padding:2px 6px; border-radius:4px; font-size:0.92em; }
+pre { padding:14px; overflow-x:auto; line-height:1.5; }
+.note { background:#e7f3ff; border-left:4px solid var(--accent); padding:10px 14px; margin:12px 0; }
+.warn { background:var(--warn); border-left:4px solid #856404; padding:10px 14px; margin:12px 0; }
+.crit { background:var(--crit); border-left:4px solid #721c24; padding:10px 14px; margin:12px 0; }
+.ok { background:var(--ok); border-left:4px solid #155724; padding:10px 14px; margin:12px 0; }
+.toc { background:#fff; border:1px solid #ccc; padding:16px 20px; border-radius:8px; }
+.toc ul { list-style:none; padding-left:0; }
+.toc li { margin:6px 0; }
+.toc a { text-decoration:none; color:var(--accent); }
+.toc a:hover { text-decoration:underline; }
+.rtl-box { background:#fff; border:2px dashed var(--accent); padding:14px 18px; border-radius:8px; margin:14px 0; }
+.rtl-box h4 { margin-top:0; color:var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>IEEE 802.3-2022 MII / GMII / XGMII / XAUI Deep-Dive RTL Reference</h1>
+<p><em>Compiled from Clauses 22, 35, 46, and 47 of IEEE Std 802.3-2022. Target audience: RTL designers implementing Ethernet MAC/PHY interfaces.</em></p>
+
+<div class="toc">
+<h4>Table of Contents</h4>
+<ul>
+<li><a href="#mii">1. MII — Media Independent Interface (Clause 22)</a></li>
+<li><a href="#gmii">2. GMII — Gigabit Media Independent Interface (Clause 35)</a></li>
+<li><a href="#xgmii">3. XGMII — 10 Gigabit Media Independent Interface (Clause 46)</a></li>
+<li><a href="#xaui">4. XAUI / XGXS — 10 Gigabit Attachment Unit Interface (Clause 47)</a></li>
+<li><a href="#rs">5. RS Adaptation — Reconciliation Sublayer Mappings</a></li>
+<li><a href="#rtl">6. RTL Design Checklist</a></li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="mii">1. MII — Media Independent Interface (Clause 22)</h2>
+
+<h3>1.1 Overview</h3>
+<p>The MII provides a simple, inexpensive interconnection between the MAC sublayer and PHYs for data transfer at 10 Mb/s and 100 Mb/s, plus a two-wire management interface (MDC/MDIO). Key characteristics:</p>
+<ul>
+<li>4-bit wide independent transmit and receive data paths</li>
+<li>TTL signal levels (5 V or 3.3 V tolerant)</li>
+<li>Supports both half-duplex and full-duplex operation</li>
+<li>TX_CLK sourced by PHY; RX_CLK sourced by PHY (recovered or nominal)</li>
+</ul>
+
+<h3>1.2 Complete MII Signal Table</h3>
+<table>
+<tr><th>Signal</th><th>Direction</th><th>Width</th><th>Description</th><th>Active Level</th></tr>
+<tr><td>TX_CLK</td><td>PHY → MAC</td><td>1</td><td>Transmit clock; 25 MHz @ 100M, 2.5 MHz @ 10M</td><td>Rising edge</td></tr>
+<tr><td>TXD[3:0]</td><td>MAC → PHY</td><td>4</td><td>Transmit data nibble (TXD[0] = LSB)</td><td>—</td></tr>
+<tr><td>TX_EN</td><td>MAC → PHY</td><td>1</td><td>Transmit enable; asserted with first preamble nibble</td><td>High</td></tr>
+<tr><td>TX_ER</td><td>MAC → PHY</td><td>1</td><td>Transmit coding error; causes PHY to emit invalid symbols</td><td>High</td></tr>
+<tr><td>RX_CLK</td><td>PHY → MAC</td><td>1</td><td>Receive clock; recovered from data or nominal reference</td><td>Rising edge</td></tr>
+<tr><td>RXD[3:0]</td><td>PHY → MAC</td><td>4</td><td>Receive data nibble (RXD[0] = LSB)</td><td>—</td></tr>
+<tr><td>RX_DV</td><td>PHY → MAC</td><td>1</td><td>Receive data valid; asserted from first to last recovered nibble</td><td>High</td></tr>
+<tr><td>RX_ER</td><td>PHY → MAC</td><td>1</td><td>Receive error; indicates coding/detectable error in frame</td><td>High</td></tr>
+<tr><td>CRS</td><td>PHY → MAC</td><td>1</td><td>Carrier sense; asserted when tx or rx medium is non-idle</td><td>High</td></tr>
+<tr><td>COL</td><td>PHY → MAC</td><td>1</td><td>Collision detected; asserted while collision persists</td><td>High</td></tr>
+<tr><td>MDC</td><td>STA → PHY</td><td>1</td><td>Management data clock (aperiodic, min 400 ns period)</td><td>Rising edge</td></tr>
+<tr><td>MDIO</td><td>Bidirectional</td><td>1</td><td>Management data I/O (tristate, PHY has pull-up)</td><td>—</td></tr>
+</table>
+
+<div class="note">
+<strong>Note:</strong> CRS and COL are <em>not</em> required to transition synchronously with TX_CLK or RX_CLK. In full-duplex mode, their behavior is unspecified.
+</div>
+
+<h3>1.3 TX_CLK / RX_CLK Frequencies</h3>
+<table>
+<tr><th>Data Rate</th><th>TX_CLK Frequency</th><th>RX_CLK Frequency</th><th>Period</th><th>Duty Cycle</th></tr>
+<tr><td>10 Mb/s</td><td>2.5 MHz ± 100 ppm</td><td>2.5 MHz (recovered or nominal)</td><td>400 ns</td><td>35% – 65%</td></tr>
+<tr><td>100 Mb/s</td><td>25 MHz ± 100 ppm</td><td>25 MHz (recovered or nominal)</td><td>40 ns</td><td>35% – 65%</td></tr>
+</table>
+<p>The TX_CLK frequency is 25% of the nominal transmit data rate. The PHY sources TX_CLK. RX_CLK may be derived from received data or from a nominal clock (e.g., TX_CLK reference). Transitions between recovered and nominal clock sources shall occur only while RX_DV is deasserted.</p>
+
+<h3>1.4 Signal Timing Relationships</h3>
+
+<h4>1.4.1 Transmit Path (Synchronous to TX_CLK)</h4>
+<ul>
+<li><strong>TX_EN</strong>: Asserted synchronously with the first nibble of preamble; remains asserted while all nibbles are presented; negated before the first TX_CLK following the final nibble.</li>
+<li><strong>TXD[3:0]</strong>: Transition synchronously with TX_CLK. Accepted by PHY on each TX_CLK rising edge where TX_EN is asserted.</li>
+<li><strong>TX_ER</strong>: Transition synchronously with TX_CLK. When asserted while TX_EN is also asserted, the PHY emits invalid symbols within the frame.</li>
+</ul>
+
+<h4>1.4.2 Receive Path (Synchronous to RX_CLK)</h4>
+<ul>
+<li><strong>RX_DV</strong>: Asserted synchronously with RX_CLK from the first recovered nibble through the final recovered nibble; negated before the first RX_CLK following the final nibble. Must encompass the complete frame starting no later than SFD.</li>
+<li><strong>RXD[3:0]</strong>: Transition synchronously with RX_CLK. Valid while RX_DV is asserted.</li>
+<li><strong>RX_ER</strong>: Asserted for one or more RX_CLK periods to indicate an error in the currently transferred frame. While RX_DV is deasserted, RX_ER has no effect on the RS (except for specific encodings like LPI or False Carrier).</li>
+</ul>
+
+<h4>1.4.3 CRS and COL Timing</h4>
+<ul>
+<li><strong>CRS assertion</strong>: PHY asserts CRS when either the transmit or receive medium is non-idle. CRS shall remain asserted throughout the duration of a collision condition.</li>
+<li><strong>CRS deassertion</strong>: PHY deasserts CRS when both transmit and receive media are idle.</li>
+<li><strong>COL assertion</strong>: PHY asserts COL upon detection of a collision and remains asserted while the collision condition persists. In 10 Mb/s operation, COL is asserted in response to a signal_quality_error message from the PMA.</li>
+<li>Neither CRS nor COL have a required synchronous relationship to TX_CLK or RX_CLK.</li>
+</ul>
+
+<h3>1.5 Nibble Ordering on TXD[3:0] / RXD[3:0]</h3>
+<p>For the MII, each octet is transmitted and received as two nibbles with <strong>low-order nibble first</strong>:</p>
+<ul>
+<li>Bits 0–3 of the octet → first nibble transmitted/received (corresponds to TXD[3:0] / RXD[3:0])</li>
+<li>Bits 4–7 of the octet → second nibble transmitted/received (corresponds to TXD[3:0] / RXD[3:0])</li>
+</ul>
+<p>TXD[0] and RXD[0] are the least significant bits. The SFD (0xD5) is transmitted as nibbles 0x5 (first) then 0xD (second).</p>
+
+<pre>
+MAC Serial Bit Stream:  D0 D1 D2 D3 D4 D5 D6 D7  (D0 first)
+                        |  low nibble  |  high nibble  |
+MII Nibble Stream:     TXD[3:0]=D3..D0   TXD[3:0]=D7..D4
+</pre>
+
+<h3>1.6 TX_ER Propagation</h3>
+<p>When TX_ER is asserted for one or more TX_CLK periods while TX_EN is also asserted, the PHY <strong>shall emit one or more symbols that are not part of the valid data or delimiter set</strong> somewhere in the frame being transmitted. The relative position of the error within the frame need not be preserved.</p>
+<p>Assertion of TX_ER does not affect transmission when TX_EN is deasserted. At 10 Mb/s (except 10BASE-T1L/T1S), TX_ER assertion has no effect.</p>
+
+<div class="warn">
+<strong>RTL Design Note:</strong> A repeater that detects RX_ER during frame reception may propagate the error to its output ports by asserting TX_ER during transmission of that frame. This requires the RS to support TX_ER generation even though the MAC itself has no mechanism to deliberately corrupt data.
+</div>
+
+<h3>1.7 RX_ER — MII Error Indication</h3>
+<p>RX_ER is asserted by the PHY for one or more RX_CLK periods to indicate that an error (coding error or any PHY-detectable error) was detected somewhere in the frame currently being transferred. If both RX_DV and RX_ER are asserted during frame reception, the RS shall ensure the MAC detects a <code>FrameCheckError</code> in that frame.</p>
+<p>While RX_DV is deasserted, RX_ER has no effect on the RS, except when combined with specific RXD values:</p>
+<table>
+<tr><th>RX_DV</th><th>RX_ER</th><th>RXD[3:0]</th><th>Indication</th></tr>
+<tr><td>0</td><td>0</td><td>0000–1111</td><td>Normal inter-frame</td></tr>
+<tr><td>0</td><td>1</td><td>0000</td><td>Normal inter-frame</td></tr>
+<tr><td>0</td><td>1</td><td>0001</td><td>Assert LPI (EEE)</td></tr>
+<tr><td>0</td><td>1</td><td>0010</td><td>PLCA BEACON indication</td></tr>
+<tr><td>0</td><td>1</td><td>0011</td><td>PLCA COMMIT indication</td></tr>
+<tr><td>0</td><td>1</td><td>1110</td><td>False Carrier indication</td></tr>
+<tr><td>1</td><td>0</td><td>0000–1111</td><td>Normal data reception</td></tr>
+<tr><td>1</td><td>1</td><td>0000–1111</td><td>Data reception with errors</td></tr>
+</table>
+
+<h3>1.8 MII Management Frame Format (MDC/MDIO)</h3>
+<p>The MII Management Interface provides read/write access to PHY registers. The frame format is:</p>
+<table>
+<tr><th>Field</th><th>Bits</th><th>Description</th></tr>
+<tr><td>PRE</td><td>32</td><td>Preamble (32 contiguous logic-1 bits). May be suppressed if all PHYs support it.</td></tr>
+<tr><td>ST</td><td>2</td><td>Start of frame: <code>01</code></td></tr>
+<tr><td>OP</td><td>2</td><td>Operation: <code>10</code> = Read, <code>01</code> = Write</td></tr>
+<tr><td>PHYAD</td><td>5</td><td>PHY address (0–31). PHY on mechanical interface responds to address 0.</td></tr>
+<tr><td>REGAD</td><td>5</td><td>Register address (0–31). Register 0 = Control, Register 1 = Status.</td></tr>
+<tr><td>TA</td><td>2</td><td>Turnaround: Read = <code>Z0</code> (both Hi-Z first bit, PHY drives 0 second bit); Write = <code>10</code></td></tr>
+<tr><td>DATA</td><td>16</td><td>Register data (MSB first)</td></tr>
+<tr><td>IDLE</td><td>—</td><td>High-impedance state (PHY pull-up holds line high)</td></tr>
+</table>
+
+<h4>1.8.1 MII Basic Registers (0 and 1)</h4>
+<p>All PHYs implementing the MII Management Interface must support at least registers 0 (Control) and 1 (Status):</p>
+
+<table>
+<tr><th>Reg</th><th>Name</th><th>Key Bits</th><th>Function</th></tr>
+<tr><td>0</td><td>Control</td><td>15</td><td>Reset (self-clearing)</td></tr>
+<tr><td>0</td><td>Control</td><td>14</td><td>Loopback</td></tr>
+<tr><td>0</td><td>Control</td><td>13, 6</td><td>Speed select: 00=10M, 01=100M, 10=1000M</td></tr>
+<tr><td>0</td><td>Control</td><td>12</td><td>Auto-Negotiation enable</td></tr>
+<tr><td>0</td><td>Control</td><td>11</td><td>Power down</td></tr>
+<tr><td>0</td><td>Control</td><td>10</td><td>Isolate (electrical isolation from MII)</td></tr>
+<tr><td>0</td><td>Control</td><td>8</td><td>Duplex mode (1=full, 0=half)</td></tr>
+<tr><td>0</td><td>Control</td><td>7</td><td>Collision test</td></tr>
+<tr><td>1</td><td>Status</td><td>15</td><td>100BASE-T4 ability</td></tr>
+<tr><td>1</td><td>Status</td><td>14:9</td><td>Ability bits (100BASE-X FD/HD, 10BASE-T FD/HD, 100BASE-T2 FD/HD)</td></tr>
+<tr><td>1</td><td>Status</td><td>5</td><td>Auto-Negotiation complete</td></tr>
+<tr><td>1</td><td>Status</td><td>4</td><td>Remote fault (latching high)</td></tr>
+<tr><td>1</td><td>Status</td><td>3</td><td>Auto-Negotiation ability</td></tr>
+<tr><td>1</td><td>Status</td><td>2</td><td>Link status (1=up, 0=down; latching low)</td></tr>
+<tr><td>1</td><td>Status</td><td>1</td><td>Jabber detect (latching high)</td></tr>
+<tr><td>1</td><td>Status</td><td>0</td><td>Extended capability (must be 1 if extended regs exist)</td></tr>
+</table>
+
+<h4>1.8.2 MDIO Timing</h4>
+<ul>
+<li>MDC minimum high/low time: 160 ns each</li>
+<li>MDC minimum period: 400 ns (max 2.5 MHz)</li>
+<li>MDIO setup time (STA sourced): 10 ns min to MDC rising edge</li>
+<li>MDIO hold time (STA sourced): 10 ns min from MDC rising edge</li>
+<li>MDIO clock-to-output delay (PHY sourced): 0 ns min, 300 ns max</li>
+</ul>
+
+<h3>1.9 MII Timing Specifications</h3>
+<table>
+<tr><th>Parameter</th><th>Value</th><th>Notes</th></tr>
+<tr><td>TX_CLK → TX_EN/TXD/TX_ER output delay</td><td>0 ns min, 25 ns max</td><td>At MII connector</td></tr>
+<tr><td>RXD/RX_DV/RX_ER setup to RX_CLK</td><td>10 ns min</td><td>At MII connector</td></tr>
+<tr><td>RXD/RX_DV/RX_ER hold from RX_CLK</td><td>10 ns min</td><td>At MII connector</td></tr>
+<tr><td>Vih(min)</td><td>2.00 V</td><td>TTL levels</td></tr>
+<tr><td>Vil(max)</td><td>0.80 V</td><td>TTL levels</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="gmii">2. GMII — Gigabit Media Independent Interface (Clause 35)</h2>
+
+<h3>2.1 Overview</h3>
+<p>The GMII extends the MII to support 1000 Mb/s operation. It is based on the MII and uses the same management interface and register set. Key differences from MII:</p>
+<ul>
+<li>8-bit wide independent transmit and receive data paths (instead of 4-bit)</li>
+<li>GTX_CLK is <strong>sourced by the Reconciliation Sublayer</strong> (not PHY)</li>
+<li>RX_CLK remains sourced by PHY</li>
+<li>Supports carrier extension and burst transmission (for half-duplex Gigabit)</li>
+</ul>
+
+<h3>2.2 Complete GMII Signal Table</h3>
+<table>
+<tr><th>Signal</th><th>Direction</th><th>Width</th><th>Description</th><th>Active Level / Edge</th></tr>
+<tr><td>GTX_CLK</td><td>MAC → PHY</td><td>1</td><td>125 MHz transmit clock (1/8 of data rate)</td><td>Rising edge</td></tr>
+<tr><td>TX_CLK</td><td>PHY → MAC</td><td>1</td><td>Used for MII mode; not used in GMII mode (25 MHz)</td><td>Rising edge</td></tr>
+<tr><td>TXD[7:0]</td><td>MAC → PHY</td><td>8</td><td>Transmit data byte (TXD[0] = LSB)</td><td>—</td></tr>
+<tr><td>TX_EN</td><td>MAC → PHY</td><td>1</td><td>Transmit enable; asserted with first octet of preamble</td><td>High</td></tr>
+<tr><td>TX_ER</td><td>MAC → PHY</td><td>1</td><td>Transmit coding error / carrier extend error</td><td>High</td></tr>
+<tr><td>RX_CLK</td><td>PHY → MAC</td><td>1</td><td>Receive clock; 125 MHz when data within tolerance</td><td>Rising edge</td></tr>
+<tr><td>RXD[7:0]</td><td>PHY → MAC</td><td>8</td><td>Receive data byte (RXD[0] = LSB)</td><td>—</td></tr>
+<tr><td>RX_DV</td><td>PHY → MAC</td><td>1</td><td>Receive data valid</td><td>High</td></tr>
+<tr><td>RX_ER</td><td>PHY → MAC</td><td>1</td><td>Receive error / carrier extend indication</td><td>High</td></tr>
+<tr><td>CRS</td><td>PHY → MAC</td><td>1</td><td>Carrier sense (unspecified in full duplex)</td><td>High</td></tr>
+<tr><td>COL</td><td>PHY → MAC</td><td>1</td><td>Collision detected (unspecified in full duplex)</td><td>High</td></tr>
+<tr><td>MDC</td><td>STA → PHY</td><td>1</td><td>Management data clock (same as MII)</td><td>Rising edge</td></tr>
+<tr><td>MDIO</td><td>Bidirectional</td><td>1</td><td>Management data I/O (same as MII)</td><td>—</td></tr>
+</table>
+
+<h3>2.3 GTX_CLK vs TX_CLK</h3>
+<table>
+<tr><th>Characteristic</th><th>GTX_CLK (GMII)</th><th>TX_CLK (MII)</th></tr>
+<tr><td>Source</td><td>Reconciliation Sublayer (MAC)</td><td>PHY</td></tr>
+<tr><td>Frequency</td><td>125 MHz (1000 Mb/s only)</td><td>25 MHz (100M) or 2.5 MHz (10M)</td></tr>
+<tr><td>Data width</td><td>8 bits</td><td>4 bits</td></tr>
+<tr><td>Phase relationship with RX_CLK</td><td>Not guaranteed</td><td>Not guaranteed</td></tr>
+<tr><td>Sampling</td><td>PHY samples TX_EN/TXD/TX_ER on GTX_CLK rising edge</td><td>PHY samples on TX_CLK rising edge</td></tr>
+</table>
+
+<div class="note">
+<strong>Key RTL Design Point:</strong> In GMII, the MAC/RS <em>drives</em> the transmit clock. This is fundamentally different from MII where the PHY drives TX_CLK. RTL designs supporting both modes must mux the clock direction or use separate clock domains.
+</div>
+
+<h3>2.4 Byte Ordering</h3>
+<p>For GMII, each octet is transferred in parallel on TXD[7:0] / RXD[7:0]. The bit ordering within each byte corresponds directly to the MAC serial bit stream:</p>
+<ul>
+<li>TXD[0] / RXD[0] = LSB of the octet (first bit transmitted serially)</li>
+<li>TXD[7] / RXD[7] = MSB of the octet (last bit transmitted serially)</li>
+</ul>
+<p>Byte 0 (first octet of preamble) is transferred first, then byte 1, etc. Unlike MII, there is no nibble splitting.</p>
+
+<h3>2.5 GMII vs MII Signal Mapping Differences</h3>
+<table>
+<tr><th>GMII Signal</th><th>MII Equivalent</th><th>Difference</th></tr>
+<tr><td>TXD[7:0]</td><td>TXD[3:0]</td><td>8-bit vs 4-bit; upper nibble vs full byte</td></tr>
+<tr><td>RXD[7:0]</td><td>RXD[3:0]</td><td>8-bit vs 4-bit</td></tr>
+<tr><td>GTX_CLK</td><td>TX_CLK</td><td>Source: MAC vs PHY; 125 MHz vs 25/2.5 MHz</td></tr>
+<tr><td>TX_EN</td><td>TX_EN</td><td>Same name; asserted with first octet vs first nibble</td></tr>
+<tr><td>TX_ER</td><td>TX_ER</td><td>Same name; additional carrier extend encodings</td></tr>
+<tr><td>RX_DV</td><td>RX_DV</td><td>Same name; covers octets vs nibbles</td></tr>
+<tr><td>RX_ER</td><td>RX_ER</td><td>Same name; additional carrier extend / false carrier encodings</td></tr>
+<tr><td>CRS</td><td>CRS</td><td>Unspecified in full-duplex GMII</td></tr>
+<tr><td>COL</td><td>COL</td><td>Unspecified in full-duplex GMII; still present for compatibility</td></tr>
+<tr><td>MDC/MDIO</td><td>MDC/MDIO</td><td>Identical management interface</td></tr>
+</table>
+
+<h3>2.6 Carrier Sense and Collision in GMII</h3>
+<p>In <strong>half-duplex</strong> mode:</p>
+<ul>
+<li>CRS is asserted when either transmit or receive medium is non-idle.</li>
+<li>CRS remains asserted throughout the duration of a collision.</li>
+<li>COL is asserted upon detection of a collision and remains asserted while the collision persists.</li>
+</ul>
+<p>In <strong>full-duplex</strong> mode:</p>
+<ul>
+<li>The behavior of CRS and COL is <strong>unspecified</strong>.</li>
+<li>COL is still present on the interface for backward compatibility but has no defined function.</li>
+<li>Most GMII implementations operate exclusively in full-duplex mode.</li>
+</ul>
+
+<h3>2.7 GMII Timing Specifications</h3>
+<table>
+<tr><th>Parameter</th><th>Min</th><th>Max</th><th>Units</th></tr>
+<tr><td>GTX_CLK frequency</td><td>125 – 100 ppm</td><td>125 + 100 ppm</td><td>MHz</td></tr>
+<tr><td>GTX_CLK period</td><td>7.50</td><td>8.50</td><td>ns</td></tr>
+<tr><td>GTX_CLK / RX_CLK high time</td><td>2.50</td><td>—</td><td>ns</td></tr>
+<tr><td>GTX_CLK / RX_CLK low time</td><td>2.50</td><td>—</td><td>ns</td></tr>
+<tr><td>GTX_CLK / RX_CLK rise/fall time</td><td>—</td><td>1.00</td><td>ns</td></tr>
+<tr><td>TXD/TX_EN/TX_ER setup to GTX_CLK</td><td>2.50</td><td>—</td><td>ns</td></tr>
+<tr><td>TXD/TX_EN/TX_ER hold from GTX_CLK</td><td>0.50</td><td>—</td><td>ns</td></tr>
+<tr><td>RXD/RX_DV/RX_ER setup to RX_CLK (at receiver)</td><td>2.00</td><td>—</td><td>ns</td></tr>
+<tr><td>RXD/RX_DV/RX_ER hold from RX_CLK (at receiver)</td><td>0.00</td><td>—</td><td>ns</td></tr>
+<tr><td>VIL_AC (max)</td><td>—</td><td>0.70</td><td>V</td></tr>
+<tr><td>VIH_AC (min)</td><td>1.90</td><td>—</td><td>V</td></tr>
+</table>
+
+<h3>2.8 GMII Special Encodings (Carrier Extension / LPI)</h3>
+<table>
+<tr><th>TX_EN</th><th>TX_ER</th><th>TXD[7:0]</th><th>Description</th></tr>
+<tr><td>0</td><td>0</td><td>00–FF</td><td>Normal inter-frame</td></tr>
+<tr><td>0</td><td>1</td><td>0x01</td><td>Assert LPI (EEE)</td></tr>
+<tr><td>0</td><td>1</td><td>0x0F</td><td>Carrier Extend (8 bits)</td></tr>
+<tr><td>0</td><td>1</td><td>0x1F</td><td>Carrier Extend Error (8 bits)</td></tr>
+<tr><td>1</td><td>0</td><td>00–FF</td><td>Normal data transmission</td></tr>
+<tr><td>1</td><td>1</td><td>00–FF</td><td>Transmit error propagation</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="xgmii">3. XGMII — 10 Gigabit Media Independent Interface (Clause 46)</h2>
+
+<h3>3.1 Overview</h3>
+<p>The XGMII supports 2.5 Gb/s, 5 Gb/s, and 10 Gb/s operation. It is functionally similar to MII/GMII but uses a much wider parallel bus with DDR clocking. Key characteristics:</p>
+<ul>
+<li>32-bit data + 4-bit control per direction</li>
+<li>Double Data Rate (DDR) at 156.25 MHz nominal (10 Gb/s: 1/64 of MAC bit rate)</li>
+<li>Four lanes of 8-bit data + 1-bit control each</li>
+<li>Full-duplex operation only</li>
+<li>Start control character aligned to lane 0</li>
+</ul>
+
+<h3>3.2 Complete XGMII Signal Table</h3>
+<table>
+<tr><th>Signal</th><th>Direction</th><th>Width</th><th>Description</th><th>Active Level / Edge</th></tr>
+<tr><td>TX_CLK</td><td>MAC → PHY</td><td>1</td><td>Transmit clock; DDR sampling on both edges</td><td>Both edges</td></tr>
+<tr><td>TXC[3:0]</td><td>MAC → PHY</td><td>4</td><td>Transmit control (one per lane)</td><td>High = control</td></tr>
+<tr><td>TXD[31:0]</td><td>MAC → PHY</td><td>32</td><td>Transmit data (4 lanes × 8 bits)</td><td>—</td></tr>
+<tr><td>RX_CLK</td><td>PHY → MAC</td><td>1</td><td>Receive clock; DDR sampling on both edges</td><td>Both edges</td></tr>
+<tr><td>RXC[3:0]</td><td>PHY → MAC</td><td>4</td><td>Receive control (one per lane)</td><td>High = control</td></tr>
+<tr><td>RXD[31:0]</td><td>PHY → MAC</td><td>32</td><td>Receive data (4 lanes × 8 bits)</td><td>—</td></tr>
+</table>
+
+<div class="note">
+<strong>Note:</strong> Unlike MII/GMII, XGMII has no CRS, COL, TX_EN, RX_DV, TX_ER, or RX_ER signals. Frame delimitation and error indication are encoded entirely via control characters on the data lanes.
+</div>
+
+<h3>3.3 DDR Clocking at 156.25 MHz</h3>
+<p>The XGMII TX_CLK and RX_CLK frequencies are 1/64 × f_MAC ± 100 ppm:</p>
+<table>
+<tr><th>MAC Rate</th><th>Clock Frequency</th><th>UI Period</th><th>Data per Edge</th><th>Total Data Rate</th></tr>
+<tr><td>10 Gb/s</td><td>156.25 MHz</td><td>6.4 ns</td><td>32 data + 4 control bits</td><td>10 Gb/s (64 bits × 156.25 MHz)</td></tr>
+<tr><td>5 Gb/s</td><td>78.125 MHz</td><td>12.8 ns</td><td>32 data + 4 control bits</td><td>5 Gb/s</td></tr>
+<tr><td>2.5 Gb/s</td><td>39.0625 MHz</td><td>25.6 ns</td><td>32 data + 4 control bits</td><td>2.5 Gb/s</td></tr>
+</table>
+<p>TXD[31:0] and TXC[3:0] are sampled by the PHY on <strong>both the rising and falling edges</strong> of TX_CLK. Similarly, RXD and RXC are sampled by the RS on both edges of RX_CLK.</p>
+
+<h3>3.4 Lane Mapping</h3>
+<p>The 32 TXD and 4 TXC signals are organized into four lanes in round-robin sequence:</p>
+<table>
+<tr><th>Lane</th><th>TXD / RXD</th><th>TXC / RXC</th></tr>
+<tr><td>0</td><td>[7:0]</td><td>[0]</td></tr>
+<tr><td>1</td><td>[15:8]</td><td>[1]</td></tr>
+<tr><td>2</td><td>[23:16]</td><td>[2]</td></tr>
+<tr><td>3</td><td>[31:24]</td><td>[3]</td></tr>
+</table>
+<p>The octet stream is distributed across lanes sequentially: byte 0 → lane 0, byte 1 → lane 1, byte 2 → lane 2, byte 3 → lane 3, byte 4 → lane 0, etc.</p>
+
+<h3>3.5 Control Character Encodings</h3>
+<p>When TXC/RXC for a lane is asserted (1), the corresponding TXD/RXD byte is interpreted as a control character:</p>
+<table>
+<tr><th>Code (Hex)</th><th>Name</th><th>Meaning</th><th>Lane Restrictions</th></tr>
+<tr><td>0x07</td><td>Idle</td><td>Inter-frame fill</td><td>Any lane</td></tr>
+<tr><td>0xFB</td><td>Start</td><td>Start of packet (replaces first preamble octet)</td><td>Lane 0 only</td></tr>
+<tr><td>0xFD</td><td>Terminate</td><td>End of packet delimiter</td><td>Any lane</td></tr>
+<tr><td>0xFE</td><td>Error</td><td>Error propagation within frame</td><td>Any lane</td></tr>
+<tr><td>0x9C</td><td>Sequence</td><td>Ordered set delimiter (link fault signaling)</td><td>Lane 0 only</td></tr>
+<tr><td>0x06</td><td>LPI</td><td>Low Power Idle (EEE, all 4 lanes simultaneously)</td><td>All lanes</td></tr>
+<tr><td>0x00–0x05, 0x08–0x9B, 0x9D–0xFA, 0xFC, 0xFF</td><td>Reserved</td><td>Invalid / reserved</td><td>—</td></tr>
+</table>
+
+<div class="warn">
+<strong>RTL Critical Rule:</strong> The Start control character (0xFB) is <em>only valid in lane 0</em>. The RS shall not assert DATA_VALID to the MAC for a Start character received on any other lane. If a control character other than Terminate or Error causes a transition from DATA_VALID to DATA_NOT_VALID, the RS shall ensure the MAC detects a FrameCheckError.
+</div>
+
+<h3>3.6 Ordered Sets</h3>
+<p>Ordered sets are signaled using the Sequence control character (0x9C) in lane 0 followed by three data bytes in lanes 1–3. The following ordered sets are defined for link fault signaling:</p>
+<table>
+<tr><th>Lane 0</th><th>Lane 1</th><th>Lane 2</th><th>Lane 3</th><th>Description</th></tr>
+<tr><td>Sequence (0x9C)</td><td>0x00</td><td>0x00</td><td>0x00</td><td>Reserved</td></tr>
+<tr><td>Sequence (0x9C)</td><td>0x00</td><td>0x00</td><td>0x01</td><td>Local Fault</td></tr>
+<tr><td>Sequence (0x9C)</td><td>0x00</td><td>0x00</td><td>0x02</td><td>Remote Fault</td></tr>
+<tr><td>Sequence (0x9C)</td><td>0x00</td><td>0x00</td><td>0x03</td><td>Link Interruption</td></tr>
+</table>
+
+<h3>3.7 Link Fault Signaling State Machine</h3>
+<p>The RS implements a link fault signaling state machine that monitors received Sequence ordered sets and controls transmitted data accordingly:</p>
+
+<h4>3.7.1 State Machine Behavior</h4>
+<ul>
+<li><strong>OK state</strong> (default): RS sends MAC frames as requested. In the absence of MAC frames, generates Idle control characters.</li>
+<li><strong>Local Fault detected</strong>: When the PHY detects a fault on the receive path, it sends Local Fault ordered sets. Upon receiving four Local Fault sequences (with each pair separated by less than 128 non-fault columns and no intervening different fault sequences), the RS sets <code>link_fault = Local Fault</code>.</li>
+<li><strong>Local Fault response</strong>: The RS continuously generates <strong>Remote Fault Sequence ordered sets</strong> on the transmit path (possibly truncating a MAC frame being transmitted).</li>
+<li><strong>Remote Fault / Link Interruption received</strong>: When the RS receives Remote Fault or Link Interruption ordered sets, it sets <code>link_fault = Remote Fault</code> or <code>Link Interruption</code> and continuously generates Idle control characters on the transmit path.</li>
+<li><strong>Return to OK</strong>: After any interval of 128 columns not containing a fault Sequence ordered set, <code>link_fault</code> returns to OK.</li>
+</ul>
+
+<div class="rtl-box">
+<h4>RTL Implementation Sketch — Link Fault State Machine</h4>
+<pre>
+// Simplified link fault signaling state machine (per 802.3 Clause 46)
+localparam LF_OK        = 2'b00;
+localparam LF_LOCAL     = 2'b01;
+localparam LF_REMOTE    = 2'b10;
+localparam LF_INTERRUPT = 2'b11;
+
+reg [1:0] link_fault_state, next_state;
+reg [6:0] col_cnt;      // count columns without fault_sequence
+reg [1:0] seq_cnt;      // count matching fault sequences
+reg [7:0] last_seq_type;
+
+wire fault_sequence = (rxc == 4'b0001) && (rxd[7:0] == 8'h9C);
+wire [7:0] seq_type = {rxd[31:24]}; // lane 3 data
+
+always @(posedge rx_clk) begin
+    if (reset) begin
+        link_fault_state &lt;= LF_OK;
+        col_cnt &lt;= 0;
+        seq_cnt &lt;= 0;
+    end else begin
+        link_fault_state &lt;= next_state;
+        // Counters updated per state diagram transitions
+    end
+end
+</pre>
+</div>
+
+<h3>3.8 Inter-Frame Spacing Rules</h3>
+<ul>
+<li>The interpacket gap (IPG) at the XGMII of the <strong>receiving RS</strong> is <strong>minimum 5 octets</strong>.</li>
+<li>The IPG may be changed between transmitting MAC and receiving MAC by RS lane alignment, PHY clock rate compensation, or 10GBASE-W data rate adaptation.</li>
+<li>The minimum IPG at the XGMII of the <strong>transmitting RS</strong> is 1 Idle control character between frames, but can be 0 in some cases for clock compensation.</li>
+<li>When the Terminate control character is in lane 0, 1, or 2, the following lanes in sequence are encoded with Idle.</li>
+</ul>
+
+<h3>3.9 Lane Alignment and Deficit Idle Count (DIC)</h3>
+<p>On transmit, the RS must align the Start control character to lane 0. Two methods are permitted:</p>
+
+<h4>Method 1: Always align on 4-byte boundary</h4>
+<p>The MAC inserts additional Idle characters so that the start of preamble always falls on a 4-byte boundary. This reduces the effective data rate for certain packet sizes.</p>
+
+<h4>Method 2: DIC (Deficit Idle Count)</h4>
+<p>The RS maintains a Deficit Idle Count to sometimes insert and sometimes delete Idle characters:</p>
+<ul>
+<li>DIC is <strong>incremented</strong> for each Idle character <strong>deleted</strong></li>
+<li>DIC is <strong>decremented</strong> for each Idle character <strong>inserted</strong></li>
+<li>DIC is bounded: <strong>0 ≤ DIC ≤ 3</strong></li>
+<li>DIC is only reset at initialization</li>
+<li>This may result in inter-frame spacing up to 3 octets shorter than the minimum transmitted IPG specified in Clause 4</li>
+</ul>
+
+<div class="note">
+<strong>DIC Purpose:</strong> The DIC mechanism maintains the average data rate while allowing the Start character to always align to lane 0. Without DIC, always padding to 4-byte boundaries would waste bandwidth (~3 bytes per frame average). DIC amortizes the alignment overhead across multiple frames.
+</div>
+
+<h3>3.10 XGMII Timing (HSTL Class I)</h3>
+<table>
+<tr><th>Parameter</th><th>Driver</th><th>Receiver</th><th>Units</th></tr>
+<tr><td>TX_CLK / RX_CLK period (10G)</td><td>6.4 ± 100 ppm</td><td>6.4 ± 100 ppm</td><td>ns</td></tr>
+<tr><td>TXD/TXC setup to TX_CLK edge</td><td>960</td><td>480</td><td>ps</td></tr>
+<tr><td>TXD/TXC hold from TX_CLK edge</td><td>960</td><td>480</td><td>ps</td></tr>
+<tr><td>TX_CLK / RX_CLK minimum pulse width</td><td>2.5</td><td>—</td><td>ns</td></tr>
+<tr><td>VDDQ</td><td>1.4–1.6</td><td>—</td><td>V</td></tr>
+<tr><td>VIH_AC(min)</td><td>—</td><td>VREF + 0.20</td><td>V</td></tr>
+<tr><td>VIL_AC(max)</td><td>—</td><td>VREF – 0.20</td><td>V</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="xaui">4. XAUI / XGXS — 10 Gigabit Attachment Unit Interface (Clause 47)</h2>
+
+<h3>4.1 Overview</h3>
+<p>The XGMII Extender (XGXS + XAUI) transparently extends the physical reach of the XGMII and reduces pin count. It is inserted between the RS and the PHY. Key characteristics:</p>
+<ul>
+<li>4-lane serial interface at <strong>3.125 Gbaud per lane</strong></li>
+<li>8B/10B encoding per lane (same as 10GBASE-X PCS/PMA in Clause 48)</li>
+<li>Low-voltage differential signaling (AC-coupled)</li>
+<li>Extends reach from ~7 cm (XGMII) to ~50 cm (XAUI)</li>
+<li>Independent clocks at DTE XGXS and PHY XGXS</li>
+</ul>
+
+<h3>4.2 XAUI Architecture</h3>
+<p>The XGMII Extender is logically composed of two XGXSs interconnected with XAUI data paths:</p>
+<ul>
+<li><strong>DTE XGXS</strong>: At the RS end; converts XGMII parallel data to 4 serial XAUI lanes</li>
+<li><strong>PHY XGXS</strong>: At the PHY end; converts 4 serial XAUI lanes back to XGMII parallel data</li>
+<li>Each XGXS is bidirectional, containing both source and destination functionality</li>
+</ul>
+
+<h3>4.3 4-Lane Serial Interface at 3.125 Gbaud</h3>
+<table>
+<tr><th>Parameter</th><th>Value</th></tr>
+<tr><td>Baud rate per lane</td><td>3.125 GBd ± 100 ppm</td></tr>
+<tr><td>Unit interval (UI)</td><td>320 ps nominal</td></tr>
+<tr><td>Number of lanes</td><td>4 differential pairs per direction</td></tr>
+<tr><td>Total data rate</td><td>4 × 3.125 Gbaud × 80% (8B/10B) = 10 Gb/s payload</td></tr>
+<tr><td>Signaling</td><td>AC-coupled differential, low swing</td></tr>
+<tr><td>Max differential amplitude</td><td>&lt; 1600 mVp-p</td></tr>
+<tr><td>Absolute output voltage</td><td>–0.4 V to +2.3 V</td></tr>
+</table>
+
+<h3>4.4 8B/10B Encoding per Lane</h3>
+<p>Each XGMII byte on a lane is 8B/10B encoded before serial transmission. The 8B/10B code provides:</p>
+<ul>
+<li>DC balance (running disparity tracking)</li>
+<li>Rich transition density for clock recovery</li>
+<li>Special control codes distinct from data codes</li>
+<li>Error detection (invalid code groups)</li>
+</ul>
+
+<h3>4.5 Code Group Table for Control Codes</h3>
+<p>The following 8B/10B control codes (K-codes) are used in XAUI/XGXS:</p>
+<table>
+<tr><th>Code</th><th>Name</th><th>8B/10B Notation</th><th>10-bit Value (RD– / RD+)</th><th>Function</th></tr>
+<tr><td>/K28.5/</td><td>Comma</td><td>K28.5</td><td>001111 1010 / 110000 0101</td><td>Comma alignment; Idle sequences</td></tr>
+<tr><td>/K28.0/</td><td>Align</td><td>K28.0</td><td>001111 0100 / 110000 1011</td><td>/A/ ordered set (lane alignment)</td></tr>
+<tr><td>/K28.3/</td><td>Sequence</td><td>K28.3</td><td>001111 0011 / 110000 1100</td><td>Used in Sequence ordered sets</td></tr>
+<tr><td>/K28.4/</td><td>—</td><td>K28.4</td><td>001111 0010 / 110000 1101</td><td>Reserved</td></tr>
+<tr><td>/K28.6/</td><td>—</td><td>K28.6</td><td>001111 0110 / 110000 1001</td><td>Reserved</td></tr>
+<tr><td>/K28.7/</td><td>—</td><td>K28.7</td><td>001111 1000 / 110000 0111</td><td>Reserved (dangerous, can mimic comma)</td></tr>
+<tr><td>/K23.7/</td><td>Idle</td><td>K23.7</td><td>111010 1000 / 000101 0111</td><td>/I/ Idle ordered set</td></tr>
+<tr><td>/K27.7/</td><td>Start</td><td>K27.7</td><td>110110 1000 / 001001 0111</td><td>/S/ Start-of-packet delimiter</td></tr>
+<tr><td>/K29.7/</td><td>Terminate</td><td>K29.7</td><td>101110 1000 / 010001 0111</td><td>/T/ End-of-packet delimiter</td></tr>
+<tr><td>/K30.7/</td><td>Error</td><td>K30.7</td><td>011110 1000 / 100001 0111</td><td>/V/ Error propagation</td></tr>
+</table>
+
+<h3>4.6 Ordered Sets in XGXS</h3>
+<table>
+<tr><th>Ordered Set</th><th>Lane 0</th><th>Lane 1</th><th>Lane 2</th><th>Lane 3</th><th>Purpose</th></tr>
+<tr><td>/I/</td><td>/K28.5/</td><td>/D5.6/ or /D16.2/</td><td>—</td><td>—</td><td>Idle (sufficient for comma alignment)</td></tr>
+<tr><td>/A/</td><td>/K28.3/</td><td>/D6.2/</td><td>—</td><td>—</td><td>Align (lane deskew)</td></tr>
+<tr><td>/R/</td><td>/K28.0/</td><td>/D31.5/</td><td>—</td><td>—</td><td>Remote fault indication</td></tr>
+<tr><td>/Q/</td><td>/K28.4/</td><td>—</td><td>—</td><td>—</td><td>Local fault indication (optional)</td></tr>
+<tr><td>/S/</td><td>/K27.7/</td><td>—</td><td>—</td><td>—</td><td>Start of packet</td></tr>
+<tr><td>/T/</td><td>/K29.7/</td><td>—</td><td>—</td><td>—</td><td>Terminate</td></tr>
+</table>
+
+<h3>4.7 Lane Deskew Mechanism (using /A/ ordered set)</h3>
+<p>Because the four XAUI lanes may experience different propagation delays, the destination XGXS must <strong>deskew</strong> the lanes:</p>
+<ul>
+<li>The source XGXS periodically transmits <strong>/A/ ordered sets</strong> (Align) on all four lanes simultaneously during inter-frame gaps.</li>
+<li>The /A/ ordered set consists of <code>/K28.3/ /D6.2/</code> on each lane.</li>
+<li>The destination XGXS uses the /A/ ordered set as a <strong>deskew reference</strong>. It buffers incoming data on each lane and aligns the lanes so that /A/ columns arrive simultaneously.</li>
+<li>Lane deskew must compensate for the maximum expected differential skew across the four lanes.</li>
+</ul>
+
+<div class="rtl-box">
+<h4>RTL Implementation Sketch — Lane Deskew Buffer</h4>
+<pre>
+// Per-lane elastic buffer for XAUI deskew
+// Depth must accommodate max expected lane skew
+module xaui_lane_deskew (
+    input        rx_clk,
+    input        reset,
+    input  [3:0] lane_codegroup_valid,
+    input  [9:0] lane_codegroup [0:3],   // 8B/10B decoded or raw
+    input  [3:0] lane_align_detected,     // /A/ ordered set detected
+    output [3:0] lane_aligned_valid,
+    output [7:0] lane_aligned_data  [0:3],
+    output [3:0] lane_aligned_control
+);
+
+// Elastic FIFO per lane (e.g., depth 16)
+// Write pointer advances with each valid code group
+// Read pointers aligned when /A/ detected on all lanes
+// After alignment, read all lanes with common read pointer
+
+localparam FIFO_DEPTH = 16;
+localparam PTR_W = 4;
+
+reg [9:0] fifo [0:3][0:FIFO_DEPTH-1];
+reg [PTR_W-1:0] wr_ptr [0:3];
+reg [PTR_W-1:0] rd_ptr;
+reg aligned;
+
+integer i;
+always @(posedge rx_clk) begin
+    if (reset) begin
+        aligned &lt;= 1'b0;
+        rd_ptr &lt;= 0;
+        for (i = 0; i &lt; 4; i = i + 1) wr_ptr[i] &lt;= 0;
+    end else begin
+        // Write each lane independently
+        for (i = 0; i &lt; 4; i = i + 1) begin
+            if (lane_codegroup_valid[i]) begin
+                fifo[i][wr_ptr[i]] &lt;= lane_codegroup[i];
+                wr_ptr[i] &lt;= wr_ptr[i] + 1'b1;
+            end
+        end
+        // Alignment logic: stall until /A/ seen on all lanes
+        if (!aligned && (&lane_align_detected)) begin
+            aligned &lt;= 1'b1;
+            // Optionally set rd_ptr = min(wr_ptr) - margin
+        end
+        if (aligned) begin
+            rd_ptr &lt;= rd_ptr + 1'b1;
+        end
+    end
+end
+endmodule
+</pre>
+</div>
+
+<h3>4.8 Clock Tolerance Compensation (Skip Columns)</h3>
+<p>Because the source XGXS and destination XGXS may operate on independent clocks (each with ±100 ppm tolerance), the destination XGXS must compensate for clock rate disparity:</p>
+<ul>
+<li>The source XGXS converts XGMII Idle control characters into 8B/10B Idle sequences (/I/ ordered sets).</li>
+<li>The destination XGXS adds or deletes <strong>Idle columns</strong> (skip columns) as needed to compensate for clock rate differences.</li>
+<li>Maximum clock rate disparity: <strong>200 ppm</strong> (±100 ppm at each end).</li>
+<li>For every 10,000 columns, up to 2 columns may need to be added or deleted.</li>
+<li>Columns are added/deleted only during inter-frame gaps (Idle sequences).</li>
+</ul>
+
+<div class="note">
+<strong>Clock Tolerance Compensation Math:</strong> At 10 Gb/s with 200 ppm max disparity, the rate difference is 2 Mb/s. Since each column is 4 bytes (32 bits), the compensation rate is approximately 2e6 / 32 ≈ 62,500 columns/second, or about 1 column every 16 µs. A typical elastic buffer depth of 4–8 columns is sufficient.
+</div>
+
+<h3>4.9 XGXS PCS Synchronization State Machine</h3>
+<p>The XGXS PCS implements a synchronization state machine per lane (similar to Clause 48):</p>
+<ul>
+<li><strong>LOSS_OF_SYNC</strong>: Initial state; searching for valid comma (/K28.5/) to establish byte boundary.</li>
+<li><strong>COMMA_DETECT_x</strong>: Comma detected; verifying consistent alignment.</li>
+<li><strong>SYNC_ACQUIRED_x</strong>: Synchronization acquired; monitoring for invalid code groups.</li>
+</ul>
+<p>State transitions depend on:</p>
+<ul>
+<li><strong>valid_codegroup</strong>: Received code group is valid 8B/10B.</li>
+<li><strong>comma_detect</strong>: Comma pattern detected (establishes byte boundary).</li>
+<li><strong>invalid_codegroup</strong>: Received code group violates 8B/10B rules.</li>
+</ul>
+<p>After a programmable number of consecutive invalid code groups (typically 4), the PCS returns to LOSS_OF_SYNC.</p>
+
+<h3>4.10 Code Group Validity Checker</h3>
+<p>Each XGXS lane independently checks received 10-bit code groups for validity:</p>
+<ul>
+<li><strong>Running Disparity Error</strong>: The received code group does not match the expected running disparity.</li>
+<li><strong>Invalid Code Group</strong>: The 10-bit pattern does not correspond to any valid 8B/10B code (data or control).</li>
+<li><strong>Comma Misalignment</strong>: A comma appears in an unexpected position.</li>
+</ul>
+<p>When an invalid code group is detected, the XGXS may:</p>
+<ul>
+<li>Signal an Error control character (0xFE) on the corresponding XGMII lane</li>
+<li>Increment a synchronization error counter</li>
+<li>Transition the PCS sync state machine toward LOSS_OF_SYNC if errors persist</li>
+</ul>
+
+<h3>4.11 XAUI Jitter Budget</h3>
+<table>
+<tr><th>Contributor</th><th>Loss (dB)</th><th>Differential Skew (ps p-p)</th><th>Total Jitter (UI p-p)</th><th>Deterministic Jitter (UI p-p)</th></tr>
+<tr><td>Driver</td><td>0</td><td>15</td><td>0.35</td><td>0.17</td></tr>
+<tr><td>Interconnect</td><td>7.5</td><td>60</td><td>0.20</td><td>0.20</td></tr>
+<tr><td>Other (crosstalk, noise)</td><td>4.5</td><td>—</td><td>0.10</td><td>0.10</td></tr>
+<tr><td><strong>Total Budget</strong></td><td><strong>12.0</strong></td><td><strong>75</strong></td><td><strong>0.65</strong></td><td><strong>0.47</strong></td></tr>
+</table>
+
+<h3>4.12 XAUI Electrical Specifications Summary</h3>
+<table>
+<tr><th>Parameter</th><th>Value</th></tr>
+<tr><td>Baud rate</td><td>3.125 GBd ± 100 ppm</td></tr>
+<tr><td>Unit interval</td><td>320 ps</td></tr>
+<tr><td>Max differential output</td><td>&lt; 1600 mVp-p</td></tr>
+<tr><td>Absolute output voltage</td><td>–0.4 V to +2.3 V</td></tr>
+<tr><td>Recommended transition time</td><td>60 – 130 ps (20%–80%)</td></tr>
+<tr><td>Near-end total jitter</td><td>± 0.175 UI peak</td></tr>
+<tr><td>Near-end deterministic jitter</td><td>± 0.085 UI peak</td></tr>
+<tr><td>Far-end total jitter</td><td>± 0.275 UI peak</td></tr>
+<tr><td>Receiver jitter tolerance</td><td>≥ 0.65 UI p-p total</td></tr>
+<tr><td>Receiver deterministic jitter tolerance</td><td>≥ 0.37 UI p-p</td></tr>
+<tr><td>BER requirement</td><td>&lt; 10<sup>–12</sup></td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="rs">5. RS Adaptation — Reconciliation Sublayer Mappings</h2>
+
+<h3>5.1 MII → MAC Mapping (PLS Service Primitives)</h3>
+<p>The RS maps MII signals to the PLS service primitives defined in Clause 6:</p>
+<table>
+<tr><th>PLS Primitive</th><th>MII Signals</th><th>Direction</th><th>Notes</th></tr>
+<tr><td>PLS_DATA.request</td><td>TXD[3:0], TX_EN, TX_CLK</td><td>MAC → PHY</td><td>OUTPUT_UNIT = ONE/ZERO conveyed on TXD while TX_EN asserted; DATA_COMPLETE = TX_EN deassertion</td></tr>
+<tr><td>PLS_DATA.indication</td><td>RXD[3:0], RX_DV, RX_ER, RX_CLK</td><td>PHY → MAC</td><td>INPUT_UNIT = ONE/ZERO derived from RXD while RX_DV asserted</td></tr>
+<tr><td>PLS_CARRIER.indication</td><td>CRS</td><td>PHY → MAC</td><td>CARRIER_ON = CRS asserted; CARRIER_OFF = CRS deasserted</td></tr>
+<tr><td>PLS_SIGNAL.indication</td><td>COL</td><td>PHY → MAC</td><td>SIGNAL_ERROR = COL asserted; NO_SIGNAL_ERROR = COL deasserted</td></tr>
+<tr><td>PLS_DATA_VALID.indication</td><td>RX_DV</td><td>PHY → MAC</td><td>DATA_VALID = RX_DV asserted; DATA_NOT_VALID = RX_DV deasserted</td></tr>
+</table>
+
+<h3>5.2 GMII → MAC Mapping</h3>
+<p>The GMII extends the MII mapping to 8-bit data and adds carrier extension support:</p>
+<table>
+<tr><th>PLS Primitive</th><th>GMII Signals</th><th>Notes</th></tr>
+<tr><td>PLS_DATA.request</td><td>TXD[7:0], TX_EN, TX_ER, GTX_CLK</td><td>OUTPUT_UNIT can be ONE, ZERO, DATA_COMPLETE, EXTEND, or EXTEND_ERROR</td></tr>
+<tr><td>PLS_DATA.indication</td><td>RXD[7:0], RX_DV, RX_ER, RX_CLK</td><td>INPUT_UNIT can be ONE, ZERO, or EXTEND</td></tr>
+<tr><td>PLS_CARRIER.indication</td><td>CRS</td><td>Same as MII</td></tr>
+<tr><td>PLS_SIGNAL.indication</td><td>COL</td><td>Same as MII</td></tr>
+<tr><td>PLS_DATA_VALID.indication</td><td>RX_DV, RX_ER, RXD[7:0]</td><td>DATA_VALID also when carrier extend is signaled (RX_DV deasserted, RX_ER asserted, RXD = 0x0F or 0x1F)</td></tr>
+</table>
+
+<h3>5.3 XGMII → MAC Mapping</h3>
+<p>The XGMII maps to PLS primitives with 32-bit parallel paths and full-duplex-only operation:</p>
+<table>
+<tr><th>PLS Primitive</th><th>XGMII Signals</th><th>Notes</th></tr>
+<tr><td>PLS_DATA.request</td><td>TXD[31:0], TXC[3:0], TX_CLK</td><td>Each 32 PLS_DATA.requests (4 octets) map to one XGMII column. Start replaces first preamble octet.</td></tr>
+<tr><td>PLS_DATA.indication</td><td>RXD[31:0], RXC[3:0], RX_CLK</td><td>Each column generates up to 32 PLS_DATA.indications (fewer if Terminate is present).</td></tr>
+<tr><td>PLS_CARRIER.indication</td><td>—</td><td>Never generated for non-EEE, non-Link-Interruption PHYs. For EEE, derived from LPI state.</td></tr>
+<tr><td>PLS_SIGNAL.indication</td><td>—</td><td>Never generated (full duplex only).</td></tr>
+<tr><td>PLS_DATA_VALID.indication</td><td>RXC[3:0], RXD[31:0]</td><td>DATA_VALID on lane 0 Start preceded by Idles or Sequence; DATA_NOT_VALID on control chars other than Error.</td></tr>
+</table>
+
+<h3>5.4 Deficit Idle Count (DIC) Mechanism</h3>
+<p>DIC is specified in Clause 4 (MAC frame transmission) and affects the MII/GMII/XGMII timing:</p>
+<ul>
+<li>The MAC interFrameSpacing parameter is nominally 96 bit times (12 bytes at 8 bits/byte, or 24 nibbles at 4 bits/nibble).</li>
+<li>At the XGMII, the RS may need to insert or delete Idle characters to align Start to lane 0.</li>
+<li>The DIC mechanism bounds the cumulative difference between inserted and deleted Idles to [0, 3].</li>
+<li>DIC ensures that <strong>average</strong> inter-frame spacing complies with the MAC specification while allowing per-frame variation.</li>
+</ul>
+
+<div class="note">
+<strong>DIC Consequence for RTL:</strong> When receiving at the XGMII, the RX IPG may be as short as 5 octets (minimum at receiving RS). When transmitting, the effective IPG may vary by ±3 octets from the MAC's nominal IPG. Any rate-matching FIFO or clock compensation logic must tolerate this variation.
+</div>
+
+<h3>5.5 Nibble vs Byte vs Column Mapping Summary</h3>
+<table>
+<tr><th>Interface</th><th>Data Width</th><th>Clock Rate</th><th>Clocking</th><th>Smallest Transfer Unit</th><th>Preamble Handling</th></tr>
+<tr><td>MII</td><td>4 bits</td><td>25 / 2.5 MHz</td><td>SDR (rising)</td><td>Nibble</td><td>7 bytes + SFD as nibbles</td></tr>
+<tr><td>GMII</td><td>8 bits</td><td>125 MHz</td><td>SDR (rising)</td><td>Byte</td><td>7 bytes + SFD as bytes</td></tr>
+<tr><td>XGMII</td><td>32 bits + 4 ctrl</td><td>156.25 MHz</td><td>DDR (both edges)</td><td>Column (4 bytes)</td><td>Start char + 6 preamble bytes + SFD</td></tr>
+<tr><td>XAUI</td><td>4× serial</td><td>3.125 Gbaud</td><td>Embedded clock</td><td>Code group (10 bits)</td><td>8B/10B encoded ordered sets</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="rtl">6. RTL Design Checklist</h2>
+
+<h3>6.1 Clock Domain Crossing: TX_CLK vs System Clock</h3>
+
+<h4>6.1.1 MII TX_CLK Domain Crossing</h4>
+<p>In MII, TX_CLK is <strong>sourced by the PHY</strong> (25 MHz or 2.5 MHz). The MAC typically runs on a higher-frequency system clock. Data must cross from the MAC clock domain to the MII TX_CLK domain:</p>
+
+<div class="rtl-box">
+<h4>RTL Pattern: MII TX Async FIFO</h4>
+<pre>
+// Asynchronous FIFO for MII transmit path
+// Write: system clock (e.g., 125 MHz or faster)
+// Read: TX_CLK (25 MHz or 2.5 MHz from PHY)
+module mii_tx_async_fifo (
+    input        wr_clk,
+    input        rd_clk,
+    input        reset,
+    input  [3:0] wr_data,
+    input        wr_en,
+    output [3:0] rd_data,
+    input        rd_en,
+    output       full,
+    output       empty,
+    output [4:0] wr_level   // for flow control
+);
+    // Typical depth: 16 or 32 entries
+    // Gray-code pointers for CDC
+    // wr_data includes {TX_EN, TX_ER, TXD[3:0]} as needed
+endmodule
+</pre>
+</div>
+
+<h4>6.1.2 GMII GTX_CLK Domain Crossing</h4>
+<p>In GMII, GTX_CLK is <strong>sourced by the MAC</strong> (125 MHz). This is simpler because the MAC controls the transmit clock. However, the RX_CLK (also 125 MHz) is sourced by the PHY and is asynchronous to GTX_CLK:</p>
+
+<div class="rtl-box">
+<h4>RTL Pattern: GMII RX Clock Domain Crossing</h4>
+<pre>
+// RX_CLK is asynchronous to GTX_CLK / system clock
+// Use dual-clock FIFO or handshake synchronizer
+module gmii_rx_cdc (
+    input        rx_clk,          // 125 MHz from PHY
+    input        sys_clk,         // e.g., 125 MHz or 156.25 MHz
+    input        reset,
+    input  [7:0] rxd,
+    input        rx_dv,
+    input        rx_er,
+    output [7:0] sys_rxd,
+    output       sys_rx_dv,
+    output       sys_rx_er,
+    output       sys_rx_sof,      // start of frame pulse
+    output       sys_rx_eof       // end of frame pulse
+);
+    // Common approach: async FIFO with frame boundaries
+    // OR: simple 2-stage register sync for control + byte FIFO
+endmodule
+</pre>
+</div>
+
+<h4>6.1.3 XGMII TX_CLK / RX_CLK DDR Handling</h4>
+<p>XGMII uses DDR at 156.25 MHz. The TX_CLK and RX_CLK may be asynchronous. The RS must sample TXD/TXC on both edges of TX_CLK, and RXD/RXC on both edges of RX_CLK:</p>
+
+<div class="rtl-box">
+<h4>RTL Pattern: XGMII DDR Input/Output</h4>
+<pre>
+// XGMII DDR interface using vendor-specific DDR I/O primitives
+// Example for Xilinx/AMD devices:
+module xgmii_ddr_io (
+    input        tx_clk,          // 156.25 MHz
+    input  [31:0] txd_pos,        // data for positive edge
+    input  [31:0] txd_neg,        // data for negative edge
+    input  [3:0]  txc_pos,
+    input  [3:0]  txc_neg,
+    output [31:0] xgmii_txd,
+    output [3:0]  xgmii_txc,
+    // RX path
+    input        rx_clk,
+    input  [31:0] xgmii_rxd,
+    input  [3:0]  xgmii_rxc,
+    output [31:0] rxd_pos,
+    output [31:0] rxd_neg,
+    output [3:0]  rxc_pos,
+    output [3:0]  rxc_neg
+);
+
+// TX: use ODDR (Output DDR) primitive per bit
+// RX: use IDDR (Input DDR) primitive per bit
+
+// Xilinx ODDR example for one bit:
+// ODDR #(.DDR_CLK_EDGE("SAME_EDGE")) oddr_inst (
+//     .Q(xgmii_txd[0]),
+//     .C(tx_clk),
+//     .CE(1'b1),
+//     .D1(txd_pos[0]),   // positive edge
+//     .D2(txd_neg[0]),   // negative edge
+//     .R(1'b0),
+//     .S(1'b0)
+// );
+
+// Generic logic (if no primitive available):
+// Use a 2x clock (312.5 MHz) to mux output, or
+// Use phase-shifted clock to capture on both edges
+endmodule
+</pre>
+</div>
+
+<div class="warn">
+<strong>CDC Critical Warning:</strong> Do NOT simply use 2-flop synchronizers for multi-bit data buses (TXD, RXD). Use gray-code pointers for FIFOs, or dedicated DDR I/O primitives. For XGMII, the 32-bit data + 4-bit control are sampled on <em>both edges</em>—ensure your I/O cells support true DDR, not just 2× oversampling.
+</div>
+
+<h3>6.2 I/O Timing Constraints (Setup/Hold for MII/GMII)</h3>
+
+<h4>6.2.1 MII I/O Constraints</h4>
+<pre>
+# MII transmit (MAC to PHY) — output delay relative to TX_CLK
+set_output_delay -clock TX_CLK -max 25.0 [get_ports {TXD* TX_EN TX_ER}]
+set_output_delay -clock TX_CLK -min  0.0 [get_ports {TXD* TX_EN TX_ER}]
+
+# MII receive (PHY to MAC) — input delay relative to RX_CLK
+set_input_delay -clock RX_CLK -max 10.0 [get_ports {RXD* RX_DV RX_ER}]
+set_input_delay -clock RX_CLK -min 10.0 [get_ports {RXD* RX_DV RX_ER}]
+
+# MDC/MDIO timing
+set_output_delay -clock MDC -max 10.0 [get_ports MDIO] ;# STA driving
+set_output_delay -clock MDC -min 10.0 [get_ports MDIO]
+set_input_delay -clock MDC -max 300.0 [get_ports MDIO] ;# PHY driving
+set_input_delay -clock MDC -min   0.0 [get_ports MDIO]
+</pre>
+
+<h4>6.2.2 GMII I/O Constraints</h4>
+<pre>
+# GMII transmit (MAC sources GTX_CLK)
+set_output_delay -clock GTX_CLK -max 2.5 [get_ports {TXD* TX_EN TX_ER}]
+set_output_delay -clock GTX_CLK -min 0.5 [get_ports {TXD* TX_EN TX_ER}]
+
+# GMII receive (PHY sources RX_CLK)
+# Note: setup at receiver is 2.0 ns, hold is 0.0 ns
+set_input_delay -clock RX_CLK -max 2.0 [get_ports {RXD* RX_DV RX_ER}]
+set_input_delay -clock RX_CLK -min 0.0 [get_ports {RXD* RX_DV RX_ER}]
+
+# Clock uncertainties
+set_clock_uncertainty -setup 0.2 [get_clocks {GTX_CLK RX_CLK}]
+set_clock_uncertainty -hold  0.1 [get_clocks {GTX_CLK RX_CLK}]
+</pre>
+
+<h4>6.2.3 XGMII I/O Constraints (HSTL)</h4>
+<pre>
+# XGMII DDR constraints
+# TX_CLK and RX_CLK at 156.25 MHz
+# Setup/hold apply to BOTH rising and falling edges
+
+# Create generated clocks for DDR edges if needed
+# For output (MAC sources TX_CLK):
+set_output_delay -clock TX_CLK -max 0.96 [get_ports {TXD* TXC*}] -clock_fall
+set_output_delay -clock TX_CLK -min 0.96 [get_ports {TXD* TXC*}] -clock_fall
+set_output_delay -clock TX_CLK -max 0.96 [get_ports {TXD* TXC*}]
+set_output_delay -clock TX_CLK -min 0.96 [get_ports {TXD* TXC*}]
+
+# For input (PHY sources RX_CLK):
+set_input_delay -clock RX_CLK -max 0.48 [get_ports {RXD* RXC*}] -clock_fall
+set_input_delay -clock RX_CLK -min 0.48 [get_ports {RXD* RXC*}] -clock_fall
+set_input_delay -clock RX_CLK -max 0.48 [get_ports {RXD* RXC*}]
+set_input_delay -clock RX_CLK -min 0.48 [get_ports {RXD* RXC*}]
+</pre>
+
+<h3>6.3 DDR Implementation for XGMII</h3>
+
+<h4>6.3.1 True DDR vs 2× Oversampling</h4>
+<table>
+<tr><th>Approach</th><th>Clock</th><th>Pros</th><th>Cons</th></tr>
+<tr><td>True DDR I/O primitives</td><td>156.25 MHz</td><td>Low power, standard-compliant, minimal skew</td><td>Requires dedicated hardware support</td></tr>
+<tr><td>2× oversampling (312.5 MHz SDR)</td><td>312.5 MHz</td><td>Works on any I/O, simpler clocking</td><td>Higher power, tighter timing, may violate spec</td></tr>
+<tr><td>Phase-shifted clock (90°)</td><td>156.25 MHz + 90°</td><td>Can use SDR flops with shifted capture</td><td>Requires DLL/PLL, duty cycle sensitive</td></tr>
+</table>
+
+<div class="ok">
+<strong>Recommendation:</strong> Always use true DDR I/O primitives (ODDR/IDDR or equivalent) for XGMII. 2× oversampling is NOT standard-compliant for XGMII electrical specifications and may fail at higher PVT corners.
+</div>
+
+<h4>6.3.2 DDR Timing Closure Considerations</h4>
+<ul>
+<li><strong>Duty cycle distortion</strong>: XGMII requires both edges. Ensure TX_CLK/RX_CLK duty cycle is 45%–55% (target 50%).</li>
+<li><strong>Inter-edge skew</strong>: The time between rising and falling edges must be stable. PLL-generated clocks with 50% duty cycle are preferred.</li>
+<li><strong>Board-level skew</strong>: Route all XGMII data signals with matched length to the clock (±10 ps typical).</li>
+<li><strong>Simultaneous switching noise (SSN)</strong>: 36 signals (32 data + 4 control) switching at 156.25 MHz DDR creates significant SSN. Use staggered output enables or reduced drive strengths.</li>
+</ul>
+
+<h3>6.4 Lane Skew Budget Calculation</h3>
+
+<h4>6.4.1 XGMII Lane Skew (Parallel)</h4>
+<p>Within a single XGMII column (4 lanes), all 8 bits per lane plus the control bit must arrive within the same UI:</p>
+<ul>
+<li>UI at 156.25 MHz DDR = 3.2 ns per edge (6.4 ns per full clock period)</li>
+<li>Setup time at receiver = 480 ps (min)</li>
+<li>Hold time at receiver = 480 ps (min)</li>
+<li><strong>Available skew budget</strong> = 3.2 ns – 0.48 ns – 0.48 ns = <strong>2.24 ns</strong> (for intra-column skew)</li>
+</ul>
+
+<h4>6.4.2 XAUI Lane Skew (Serial)</h4>
+<p>The four XAUI serial lanes may have different PCB trace lengths:</p>
+<ul>
+<li>XAUI interconnect skew budget: <strong>60 ps p-p</strong> (interconnect) + <strong>15 ps p-p</strong> (driver) = <strong>75 ps p-p total</strong></li>
+<li>At 3.125 Gbaud, 1 UI = 320 ps</li>
+<li>75 ps = 0.234 UI — well within the lane deskew capability of the XGXS</li>
+<li>Typical deskew FIFO depth: 4–8 UI (1.28–2.56 ns)</li>
+</ul>
+
+<div class="rtl-box">
+<h4>Lane Skew Budget Table</h4>
+<pre>
+Interface    | Data Rate   | UI      | Max Skew   | Skew/UI  | Compensation
+-------------|-------------|---------|------------|----------|------------------
+MII          | 100 Mb/s    | 40 ns   | 0.1 ns     | 0.0025   | None (single nibble)
+GMII         | 1 Gb/s      | 8 ns    | ~1 ns      | 0.125    | PCB matching
+XGMII (DDR)  | 10 Gb/s     | 3.2 ns  | ~0.5 ns    | 0.156    | PCB matching
+XAUI         | 3.125 Gbaud | 320 ps  | 75 ps      | 0.234    | XGXS deskew FIFO
+</pre>
+</div>
+
+<h3>6.5 8B/10B Disparity Tracking in XGXS</h3>
+
+<h4>6.5.1 Running Disparity Rules</h4>
+<p>8B/10B encoding maintains DC balance by tracking <strong>running disparity (RD)</strong>:</p>
+<ul>
+<li>RD starts at <strong>negative (–)</strong> after reset.</li>
+<li>Each valid 10-bit code group is either RD– or RD+.</li>
+<li>After transmitting an RD– code group, RD becomes negative.</li>
+<li>After transmitting an RD+ code group, RD becomes positive.</li>
+<li>Most data bytes have two encodings: one for RD– and one for RD+.</li>
+<li>Special control codes (K-codes) also have RD– and RD+ versions.</li>
+</ul>
+
+<h4>6.5.2 Disparity Error Detection</h4>
+<p>A disparity error occurs when:</p>
+<ul>
+<li>A received code group does not match the expected RD (e.g., an RD– code is received when RD is currently positive).</li>
+<li>The received 10-bit pattern does not correspond to any valid RD– or RD+ code group.</li>
+</ul>
+
+<div class="rtl-box">
+<h4>RTL Pattern: 8B/10B Encoder with Disparity Tracking</h4>
+<pre>
+module encode_8b10b (
+    input        clk,
+    input        reset,
+    input  [7:0] data_in,
+    input        k_char,         // 1 = control code
+    input        disp_in,        // running disparity in: 0=neg, 1=pos
+    output [9:0] code_group,
+    output       disp_out,       // running disparity out
+    output       code_error
+);
+    // Lookup tables for RD- and RD+ encodings
+    // 256 data codes + 12 control codes
+    // Use combinatorial logic or ROM
+
+    reg [9:0] codegroup_rd_minus [0:267]; // 256 + 12 control
+    reg [9:0] codegroup_rd_plus  [0:267];
+
+    wire [8:0] lookup_addr = {k_char, data_in};
+
+    assign code_group = disp_in ? codegroup_rd_plus[lookup_addr]
+                                : codegroup_rd_minus[lookup_addr];
+
+    // Disparity of the selected code group
+    // A code group has positive disparity if it has more 1s than 0s
+    // Neutral disparity (e.g., /D00.0/) does not flip RD
+    wire [3:0] ones = $countones(code_group);
+    wire neutral = (ones == 5);
+    wire pos_disp = (ones > 5);
+    wire neg_disp = (ones < 5);
+
+    assign disp_out = neutral ? disp_in : pos_disp;
+    assign code_error = /* invalid combination */ 1'b0;
+endmodule
+</pre>
+</div>
+
+<div class="rtl-box">
+<h4>RTL Pattern: 8B/10B Decoder with Disparity Tracking</h4>
+<pre>
+module decode_8b10b (
+    input         clk,
+    input         reset,
+    input  [9:0]  code_group,
+    input         disp_in,
+    output [7:0]  data_out,
+    output        k_char,
+    output        disp_out,
+    output        code_error,     // invalid code group
+    output        disp_error      // running disparity error
+);
+    // Reverse lookup: 10-bit -> {k_char, 8-bit data}
+    // Two lookup tables: one for RD- input, one for RD+ input
+
+    reg [8:0] decode_rd_minus [0:1023];
+    reg [8:0] decode_rd_plus  [0:1023];
+    reg       valid_rd_minus [0:1023];
+    reg       valid_rd_plus  [0:1023];
+    reg       disp_rd_minus  [0:1023];
+    reg       disp_rd_plus   [0:1023];
+
+    wire [8:0] decoded = disp_in ? decode_rd_plus[code_group]
+                                 : decode_rd_minus[code_group];
+    wire valid  = disp_in ? valid_rd_plus[code_group]
+                          : valid_rd_minus[code_group];
+    wire dflip  = disp_in ? disp_rd_plus[code_group]
+                          : disp_rd_minus[code_group];
+
+    assign k_char    = decoded[8];
+    assign data_out  = decoded[7:0];
+    assign disp_out  = dflip ? ~disp_in : disp_in;
+    assign code_error = ~valid;
+    assign disp_error = valid && (/* expected disp mismatch */ 1'b0);
+endmodule
+</pre>
+</div>
+
+<h4>6.5.3 Disparity Initialization</h4>
+<p>After reset or loss of sync, RD must be initialized to <strong>negative</strong>. The /K28.5/ comma has negative disparity (RD–), so the first valid comma received after sync acquisition should match RD–.</p>
+
+<h3>6.6 Idle Insertion / Removal Logic</h3>
+
+<h4>6.6.1 XGMII Idle Handling</h4>
+<p>The XGMII inter-frame gap consists of Idle control characters (0x07). The RS must:</p>
+<ul>
+<li>Generate Idle characters when no MAC frame is being transmitted.</li>
+<li>Insert or delete Idles to align Start to lane 0 (DIC mechanism).</li>
+<li>Never insert or delete Idles within a frame.</li>
+</ul>
+
+<div class="rtl-box">
+<h4>RTL Pattern: XGMII Idle Insertion / DIC</h4>
+<pre>
+module xgmii_idle_manager (
+    input         clk,
+    input         reset,
+    input         tx_frame_valid,    // MAC has frame to send
+    input  [31:0] tx_frame_data,
+    input  [3:0]  tx_frame_ctrl,
+    output [31:0] xgmii_txd,
+    output [3:0]  xgmii_txc,
+    output        ready
+);
+
+    localparam IDLE_CHAR = 8'h07;
+    localparam START_CHAR = 8'hFB;
+    localparam TERM_CHAR = 8'hFD;
+
+    reg [1:0] dic;           // Deficit Idle Count: 0 to 3
+    reg [1:0] lane_ptr;      // Current lane for next byte (0-3)
+    reg       in_frame;
+
+    // State machine for transmit column assembly
+    // When frame pending and lane_ptr==0: emit Start + preamble
+    // When frame ending: emit Terminate in appropriate lane, Idles after
+    // DIC updated when adding or removing Idles between frames
+
+    always @(posedge clk) begin
+        if (reset) begin
+            dic &lt;= 2'd0;
+            lane_ptr &lt;= 2'd0;
+            in_frame &lt;= 1'b0;
+        end else begin
+            if (!in_frame && tx_frame_valid) begin
+                // Need Start aligned to lane 0
+                if (lane_ptr != 2'd0) begin
+                    // Must insert Idles until lane_ptr == 0
+                    // OR delete Idles (if dic > 0) to reach alignment sooner
+                    if (dic > 0) begin
+                        // Delete one idle: decrement DIC, advance lane_ptr faster
+                        dic &lt;= dic - 1'd1;
+                        lane_ptr &lt;= lane_ptr + 1'd1; // skip one idle slot
+                    end else begin
+                        // Insert idle: stay in inter-frame, increment DIC
+                        dic &lt;= dic + 1'd1;
+                        lane_ptr &lt;= lane_ptr + 1'd1;
+                    end
+                end else begin
+                    // Aligned to lane 0: emit Start
+                    in_frame &lt;= 1'b1;
+                end
+            end else if (in_frame && !tx_frame_valid) begin
+                // Frame ended, emit Terminate
+                in_frame &lt;= 1'b0;
+                lane_ptr &lt;= lane_ptr + 1'd1; // Terminate consumes one lane
+            end else begin
+                // Normal progression
+                lane_ptr &lt;= lane_ptr + 1'd1;
+            end
+        end
+    end
+endmodule
+</pre>
+</div>
+
+<h4>6.6.2 XGXS Clock Tolerance Compensation (Idle Add/Delete)</h4>
+<p>The XGXS destination may add or delete Idle columns to compensate for clock rate differences:</p>
+
+<div class="rtl-box">
+<h4>RTL Pattern: XGXS Clock Compensation FIFO</h4>
+<pre>
+module xgxsk_clock_comp (
+    input        wr_clk,       // source XGXS clock (e.g., 156.25 MHz div)
+    input        rd_clk,       // destination XGXS clock (async)
+    input        reset,
+    input  [3:0] wr_col_valid,
+    input  [31:0] wr_col_data,
+    input  [3:0]  wr_col_ctrl,
+    output [3:0]  rd_col_valid,
+    output [31:0] rd_col_data,
+    output [3:0]  rd_col_ctrl,
+    output [4:0]  fifo_level
+);
+    // Dual-clock FIFO with column width = 36 bits (32 data + 4 ctrl)
+    // Depth typically 8-16 columns
+    // Clock comp decision: when FIFO level > threshold, delete Idle column
+    //                      when FIFO level < threshold, insert Idle column
+
+    localparam FIFO_DEPTH = 16;
+    localparam ADD_THRESH = 4;
+    localparam DEL_THRESH = 12;
+
+    reg [35:0] fifo [0:FIFO_DEPTH-1];
+    reg [3:0]  wr_ptr, rd_ptr;
+    reg [3:0]  gray_wr, gray_rd;
+    wire [3:0] sync_wr_ptr;
+
+    // Gray code sync from write to read domain
+    // ...
+
+    wire [3:0] level = wr_ptr - rd_ptr;
+    assign fifo_level = level;
+
+    wire is_idle_col = (wr_col_ctrl == 4'b1111) &&
+                       (wr_col_data == {4{8'h07}});
+
+    always @(posedge wr_clk) begin
+        if (reset) begin
+            wr_ptr &lt;= 0;
+        end else begin
+            if (wr_col_valid) begin
+                if (level >= DEL_THRESH && is_idle_col) begin
+                    // Delete this idle column (don't write)
+                end else begin
+                    fifo[wr_ptr] &lt;= {wr_col_ctrl, wr_col_data};
+                    wr_ptr &lt;= wr_ptr + 1'd1;
+                end
+            end
+        end
+    end
+
+    always @(posedge rd_clk) begin
+        if (reset) begin
+            rd_ptr &lt;= 0;
+        end else begin
+            if (level &lt;= ADD_THRESH) begin
+                // Insert idle column: don't advance read pointer
+                rd_col_valid &lt;= 4'b1111;
+                rd_col_ctrl  &lt;= 4'b1111;
+                rd_col_data  &lt;= {4{8'h07}};
+            end else begin
+                {rd_col_ctrl, rd_col_data} &lt;= fifo[rd_ptr];
+                rd_ptr &lt;= rd_ptr + 1'd1;
+            end
+        end
+    end
+endmodule
+</pre>
+</div>
+
+<h3>6.7 Additional RTL Checks</h3>
+
+<table>
+<tr><th>Check Item</th><th>MII</th><th>GMII</th><th>XGMII</th><th>XAUI</th></tr>
+<tr><td>Clock domain crossing async FIFO</td><td>Required (TX_CLK from PHY)</td><td>Required (RX_CLK async)</td><td>Required (RX_CLK async)</td><td>Required (wr/rd clocks async)</td></tr>
+<tr><td>Setup/hold constraints</td><td>10 ns</td><td>2.5/0.5 ns</td><td>0.96/0.48 ns</td><td>N/A (serial)</td></tr>
+<tr><td>I/O standard</td><td>TTL / LVTTL</td><td>CMOS (2.5V/1.8V)</td><td>HSTL Class I (1.5V)</td><td>AC-coupled differential</td></tr>
+<tr><td>DDR support</td><td>No</td><td>No</td><td>Yes (both edges)</td><td>Embedded clock</td></tr>
+<tr><td>Running disparity tracking</td><td>N/A</td><td>N/A (unless PCS)</td><td>N/A (unless PCS)</td><td>Required (8B/10B)</td></tr>
+<tr><td>Lane deskew logic</td><td>N/A</td><td>N/A</td><td>N/A</td><td>Required</td></tr>
+<tr><td>Clock tolerance compensation</td><td>N/A</td><td>N/A</td><td>N/A</td><td>Required</td></tr>
+<tr><td>Comma alignment</td><td>N/A</td><td>N/A</td><td>N/A</td><td>Required</td></tr>
+<tr><td>Idle add/delete logic</td><td>N/A</td><td>N/A</td><td>Required (DIC)</td><td>Required</td></tr>
+<tr><td>Link fault signaling state machine</td><td>N/A</td><td>N/A</td><td>Required</td><td>Required</td></tr>
+<tr><td>LPI support (EEE)</td><td>Optional (100M)</td><td>Optional</td><td>Optional</td><td>Optional</td></tr>
+</table>
+
+<h3>6.8 RTL Verification Checklist</h3>
+<ul>
+<li><input type="checkbox"> TX_CLK / RX_CLK frequency measured within ±100 ppm</li>
+<li><input type="checkbox"> GTX_CLK duty cycle within 35%–65% (MII) or 45%–55% (XGMII)</li>
+<li><input type="checkbox"> TX_EN assertion aligned to first preamble nibble/byte</li>
+<li><input type="checkbox"> TX_EN negation before first clock after final nibble/byte</li>
+<li><input type="checkbox"> RX_DV encompasses complete frame from SFD through CRC</li>
+<li><input type="checkbox"> RX_ER causes FrameCheckError at MAC</li>
+<li><input type="checkbox"> CRS remains asserted throughout collision</li>
+<li><input type="checkbox"> MDIO turnaround handled correctly for read vs write</li>
+<li><input type="checkbox"> XGMII Start character aligned to lane 0</li>
+<li><input type="checkbox"> XGMII DIC bounded 0–3</li>
+<li><input type="checkbox"> XGMII minimum IPG at receiver ≥ 5 octets</li>
+<li><input type="checkbox"> Link fault state machine transitions verified (OK ↔ Local Fault ↔ Remote Fault)</li>
+<li><input type="checkbox"> XAUI 8B/10B encoding valid for all data and control codes</li>
+<li><input type="checkbox"> XAUI running disparity initialized negative</li>
+<li><input type="checkbox"> XAUI deskew FIFO compensates max skew (≥ 75 ps)</li>
+<li><input type="checkbox"> XAUI clock compensation handles ±200 ppm disparity</li>
+<li><input type="checkbox"> All async FIFOs have gray-code pointers and proper depth</li>
+<li><input type="checkbox"> Lint clean (no combinational loops, no latches, no multi-driven nets)</li>
+<li><input type="checkbox"> CDC verified with proper constraints (set_max_delay -datapath_only)</li>
+</ul>
+
+<div class="crit">
+<strong>Critical RTL Design Rules (from AGENTS.md):</strong>
+<ul>
+<li><strong>Do not guess clock relationships.</strong> TX_CLK and RX_CLK have no guaranteed phase relationship. Always treat them as asynchronous unless explicitly designed otherwise.</li>
+<li><strong>Do not delete legacy signals without confirmation.</strong> COL and CRS may appear unused in full-duplex designs but are required for backward compatibility and management loopback modes.</li>
+<li><strong>Verify with real timing constraints.</strong> Do not assume setup/hold margins. Apply correct SDC constraints for MII (10 ns), GMII (2.5/0.5 ns), and XGMII (0.96/0.48 ns).</li>
+<li><strong>Use standard primitives.</strong> For XGMII DDR, use vendor-specific ODDR/IDDR primitives. Do not implement DDR with 2× clocking unless absolutely necessary.</li>
+</ul>
+</div>
+
+<hr>
+<p><em>Document compiled from IEEE Std 802.3-2022, Clauses 22, 35, 46, and 47. All specifications are property of the IEEE. This reference is intended for RTL design and verification purposes only.</em></p>
+<p><em>Last updated: 2026-05-11</em></p>
+
+</body>
+</html>
+<!-- ============================================================ -->
+<h3>6.9 Expanded MDIO Transaction Examples</h3>
+
+<h4>6.9.1 Read Transaction (Clause 22)</h4>
+<pre>
+MDC  :  ____/‾‾‾‾\____/‾‾‾‾\____/‾‾‾‾\____/‾‾‾‾\____/‾‾‾‾\____/‾‾‾‾\____
+MDIO :  ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\____/‾‾‾‾\____/‾‾‾‾\____/‾‾‾‾
+        &lt;--------- PRE (32 ones) ---------&gt;&lt;ST&gt;&lt;OP&gt;&lt;PHYAD&gt;&lt;REGAD&gt;&lt;TA &gt;&lt;DATA   &gt;
+                                          01 10  AAAAA  RRRRR  Z0   DDDDDDDDDDDDDDDD
+                                          
+Phase-by-phase:
+  PRE : 32 consecutive '1' bits (may be suppressed if PHY supports it)
+  ST  : 2 bits '01' (start delimiter)
+  OP  : 2 bits '10' (read operation)
+  PHYAD: 5 bits PHY address (MSB first), e.g., 00000 for single PHY
+  REGAD: 5 bits register address (MSB first), e.g., 00001 for Status reg
+  TA  : 2-bit turnaround. Bit 1: both STA and PHY are Hi-Z. Bit 2: PHY drives '0'
+  DATA: 16 bits register data (bit 15 first, bit 0 last)
+  IDLE: MDIO returns to Hi-Z (PHY pull-up holds line high)
+</pre>
+
+<h4>6.9.2 Write Transaction (Clause 22)</h4>
+<pre>
+MDC  :  ____/‾‾‾‾\____/‾‾‾‾\____/‾‾‾‾\____/‾‾‾‾\____/‾‾‾‾\____/‾‾‾‾\____
+MDIO :  ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\____/‾‾‾‾\____/‾‾‾‾\____/‾‾‾‾
+        &lt;--------- PRE (32 ones) ---------&gt;&lt;ST&gt;&lt;OP&gt;&lt;PHYAD&gt;&lt;REGAD&gt;&lt;TA &gt;&lt;DATA   &gt;
+                                          01 01  AAAAA  RRRRR  10   DDDDDDDDDDDDDDDD
+
+Phase-by-phase:
+  PRE : 32 consecutive '1' bits
+  ST  : 2 bits '01'
+  OP  : 2 bits '01' (write operation)
+  PHYAD: 5 bits PHY address
+  REGAD: 5 bits register address
+  TA  : 2-bit turnaround. Bit 1: STA drives '1'. Bit 2: STA drives '0'
+  DATA: 16 bits data driven by STA (MSB first)
+  IDLE: STA releases MDIO to Hi-Z
+</pre>
+
+<h4>6.9.3 MDC Frequency Limits</h4>
+<table>
+<tr><th>Parameter</th><th>Min</th><th>Max</th><th>Units</th></tr>
+<tr><td>MDC high time</td><td>160</td><td>—</td><td>ns</td></tr>
+<tr><td>MDC low time</td><td>160</td><td>—</td><td>ns</td></tr>
+<tr><td>MDC period</td><td>400</td><td>—</td><td>ns</td></tr>
+<tr><td>MDC frequency</td><td>—</td><td>2.5</td><td>MHz</td></tr>
+<tr><td>MDIO setup (STA→PHY)</td><td>10</td><td>—</td><td>ns</td></tr>
+<tr><td>MDIO hold (STA→PHY)</td><td>10</td><td>—</td><td>ns</td></tr>
+<tr><td>MDIO clk-to-out (PHY→STA)</td><td>0</td><td>300</td><td>ns</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL Pattern: MDIO Master Controller</h4>
+<pre>
+module mdio_master (
+    input        clk,           // system clock (e.g., 50 MHz)
+    input        reset,
+    input        start,
+    input        rd_wr_n,       // 1=read, 0=write
+    input  [4:0] phy_addr,
+    input  [4:0] reg_addr,
+    input  [15:0] wr_data,
+    output reg [15:0] rd_data,
+    output reg   busy,
+    output reg   done,
+    output reg   mdc,
+    inout        mdio
+);
+    localparam IDLE=0, PREAMBLE=1, START=2, OP=3, PHYAD=4,
+               REGAD=5, TA=6, DATA=7, DONE=8;
+    reg [3:0] state;
+    reg [4:0] bit_cnt;
+    reg [31:0] shift_reg;
+    reg        mdio_oe;
+    reg        mdio_out;
+
+    assign mdio = mdio_oe ? mdio_out : 1'bz;
+
+    // MDC generation: divide system clock by N to get ~1 MHz
+    reg [5:0] mdc_div;
+    wire mdc_rising = (mdc_div == 6'd0);
+    always @(posedge clk) begin
+        if (reset) mdc_div &lt;= 0;
+        else mdc_div &lt;= (mdc_div >= 6'd24) ? 6'd0 : mdc_div + 1'b1;
+    end
+    always @(posedge clk) mdc &lt;= (mdc_div >= 6'd12);
+
+    always @(posedge clk) begin
+        if (reset) begin
+            state &lt;= IDLE;
+            busy &lt;= 1'b0;
+            done &lt;= 1'b0;
+            mdio_oe &lt;= 1'b0;
+        end else begin
+            done &lt;= 1'b0;
+            if (mdc_rising) begin
+                case (state)
+                    IDLE: if (start) begin
+                        state &lt;= PREAMBLE;
+                        bit_cnt &lt;= 5'd31;
+                        shift_reg &lt;= 32'hFFFFFFFF;
+                        busy &lt;= 1'b1;
+                        mdio_oe &lt;= 1'b1;
+                        mdio_out &lt;= 1'b1;
+                    end
+                    PREAMBLE: begin
+                        if (bit_cnt == 0) begin
+                            state &lt;= START;
+                            bit_cnt &lt;= 5'd1;
+                            shift_reg &lt;= 32'h60000000 | {rd_wr_n, 31'b0};
+                        end else bit_cnt &lt;= bit_cnt - 1'b1;
+                    end
+                    // ... remaining states
+                endcase
+            end
+        end
+    end
+endmodule
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h3>6.10 XGXS PCS Synchronization State Machine Detail</h3>
+
+<p>Each XAUI lane independently runs a PCS synchronization state machine. The state machine ensures correct byte alignment (via comma detection) and monitors link quality:</p>
+
+<h4>6.10.1 State Definitions</h4>
+<table>
+<tr><th>State</th><th>Description</th><th>Entry Condition</th><th>Exit Condition</th></tr>
+<tr><td>LOSS_OF_SYNC</td><td>No valid comma detected; searching for byte boundary</td><td>Reset, or too many errors</td><td>Valid comma detected</td></tr>
+<tr><td>COMMA_DETECT_1</td><td>First comma detected; verifying alignment</td><td>Comma detected in LOSS_OF_SYNC</td><td>Second valid comma in expected position</td></tr>
+<tr><td>COMMA_DETECT_2</td><td>Second comma detected; confirming alignment</td><td>Valid code after COMMA_DETECT_1</td><td>Third valid comma</td></tr>
+<tr><td>COMMA_DETECT_3</td><td>Third comma detected; near sync</td><td>Valid code after COMMA_DETECT_2</td><td>Fourth valid comma</td></tr>
+<tr><td>SYNC_ACQUIRED_1</td><td>Synchronization acquired; monitoring</td><td>4 valid commas in a row</td><td>4 consecutive invalid code groups</td></tr>
+<tr><td>SYNC_ACQUIRED_2</td><td>Sync acquired; more tolerant</td><td>—</td><td>4 consecutive invalid code groups</td></tr>
+<tr><td>SYNC_ACQUIRED_3</td><td>Sync acquired; maximum tolerance</td><td>—</td><td>4 consecutive invalid code groups</td></tr>
+<tr><td>SYNC_ACQUIRED_3A</td><td>Hold state; preventing rapid toggling</td><td>—</td><td>Explicit re-sync required</td></tr>
+<tr><td>SYNC_ACQUIRED_4</td><td>Final hold state</td><td>—</td><td>—</td></tr>
+</table>
+
+<h4>6.10.2 Synchronization Requirements</h4>
+<ul>
+<li>To achieve sync: <strong>4 consecutive valid commas</strong> must be detected with correct spacing.</li>
+<li>To lose sync: <strong>4 consecutive invalid code groups</strong> (or disparity errors).</li>
+<li>Comma pattern: <code>/K28.5/</code> = 0011111010 (RD–) or 1100000101 (RD+).</li>
+<li>Comma appears in /I/ and /A/ ordered sets.</li>
+</ul>
+
+<div class="rtl-box">
+<h4>RTL Pattern: PCS Synchronization State Machine</h4>
+<pre>
+module pcs_sync_sm (
+    input        clk,
+    input        reset,
+    input  [9:0] code_group,
+    input        code_valid,
+    input        comma_detect,
+    output reg   sync_status,     // 1 = in sync
+    output reg   code_group_align // 1 = aligned
+);
+    localparam LOSS_OF_SYNC   = 4'd0,
+               COMMA_DETECT_1 = 4'd1,
+               COMMA_DETECT_2 = 4'd2,
+               COMMA_DETECT_3 = 4'd3,
+               SYNC_ACQUIRED_1 = 4'd4,
+               SYNC_ACQUIRED_2 = 4'd5,
+               SYNC_ACQUIRED_3 = 4'd6,
+               SYNC_ACQUIRED_3A = 4'd7,
+               SYNC_ACQUIRED_4 = 4'd8;
+
+    reg [3:0] state;
+    reg [2:0] good_cnt;
+    reg [2:0] bad_cnt;
+
+    always @(posedge clk) begin
+        if (reset) begin
+            state &lt;= LOSS_OF_SYNC;
+            sync_status &lt;= 1'b0;
+            code_group_align &lt;= 1'b0;
+            good_cnt &lt;= 0;
+            bad_cnt &lt;= 0;
+        end else begin
+            case (state)
+                LOSS_OF_SYNC: begin
+                    sync_status &lt;= 1'b0;
+                    if (comma_detect) begin
+                        state &lt;= COMMA_DETECT_1;
+                        good_cnt &lt;= 3'd1;
+                    end
+                end
+                COMMA_DETECT_1: begin
+                    if (code_valid && comma_detect) begin
+                        if (good_cnt >= 3) state &lt;= SYNC_ACQUIRED_1;
+                        else good_cnt &lt;= good_cnt + 1'b1;
+                    end else if (!code_valid) begin
+                        state &lt;= LOSS_OF_SYNC;
+                    end
+                end
+                SYNC_ACQUIRED_1: begin
+                    sync_status &lt;= 1'b1;
+                    code_group_align &lt;= 1'b1;
+                    if (!code_valid) begin
+                        bad_cnt &lt;= bad_cnt + 1'b1;
+                        if (bad_cnt >= 3) state &lt;= LOSS_OF_SYNC;
+                    end else begin
+                        bad_cnt &lt;= 0;
+                    end
+                end
+                // Additional states for hysteresis...
+                default: state &lt;= LOSS_OF_SYNC;
+            endcase
+        end
+    end
+endmodule
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h3>6.11 GMII Signal Mapping with TBI Compatibility</h3>
+
+<p>The GMII is specified such that implementers may share pins with the Ten-Bit Interface (TBI, Clause 36). Table 35-6 of 802.3-2022 shows the recommended mapping:</p>
+
+<table>
+<tr><th>GMII Signal</th><th>MII Signal</th><th>TBI Signal</th><th>Notes</th></tr>
+<tr><td>TXD[7]</td><td>—</td><td>TX[7]</td><td>GMII data / TBI coded bit</td></tr>
+<tr><td>TXD[6]</td><td>—</td><td>TX[6]</td><td>GMII data / TBI coded bit</td></tr>
+<tr><td>TXD[5]</td><td>—</td><td>TX[5]</td><td>GMII data / TBI coded bit</td></tr>
+<tr><td>TXD[4]</td><td>—</td><td>TX[4]</td><td>GMII data / TBI coded bit</td></tr>
+<tr><td>TXD[3]</td><td>TXD[3]</td><td>TX[3]</td><td>Shared across all three interfaces</td></tr>
+<tr><td>TXD[2]</td><td>TXD[2]</td><td>TX[2]</td><td>Shared across all three interfaces</td></tr>
+<tr><td>TXD[1]</td><td>TXD[1]</td><td>TX[1]</td><td>Shared across all three interfaces</td></tr>
+<tr><td>TXD[0]</td><td>TXD[0]</td><td>TX[0]</td><td>Shared across all three interfaces</td></tr>
+<tr><td>TX_EN</td><td>TX_EN</td><td>TX[8]</td><td>GMII enable / TBI control</td></tr>
+<tr><td>TX_ER</td><td>TX_ER</td><td>TX[9]</td><td>GMII error / TBI control</td></tr>
+<tr><td>RXD[7]</td><td>—</td><td>RX[7]</td><td>GMII data / TBI coded bit</td></tr>
+<tr><td>RXD[6]</td><td>—</td><td>RX[6]</td><td>GMII data / TBI coded bit</td></tr>
+<tr><td>RXD[5]</td><td>—</td><td>RX[5]</td><td>GMII data / TBI coded bit</td></tr>
+<tr><td>RXD[4]</td><td>—</td><td>RX[4]</td><td>GMII data / TBI coded bit</td></tr>
+<tr><td>RXD[3]</td><td>RXD[3]</td><td>RX[3]</td><td>Shared across all three interfaces</td></tr>
+<tr><td>RXD[2]</td><td>RXD[2]</td><td>RX[2]</td><td>Shared across all three interfaces</td></tr>
+<tr><td>RXD[1]</td><td>RXD[1]</td><td>RX[1]</td><td>Shared across all three interfaces</td></tr>
+<tr><td>RXD[0]</td><td>RXD[0]</td><td>RX[0]</td><td>Shared across all three interfaces</td></tr>
+<tr><td>RX_DV</td><td>RX_DV</td><td>RX[8]</td><td>GMII valid / TBI control</td></tr>
+<tr><td>RX_ER</td><td>RX_ER</td><td>RX[9]</td><td>GMII error / TBI control</td></tr>
+<tr><td>COL</td><td>COL</td><td>—</td><td>GMII/MII only</td></tr>
+<tr><td>CRS</td><td>CRS</td><td>—</td><td>GMII/MII only</td></tr>
+</table>
+
+<div class="note">
+<strong>Pin-Sharing Note:</strong> When an implementation supports both GMII and TBI, the upper 4 bits of TXD/RXD (bits 7:4) and the COL/CRS signals have no TBI equivalent. It is recommended that unused pins be driven to a valid logic state to avoid floating inputs.
+</div>
+
+<!-- ============================================================ -->
+<h3>6.12 MII-to-GMII Adapter RTL</h3>
+
+<p>When a MAC supports both MII and GMII, an adapter must handle the width conversion and clock switching:</p>
+
+<div class="rtl-box">
+<h4>RTL Pattern: MII/GMII Multiplexed MAC Interface</h4>
+<pre>
+module mii_gmii_adapter (
+    input         clk_125,        // GMII / system clock
+    input         clk_25,         // MII 100M clock
+    input         clk_2_5,        // MII 10M clock
+    input         reset,
+    input         gmii_mode,      // 1=GMII, 0=MII
+    input  [7:0]  mac_tx_data,
+    input         mac_tx_sof,
+    input         mac_tx_eof,
+    input         mac_tx_valid,
+    output [7:0]  mac_rx_data,
+    output        mac_rx_sof,
+    output        mac_rx_eof,
+    output        mac_rx_valid,
+    output        mac_rx_error,
+    // MII / GMII PHY interface
+    output        gtx_clk,        // GMII only (125 MHz)
+    output        tx_clk_out,     // MII TX_CLK to PHY (driven by PHY, but buffered here)
+    input         tx_clk_in,      // MII TX_CLK from PHY
+    output [7:0]  txd,
+    output        tx_en,
+    output        tx_er,
+    input         rx_clk,
+    input  [7:0]  rxd,
+    input         rx_dv,
+    input         rx_er,
+    input         crs,
+    input         col
+);
+    // Clock muxing for MII mode
+    wire tx_clk_sel = gmii_mode ? clk_125 : tx_clk_in;
+    assign gtx_clk = gmii_mode ? clk_125 : 1'b0;
+
+    // TX path: GMII = 8-bit @ 125 MHz; MII = 4-bit @ 25/2.5 MHz
+    reg [7:0] txd_reg;
+    reg       tx_en_reg;
+    reg       tx_er_reg;
+    reg       tx_nibble_sel;      // 0=lower nibble, 1=upper nibble
+
+    always @(posedge tx_clk_sel or posedge reset) begin
+        if (reset) begin
+            tx_nibble_sel &lt;= 1'b0;
+        end else begin
+            if (gmii_mode) begin
+                txd_reg  &lt;= mac_tx_data;
+                tx_en_reg&lt;= mac_tx_valid;
+                tx_er_reg&lt;= 1'b0; // TX_ER driven by MAC separately if needed
+            end else begin
+                // MII mode: multiplex 8-bit data into 4-bit nibbles
+                if (mac_tx_valid || tx_nibble_sel) begin
+                    tx_nibble_sel &lt;= ~tx_nibble_sel;
+                    if (!tx_nibble_sel) begin
+                        txd_reg[3:0] &lt;= mac_tx_data[3:0]; // low nibble first
+                        tx_en_reg    &lt;= mac_tx_valid;
+                    end else begin
+                        txd_reg[3:0] &lt;= mac_tx_data[7:4]; // high nibble second
+                        tx_en_reg    &lt;= mac_tx_valid || (tx_nibble_sel && mac_tx_eof);
+                    end
+                end else begin
+                    tx_en_reg &lt;= 1'b0;
+                end
+            end
+        end
+    end
+
+    assign txd  = gmii_mode ? txd_reg : {4'b0, txd_reg[3:0]};
+    assign tx_en = tx_en_reg;
+    assign tx_er = tx_er_reg;
+
+    // RX path: MII 4-bit to GMII 8-bit assembly
+    reg [7:0] rxd_assembled;
+    reg       rx_dv_assembled;
+    reg       rx_er_assembled;
+    reg       rx_nibble_sel;
+
+    always @(posedge rx_clk or posedge reset) begin
+        if (reset) begin
+            rx_nibble_sel &lt;= 1'b0;
+        end else begin
+            if (gmii_mode) begin
+                rxd_assembled  &lt;= rxd;
+                rx_dv_assembled&lt;= rx_dv;
+                rx_er_assembled&lt;= rx_er;
+            end else begin
+                if (rx_dv || rx_nibble_sel) begin
+                    if (!rx_nibble_sel) begin
+                        rxd_assembled[3:0] &lt;= rxd[3:0];
+                        rx_nibble_sel &lt;= 1'b1;
+                        rx_dv_assembled &lt;= 1'b0; // byte not complete yet
+                    end else begin
+                        rxd_assembled[7:4] &lt;= rxd[3:0];
+                        rx_nibble_sel &lt;= 1'b0;
+                        rx_dv_assembled &lt;= 1'b1; // complete byte
+                    end
+                    rx_er_assembled &lt;= rx_er;
+                end else begin
+                    rx_dv_assembled &lt;= 1'b0;
+                    rx_nibble_sel &lt;= 1'b0;
+                end
+            end
+        end
+    end
+
+    assign mac_rx_data  = rxd_assembled;
+    assign mac_rx_valid = rx_dv_assembled;
+    assign mac_rx_error = rx_er_assembled;
+    assign mac_rx_sof   = rx_dv_assembled && !rx_dv_delayed;
+    assign mac_rx_eof   = !rx_dv_assembled && rx_dv_delayed;
+endmodule
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h3>6.13 XGMII Lane Alignment Logic Detail</h3>
+
+<p>The XGMII RS must ensure that the Start control character (0xFB) is always aligned to lane 0. When the MAC presents a frame that would not naturally align to lane 0, the RS inserts or deletes Idle characters:</p>
+
+<div class="rtl-box">
+<h4>RTL Pattern: XGMII Transmit Lane Aligner with DIC</h4>
+<pre>
+module xgmii_tx_aligner (
+    input         clk,
+    input         reset,
+    // MAC interface
+    input         mac_tx_valid,
+    input  [31:0] mac_tx_data,
+    input  [3:0]  mac_tx_ctrl,
+    output        mac_tx_ready,
+    // XGMII interface
+    output reg [31:0] xgmii_txd,
+    output reg [3:0]  xgmii_txc
+);
+    localparam IDLE = 8'h07;
+    localparam START = 8'hFB;
+    localparam TERM  = 8'hFD;
+
+    reg [1:0] dic;           // Deficit Idle Count: 0..3
+    reg [1:0] lane;          // Next lane for data: 0..3
+    reg       in_frame;
+    reg [1:0] state;
+    localparam ST_IDLE = 0, ST_DATA = 1, ST_TERM = 2;
+
+    assign mac_tx_ready = (state == ST_IDLE) && (lane == 2'd0 || dic > 0);
+
+    always @(posedge clk) begin
+        if (reset) begin
+            dic &lt;= 2'd0;
+            lane &lt;= 2'd0;
+            in_frame &lt;= 1'b0;
+            state &lt;= ST_IDLE;
+            xgmii_txd &lt;= {4{IDLE}};
+            xgmii_txc &lt;= 4'b1111;
+        end else begin
+            case (state)
+                ST_IDLE: begin
+                    if (mac_tx_valid) begin
+                        if (lane == 2'd0) begin
+                            // Perfect alignment: emit Start in lane 0
+                            xgmii_txd &lt;= {mac_tx_data[31:8], START};
+                            xgmii_txc &lt;= {mac_tx_ctrl[3:1], 1'b1};
+                            lane &lt;= 2'd1;
+                            state &lt;= ST_DATA;
+                        end else if (dic > 0) begin
+                            // Delete an idle to accelerate alignment
+                            dic &lt;= dic - 1'd1;
+                            lane &lt;= lane + 1'd1;
+                            // Stay in ST_IDLE, emit nothing this cycle
+                            xgmii_txd &lt;= {4{IDLE}};
+                            xgmii_txc &lt;= 4'b1111;
+                        end else begin
+                            // Insert idle, increment DIC
+                            dic &lt;= dic + 1'd1;
+                            lane &lt;= lane + 1'd1;
+                            xgmii_txd &lt;= {4{IDLE}};
+                            xgmii_txc &lt;= 4'b1111;
+                        end
+                    end else begin
+                        xgmii_txd &lt;= {4{IDLE}};
+                        xgmii_txc &lt;= 4'b1111;
+                    end
+                end
+                ST_DATA: begin
+                    if (!mac_tx_valid) begin
+                        // Frame ended: need Terminate
+                        xgmii_txd &lt;= {IDLE, IDLE, IDLE, TERM};
+                        xgmii_txc &lt;= 4'b1111;
+                        lane &lt;= 2'd0; // Terminate consumes lane, next is 0
+                        state &lt;= ST_IDLE;
+                    end else begin
+                        xgmii_txd &lt;= mac_tx_data;
+                        xgmii_txc &lt;= mac_tx_ctrl;
+                        lane &lt;= 2'd0; // XGMII always 4-lane aligned in data
+                    end
+                end
+                default: state &lt;= ST_IDLE;
+            endcase
+        end
+    end
+endmodule
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h3>6.14 Electrical Comparison Summary</h3>
+
+<table>
+<tr><th>Parameter</th><th>MII</th><th>GMII</th><th>XGMII</th><th>XAUI</th></tr>
+<tr><td>Signal type</td><td>Single-ended TTL</td><td>Single-ended CMOS</td><td>Single-ended HSTL</td><td>Differential CML/AC-coupled</td></tr>
+<tr><td>Voh (min)</td><td>2.40 V @ –4 mA</td><td>2.10 V @ –1 mA</td><td>—</td><td>—</td></tr>
+<tr><td>Vol (max)</td><td>0.40 V @ 4 mA</td><td>0.50 V @ 1 mA</td><td>—</td><td>—</td></tr>
+<tr><td>Vih (min)</td><td>2.00 V</td><td>1.70 V</td><td>1.90 V (ac)</td><td>—</td></tr>
+<tr><td>Vil (max)</td><td>0.80 V</td><td>0.90 V</td><td>0.70 V (ac)</td><td>—</td></tr>
+<tr><td>Supply</td><td>5.0 V or 3.3 V</td><td>2.5 V or 1.8 V</td><td>1.5 V (VDDQ)</td><td>—</td></tr>
+<tr><td>Max diff amplitude</td><td>N/A</td><td>N/A</td><td>N/A</td><td>1600 mVp-p</td></tr>
+<tr><td>Abs output voltage</td><td>—</td><td>—</td><td>—</td><td>–0.4 to +2.3 V</td></tr>
+<tr><td>Termination</td><td>Unterminated (short traces)</td><td>Point-to-point, vendor term</td><td>Unterminated (HSTL Class I)</td><td>AC-coupled, 100 Ω diff</td></tr>
+<tr><td>Max trace length</td><td>~50 cm (cable)</td><td>~25 cm (PCB)</td><td>~7 cm (PCB)</td><td>~50 cm (PCB)</td></tr>
+<tr><td>Connector</td><td>40-pin IDC (IEC 61076-3-101)</td><td>None (chip-to-chip)</td><td>None (chip-to-chip)</td><td>None (chip-to-chip)</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h3>6.15 Frame Format Recap Across Interfaces</h3>
+
+<h4>6.15.1 MII Frame Format</h4>
+<pre>
+Inter-frame  Preamble (7 bytes)  SFD    DA (6B)  SA (6B)  Length/Type  Data  FCS (4B)  EFD
+     ↓            ↓               ↓       ↓        ↓         ↓         ↓      ↓       ↓
+  TX_EN=0     TX_EN=1          TX_EN=1  TX_EN=1  TX_EN=1   TX_EN=1   TX_EN=1 TX_EN=1 TX_EN=0
+  TXD=X       TXD=0x5,0x5...   TXD=0x5,0xD  nibbles...                    nibbles   TXD=X
+
+Note: Each byte = 2 nibbles on TXD[3:0], low nibble first.
+</pre>
+
+<h4>6.15.2 GMII Frame Format</h4>
+<pre>
+Inter-frame  Preamble (7 bytes)  SFD    DA (6B)  SA (6B)  Length/Type  Data  FCS (4B)  EFD
+     ↓            ↓               ↓       ↓        ↓         ↓         ↓      ↓       ↓
+  TX_EN=0     TX_EN=1          TX_EN=1  TX_EN=1  TX_EN=1   TX_EN=1   TX_EN=1 TX_EN=1 TX_EN=0
+  TXD=X       TXD=0x55...      TXD=0xD5  bytes...                      bytes   TXD=X
+
+Note: Each byte on TXD[7:0], bit 0 = LSB.
+</pre>
+
+<h4>6.15.3 XGMII Frame Format</h4>
+<pre>
+Column N-1        Column N (Start)     Column N+1 ...    Column M (Term)   Column M+1
+Lane 0:  Idle     Start (0xFB)         DA[0]             Data              Idle
+Lane 1:  Idle     Preamble (0x55)      DA[1]             Data              Idle
+Lane 2:  Idle     Preamble (0x55)      DA[2]             Data              Idle
+Lane 3:  Idle     Preamble (0x55)      DA[3]             Term (0xFD)       Idle
+TXC:     1111     1000                 0000              0001              1111
+
+Note: First preamble byte replaced by Start control character in lane 0.
+      Terminate can appear in any lane; subsequent lanes in column are Idle.
+</pre>
+
+<h4>6.15.4 XAUI Ordered Set Format</h4>
+<pre>
+Lane 0:  /K28.5/ /D16.2/  /K28.5/ /D16.2/  /K27.7/  data...  /K29.7/  /K28.5/ /D5.6/
+Lane 1:  /K28.5/ /D16.2/  /K28.5/ /D16.2/  data     data...  data     /K28.5/ /D5.6/
+Lane 2:  /K28.5/ /D16.2/  /K28.5/ /D16.2/  data     data...  data     /K28.5/ /D5.6/
+Lane 3:  /K28.5/ /D16.2/  /K28.5/ /D16.2/  data     data...  data     /K28.5/ /D5.6/
+         &lt;-- /I/ Idle --&gt;  &lt;-- /I/ Idle --&gt;  &lt;-S-&gt;   &lt;--- data ---&gt;  &lt;-T-&gt;  &lt;-- /I/ Idle --&gt;
+</pre>
+
+<div class="note">
+<strong>Key Takeaway:</strong> The progression from MII → GMII → XGMII → XAUI shows a consistent theme: wider parallel buses at lower clock rates, then serialization with embedded clocking. The fundamental data (Ethernet frame) remains identical; only the physical encoding and width change.
+</div>
+
+</body>
+</html>

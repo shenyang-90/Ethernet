@@ -1,0 +1,1850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IEEE 802.3-2022 RTL Design Reference: MDIO, Auto-Negotiation &amp; EEE</title>
+<style>
+:root {
+  --bg: #0d1117; --fg: #c9d1d9; --accent: #58a6ff;
+  --code-bg: #161b22; --border: #30363d;
+  --warn: #d29922; --crit: #f85149; --ok: #3fb950;
+  --note-bg: #1c2128;
+}
+body { font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; background: var(--bg); color: var(--fg); line-height: 1.6; max-width: 1200px; margin: 0 auto; padding: 24px; }
+h1 { color: var(--accent); border-bottom: 2px solid var(--border); padding-bottom: 8px; }
+h2 { color: var(--accent); border-bottom: 1px solid var(--border); margin-top: 32px; }
+h3 { color: #79c0ff; margin-top: 24px; }
+h4 { color: #a5d6ff; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.92em; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+th { background: var(--code-bg); color: var(--accent); }
+tr:nth-child(even) { background: #11161d; }
+code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 14px; border-radius: 6px; overflow-x: auto; border: 1px solid var(--border); }
+.note { background: var(--note-bg); border-left: 4px solid var(--accent); padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+.warn { background: #1c1917; border-left: 4px solid var(--warn); padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+.crit { background: #1c1210; border-left: 4px solid var(--crit); padding: 10px 14px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+.ok { color: var(--ok); font-weight: bold; }
+.toc { background: var(--code-bg); padding: 16px 20px; border-radius: 6px; border: 1px solid var(--border); }
+.toc ul { margin: 6px 0; padding-left: 20px; }
+.toc a { color: var(--accent); text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+.rtl-box { background: #0f151d; border: 1px solid #1f6feb; padding: 14px; border-radius: 6px; margin: 14px 0; }
+.rtl-box h4 { margin-top: 0; color: #58a6ff; }
+.bitfield { font-family: monospace; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+
+<h1>IEEE 802.3-2022 RTL Design Reference</h1>
+<h2 style="border:none;margin-top:0;color:#8b949e;font-weight:normal;">MDIO (Clauses 22 &amp; 45) · Auto-Negotiation (Clauses 28, 37, 98) · Energy-Efficient Ethernet (Clause 78)</h2>
+
+<div class="toc">
+<strong>Table of Contents</strong>
+<ul>
+<li><a href="#c22">1. Clause 22 — MII MDIO Management Interface</a></li>
+<li><a href="#c45">2. Clause 45 — Enhanced MDIO (MMD Indirect Access)</a></li>
+<li><a href="#c28">3. Clause 28 — Auto-Negotiation for Twisted Pair</a></li>
+<li><a href="#c37">4. Clause 37 — Auto-Negotiation for 1000BASE-X</a></li>
+<li><a href="#c98">5. Clause 98 — Auto-Negotiation for Single-Pair Media</a></li>
+<li><a href="#c78">6. Clause 78 — Energy-Efficient Ethernet (EEE)</a></li>
+<li><a href="#rtl">7. RTL Design Checklist &amp; Implementation Notes</a></li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="c22">1. Clause 22 — MII MDIO Management Interface</h2>
+
+<h3>1.1 Frame Format (22.2.4.5)</h3>
+<p>Each management frame is <strong>64 MDC clocks</strong> minimum (32 preamble + 2 ST + 2 OP + 5 PHYAD + 5 REGAD + 2 TA + 16 DATA). The MDIO bus is idle-high (pulled up by PHY).</p>
+<table>
+<tr><th>Field</th><th>Bits</th><th>Value</th><th>Description</th></tr>
+<tr><td>PRE</td><td>32</td><td>1…1</td><td>Preamble; STA may suppress if all PHYs accept frame without preamble</td></tr>
+<tr><td>ST</td><td>2</td><td>01</td><td>Start of frame (Clause 22)</td></tr>
+<tr><td>OP</td><td>2</td><td>10=Read, 01=Write</td><td>Operation code</td></tr>
+<tr><td>PHYAD</td><td>5</td><td>AAAAA</td><td>PHY address (MSB first); PHY on mechanical interface responds to 00000</td></tr>
+<tr><td>REGAD</td><td>5</td><td>RRRRR</td><td>Register address (MSB first); 0=Control, 1=Status</td></tr>
+<tr><td>TA</td><td>2</td><td>Read: Z0, Write: 10</td><td>Turnaround; first bit Z on both sides, PHY drives 0 on second bit for read</td></tr>
+<tr><td>DATA</td><td>16</td><td>DDDDDDDDDDDDDDDD</td><td>Data (bit 15 first)</td></tr>
+<tr><td>IDLE</td><td>1+</td><td>Z</td><td>High-impedance between frames</td></tr>
+</table>
+
+<h3>1.2 Key Management Registers</h3>
+<h4>Register 0 — Control (22.2.4.1)</h4>
+<table>
+<tr><th>Bit</th><th>Name</th><th>Description</th></tr>
+<tr><td>0.15</td><td>Reset</td><td>1 = PHY reset; self-clearing</td></tr>
+<tr><td>0.14</td><td>Loopback</td><td>1 = Loopback mode</td></tr>
+<tr><td>0.13</td><td>Speed Selection (LSB)</td><td>0.13:0.6 = 10=1000Mb/s, 01=100Mb/s, 00=10Mb/s</td></tr>
+<tr><td>0.12</td><td>Auto-Negotiation Enable</td><td>1 = Enable Auto-Negotiation</td></tr>
+<tr><td>0.11</td><td>Power Down</td><td>1 = Power down</td></tr>
+<tr><td>0.10</td><td>Isolate</td><td>1 = Isolate PHY from MII (electrical isolation)</td></tr>
+<tr><td>0.9</td><td>Restart Auto-Negotiation</td><td>1 = Restart AN; self-clearing</td></tr>
+<tr><td>0.8</td><td>Duplex Mode</td><td>1 = Full duplex, 0 = Half duplex</td></tr>
+<tr><td>0.7</td><td>Collision Test</td><td>1 = Enable COL test</td></tr>
+<tr><td>0.6</td><td>Speed Selection (MSB)</td><td>See 0.13</td></tr>
+</table>
+
+<h4>Register 1 — Status (22.2.4.2)</h4>
+<table>
+<tr><th>Bit</th><th>Name</th><th>Description</th></tr>
+<tr><td>1.15</td><td>100BASE-T4</td><td>1 = T4 ability</td></tr>
+<tr><td>1.14</td><td>100BASE-X Full Duplex</td><td>1 = 100BASE-X FD ability</td></tr>
+<tr><td>1.13</td><td>100BASE-X Half Duplex</td><td>1 = 100BASE-X HD ability</td></tr>
+<tr><td>1.12</td><td>10 Mb/s Full Duplex</td><td>1 = 10Mb/s FD ability</td></tr>
+<tr><td>1.11</td><td>10 Mb/s Half Duplex</td><td>1 = 10Mb/s HD ability</td></tr>
+<tr><td>1.10</td><td>100BASE-T2 Full Duplex</td><td>1 = 100BASE-T2 FD ability</td></tr>
+<tr><td>1.9</td><td>100BASE-T2 Half Duplex</td><td>1 = 100BASE-T2 HD ability</td></tr>
+<tr><td>1.8</td><td>Extended Status</td><td>1 = Extended status in Register 15</td></tr>
+<tr><td>1.7</td><td>Reserved</td><td>—</td></tr>
+<tr><td>1.6</td><td>MF Preamble Suppression</td><td>1 = PHY accepts suppressed preamble</td></tr>
+<tr><td>1.5</td><td>Auto-Negotiation Complete</td><td>1 = AN complete</td></tr>
+<tr><td>1.4</td><td>Remote Fault</td><td>1 = Remote fault detected (LH)</td></tr>
+<tr><td>1.3</td><td>Auto-Negotiation Ability</td><td>1 = PHY able to perform AN</td></tr>
+<tr><td>1.2</td><td>Link Status</td><td>1 = Link up, 0 = Link down (LL)</td></tr>
+<tr><td>1.1</td><td>Jabber Detect</td><td>1 = Jabber condition detected (LH)</td></tr>
+<tr><td>1.0</td><td>Extended Capability</td><td>1 = Extended register capabilities</td></tr>
+</table>
+
+<h4>Registers 4/5/6 — AN Advertise / LP Ability / Expansion (22.2.4.1)</h4>
+<table>
+<tr><th>Reg</th><th>Bit(s)</th><th>Field</th><th>Description</th></tr>
+<tr><td>4</td><td>4.15</td><td>Next Page</td><td>1 = Next Page ability</td></tr>
+<tr><td>4</td><td>4.14</td><td>Reserved</td><td>Write 0</td></tr>
+<tr><td>4</td><td>4.13:12</td><td>Remote Fault</td><td>Encoding of remote fault</td></tr>
+<tr><td>4</td><td>4.11:5</td><td>Technology Ability</td><td>A[6:0] = {10BASE-T HD, 10BASE-T FD, 100BASE-TX HD, 100BASE-TX FD, 100BASE-T4, 100BASE-T2 HD, 100BASE-T2 FD}</td></tr>
+<tr><td>4</td><td>4.4:0</td><td>Selector Field</td><td>S[4:0] = 00001 for IEEE 802.3</td></tr>
+<tr><td>5</td><td>5.15:0</td><td>LP Ability</td><td>Mirror of Register 4 from link partner (RO)</td></tr>
+<tr><td>6</td><td>6.5</td><td>Parallel Detection Fault</td><td>1 = PD fault (LH)</td></tr>
+<tr><td>6</td><td>6.4</td><td>LP Next Page Able</td><td>1 = LP supports Next Page</td></tr>
+<tr><td>6</td><td>6.3</td><td>Local Next Page Able</td><td>1 = Local supports Next Page</td></tr>
+<tr><td>6</td><td>6.2</td><td>New Page Received</td><td>1 = New page received (LH)</td></tr>
+<tr><td>6</td><td>6.1</td><td>LP Auto-Negotiation Able</td><td>1 = LP is AN able</td></tr>
+<tr><td>6</td><td>6.0</td><td>LP 10BASE-T Ability</td><td>1 = LP has 10BASE-T ability</td></tr>
+</table>
+
+<h3>1.3 MDIO Timing (22.3.4, 22.4)</h3>
+<table>
+<tr><th>Parameter</th><th>Min</th><th>Max</th><th>Unit</th><th>Notes</th></tr>
+<tr><td>MDC period</td><td>400</td><td>—</td><td>ns</td><td>Max 2.5 MHz</td></tr>
+<tr><td>MDC high/low</td><td>160</td><td>—</td><td>ns</td><td>40% duty cycle min</td></tr>
+<tr><td>MDIO setup (STA→PHY)</td><td>10</td><td>—</td><td>ns</td><td>Before MDC rising</td></tr>
+<tr><td>MDIO hold (STA→PHY)</td><td>10</td><td>—</td><td>ns</td><td>After MDC rising</td></tr>
+<tr><td>MDIO output delay (PHY→STA)</td><td>0</td><td>300</td><td>ns</td><td>After MDC rising</td></tr>
+<tr><td>Vih(min)</td><td>2.00</td><td>—</td><td>V</td><td>TTL levels (5V/3.3V)</td></tr>
+<tr><td>Vil(max)</td><td>—</td><td>0.80</td><td>V</td><td>—</td></tr>
+<tr><td>MDIO input capacitance</td><td>—</td><td>10</td><td>pF</td><td>—</td></tr>
+</table>
+
+<div class="note">
+<strong>RTL Note:</strong> Clause 22 MDIO uses TTL levels (2.4V Voh, 0.4V Vol). PHY must observe <strong>32 contiguous one bits</strong> on MDIO with 32 MDC cycles before responding. The STA may suppress preamble if all connected PHYs support it (advertised via bit 1.6).
+</div>
+
+<h3>1.4 SGMII Registers (Clause 22 Extension)</h3>
+<p>Serial GMII (SGMII) typically maps to Clause 22 registers with extensions in Registers 17/18 (or vendor-specific). The exact SGMII register mapping is implementation-specific; common practice uses Register 17 for SGMII status and Register 18 for SGMII control. Always consult the specific PHY datasheet for SGMII register map.</p>
+
+<!-- ============================================================ -->
+<h2 id="c45">2. Clause 45 — Enhanced MDIO (MMD Indirect Access)</h2>
+
+<h3>2.1 Frame Format (45.3)</h3>
+<p>Clause 45 extends the MDIO frame to support indirect addressing. The electrical interface is 1.2V (incompatible with Clause 22; voltage translator required for coexistence per Annex 45A). Each MMD implements a 16-bit address register.</p>
+<table>
+<tr><th>Field</th><th>Bits</th><th>Value</th><th>Description</th></tr>
+<tr><td>PRE</td><td>32</td><td>1…1</td><td>Preamble (same as Clause 22)</td></tr>
+<tr><td>ST</td><td>2</td><td>00</td><td>Start of frame (Clause 45 indirect access)</td></tr>
+<tr><td>OP</td><td>2</td><td>00=Addr, 01=Write, 11=Read, 10=Post-Read-Inc</td><td>Operation code</td></tr>
+<tr><td>PRTAD</td><td>5</td><td>PPPPP</td><td>Port address (MSB first)</td></tr>
+<tr><td>DEVAD</td><td>5</td><td>EEEEE</td><td>Device/MMD address (MSB first)</td></tr>
+<tr><td>TA</td><td>2</td><td>Addr/Write: 10, Read/Post-Inc: Z0</td><td>Turnaround</td></tr>
+<tr><td>ADDRESS/DATA</td><td>16</td><td>AAAAAAAAAAAAAAAA</td><td>Address (OP=00) or Data (OP=01/11/10)</td></tr>
+<tr><td>IDLE</td><td>1+</td><td>Z</td><td>High-impedance</td></tr>
+</table>
+
+<h3>2.2 MMD DEVAD Mapping (45.2)</h3>
+<table>
+<tr><th>DEVAD</th><th>MMD Name</th><th>Register Range</th><th>Key Functions</th></tr>
+<tr><td>0</td><td>Reserved</td><td>—</td><td>—</td></tr>
+<tr><td>1</td><td>PMA/PMD</td><td>1.0 – 1.32767</td><td>TX/RX fault, loopback, signal detect</td></tr>
+<tr><td>2</td><td>WIS</td><td>2.0 – 2.32767</td><td>SONET/SDH interface</td></tr>
+<tr><td>3</td><td>PCS</td><td>3.0 – 3.32767</td><td>EEE capability (3.20, 3.21), control</td></tr>
+<tr><td>4</td><td>PHY XS</td><td>4.0 – 4.32767</td><td>PHY Extender Sublayer</td></tr>
+<tr><td>5</td><td>DTE XS</td><td>5.0 – 5.32767</td><td>DTE Extender Sublayer</td></tr>
+<tr><td>6</td><td>TC</td><td>6.0 – 6.32767</td><td>Transmission Convergence (EPON)</td></tr>
+<tr><td>7</td><td>AN</td><td>7.0 – 7.32767</td><td>Auto-Negotiation (Clause 98 BASE-T1 AN)</td></tr>
+<tr><td>29</td><td>Clause 22 ext</td><td>—</td><td>Clause 22 register extension</td></tr>
+<tr><td>30</td><td>Vendor specific 1</td><td>—</td><td>Vendor specific</td></tr>
+<tr><td>31</td><td>Vendor specific 2</td><td>—</td><td>Vendor specific</td></tr>
+</table>
+
+<h3>2.3 Address-Increment Operations</h3>
+<p>The <strong>post-read-increment-address</strong> operation (OP=10) reads the register at the current address register value, then increments the address register by one (unless it contains 65535). This enables burst reads across consecutive registers without separate address frames.</p>
+<div class="rtl-box">
+<h4>Typical Indirect Read Sequence</h4>
+<pre>// Step 1: Write address to MMD's address register
+  ST=00, OP=00 (Address), PRTAD, DEVAD, TA=10, ADDRESS
+
+// Step 2: Read data from that address
+  ST=00, OP=11 (Read), PRTAD, DEVAD, TA=Z0, DATA</pre>
+</div>
+
+<h3>2.4 Clause 22 vs Clause 45 Comparison</h3>
+<table>
+<tr><th>Feature</th><th>Clause 22</th><th>Clause 45</th></tr>
+<tr><td>ST code</td><td>01</td><td>00</td></tr>
+<tr><td>PHYAD/PRTAD</td><td>5 bits (32 PHYs)</td><td>5 bits (32 ports)</td></tr>
+<tr><td>Register space</td><td>5 bits (32 registers)</td><td>16-bit indirect (65536 regs/MMD)</td></tr>
+<tr><td>DEVAD</td><td>N/A</td><td>5 bits (32 MMDs/port)</td></tr>
+<tr><td>OP codes</td><td>01=Write, 10=Read</td><td>00=Addr, 01=Write, 11=Read, 10=Post-Read-Inc</td></tr>
+<tr><td>Voltage</td><td>TTL (5V/3.3V)</td><td>1.2V</td></tr>
+<tr><td>MDIO pull-up</td><td>1.5kΩ ±5% (PHY side)</td><td>Open drain + resistive pull-up</td></tr>
+<tr><td>Max load</td><td>—</td><td>470 pF total capacitive load</td></tr>
+</table>
+
+<h3>2.5 EEE-Related Clause 45 Registers</h3>
+<table>
+<tr><th>Register</th><th>Bit(s)</th><th>Name</th><th>Description</th></tr>
+<tr><td>3.20 (PCS)</td><td>3.20.14</td><td>50GBASE-R EEE fast wake</td><td>1 = fast wake supported</td></tr>
+<tr><td>3.20</td><td>3.20.13</td><td>100GBASE-R EEE deep sleep</td><td>1 = deep sleep supported</td></tr>
+<tr><td>3.20</td><td>3.20.12</td><td>100GBASE-R EEE fast wake</td><td>1 = fast wake supported</td></tr>
+<tr><td>3.20</td><td>3.20.11</td><td>25GBASE-R deep sleep</td><td>1 = deep sleep supported</td></tr>
+<tr><td>3.20</td><td>3.20.10</td><td>25GBASE-R fast wake</td><td>1 = fast wake supported</td></tr>
+<tr><td>3.20</td><td>3.20.9</td><td>40GBASE-R EEE deep sleep</td><td>1 = deep sleep supported</td></tr>
+<tr><td>3.20</td><td>3.20.8</td><td>40GBASE-R EEE fast wake</td><td>1 = fast wake supported</td></tr>
+<tr><td>3.20</td><td>3.20.7</td><td>40GBASE-T EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.20</td><td>3.20.6</td><td>10GBASE-KR EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.20</td><td>3.20.5</td><td>10GBASE-KX4 EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.20</td><td>3.20.4</td><td>1000BASE-KX EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.20</td><td>3.20.3</td><td>10GBASE-T EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.20</td><td>3.20.2</td><td>1000BASE-T EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.20</td><td>3.20.1</td><td>100BASE-TX EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.20</td><td>3.20.0</td><td>LPI_FW</td><td>1=fast wake, 0=deep sleep</td></tr>
+<tr><td>3.21</td><td>3.21.8</td><td>5GBASE-KR EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.21</td><td>3.21.7</td><td>2.5GBASE-KX EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.21</td><td>3.21.5</td><td>400GBASE-R EEE fast wake</td><td>1 = supported</td></tr>
+<tr><td>3.21</td><td>3.21.3</td><td>200GBASE-R EEE fast wake</td><td>1 = supported</td></tr>
+<tr><td>3.21</td><td>3.21.2</td><td>25GBASE-T EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.21</td><td>3.21.1</td><td>5GBASE-T EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.21</td><td>3.21.0</td><td>2.5GBASE-T EEE supported</td><td>1 = supported</td></tr>
+<tr><td>7.60 (AN)</td><td>7.60.15:0</td><td>EEE Advertisement 1</td><td>EEE capability advertisement during AN</td></tr>
+<tr><td>1.16 (PMA/PMD)</td><td>1.16.15:0</td><td>EEE Capability</td><td>PMA/PMD EEE capability bits</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="c28">3. Clause 28 — Auto-Negotiation for Twisted Pair</h2>
+
+<h3>3.1 FLP Burst Format (28.2.1.1)</h3>
+<p>Fast Link Pulse (FLP) bursts consist of <strong>33 pulse positions</strong> (17 clock + 16 data). Odd positions (1,3,5,...) are clock pulses; even positions (2,4,6,...) are data pulses (logic 1 = pulse present, logic 0 = no pulse).</p>
+<table>
+<tr><th>Parameter</th><th>Min</th><th>Typ</th><th>Max</th><th>Unit</th></tr>
+<tr><td>Clock pulse spacing (within burst)</td><td>111</td><td>125</td><td>139</td><td>µs</td></tr>
+<tr><td>Data pulse spacing (logic 1)</td><td>55.5</td><td>62.5</td><td>69.5</td><td>µs</td></tr>
+<tr><td>FLP burst to FLP burst (no ENP)</td><td>16-8=8</td><td>16</td><td>16+8=24</td><td>ms</td></tr>
+<tr><td>FLP burst to FLP burst (ENP, 16-bit)</td><td>5.7</td><td>6.25</td><td>6.8</td><td>ms</td></tr>
+<tr><td>FLP burst to FLP burst (ENP, 48-bit)</td><td>1.3</td><td>2.25</td><td>3.2</td><td>ms</td></tr>
+</table>
+
+<h3>3.2 Base Page Encoding (28.2.1.2)</h3>
+<table>
+<tr><th>Bit(s)</th><th>Field</th><th>Description</th></tr>
+<tr><td>D15</td><td>Next Page (NP)</td><td>1 = Additional Next Pages follow</td></tr>
+<tr><td>D14</td><td>Acknowledge</td><td>1 = Successfully received partner's Base Page</td></tr>
+<tr><td>D13:D12</td><td>Remote Fault (RF)</td><td>00=No fault, 01=Link failure, 10=Offline, 11=Auto-Negotiation error</td></tr>
+<tr><td>D11</td><td>Reserved / Technology</td><td>Technology-specific (e.g., 1000BASE-T uses D11 for Asymmetric Pause)</td></tr>
+<tr><td>D10:D5</td><td>Technology Ability (A[6:0])</td><td>Technology advertisement bits</td></tr>
+<tr><td>D4:D0</td><td>Selector Field (S[4:0])</td><td>00001 = IEEE 802.3</td></tr>
+</table>
+
+<h3>3.3 Next Page Encoding (28.2.3.4)</h3>
+<p>Extended Next Pages (ENP) are 48-bit; standard Next Pages are 16-bit. Next Pages use the same FLP burst timing but with adjusted inter-burst timing.</p>
+<table>
+<tr><th>Bit(s)</th><th>Field</th><th>Description</th></tr>
+<tr><td>D15</td><td>NP</td><td>1 = More pages to follow</td></tr>
+<tr><td>D14</td><td>Ack</td><td>Acknowledge</td></tr>
+<tr><td>D13</td><td>MP</td><td>1 = Message Page, 0 = Unformatted Page</td></tr>
+<tr><td>D12</td><td>Ack2</td><td>1 = Can comply with message</td></tr>
+<tr><td>D11</td><td>Toggle (T)</td><td>Alternates each page for synchronization</td></tr>
+<tr><td>D10:D0</td><td>Message/Unformatted Code</td><td>11-bit message code or unformatted data</td></tr>
+<tr><td>D47:D16</td><td>Unformatted Code (ENP only)</td><td>32-bit unformatted field</td></tr>
+</table>
+
+<h3>3.4 Arbitration State Diagram (28.3.4, Figure 28-18)</h3>
+<p>The state diagram takes precedence over text in case of ambiguity. Key states:</p>
+<pre>
+TRANSMIT_DISABLE → break_link_timer (1200-1500ms)
+  ↓ break_link_timer_done
+AN_ENABLE → mr_autoneg_enable=true
+  ↓ mr_autoneg_enable=true
+ABILITY_DETECT → tx_link_code_word = mr_adv_ability
+  ↓ ability_match=true &amp; rx_link_code_word≠0
+ACKNOWLEDGE_DETECT → transmit_ack=true
+  ↓ acknowledge_match=true &amp; consistency_match=true
+COMPLETE_ACKNOWLEDGE → ack_finished=true
+  ↓ ack_finished=true &amp; (no NP or NP handled)
+LINK_STATUS_CHECK → autoneg_wait_timer (500-1000ms)
+  ↓ single_link_ready=true &amp; autoneg_wait_timer_done
+FLP_LINK_GOOD_CHECK → link_fail_inhibit_timer
+  ↓ link_status[HCD]=OK
+LINK_OK → mr_autoneg_complete=true
+</pre>
+
+<h3>3.5 Timers Summary (28.3.2, Table 28-9)</h3>
+<table>
+<tr><th>Timer</th><th>Min</th><th>Max</th><th>Unit</th><th>Purpose</th></tr>
+<tr><td>autoneg_wait_timer</td><td>500</td><td>1000</td><td>ms</td><td>Wait before evaluating link_status=READY</td></tr>
+<tr><td>break_link_timer</td><td>1200</td><td>1500</td><td>ms</td><td>Ensure partner enters Link Fail</td></tr>
+<tr><td>data_detect_min_timer</td><td>15</td><td>47</td><td>µs</td><td>Min clock→data pulse gap</td></tr>
+<tr><td>data_detect_max_timer</td><td>78</td><td>100</td><td>µs</td><td>Max clock→data pulse gap</td></tr>
+<tr><td>flp_test_min_timer</td><td>5</td><td>25</td><td>µs</td><td>Min inter-pulse within burst</td></tr>
+<tr><td>flp_test_max_timer</td><td>165</td><td>185</td><td>µs</td><td>Max inter-pulse within burst</td></tr>
+<tr><td>interval_timer</td><td>55.5</td><td>69.5</td><td>µs</td><td>Clock pulse to data bit spacing</td></tr>
+<tr><td>link_fail_inhibit_timer (10/100/1000)</td><td>750</td><td>1000</td><td>ms</td><td>Qualify link_status FAIL</td></tr>
+<tr><td>link_fail_inhibit_timer (MultiGBASE-T)</td><td>2000</td><td>2250</td><td>ms</td><td>Qualify link_status FAIL</td></tr>
+<tr><td>nlp_test_max_timer</td><td>50</td><td>150</td><td>ms</td><td>Max no-FLP before IDLE</td></tr>
+<tr><td>nlp_test_min_timer</td><td>5</td><td>7</td><td>ms</td><td>Min between FLP bursts (no ENP)</td></tr>
+</table>
+
+<h3>3.6 Parallel Detection Rules</h3>
+<p>When the local device has Auto-Negotiation disabled or the link partner does not support AN, Parallel Detection allows detection of 10BASE-T (NLP), 100BASE-TX, or 100BASE-T4 via their respective link integrity signals. A Parallel Detection Fault occurs if:</p>
+<ul>
+<li>Zero or more than one technology indicates link_status=READY when autoneg_wait_timer expires, OR</li>
+<li>flp_receive_idle = false at expiration</li>
+</ul>
+<div class="warn">
+<strong>RTL Note:</strong> Parallel Detection is <strong>not</strong> a full AN exchange. The HCD resolution skips the Acknowledge/Complete Acknowledge states. Implementations must gate the link_fail_inhibit_timer properly per Table 28-9.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="c37">4. Clause 37 — Auto-Negotiation for 1000BASE-X</h2>
+
+<h3>4.1 /C/ Ordered Set Transmission (37.2.1)</h3>
+<p>1000BASE-X Auto-Negotiation transmits <strong>/C/ ordered sets</strong> (Configuration ordered sets) containing 16-bit Config_Reg values. The /C/ ordered sets replace idle codes during AN. Each /C/ contains:</p>
+<pre>/C/ = /K28.5/ /D16.2/ /D16.2/ /D16.2/  (first /C/ of a sequence)
+/C/ = /K28.5/ /D31.5/ /D16.2/ /D16.2/  (subsequent /C/ sets)</pre>
+
+<h3>4.2 Config_Reg Base Page Mapping (37.2.1.1)</h3>
+<table>
+<tr><th>Bit</th><th>Name</th><th>Description</th></tr>
+<tr><td>D15</td><td>NP</td><td>Next Page (1 = additional pages)</td></tr>
+<tr><td>D14</td><td>Ack</td><td>Acknowledge</td></tr>
+<tr><td>D13:D12</td><td>RF</td><td>Remote Fault (00=OK, 01=Link failure, 10=Offline, 11=AN error)</td></tr>
+<tr><td>D11</td><td>Reserved</td><td>Reserved for future use</td></tr>
+<tr><td>D10</td><td>PS2 (Asymmetric Pause)</td><td>Pause encoding per 37.2.1.4</td></tr>
+<tr><td>D9</td><td>PS1 (Symmetric Pause)</td><td>Pause encoding per 37.2.1.4</td></tr>
+<tr><td>D8</td><td>Reserved</td><td>Reserved</td></tr>
+<tr><td>D7</td><td>FD</td><td>Full Duplex (1 = capable)</td></tr>
+<tr><td>D6</td><td>HD</td><td>Half Duplex (1 = capable)</td></tr>
+<tr><td>D5:D0</td><td>Reserved</td><td>Reserved</td></tr>
+</table>
+
+<h3>4.3 Pause Capability Resolution (37.2.1.4)</h3>
+<table>
+<tr><th>Local PS2 (D10)</th><th>Local PS1 (D9)</th><th>Remote PS2</th><th>Remote PS1</th><th>Local Resolution</th><th>Remote Resolution</th></tr>
+<tr><td>0</td><td>0</td><td>X</td><td>X</td><td>Disable PAUSE</td><td>Disable PAUSE</td></tr>
+<tr><td>0</td><td>1</td><td>0</td><td>0</td><td>Disable PAUSE</td><td>Disable PAUSE</td></tr>
+<tr><td>0</td><td>1</td><td>0</td><td>1</td><td>Enable PAUSE TX+RX</td><td>Enable PAUSE TX+RX</td></tr>
+<tr><td>0</td><td>1</td><td>1</td><td>0</td><td>Enable PAUSE RX, Disable TX</td><td>Enable PAUSE TX, Disable RX</td></tr>
+<tr><td>0</td><td>1</td><td>1</td><td>1</td><td>Enable PAUSE TX+RX</td><td>Enable PAUSE TX+RX</td></tr>
+<tr><td>1</td><td>0</td><td>0</td><td>0</td><td>Disable PAUSE</td><td>Disable PAUSE</td></tr>
+<tr><td>1</td><td>0</td><td>0</td><td>1</td><td>Enable PAUSE TX, Disable RX</td><td>Enable PAUSE RX, Disable TX</td></tr>
+<tr><td>1</td><td>0</td><td>1</td><td>0</td><td>Disable PAUSE</td><td>Disable PAUSE</td></tr>
+<tr><td>1</td><td>0</td><td>1</td><td>1</td><td>Enable PAUSE TX+RX</td><td>Enable PAUSE TX+RX</td></tr>
+<tr><td>1</td><td>1</td><td>0</td><td>0</td><td>Disable PAUSE</td><td>Disable PAUSE</td></tr>
+<tr><td>1</td><td>1</td><td>0</td><td>1</td><td>Enable PAUSE TX+RX</td><td>Enable PAUSE TX+RX</td></tr>
+<tr><td>1</td><td>1</td><td>1</td><td>0</td><td>Enable PAUSE TX+RX</td><td>Enable PAUSE TX+RX</td></tr>
+<tr><td>1</td><td>1</td><td>1</td><td>1</td><td>Enable PAUSE TX+RX</td><td>Enable PAUSE TX+RX</td></tr>
+</table>
+
+<h3>4.4 ACK Requirement (37.2.1.6)</h3>
+<p>The Acknowledge bit shall be set to <strong>logic one</strong> in the transmitted Config_Reg after the reception of <strong>at least three consecutive and consistent /C/ ordered sets</strong> from the link partner with the Acknowledge bit set. This is detected by the <code>acknowledge_match</code> function, which requires three matching consecutive <code>rx_Config_Reg&lt;D15:D0&gt;</code> values with Ack=1.</p>
+
+<h3>4.5 State Diagram (37.3.1.5, Figure 37-6)</h3>
+<pre>
+AN_ENABLE → mr_an_complete=FALSE, xmit=CONFIGURATION
+  ↓ mr_an_enable=TRUE
+ABILITY_DETECT → tx_Config_Reg = mr_adv_ability
+  ↓ ability_match=TRUE &amp; rx_Config_Reg≠0
+ACKNOWLEDGE_DETECT → tx_Config_Reg&lt;D14&gt; = 1
+  ↓ acknowledge_match=TRUE &amp; consistency_match=TRUE
+COMPLETE_ACKNOWLEDGE → toggle_tx = !toggle_tx
+  ↓ (link_timer_done &amp; no NP) or (link_timer_done &amp; NP handled)
+IDLE_DETECT → xmit=DATA
+  ↓ idle_match=TRUE
+LINK_OK → mr_an_complete=TRUE
+</pre>
+
+<h3>4.6 link_timer (37.3.1.4)</h3>
+<div class="note">
+<code>link_timer</code> duration: <strong>10 ms</strong>, tolerance <strong>+10 ms / -0 s</strong>. This timer is critical for AN protocol stability and management register R/W.
+</div>
+
+<h3>4.7 Differences from Clause 28</h3>
+<table>
+<tr><th>Feature</th><th>Clause 28</th><th>Clause 37</th></tr>
+<tr><td>Physical signaling</td><td>FLP bursts (link pulses)</td><td>/C/ ordered sets within 8B/10B stream</td></tr>
+<tr><td>Page size</td><td>16 or 48 bits</td><td>16 bits (Config_Reg)</td></tr>
+<tr><td>ACK requirement</td><td>3 consecutive FLP bursts</td><td>3 consecutive /C/ ordered sets</td></tr>
+<tr><td>link_timer</td><td>10-20 ms</td><td>10 ms (+10/-0 ms)</td></tr>
+<tr><td>Carrier detection</td><td>NLP/FLP detection</td><td>sync_status + /C/ reception</td></tr>
+<tr><td>Speed negotiation</td><td>10/100/1000 Mb/s</td><td>1000 Mb/s only (FD/HD + Pause)</td></tr>
+</table>
+
+
+<!-- ============================================================ -->
+<h2 id="c98">5. Clause 98 — Auto-Negotiation for Single-Pair Media</h2>
+
+<h3>5.1 DME Page Encoding (98.2.1.1.1)</h3>
+<p>Single-pair Auto-Negotiation uses <strong>Differential Manchester Encoding (DME)</strong> pages. Each page has <strong>157 transition positions</strong> carrying a 48-bit page + 16-bit CRC. Odd positions = clock transitions; even positions = data transitions.</p>
+
+<h4>Page Structure</h4>
+<table>
+<tr><th>Section</th><th>Transition Positions</th><th>Content</th></tr>
+<tr><td>Start Delimiter</td><td>1 – 26</td><td>Unique 26-T1 pattern with DME violations</td></tr>
+<tr><td>Data payload</td><td>27 – 154</td><td>48-bit page + 16-bit CRC16</td></tr>
+<tr><td>End Delimiter</td><td>155 – 157</td><td>Transition at 155, quiet at 157</td></tr>
+</table>
+
+<h4>Start Delimiter Bit Sequences</h4>
+<p>For a delimiter starting with 0→+1 transition:</p>
+<ul>
+<li><strong>HSM:</strong> +1 –1 +1 +1 –1 –1 +1 –1 –1 –1 –1 +1 –1 +1 –1 –1 –1 –1 +1 +1 –1 –1 –1 +1 –1 +1</li>
+<li><strong>LSM:</strong> +1 –1 +1 –1 +1 –1 +1 –1 +1 +1 –1 –1 +1 +1 –1 +1 +1 –1 +1 –1 –1 +1 –1 +1 +1 –1</li>
+</ul>
+
+<h3>5.2 DME Timing (98.2.1.1.2, Table 98-1)</h3>
+<table>
+<tr><th>Param</th><th>Mode</th><th>Min</th><th>Typ</th><th>Max</th><th>Unit</th></tr>
+<tr><td>T1</td><td>HSM</td><td>—</td><td>30</td><td>—</td><td>ns</td></tr>
+<tr><td>T1</td><td>LSM</td><td>799.96</td><td>800</td><td>800.04</td><td>ns</td></tr>
+<tr><td>T2 (clock→clock)</td><td>HSM</td><td>59.8</td><td>60</td><td>60.2</td><td>ns</td></tr>
+<tr><td>T3 (clock→data=1)</td><td>HSM</td><td>29.9</td><td>30</td><td>30.1</td><td>ns</td></tr>
+<tr><td>T5 (page width)</td><td>HSM</td><td>—</td><td>—</td><td>—</td><td>ns (157×T1)</td></tr>
+<tr><td>T5</td><td>LSM</td><td>124793</td><td>124800</td><td>124807</td><td>ns</td></tr>
+<tr><td>Transition tolerance</td><td>HSM</td><td colspan="3">±0.8 ns</td><td>ns</td></tr>
+<tr><td>Transition tolerance</td><td>LSM</td><td colspan="3">±10 ns</td><td>ns</td></tr>
+</table>
+<div class="note">
+<strong>RTL Note:</strong> HSM nominal rate = 16.667 Mb/s; LSM nominal rate = 625 kb/s. T1 HSM period is ~30 ns (±0.8 ns). A 1.2V open-drain MDIO interface is used.
+</div>
+
+<h3>5.3 Link Codeword Base Page (98.2.1.2, Table 98-2)</h3>
+<table>
+<tr><th>Bit(s)</th><th>Field</th><th>Width</th><th>Description</th></tr>
+<tr><td>D4:D0</td><td>Selector Field (S[4:0])</td><td>5</td><td>00001 = IEEE 802.3</td></tr>
+<tr><td>D9:D5</td><td>Echoed Nonce (E[4:0])</td><td>5</td><td>Echo of partner's transmitted nonce</td></tr>
+<tr><td>D11:D10</td><td>Pause (C[1:0])</td><td>2</td><td>Same encoding as Clause 28B</td></tr>
+<tr><td>D12</td><td>Force M/S</td><td>1</td><td>1=forced mode, 0=preferred mode</td></tr>
+<tr><td>D13</td><td>Remote Fault (RF)</td><td>1</td><td>1=Remote fault</td></tr>
+<tr><td>D14</td><td>Acknowledge</td><td>1</td><td>1=Received partner's page with good CRC</td></tr>
+<tr><td>D15</td><td>Next Page (NP)</td><td>1</td><td>1=Additional Next Pages</td></tr>
+<tr><td>D20:D16</td><td>Transmitted Nonce (T[4:0])</td><td>5</td><td>Random/pseudo-random nonce; T[4]=M/S preference</td></tr>
+<tr><td>D47:D21</td><td>Technology Ability (A[26:0])</td><td>27</td><td>Supported technologies (parallel advertisement)</td></tr>
+</table>
+
+<h3>5.4 Master/Slave Resolution (98.2.1.2.5, Table 98-4)</h3>
+<table>
+<tr><th>Local M/S</th><th>Local T[4]</th><th>Remote M/S</th><th>Remote T[4]</th><th>Local Resolution</th><th>Remote Resolution</th></tr>
+<tr><td>Preferred</td><td>X</td><td>Preferred</td><td>X</td><td>Higher T[4:0] = MASTER</td><td>Higher T[4:0] = MASTER</td></tr>
+<tr><td>Preferred</td><td>MASTER</td><td>Forced SLAVE</td><td>X</td><td>SLAVE</td><td>MASTER</td></tr>
+<tr><td>Preferred</td><td>SLAVE</td><td>Forced MASTER</td><td>X</td><td>MASTER</td><td>SLAVE</td></tr>
+<tr><td>Forced SLAVE</td><td>X</td><td>Preferred</td><td>MASTER</td><td>SLAVE</td><td>MASTER</td></tr>
+<tr><td>Forced SLAVE</td><td>X</td><td>Preferred</td><td>SLAVE</td><td>MASTER</td><td>SLAVE</td></tr>
+<tr><td>Forced MASTER</td><td>X</td><td>Forced MASTER</td><td>X</td><td colspan="2">Configuration Fault</td></tr>
+<tr><td>Forced SLAVE</td><td>X</td><td>Forced SLAVE</td><td>X</td><td colspan="2">Configuration Fault</td></tr>
+</table>
+
+<h3>5.5 CRC16 Polynomial (98.2.1.1.1)</h3>
+<div class="rtl-box">
+<h4>CRC16 Implementation</h4>
+<pre>Polynomial: x^16 + x^15 + x^2 + 1
+Initial value: S[15:0] = 0
+After 48 data bits: switch to CRCout
+Transmit order: S15, S14, ..., S0</pre>
+</div>
+
+<h3>5.6 Next Page Encoding (98.2.4.3)</h3>
+<table>
+<tr><th>Type</th><th>MP</th><th>D10:D0</th><th>D47:D16</th></tr>
+<tr><td>Message Page</td><td>1</td><td>Message Code Field (11 bits)</td><td>Unformatted Code Field (32 bits)</td></tr>
+<tr><td>Unformatted Page</td><td>0</td><td colspan="2">Unformatted Code Field (43 bits, D10:D0 + D47:D16)</td></tr>
+</table>
+
+<h3>5.7 State Diagram Variable to MDIO Register Mapping (Table 98-7)</h3>
+<table>
+<tr><th>Variable</th><th>MDIO Register(s)</th></tr>
+<tr><td>mr_adv_ability[48:1]</td><td>{7.516.15:0, 7.515.15:0, 7.514.15:0} BASE-T1 AN advertisement</td></tr>
+<tr><td>mr_autoneg_complete</td><td>7.513.5 Auto-Negotiation complete</td></tr>
+<tr><td>mr_autoneg_enable</td><td>7.512.12 Auto-Negotiation enable</td></tr>
+<tr><td>mr_lp_adv_ability[48:1] (Base)</td><td>{7.519.15:0, 7.518.15:0, 7.517.15:0} LP Base Page</td></tr>
+<tr><td>mr_lp_adv_ability[48:1] (Next)</td><td>{7.525.15:0, 7.524.15:0, 7.523.15:0} LP Next Page</td></tr>
+<tr><td>mr_main_reset</td><td>7.512.15 AN reset</td></tr>
+<tr><td>mr_np_tx[48:1]</td><td>{7.522.15:0, 7.521.15:0, 7.520.15:0} Next Page transmit</td></tr>
+<tr><td>mr_page_rx</td><td>7.513.6 Page received</td></tr>
+<tr><td>mr_restart_negotiation</td><td>7.512.9 Restart Auto-Negotiation</td></tr>
+</table>
+
+<h3>5.8 Half-Duplex Backoff &amp; Arbitration</h3>
+<p>The AN half-duplex function (Figure 98-10) ensures only one device transmits a DME page at a time. It uses:</p>
+<ul>
+<li><strong>blind_timer</strong>: Ignores reflected signals after local transmission ends</li>
+<li><strong>silent_timer</strong>: Ensures partner has exited blind state before local TX</li>
+<li><strong>backoff_timer</strong>: Random wait to resolve concurrent transmissions</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="c78">6. Clause 78 — Energy-Efficient Ethernet (EEE)</h2>
+
+<h3>6.1 LPI Signaling Overview</h3>
+<p>LPI (Low Power Idle) allows PHYs to enter power-saving states during idle periods without dropping link status. The LPI Client communicates with the PHY via the RS service interface using <code>LP_IDLE.request</code> and <code>LP_IDLE.indication</code>.</p>
+
+<h3>6.2 LPI Assertion on xMII (22.7)</h3>
+<table>
+<tr><th>Signal</th><th>LPI Asserted Value</th><th>Notes</th></tr>
+<tr><td>TX_EN</td><td>0</td><td>Normal interframe = TX_EN=0</td></tr>
+<tr><td>TX_ER</td><td>1</td><td>Differentiates LPI from normal idle</td></tr>
+<tr><td>TXD[3:0]</td><td>0001</td><td>LPI encoding on MII</td></tr>
+<tr><td>RX_ER</td><td>1</td><td>When LP_IDLE detected</td></tr>
+<tr><td>RXD[3:0]</td><td>0001</td><td>LPI indication on MII</td></tr>
+</table>
+<div class="note">
+<strong>Note:</strong> LPI signaling on MII is specified only for 100 Mb/s operation per Clause 22.7. For GMII/RGMII/XGMII and higher, the encoding is defined in respective PCS clauses.
+</div>
+
+<h3>6.3 EEE Timing Parameters (78.2, Table 78-2)</h3>
+<table>
+<tr><th>PHY/Interface</th><th>Ts Min</th><th>Ts Max</th><th>Tq Min</th><th>Tq Max</th><th>Tr Min</th><th>Tr Max</th><th>Unit</th></tr>
+<tr><td>100BASE-TX</td><td>—</td><td>—</td><td>20,000</td><td>22,000</td><td>—</td><td>—</td><td>µs</td></tr>
+<tr><td>1000BASE-KX</td><td>19.9</td><td>20.1</td><td>2,500</td><td>2,600</td><td>19.9</td><td>20.1</td><td>µs</td></tr>
+<tr><td>1000BASE-T1</td><td>3.6</td><td>3.6</td><td>84.95</td><td>84.97</td><td>1.44</td><td>1.44</td><td>µs</td></tr>
+<tr><td>1000BASE-T</td><td>—</td><td>—</td><td>20,000</td><td>24,000</td><td>—</td><td>—</td><td>µs</td></tr>
+<tr><td>2.5GBASE-KX</td><td>19.9</td><td>20.1</td><td>2,500</td><td>2,600</td><td>19.9</td><td>20.1</td><td>µs</td></tr>
+<tr><td>2.5GBASE-T</td><td>11.52</td><td>12.8</td><td>76.8</td><td>76.8</td><td>5.12</td><td>5.12</td><td>µs</td></tr>
+<tr><td>5GBASE-KR</td><td>4.9</td><td>5.1</td><td>1,700</td><td>1,800</td><td>16.9</td><td>17.5</td><td>µs</td></tr>
+<tr><td>5GBASE-T</td><td>5.76</td><td>6.4</td><td>38.4</td><td>38.4</td><td>2.56</td><td>2.56</td><td>µs</td></tr>
+<tr><td>10GBASE-KX4</td><td>19.9</td><td>20.1</td><td>2,500</td><td>2,600</td><td>19.9</td><td>20.1</td><td>µs</td></tr>
+<tr><td>10GBASE-KR</td><td>4.9</td><td>5.1</td><td>1,700</td><td>1,800</td><td>16.9</td><td>17.5</td><td>µs</td></tr>
+<tr><td>10GBASE-T</td><td>2.88</td><td>3.2</td><td>39.68</td><td>39.68</td><td>1.28</td><td>1.28</td><td>µs</td></tr>
+<tr><td>25GBASE-KR/CR</td><td>4.9</td><td>5.1</td><td>1,700</td><td>1,800</td><td>16.9</td><td>17.5</td><td>µs</td></tr>
+<tr><td>25GBASE-T</td><td>0.768</td><td>0.896</td><td>15.616</td><td>15.616</td><td>0.768</td><td>0.768</td><td>µs</td></tr>
+<tr><td>40GBASE-KR4/CR4</td><td>0.9</td><td>1.1</td><td>1,700</td><td>1,800</td><td>5.9</td><td>6.5</td><td>µs</td></tr>
+<tr><td>40GBASE-T</td><td>0.48</td><td>0.56</td><td>9.76</td><td>9.76</td><td>0.48</td><td>0.48</td><td>µs</td></tr>
+<tr><td>100GBASE-KR4/CR4/CR10/KP4</td><td>0.9</td><td>1.1</td><td>1,700</td><td>1,800</td><td>5.9</td><td>6.5</td><td>µs</td></tr>
+</table>
+
+<h3>6.4 LPI Timing Definitions</h3>
+<table>
+<tr><th>Parameter</th><th>Definition</th></tr>
+<tr><td>Ts</td><td>Time PHY transmits sleep signal before turning transmitters off</td></tr>
+<tr><td>Tq</td><td>Time PHY remains quiet before sending refresh signal</td></tr>
+<tr><td>Tr</td><td>Duration of refresh signal</td></tr>
+<tr><td>Tphy_prop_tx</td><td>Propagation delay from xMII to MDI</td></tr>
+<tr><td>Tphy_prop_rx</td><td>Propagation delay from MDI to xMII</td></tr>
+<tr><td>Tphy_shrink_tx</td><td>|(xMII LPI→Normal to MDI wake start) - Tphy_prop_tx|</td></tr>
+<tr><td>Tphy_shrink_rx</td><td>|(MDI wake start to xMII LPI→Normal) - Tphy_prop_rx|</td></tr>
+<tr><td>Tw_phy</td><td>Max time from IDLE on xMII to first data codewords permitted</td></tr>
+<tr><td>Tw_sys_tx</td><td>Max time system waits between deasserting LPI and sending data</td></tr>
+<tr><td>Tw_sys_rx</td><td>Min time system needs between wake request and readiness to receive</td></tr>
+</table>
+
+<h3>6.5 Deep Sleep vs Fast Wake (78.1.3.3)</h3>
+<table>
+<tr><th>Mode</th><th>Tx Behavior During LPI</th><th>Wake Time</th><th>PHY Speed</th></tr>
+<tr><td>Deep Sleep</td><td>Transmitters OFF; periodic refresh</td><td>Longer</td><td>≤10 Gb/s (mandatory if EEE), ≥25 Gb/s (optional)</td></tr>
+<tr><td>Fast Wake</td><td>Continues transmitting signals</td><td>Shorter</td><td>≥25 Gb/s (mandatory if EEE); not for BASE-T</td></tr>
+</table>
+<div class="warn">
+<strong>Warning:</strong> Deep sleep precludes transparent mapping over OTN (Optical Transport Networks). Only fast wake should be enabled for links intended for transparent OTN mapping.
+</div>
+
+<h3>6.6 EEE DLL State Diagrams (78.4.2)</h3>
+<p>For ≥10 Gb/s PHYs, Data Link Layer (DLL) capabilities negotiate <code>Tw_sys_tx</code> via LLDP TLVs. Four state diagrams govern this:</p>
+<ul>
+<li><strong>Figure 78-6</strong>: EEE DLL Transmitter — computes NEW_TX_VALUE from PHY WAKE VALUE and remote requests</li>
+<li><strong>Figure 78-7</strong>: EEE DLL Receiver — computes NEW_RX_VALUE requested from remote transmitter</li>
+<li><strong>Figure 78-8</strong>: EEE DLL Transmitter Fast Wake — negotiates LPI_FW (fast wake enable)</li>
+<li><strong>Figure 78-9</strong>: EEE DLL Receiver Fast Wake — echoes and resolves fast wake requests</li>
+</ul>
+
+<h4>Key DLL Variables</h4>
+<table>
+<tr><th>Variable</th><th>Description</th></tr>
+<tr><td>LocTxSystemValue</td><td>Tw_sys_tx the local system can support</td></tr>
+<tr><td>LocRxSystemValue</td><td>Tw_sys_tx the local system requests from remote</td></tr>
+<tr><td>LocResolvedTxSystemValue</td><td>Currently resolved Tw_sys_tx for local TX</td></tr>
+<tr><td>LocResolvedRxSystemValue</td><td>Currently resolved Tw_sys_tx for local RX</td></tr>
+<tr><td>RemTxSystemValue</td><td>Tw_sys_tx remote can support</td></tr>
+<tr><td>RemRxSystemValue</td><td>Tw_sys_tx remote requests from local</td></tr>
+<tr><td>LocTxSystemFW / LocRxSystemFW</td><td>Fast wake capability flags</td></tr>
+</table>
+
+<h3>6.7 EEE Capability Negotiation</h3>
+<p>EEE capability is advertised during Auto-Negotiation (except fast-wake-only PHYs or PHYs that exchange EEE during link training). EEE is enabled <strong>only if both link partners advertise EEE capability for the resolved PHY type</strong>. Deep sleep is enabled only if both advertise deep sleep.</p>
+
+<h3>6.8 LLDP TLV Timing (78.4.1)</h3>
+<ul>
+<li>LLDPDU with EEE TLV sent within <strong>10 s</strong> of dll_enabled &amp;&amp; dll_ready asserted</li>
+<li>Updated LLDPDU sent within <strong>10 s</strong> of receiving changed Tw_sys_tx value</li>
+<li>All fractional values rounded <strong>up</strong> to nearest integer µs</li>
+</ul>
+
+<h3>6.9 Transmit LPI State Diagram (22.7.2, Figure 22-23)</h3>
+<pre>
+LPI_DEASSERTED → tw_timer = 0
+  ↓ LPI_REQUEST = ASSERT
+LPI_ASSERTED → CARRIER_STATUS = OFF
+  ↓ LPI_REQUEST = DEASSERT
+LPI_WAIT → start_tw_timer
+  ↓ tw_timer_done
+CARRIER_STATUS = ON
+</pre>
+<div class="note">
+<strong>RTL Note:</strong> The <code>tw_timer</code> terminal count is <code>resolved Tw_sys_tx</code>. Minimum Tw_sys_tx for 100BASE-TX is <strong>30 µs</strong>. The MAC must not send valid data until tw_timer_done after LPI deassertion.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="rtl">7. RTL Design Checklist &amp; Implementation Notes</h2>
+
+<h3>7.1 MDIO FSM Design</h3>
+<div class="rtl-box">
+<h4>Recommended State Machine</h4>
+<pre>IDLE → PREAMBLE → START → OP → PRTAD → DEVAD → TA → DATA → IDLE
+
+// For Clause 45 indirect access:
+// Address cycle:  IDLE → PRE → ST(00) → OP(00) → PRTAD → DEVAD → TA(10) → ADDR → IDLE
+// Data cycle:     IDLE → PRE → ST(00) → OP(11) → PRTAD → DEVAD → TA(Z0) → DATA → IDLE</pre>
+</div>
+<table>
+<tr><th>Check</th><th>Requirement</th><th>Severity</th></tr>
+<tr><td>Preamble generation</td><td>32 ones minimum; may suppress if all PHYs advertise MF preamble suppression (bit 1.6)</td><td>Critical</td></tr>
+<tr><td>TA handling</td><td>Read: Z0 (PHY drives 0 on 2nd bit); Write: 10 (STA drives)</td><td>Critical</td></tr>
+<tr><td>Bit order</td><td>MSB first for all address and data fields</td><td>Critical</td></tr>
+<tr><td>MDC frequency</td><td>≤ 2.5 MHz (Clause 22); ≤ 12 MHz typical (Clause 45)</td><td>Major</td></tr>
+<tr><td>Bus turnaround</td><td>Tristate MDIO during PHY-driven phases; avoid bus contention</td><td>Critical</td></tr>
+<tr><td>Clause 22/45 coexistence</td><td>Voltage translation required (1.2V ↔ 3.3V/5V) per Annex 45A</td><td>Major</td></tr>
+</table>
+
+<h3>7.2 FLP Burst Generator Timing</h3>
+<div class="rtl-box">
+<h4>FLP Transmit Timing Constraints</h4>
+<pre>// Clock pulse spacing within burst: 125 µs ± 14 µs (111-139 µs)
+// Data=1 pulse offset from clock:   62.5 µs ± 7 µs (55.5-69.5 µs)
+// Inter-burst spacing (no ENP):     16 ms ± 8 ms (8-24 ms)
+// Inter-burst spacing (ENP, 16-bit): 5.7-6.8 ms
+// Inter-burst spacing (ENP, 48-bit): 1.3-3.2 ms
+
+// Timer counter widths (for 10ns clock):
+//   interval_timer:  5550-6950 counts (13 bits)
+//   flp_test timers: 500-18500 counts (15 bits)
+//   burst spacing:   570000-24000000 counts (25 bits)
+</pre>
+</div>
+<table>
+<tr><th>Check</th><th>Requirement</th><th>Severity</th></tr>
+<tr><td>Pulse width</td><td>Link pulse = NLP pulse = ~100 ns (10BASE-T link pulse spec)</td><td>Critical</td></tr>
+<tr><td>Clock-data spacing</td><td>55.5-69.5 µs for logic 1; no pulse within 111 µs for logic 0</td><td>Critical</td></tr>
+<tr><td>Burst timing tolerance</td><td>All timers must meet min/max across PVT; use digital trimming if needed</td><td>Major</td></tr>
+<tr><td>Frame counter</td><td>17 clock + 16 data = 33 pulse positions; tx_bit_cnt 1..17</td><td>Critical</td></tr>
+</table>
+
+<h3>7.3 AN Timer Counter Implementation</h3>
+<table>
+<tr><th>Timer</th><th>Range</th><th>Counter Width (1 µs tick)</th><th>Implementation Notes</th></tr>
+<tr><td>link_timer (Cl 37)</td><td>10 ms (+10/-0 ms)</td><td>15 bits (max 20 ms)</td><td>Use 15-bit counter; load at 10000; allow overflow to 20000</td></tr>
+<tr><td>autoneg_wait_timer</td><td>500-1000 ms</td><td>20 bits (max 1048 ms)</td><td>Load 500000; compare against 1000000</td></tr>
+<tr><td>break_link_timer</td><td>1200-1500 ms</td><td>21 bits</td><td>Load 1200000; expire at 1500000</td></tr>
+<tr><td>link_fail_inhibit (10/100/1000)</td><td>750-1000 ms</td><td>20 bits</td><td>Qualifies link_status FAIL</td></tr>
+<tr><td>link_fail_inhibit (MultiGBASE-T)</td><td>2000-2250 ms</td><td>22 bits</td><td>Longer timer for complex training</td></tr>
+<tr><td>data_detect_min/max</td><td>15-100 µs</td><td>7 bits</td><td>Dual-window detector for data bit</td></tr>
+<tr><td>tw_timer (EEE, 100BASE-TX)</td><td>30 µs min</td><td>12 bits</td><td>Resolved Tw_sys_tx; configurable</td></tr>
+</table>
+
+<h3>7.4 LPI Wake/Sleep Timing Accuracy</h3>
+<table>
+<tr><th>Check</th><th>Requirement</th><th>Severity</th></tr>
+<tr><td>Ts accuracy</td><td>Meet min/max per Table 78-2; tighter for higher speeds</td><td>Critical</td></tr>
+<tr><td>Tq accuracy</td><td>Quiet period must be long enough for partner to sleep, short enough for refresh</td><td>Major</td></tr>
+<tr><td>Tr accuracy</td><td>Refresh signal duration must be sufficient for adaptive filter update</td><td>Major</td></tr>
+<tr><td>Tw_sys_tx</td><td>System must wait resolved Tw_sys_tx before TX after LPI deassert</td><td>Critical</td></tr>
+<tr><td>Tw_sys_rx</td><td>System must be ready to receive within partner's resolved Tw_sys_tx</td><td>Critical</td></tr>
+<tr><td>Fast wake signaling</td><td>For ≥25 Gb/s: continuous signal during LPI; receiver can wake faster</td><td>Major</td></tr>
+</table>
+
+<h3>7.5 MDC Async CDC Handling</h3>
+<div class="warn">
+<strong>Critical:</strong> MDC is an asynchronous clock domain relative to the system clock. MDIO data must be synchronized.
+</div>
+<table>
+<tr><th>Check</th><th>Requirement</th><th>Severity</th></tr>
+<tr><td>MDIO input sync</td><td>2-flop synchronizer for MDIO sampled on MDC rising edge</td><td>Critical</td></tr>
+<tr><td>MDC edge detection</td><td>Detect rising edge in system clock domain; generate single-cycle pulse</td><td>Critical</td></tr>
+<tr><td>Setup/hold</td><td>STA provides ≥10 ns setup/hold; PHY output 0-300 ns delay</td><td>Major</td></tr>
+<tr><td>Bus contention</td><td>Never drive MDIO when PHY is driving (read/post-read-inc TA)</td><td>Critical</td></tr>
+<tr><td>Tri-state control</td><td>Use registered tristate enable; avoid glitching on bus</td><td>Critical</td></tr>
+</table>
+
+<h3>7.6 Register RMW Atomicity Requirements</h3>
+<table>
+<tr><th>Check</th><th>Requirement</th><th>Severity</th></tr>
+<tr><td>Read-Modify-Write</td><td>Clause 45 indirect access: separate address + data frames; not atomic</td><td>Major</td></tr>
+<tr><td>Address register</td><td>Each MMD has independent 16-bit address register</td><td>Major</td></tr>
+<tr><td>Post-read-inc</td><td>Address increments after read; do not increment from 65535</td><td>Major</td></tr>
+<tr><td>Software locking</td><td>SW must serialize access to same MMD; HW does not arbitrate</td><td>Minor</td></tr>
+<tr><td>Atomic test-and-set</td><td>Not supported natively; implement in SW or with sideband</td><td>Minor</td></tr>
+</table>
+
+<h3>7.7 State Diagram Precedence Rule</h3>
+<div class="crit">
+<strong>CRITICAL RULE (Clauses 28, 37, 98):</strong> "In the case of any ambiguity between stated requirements and the state diagrams, the <strong>state diagrams take precedence</strong>." RTL implementations must faithfully implement the state diagrams. Do not optimize away states or transitions based on textual interpretation alone.
+</div>
+
+<h3>7.8 Summary Quick Reference</h3>
+<table>
+<tr><th>Clause</th><th>Key RTL Module</th><th>Clock</th><th>Critical Timing</th><th>Registers</th></tr>
+<tr><td>22</td><td>MDIO master FSM</td><td>MDC ≤2.5MHz</td><td>10ns setup/hold, 300ns PHY delay</td><td>0,1,4,5,6,7,8,15,17,18</td></tr>
+<tr><td>45</td><td>MDIO MMD indirect</td><td>MDC ≤12MHz</td><td>1.2V levels, 470pF load</td><td>&lt;DEVAD&gt;.&lt;ADDR&gt;</td></tr>
+<tr><td>28</td><td>FLP TX/RX, Arb FSM</td><td>~62.5µs tick</td><td>125±14µs clock, 16±8ms burst spacing</td><td>0,1,4,5,6,7,8</td></tr>
+<tr><td>37</td><td>/C/ ordered set AN</td><td>125MHz byte</td><td>10ms link_timer, 3×/C/ ACK</td><td>0,1,4,5,6,7,8,15</td></tr>
+<tr><td>98</td><td>DME TX/RX, AN FSM</td><td>~30ns (HSM) / ~800ns (LSM)</td><td>±0.8ns HSM, ±10ns LSM</td><td>7.512-7.525</td></tr>
+<tr><td>78</td><td>LPI TX/RX, DLL FSM</td><td>System</td><td>Ts/Tq/Tr per Table 78-2, Tw_sys_tx</td><td>3.20, 3.21, 7.60, 1.16</td></tr>
+</table>
+
+<div class="note">
+<strong>Document Source:</strong> IEEE Std 802.3-2022, Clauses 22, 28, 37, 45, 78, 98. All register bit definitions, timing parameters, and state diagram variables are transcribed directly from the standard. State diagrams take precedence over text in case of ambiguity (Clauses 28, 37, 98).
+</div>
+
+
+
+<!-- ============================================================ -->
+<!-- ADDITIONAL DEPTH: Clause 22 Extended Register Details -->
+
+<h3>1.5 MII Signal Timing Relationships (22.3)</h3>
+<table>
+<tr><th>Signal Group</th><th>Reference Clock</th><th>Setup</th><th>Hold</th><th>Output Delay</th></tr>
+<tr><td>TXD[3:0], TX_EN, TX_ER</td><td>TX_CLK rising</td><td>N/A (driven)</td><td>N/A</td><td>0 min / 25 max (ns)</td></tr>
+<tr><td>RXD[3:0], RX_DV, RX_ER</td><td>RX_CLK rising</td><td>10 min (ns)</td><td>10 min (ns)</td><td>N/A (input)</td></tr>
+<tr><td>CRS, COL</td><td>Async to clocks</td><td>N/A</td><td>N/A</td><td>N/A</td></tr>
+<tr><td>MDIO (STA→PHY)</td><td>MDC rising</td><td>10 min (ns)</td><td>10 min (ns)</td><td>N/A</td></tr>
+<tr><td>MDIO (PHY→STA)</td><td>MDC rising</td><td>N/A</td><td>N/A</td><td>0 min / 300 max (ns)</td></tr>
+</table>
+
+<h3>1.6 Clause 22 Register 2/3 — PHY Identifier</h3>
+<table>
+<tr><th>Register</th><th>Bits</th><th>Name</th><th>Description</th></tr>
+<tr><td>2</td><td>2.15:0</td><td>PHY ID 1</td><td>OUI bits 3:18 (MSB to LSB)</td></tr>
+<tr><td>3</td><td>3.15:0</td><td>PHY ID 2</td><td>3.15:10 = OUI bits 19:24; 3.9:4 = Vendor model; 3.3:0 = Vendor revision</td></tr>
+</table>
+
+<h3>1.7 Clause 22 Register 15 — Extended Status</h3>
+<table>
+<tr><th>Bit</th><th>Name</th><th>Description</th></tr>
+<tr><td>15.15</td><td>1000BASE-X Full Duplex</td><td>1 = 1000BASE-X FD capable</td></tr>
+<tr><td>15.14</td><td>1000BASE-X Half Duplex</td><td>1 = 1000BASE-X HD capable</td></tr>
+<tr><td>15.13</td><td>1000BASE-T Full Duplex</td><td>1 = 1000BASE-T FD capable</td></tr>
+<tr><td>15.12</td><td>1000BASE-T Half Duplex</td><td>1 = 1000BASE-T HD capable</td></tr>
+<tr><td>15.11:0</td><td>Reserved</td><td>Ignore on read</td></tr>
+</table>
+
+<h3>1.8 MII Electrical Characteristics (22.4)</h3>
+<table>
+<tr><th>Parameter</th><th>Condition</th><th>Min</th><th>Max</th><th>Unit</th></tr>
+<tr><td>Voh</td><td>Ioh = -4.0 mA</td><td>2.40</td><td>—</td><td>V</td></tr>
+<tr><td>Vol</td><td>Iol = +4.0 mA</td><td>—</td><td>0.40</td><td>V</td></tr>
+<tr><td>Vih(min)</td><td>—</td><td>2.00</td><td>—</td><td>V</td></tr>
+<tr><td>Vil(max)</td><td>—</td><td>—</td><td>0.80</td><td>V</td></tr>
+<tr><td>Ci (non-MDIO)</td><td>—</td><td>—</td><td>8</td><td>pF</td></tr>
+<tr><td>Ci (MDIO)</td><td>—</td><td>—</td><td>10</td><td>pF</td></tr>
+<tr><td>Zo (long paths)</td><td>—</td><td>68-15%</td><td>68+15%</td><td>Ω</td></tr>
+<tr><td>Conductor DC resistance</td><td>Incl. connector</td><td>—</td><td>150</td><td>mΩ</td></tr>
+<tr><td>Propagation delay</td><td>@ 25 MHz</td><td>—</td><td>2.5</td><td>ns</td></tr>
+<tr><td>Delay variation</td><td>Within cable</td><td>—</td><td>0.1</td><td>ns</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- ADDITIONAL DEPTH: Clause 45 Register Details -->
+
+<h3>2.6 Clause 45 PCS Control 1 (Register 3.0)</h3>
+<table>
+<tr><th>Bit</th><th>Name</th><th>Description</th></tr>
+<tr><td>3.0.15</td><td>Reset</td><td>1 = PCS reset; self-clearing</td></tr>
+<tr><td>3.0.14</td><td>Loopback</td><td>1 = PCS loopback</td></tr>
+<tr><td>3.0.13</td><td>Speed selection (LSB)</td><td>See 3.0.6</td></tr>
+<tr><td>3.0.12</td><td>Speed selection (MSB)</td><td>See 3.0.6</td></tr>
+<tr><td>3.0.11</td><td>Low power</td><td>1 = Low power mode</td></tr>
+<tr><td>3.0.10</td><td>Clock stop enable</td><td>1 = Clock stop allowed</td></tr>
+<tr><td>3.0.6</td><td>Speed selection</td><td>3.0.12:3.0.13:3.0.6 = 101 = 10PASS-TS/2BASE-TL, 100 = 10 Gb/s, 011 = 1000 Mb/s, 010 = 100 Mb/s, 001 = 10 Mb/s, 000 = 10 Gb/s (for XAUI only)</td></tr>
+</table>
+
+<h3>2.7 Clause 45 PCS Status 1 (Register 3.1)</h3>
+<table>
+<tr><th>Bit</th><th>Name</th><th>Description</th></tr>
+<tr><td>3.1.15</td><td>Fault</td><td>1 = Fault detected (LH)</td></tr>
+<tr><td>3.1.7</td><td>PCS receive link status</td><td>1 = Link up (LL); 0 = Link down</td></tr>
+<tr><td>3.1.6</td><td>Low-power ability</td><td>1 = PCS supports low-power mode</td></tr>
+<tr><td>3.1.5</td><td>Tx LPI received</td><td>1 = Tx LPI received (LH)</td></tr>
+<tr><td>3.1.4</td><td>Rx LPI received</td><td>1 = Rx LPI received (LH)</td></tr>
+<tr><td>3.1.3</td><td>Tx LPI indication</td><td>1 = Tx LPI currently indicated</td></tr>
+<tr><td>3.1.2</td><td>Rx LPI indication</td><td>1 = Rx LPI currently indicated</td></tr>
+</table>
+
+<h3>2.8 Clause 45 EEE Wake Error Counter (Register 3.22)</h3>
+<p>Register 3.22 counts the number of times the local receiver fails to recover within the required time after LPI deassertion. Counter saturates at maximum and is cleared on read.</p>
+
+<h3>2.9 AN MMD Key Registers (DEVAD=7)</h3>
+<table>
+<tr><th>Register</th><th>Name</th><th>Description</th></tr>
+<tr><td>7.0</td><td>AN control 1</td><td>Reset, enable, restart AN</td></tr>
+<tr><td>7.1</td><td>AN status 1</td><td>Complete, LP ability, page rx</td></tr>
+<tr><td>7.2-7.3</td><td>AN device ID</td><td>PHY identifier</td></tr>
+<tr><td>7.16-7.17</td><td>AN devices in package</td><td>MMD presence detection</td></tr>
+<tr><td>7.18-7.19</td><td>AN package ID</td><td>Vendor package</td></tr>
+<tr><td>7.32</td><td>AN advertisement 1</td><td>Technology ability bits 15:0</td></tr>
+<tr><td>7.33</td><td>AN advertisement 2</td><td>Technology ability bits 31:16</td></tr>
+<tr><td>7.34</td><td>AN advertisement 3</td><td>Technology ability bits 47:32</td></tr>
+<tr><td>7.35</td><td>AN LP ability 1</td><td>LP technology ability 15:0</td></tr>
+<tr><td>7.36</td><td>AN LP ability 2</td><td>LP technology ability 31:16</td></tr>
+<tr><td>7.37</td><td>AN LP ability 3</td><td>LP technology ability 47:32</td></tr>
+<tr><td>7.48</td><td>AN XNP transmit 1</td><td>Next Page transmit 15:0</td></tr>
+<tr><td>7.49</td><td>AN XNP transmit 2</td><td>Next Page transmit 31:16</td></tr>
+<tr><td>7.50</td><td>AN XNP transmit 3</td><td>Next Page transmit 47:32</td></tr>
+<tr><td>7.60</td><td>EEE advertisement 1</td><td>EEE capability advertisement</td></tr>
+<tr><td>7.61</td><td>EEE advertisement 2</td><td>Extended EEE advertisement</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- ADDITIONAL DEPTH: Clause 28 State Machine Variables -->
+
+<h3>3.7 Clause 28 State Diagram Variables (28.3.1)</h3>
+<table>
+<tr><th>Variable</th><th>Type</th><th>Description</th></tr>
+<tr><td>ability_match</td><td>Boolean</td><td>At least 3 consistent FLP bursts received (not set explicitly; defined by function)</td></tr>
+<tr><td>acknowledge_match</td><td>Boolean</td><td>At least 3 consistent FLP bursts with Ack=1 received</td></tr>
+<tr><td>consistency_match</td><td>Boolean</td><td>Ability page == Acknowledge page (ignoring Ack bit)</td></tr>
+<tr><td>tx_link_code_word[page_size:1]</td><td>16 or 48-bit</td><td>Data to transmit in FLP burst</td></tr>
+<tr><td>rx_link_code_word[page_size:1]</td><td>16 or 48-bit</td><td>Data received from FLP burst</td></tr>
+<tr><td>mr_adv_ability[page_size:1]</td><td>16 or 48-bit</td><td>Local advertised ability (from Register 4/7)</td></tr>
+<tr><td>mr_lp_adv_ability[page_size:1]</td><td>16 or 48-bit</td><td>Link partner ability (to Register 5/8)</td></tr>
+<tr><td>mr_autoneg_enable</td><td>Boolean</td><td>Register 0.12</td></tr>
+<tr><td>mr_autoneg_complete</td><td>Boolean</td><td>Register 1.5</td></tr>
+<tr><td>mr_main_reset</td><td>Boolean</td><td>Register 0.15</td></tr>
+<tr><td>mr_next_page_loaded</td><td>Boolean</td><td>Set when Register 7 written; cleared by state machine</td></tr>
+<tr><td>mr_np_able</td><td>Boolean</td><td>Local Next Page able (Register 6.3)</td></tr>
+<tr><td>mr_lp_np_able</td><td>Boolean</td><td>Link partner Next Page able</td></tr>
+<tr><td>mr_restart_negotiation</td><td>Boolean</td><td>Register 0.9</td></tr>
+<tr><td>mr_parallel_detection_fault</td><td>Boolean</td><td>Register 6.5 (LH)</td></tr>
+<tr><td>single_link_ready</td><td>Boolean</td><td>Exactly one technology link_status=READY &amp; flp_receive_idle=true</td></tr>
+<tr><td>toggle_tx / toggle_rx</td><td>1-bit</td><td>Toggle bit state tracking for Next Page sync</td></tr>
+<tr><td>transmit_ability</td><td>Boolean</td><td>Enable transmission of link codeword</td></tr>
+<tr><td>transmit_ack</td><td>Boolean</td><td>Set Ack bit in transmitted codeword</td></tr>
+<tr><td>transmit_disable</td><td>Boolean</td><td>Halt tx_link_code_word transmission</td></tr>
+<tr><td>complete_ack</td><td>Boolean</td><td>Flag for complete acknowledge state</td></tr>
+<tr><td>base_page</td><td>Boolean</td><td>TRUE during Base Page exchange</td></tr>
+<tr><td>page_size</td><td>Integer</td><td>16 or 48; set upon TRANSMIT_DISABLE entry</td></tr>
+<tr><td>power_on</td><td>Boolean</td><td>TRUE until device powered or low power mode</td></tr>
+</table>
+
+<h3>3.8 Clause 28 Counters (28.3.3)</h3>
+<table>
+<tr><th>Counter</th><td>Width</th><th>Purpose</th></tr>
+<tr><td>flp_cnt</td><td>0-17</td><td>Count FLPs to detect AN-capable partner (done at 6-17)</td></tr>
+<tr><td>remaining_ack_cnt</td><td>0-8</td><td>Additional ack bursts to send after ack_match (done at 6-8)</td></tr>
+<tr><td>rx_bit_cnt</td><td>0-(page_size+1)</td><td>Count received data bits; saturates at page_size+1</td></tr>
+<tr><td>tx_bit_cnt</td><td>1-(page_size+1)</td><td>Count transmitted data bits; init=1</td></tr>
+</table>
+
+<h3>3.9 Clause 28 Technology Ability Field (28.2.1.2.2)</h3>
+<table>
+<tr><th>Bit</th><th>Technology</th><th>Priority</th></tr>
+<tr><td>A0</td><td>10BASE-T</td><td>Lowest</td></tr>
+<tr><td>A1</td><td>10BASE-T Full Duplex</td><td>—</td></tr>
+<tr><td>A2</td><td>100BASE-TX</td><td>—</td></tr>
+<tr><td>A3</td><td>100BASE-TX Full Duplex</td><td>—</td></tr>
+<tr><td>A4</td><td>100BASE-T4</td><td>—</td></tr>
+<tr><td>A5</td><td>100BASE-T2 Half Duplex</td><td>—</td></tr>
+<tr><td>A6</td><td>100BASE-T2 Full Duplex</td><td>Highest (among A[6:0])</td></tr>
+</table>
+
+<h3>3.10 Clause 28 Pause Encoding (Annex 28B)</h3>
+<table>
+<tr><th>PAUSE (D8)</th><th>ASM_DIR (D7)</th><th>Local Resolution</th><th>Remote Resolution</th></tr>
+<tr><td>0</td><td>0</td><td>Disable PAUSE</td><td>Disable PAUSE</td></tr>
+<tr><td>0</td><td>1</td><td>Disable PAUSE</td><td>Disable PAUSE</td></tr>
+<tr><td>1</td><td>0</td><td>Enable symmetric PAUSE</td><td>Enable symmetric PAUSE</td></tr>
+<tr><td>1</td><td>1</td><td>Enable PAUSE TX + RX</td><td>Enable PAUSE TX + RX</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- ADDITIONAL DEPTH: Clause 37 Extended -->
+
+<h3>4.8 Clause 37 Config_Reg Bit Definitions (37.2.1.1)</h3>
+<table>
+<tr><th>Bit</th><th>Name</th><th>Description</th></tr>
+<tr><td>D15</td><td>NP</td><td>Next Page (1 = more pages)</td></tr>
+<tr><td>D14</td><td>Ack</td><td>Acknowledge</td></tr>
+<tr><td>D13:D12</td><td>RF</td><td>Remote Fault</td></tr>
+<tr><td>D11</td><td>Reserved</td><td>Reserved (set to 0)</td></tr>
+<tr><td>D10</td><td>PS2 / ASM_DIR</td><td>Asymmetric Pause</td></tr>
+<tr><td>D9</td><td>PS1 / PAUSE</td><td>Symmetric Pause</td></tr>
+<tr><td>D8</td><td>Reserved</td><td>Reserved (set to 0)</td></tr>
+<tr><td>D7</td><td>FD</td><td>Full Duplex capable</td></tr>
+<tr><td>D6</td><td>HD</td><td>Half Duplex capable</td></tr>
+<tr><td>D5:D0</td><td>Reserved</td><td>Reserved (set to 0)</td></tr>
+</table>
+
+<h3>4.9 Clause 37 Priority Resolution (37.2.4.2)</h3>
+<p>The HCD is determined by the Priority Resolution function. For 1000BASE-X, the priority is:</p>
+<ol>
+<li>1000BASE-X Full Duplex</li>
+<li>1000BASE-X Half Duplex</li>
+</ol>
+<p>If no common mode, HCD = NULL and link_status = FAIL.</p>
+
+<h3>4.10 Clause 37 Ability Match Function (37.3.1.2)</h3>
+<div class="rtl-box">
+<h4>ability_match RTL Implementation Sketch</h4>
+<pre>// Pseudocode for ability_match detection
+reg [1:0] match_cnt;
+always @(posedge rx_clk) begin
+  if (rx_ordered_set == /I/) begin
+    match_cnt <= 2'd0;
+  end else if (rx_ordered_set == /C/) begin
+    if (rx_config_reg[15,13:0] == prev_config_reg[15,13:0])
+      match_cnt <= match_cnt + 1'b1;
+    else
+      match_cnt <= 2'd1;  // first match
+  end
+end
+assign ability_match = (match_cnt >= 2'd3);</pre>
+</div>
+
+<h3>4.11 Clause 37 Idle Match Function (37.3.1.2)</h3>
+<p>Three consecutive /I/ ordered sets required for idle_match=TRUE. Match count reset upon receipt of /C/.</p>
+
+<!-- ============================================================ -->
+<!-- ADDITIONAL DEPTH: Clause 98 Extended -->
+
+<h3>5.9 Clause 98 AN Half-Duplex Function (98.2.3)</h3>
+<p>The AN half-duplex function ensures only one device transmits at a time using three timers:</p>
+<table>
+<tr><th>Timer</th><th>Purpose</th></tr>
+<tr><td>blind_timer</td><td>Ignore reflected signals after local TX ends</td></tr>
+<tr><td>silent_timer</td><td>Wait before TX to ensure partner exited blind_timer</td></tr>
+<tr><td>backoff_timer</td><td>Random wait to resolve simultaneous TX attempts</td></tr>
+</table>
+
+<h3>5.10 Clause 98 Technology Ability Field Encoding (98B.3)</h3>
+<table>
+<tr><th>Bit</th><th>Technology</th></tr>
+<tr><td>A0</td><td>10BASE-T1S</td></tr>
+<tr><td>A1</td><td>10BASE-T1L</td></tr>
+<tr><td>A2</td><td>100BASE-T1</td></tr>
+<tr><td>A3</td><td>1000BASE-T1</td></tr>
+<tr><td>A4</td><td>2.5GBASE-T1</td></tr>
+<tr><td>A5</td><td>5GBASE-T1</td></tr>
+<tr><td>A6</td><td>10GBASE-T1</td></tr>
+<tr><td>A7:A26</td><td>Reserved</td></tr>
+</table>
+
+<h3>5.11 Clause 98 DME Receiver Implementation Notes</h3>
+<div class="rtl-box">
+<h4>DME Clock/Data Recovery RTL Sketch</h4>
+<pre>// HSM mode: T1 ≈ 30 ns, T2 ≈ 60 ns (clock→clock)
+// Use DLL/PLL or oversampling for transition detection
+
+// Transition detector:
+//   Sample MDI at &gt; 1 GHz or use analog edge detector
+//   Digital filter: require 2+ consecutive samples at new level
+
+// State machine:
+//   SEARCH_SD: Look for Start Delimiter pattern
+//   RX_DATA: Decode even positions as data (transition=1, no transition=0)
+//   CRC_CHECK: Compute CRC16 on 48 data bits
+//   VERIFY_ED: Confirm end delimiter</pre>
+</div>
+
+<h3>5.12 Clause 98 Priority Resolution (98B.4)</h3>
+<p>Highest priority to lowest: 10GBASE-T1 &gt; 5GBASE-T1 &gt; 2.5GBASE-T1 &gt; 1000BASE-T1 &gt; 100BASE-T1 &gt; 10BASE-T1L &gt; 10BASE-T1S.</p>
+
+<!-- ============================================================ -->
+<!-- ADDITIONAL DEPTH: Clause 78 Extended -->
+
+<h3>6.10 EEE Register Details</h3>
+<h4>PCS EEE Control and Capability 1 (Register 3.20)</h4>
+<table>
+<tr><th>Bit</th><th>Name</th><th>Description</th></tr>
+<tr><td>3.20.15</td><td>Reserved</td><td>—</td></tr>
+<tr><td>3.20.14</td><td>50GBASE-R EEE fast wake</td><td>1 = fast wake supported</td></tr>
+<tr><td>3.20.13</td><td>100GBASE-R EEE deep sleep</td><td>1 = deep sleep supported</td></tr>
+<tr><td>3.20.12</td><td>100GBASE-R EEE fast wake</td><td>1 = fast wake supported</td></tr>
+<tr><td>3.20.11</td><td>25GBASE-R deep sleep</td><td>1 = deep sleep supported</td></tr>
+<tr><td>3.20.10</td><td>25GBASE-R fast wake</td><td>1 = fast wake supported</td></tr>
+<tr><td>3.20.9</td><td>40GBASE-R EEE deep sleep</td><td>1 = deep sleep supported</td></tr>
+<tr><td>3.20.8</td><td>40GBASE-R EEE fast wake</td><td>1 = fast wake supported</td></tr>
+<tr><td>3.20.7</td><td>40GBASE-T EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.20.6</td><td>10GBASE-KR EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.20.5</td><td>10GBASE-KX4 EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.20.4</td><td>1000BASE-KX EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.20.3</td><td>10GBASE-T EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.20.2</td><td>1000BASE-T EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.20.1</td><td>100BASE-TX EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.20.0</td><td>LPI_FW</td><td>1 = fast wake, 0 = deep sleep</td></tr>
+</table>
+
+<h4>PCS EEE Control and Capability 2 (Register 3.21)</h4>
+<table>
+<tr><th>Bit</th><th>Name</th><th>Description</th></tr>
+<tr><td>3.21.15:9</td><td>Reserved</td><td>—</td></tr>
+<tr><td>3.21.8</td><td>5GBASE-KR EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.21.7</td><td>2.5GBASE-KX EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.21.6</td><td>Reserved</td><td>—</td></tr>
+<tr><td>3.21.5</td><td>400GBASE-R EEE fast wake</td><td>1 = supported</td></tr>
+<tr><td>3.21.4</td><td>Reserved</td><td>—</td></tr>
+<tr><td>3.21.3</td><td>200GBASE-R EEE fast wake</td><td>1 = supported</td></tr>
+<tr><td>3.21.2</td><td>25GBASE-T EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.21.1</td><td>5GBASE-T EEE supported</td><td>1 = supported</td></tr>
+<tr><td>3.21.0</td><td>2.5GBASE-T EEE supported</td><td>1 = supported</td></tr>
+</table>
+
+<h3>6.11 EEE Wake Time Requirements (Table 78-4)</h3>
+<table>
+<tr><th>PHY Type</th><th>Tw_sys_tx (min)</th><th>Tw_sys_tx (max)</th><th>Unit</th></tr>
+<tr><td>1000BASE-KX</td><td>4.5</td><td>7.2</td><td>µs</td></tr>
+<tr><td>1000BASE-T1</td><td>7.2</td><td>11.5</td><td>µs</td></tr>
+<tr><td>1000BASE-T</td><td>30</td><td>33.5</td><td>µs</td></tr>
+<tr><td>2.5GBASE-KX</td><td>4.5</td><td>7.2</td><td>µs</td></tr>
+<tr><td>2.5GBASE-T</td><td>30</td><td>33.5</td><td>µs</td></tr>
+<tr><td>5GBASE-KR</td><td>4.9</td><td>7.2</td><td>µs</td></tr>
+<tr><td>5GBASE-T</td><td>30</td><td>33.5</td><td>µs</td></tr>
+<tr><td>10GBASE-KX4</td><td>4.5</td><td>7.2</td><td>µs</td></tr>
+<tr><td>10GBASE-KR</td><td>4.9</td><td>7.2</td><td>µs</td></tr>
+<tr><td>10GBASE-T</td><td>30</td><td>33.5</td><td>µs</td></tr>
+<tr><td>25GBASE-KR/CR</td><td>4.9</td><td>7.2</td><td>µs</td></tr>
+<tr><td>25GBASE-T</td><td>30</td><td>33.5</td><td>µs</td></tr>
+<tr><td>40GBASE-KR4/CR4</td><td>4.9</td><td>7.2</td><td>µs</td></tr>
+<tr><td>40GBASE-T</td><td>30</td><td>33.5</td><td>µs</td></tr>
+<tr><td>100GBASE-KR4/CR4/CR10/KP4</td><td>4.9</td><td>7.2</td><td>µs</td></tr>
+</table>
+
+<h3>6.12 LPI Transmit State Machine (General)</h3>
+<pre>
+State transitions for PHY LPI transmit:
+  ACTIVE → SLEEP  (on LP_IDLE.request ASSERT)
+  SLEEP  → QUIET  (after Ts sleep signal)
+  QUIET  → REFRESH (after Tq quiet time)
+  REFRESH → QUIET  (after Tr refresh time)
+  QUIET  → WAKE   (on LP_IDLE.request DEASSERT)
+  WAKE   → ACTIVE  (after Tw_phy wake time)
+</pre>
+
+<h3>6.13 LPI Receive State Machine (General)</h3>
+<pre>
+State transitions for PHY LPI receive:
+  ACTIVE → SLEEP  (on receiving sleep signal from partner)
+  SLEEP  → QUIET  (after partner Ts)
+  QUIET  → REFRESH (on receiving refresh signal)
+  REFRESH → QUIET  (after partner Tr)
+  QUIET  → WAKE   (on receiving wake signal)
+  WAKE   → ACTIVE  (after local Rx wake processing)
+</pre>
+
+<h3>6.14 EEE DLL TLV Format (79.3.5)</h3>
+<table>
+<tr><th>Field</th><th>Size</th><th>Value</th></tr>
+<tr><td>TLV type</td><td>7 bits</td><td>127 (Organizationally Specific)</td></tr>
+<tr><td>TLV info string length</td><td>9 bits</td><td>Variable</td></tr>
+<tr><td>Organization unique code</td><td>3 octets</td><td>00-80-C2 (IEEE 802.3)</td></tr>
+<tr><td>Organizationally defined subtype</td><td>1 octet</td><td>3 = EEE</td></tr>
+<tr><td>Transmit Tw_sys_tx</td><td>2 octets</td><td>Local TX wake time</td></tr>
+<tr><td>Receive Tw_sys_tx</td><td>2 octets</td><td>Local RX wake time request</td></tr>
+<tr><td>Echo Transmit Tw_sys_tx</td><td>2 octets</td><td>Echo of remote TX wake time</td></tr>
+<tr><td>Echo Receive Tw_sys_tx</td><td>2 octets</td><td>Echo of remote RX wake time request</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- ADDITIONAL DEPTH: RTL Implementation Code Examples -->
+
+<h3>7.9 MDIO Master FSM Verilog Skeleton</h3>
+<div class="rtl-box">
+<h4>Clause 22 MDIO Master</h4>
+<pre>module mdio_master_c22 (
+  input        clk,           // System clock
+  input        rst_n,
+  input        start,
+  input        rw,            // 0=write, 1=read
+  input  [4:0] phyad,
+  input  [4:0] regad,
+  input  [15:0] wdata,
+  output reg [15:0] rdata,
+  output reg   done,
+  output reg   mdc,
+  inout        mdio
+);
+
+  localparam [3:0] IDLE=0, PRE=1, ST=2, OP=3, PHYAD_S=4,
+                   REGAD_S=5, TA=6, DATA=7, DONE_S=8;
+  reg [3:0] state, next_state;
+  reg [5:0] bit_cnt;
+  reg [31:0] shift_reg;
+  reg mdio_oe, mdio_out;
+  reg [7:0] mdc_cnt;
+
+  assign mdio = mdio_oe ? mdio_out : 1'bz;
+
+  // MDC generation: divide clk by N to get ≤2.5MHz
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) mdc_cnt <= 0;
+    else if (mdc_cnt == MDC_DIV-1) mdc_cnt <= 0;
+    else mdc_cnt <= mdc_cnt + 1;
+  end
+  wire mdc_rise = (mdc_cnt == 0);
+
+  // State machine (simplified)
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) state <= IDLE;
+    else if (mdc_rise) state <= next_state;
+  end
+
+  always @(*) begin
+    next_state = state;
+    case (state)
+      IDLE:   if (start) next_state = PRE;
+      PRE:    if (bit_cnt == 31) next_state = ST;
+      ST:     if (bit_cnt == 1)  next_state = OP;
+      OP:     if (bit_cnt == 1)  next_state = PHYAD_S;
+      PHYAD_S:if (bit_cnt == 4)  next_state = REGAD_S;
+      REGAD_S:if (bit_cnt == 4)  next_state = TA;
+      TA:     if (bit_cnt == 1)  next_state = DATA;
+      DATA:   if (bit_cnt == 15) next_state = DONE_S;
+      DONE_S: next_state = IDLE;
+    endcase
+  end
+endmodule</pre>
+</div>
+
+<h3>7.10 FLP Burst Generator Verilog Sketch</h3>
+<div class="rtl-box">
+<h4>Clause 28 FLP Transmit</h4>
+<pre>module flp_generator (
+  input        clk,        // e.g., 10 MHz (100 ns period)
+  input        rst_n,
+  input        enable,
+  input  [15:0] link_code_word,
+  input        np_mode,    // 0=16-bit, 1=48-bit (ENP)
+  output reg   flp_out,    // To NLP generator
+  output reg   burst_done
+);
+  // 125 µs clock spacing = 1250 counts @ 10 MHz
+  // 62.5 µs data spacing = 625 counts @ 10 MHz
+  localparam CLK_SPACING = 1250;
+  localparam DATA1_SPACING = 625;
+
+  reg [10:0] timer;
+  reg [4:0]  pulse_cnt;  // 0-32 (33 pulses)
+  reg [15:0] tx_word;
+
+  // State: IDLE, CLK_PULSE, DATA_SLOT, INTER_BURST
+  // Clock pulses at odd positions (1,3,5,...33)
+  // Data pulses at even positions if bit=1
+endmodule</pre>
+</div>
+
+<h3>7.11 AN Timer Counter RTL Best Practices</h3>
+<div class="rtl-box">
+<h4>Timer Implementation Template</h4>
+<pre>module an_timer (
+  input        clk,       // 1 MHz tick
+  input        rst_n,
+  input        start,
+  input  [19:0] load_value,
+  input  [19:0] max_value,
+  output reg   running,
+  output reg   done,
+  output reg   expired   // Asserted when count > max
+);
+  reg [19:0] count;
+
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      count <= 0;
+      running <= 0;
+      done <= 0;
+      expired <= 0;
+    end else begin
+      done <= 0;
+      if (start) begin
+        count <= load_value;
+        running <= 1;
+        expired <= 0;
+      end else if (running) begin
+        count <= count + 1'b1;
+        if (count >= max_value) begin
+          expired <= 1;
+          running <= 0;
+          done <= 1;
+        end
+      end
+    end
+  end
+endmodule</pre>
+</div>
+
+<h3>7.12 LPI State Machine Verilog Sketch</h3>
+<div class="rtl-box">
+<h4>EEE LPI Transmit Control</h4>
+<pre>module lpi_tx_control (
+  input        clk,
+  input        rst_n,
+  input        lpi_request,      // From MAC/RS
+  input  [15:0] tw_sys_tx,        // Resolved wake time (µs)
+  input        timer_tick_1us,
+  output reg   lpi_active,
+  output reg   carrier_off,
+  output reg   wake_in_progress
+);
+  localparam [2:0] ACTIVE=0, ASSERT_LPI=1, SLEEP=2,
+                   QUIET=3, WAKE=4, WAKE_WAIT=5;
+  reg [2:0] state;
+  reg [15:0] timer;
+
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      state <= ACTIVE;
+      timer <= 0;
+      lpi_active <= 0;
+      carrier_off <= 0;
+      wake_in_progress <= 0;
+    end else if (timer_tick_1us) begin
+      case (state)
+        ACTIVE: begin
+          if (lpi_request) begin
+            state <= ASSERT_LPI;
+            lpi_active <= 1;
+          end
+        end
+        ASSERT_LPI: begin
+          // Transmit Ts sleep signal
+          state <= SLEEP;
+          timer <= 0;
+          carrier_off <= 1;
+        end
+        SLEEP: begin
+          // Wait Ts, then enter quiet
+          state <= QUIET;
+        end
+        QUIET: begin
+          if (!lpi_request) begin
+            state <= WAKE;
+            wake_in_progress <= 1;
+          end
+        end
+        WAKE: begin
+          // Start wake signal, load timer
+          timer <= tw_sys_tx;
+          state <= WAKE_WAIT;
+        end
+        WAKE_WAIT: begin
+          if (timer == 0) begin
+            state <= ACTIVE;
+            lpi_active <= 0;
+            carrier_off <= 0;
+            wake_in_progress <= 0;
+          end else begin
+            timer <= timer - 1;
+          end
+        end
+      endcase
+    end
+  end
+endmodule</pre>
+</div>
+
+<h3>7.13 CDC: MDIO Async Interface</h3>
+<div class="rtl-box">
+<h4>Two-Flop Synchronizer + Edge Detector</h4>
+<pre>module mdio_cdc (
+  input        sys_clk,
+  input        rst_n,
+  input        mdc,           // Async input
+  input        mdio_in,       // Async input
+  output       mdc_rise_sys,
+  output       mdio_sync
+);
+  // MDC synchronization
+  reg [2:0] mdc_sync;
+  always @(posedge sys_clk or negedge rst_n) begin
+    if (!rst_n) mdc_sync <= 3'b000;
+    else        mdc_sync <= {mdc_sync[1:0], mdc};
+  end
+  assign mdc_rise_sys = (mdc_sync[2:1] == 2'b01);
+
+  // MDIO data synchronization
+  reg [1:0] mdio_meta;
+  always @(posedge sys_clk or negedge rst_n) begin
+    if (!rst_n) mdio_meta <= 2'b00;
+    else        mdio_meta <= {mdio_meta[0], mdio_in};
+  end
+  assign mdio_sync = mdio_meta[1];
+endmodule</pre>
+</div>
+
+<h3>7.14 DME Page Encoder/Decoder (Clause 98)</h3>
+<div class="rtl-box">
+<h4>HSM DME Transition Generator</h4>
+<pre>// T1 = 30 ns nominal @ 16.667 Mb/s
+// For 1 GHz clock: 30 counts per T1
+// Clock transitions at odd positions (1,3,5,...,155)
+// Data transitions at even positions if data_bit=1
+
+module dme_encoder (
+  input        clk_1ghz,      // or equivalent fast clock
+  input        rst_n,
+  input        start,
+  input  [47:0] page_data,
+  input  [15:0] crc,
+  output reg   tx_transition,
+  output reg   tx_polarity,
+  output       tx_active
+);
+  reg [7:0]  pos_cnt;    // 1-157
+  reg [5:0]  data_idx;   // 0-63 (48 data + 16 CRC)
+  reg [63:0] payload;
+
+  // Start Delimiter pattern for HSM (positions 1-26)
+  // Pre-loaded or computed
+
+  always @(posedge clk_1ghz or negedge rst_n) begin
+    if (!rst_n) begin
+      pos_cnt <= 0;
+      tx_transition <= 0;
+    end else if (start) begin
+      pos_cnt <= 1;
+      payload <= {crc, page_data};
+    end else if (pos_cnt != 0 && pos_cnt <= 157) begin
+      // Generate transition at current position
+      if (pos_cnt[0]) begin
+        // Odd position: always clock transition
+        tx_transition <= 1;
+      end else begin
+        // Even position: data transition if bit=1
+        data_idx <= pos_cnt[7:1] - 1;
+        tx_transition <= payload[data_idx];
+      end
+      pos_cnt <= pos_cnt + 1;
+    end else begin
+      tx_transition <= 0;
+    end
+  end
+endmodule</pre>
+</div>
+
+<h3>7.15 Clause 45 Address-Increment Burst Read</h3>
+<div class="rtl-box">
+<h4>Burst Read Using Post-Read-Increment</h4>
+<pre>// Read N consecutive registers from MMD
+// Sequence:
+//   1. Address frame:  OP=00, ADDR = start_address
+//   2. Repeat N times: OP=10 (post-read-inc), capture DATA each cycle
+//   3. Final read (optional): OP=11 for last register without increment
+
+task automatic burst_read_mmd (
+  input [4:0]  prtad,
+  input [4:0]  devad,
+  input [15:0] start_addr,
+  input [7:0]  num_regs,
+  output [15:0] data_array [0:255]
+);
+  int i;
+  // Write address
+  mdio_write_addr(prtad, devad, start_addr);
+  // Burst read with auto-increment
+  for (i = 0; i < num_regs; i++) begin
+    mdio_post_read_inc(prtad, devad, data_array[i]);
+  end
+endtask</pre>
+</div>
+
+<h3>7.16 Cross-Clock Domain Considerations for AN</h3>
+<table>
+<tr><th>Clock Domain</th><th>Frequency</th><th>Interface To</th><th>CDC Method</th></tr>
+<tr><td>MDC</td><td>≤2.5 MHz (Cl 22) / ≤12 MHz (Cl 45)</td><td>System</td><td>2-flop sync + edge detector</td></tr>
+<tr><td>FLP burst</td><td>~8 kHz burst rate, ~8 kHz internal</td><td>MDIO / System</td><td>Level sync + pulse stretch</td></tr>
+<tr><td>DME HSM</td><td>~16.667 Mb/s transitions</td><td>System / MDIO</td><td>Async FIFO or handshake</td></tr>
+<tr><td>DME LSM</td><td>~625 kb/s transitions</td><td>System / MDIO</td><td>2-flop sync sufficient</td></tr>
+<tr><td>/C/ ordered set (Cl 37)</td><td>125 MHz (8B/10B byte)</td><td>System</td><td>Async FIFO</td></tr>
+<tr><td>LPI timer</td><td>1 µs tick</td><td>System / MAC</td><td>Level sync</td></tr>
+<tr><td>EEE DLL</td><td>LLDP rate (~10s)</td><td>System</td><td>Handshake</td></tr>
+</table>
+
+<h3>7.17 Reset Strategy</h3>
+<table>
+<tr><th>Reset Type</th><th>Trigger</th><th>Effect</th></tr>
+<tr><td>Power-on reset</td><td>power_on=TRUE</td><td>All state machines to initial state; address regs undefined</td></tr>
+<tr><td>Management reset</td><td>Register 0.15 / 1.15 / 3.0.15 / 7.512.15</td><td>Reset respective sublayer; self-clearing bit</td></tr>
+<tr><td>AN restart</td><td>Register 0.9 / 7.512.9</td><td>Enter TRANSMIT_DISABLE; break link; renegotiate</td></tr>
+<tr><td>LPI wake reset</td><td>LPI deassert</td><td>tw_timer reload; carrier sense re-enabled after timeout</td></tr>
+</table>
+
+<h3>7.18 Verification Test Points</h3>
+<table>
+<tr><th>Test</th><th>Method</th><th>Pass Criteria</th></tr>
+<tr><td>MDIO read/write</td><td>Directed tests across all 32 PHYAD × 32 REGAD</td><td>Correct data, proper TA, no bus contention</td></tr>
+<tr><td>Clause 45 indirect access</td><td>Burst read 256 registers with post-read-inc</td><td>Address increments correctly; 65535 saturates</td></tr>
+<tr><td>FLP timing</td><td>Measure pulse spacing with scope/assertions</td><td>125±14µs clock, 62.5±7µs data, 16±8ms burst</td></tr>
+<tr><td>ACK detection</td><td>Send 3 identical FLP bursts with Ack=1</td><td>State machine enters COMPLETE_ACKNOWLEDGE</td></tr>
+<tr><td>Parallel Detection</td><td>Disable AN partner; send NLP/100BASE-TX signal</td><td>HCD resolves to detected technology</td></tr>
+<tr><td>LPI assert/deassert</td><td>Toggle LP_IDLE.request; measure timing</td><td>Ts/Tq/Tr within spec; Tw_sys_tx enforced</td></tr>
+<tr><td>DME encoding</td><td>Generate known page; verify CRC16</td><td>CRC matches x^16+x^15+x^2+1 polynomial</td></tr>
+<tr><td>Master/Slave resolution</td><td>Force M/S configurations; verify outcome</td><td>Table 98-4 resolution correct</td></tr>
+</table>
+
+<div class="note">
+<strong>Final Notes for RTL Designers:</strong>
+<ol>
+<li>Always implement state diagrams exactly as shown in the standard. Text is secondary.</li>
+<li>Use parameterized timer widths; load values from configuration registers where possible.</li>
+<li>Implement full preamble (32 ones) by default; add optional suppression as a config bit.</li>
+<li>For Clause 45, always write address before data access. Post-read-inc is optional but recommended for burst efficiency.</li>
+<li>LPI timers must be configurable to support DLL-negotiated Tw_sys_tx values.</li>
+<li>Document all async clock boundaries and CDC strategies in design spec.</li>
+<li>Reserve test points for AN state, MDIO state, LPI state, and error counters.</li>
+</ol>
+</div>
+
+
+
+<!-- ============================================================ -->
+<!-- EXPANSION: Clause 22 Complete Register Map -->
+
+<h3>1.9 MII Complete Register Map (22.2.4)</h3>
+<table>
+<tr><th>Reg</th><th>Name</th><th>Type</th><th>Clause</th><th>Description</th></tr>
+<tr><td>0</td><td>Control</td><td>R/W</td><td>22</td><td>Reset, loopback, speed, AN enable, duplex</td></tr>
+<tr><td>1</td><td>Status</td><td>RO</td><td>22</td><td>Capabilities, AN complete, link status, remote fault</td></tr>
+<tr><td>2</td><td>PHY ID 1</td><td>RO</td><td>22</td><td>OUI bits 3:18</td></tr>
+<tr><td>3</td><td>PHY ID 2</td><td>RO</td><td>22</td><td>OUI bits 19:24, model, revision</td></tr>
+<tr><td>4</td><td>AN Advertisement</td><td>R/W</td><td>28, 37</td><td>Selector, technology, pause, remote fault, NP</td></tr>
+<tr><td>5</td><td>AN LP Ability</td><td>RO</td><td>28, 37</td><td>Link partner Base Page</td></tr>
+<tr><td>6</td><td>AN Expansion</td><td>RO</td><td>28, 37</td><td>NP able, page received, parallel detection fault</td></tr>
+<tr><td>7</td><td>AN Next Page TX</td><td>R/W</td><td>28, 37</td><td>Next Page to transmit</td></tr>
+<tr><td>8</td><td>AN LP Next Page</td><td>RO</td><td>28, 37</td><td>Link partner Next Page</td></tr>
+<tr><td>9</td><td>1000BASE-T Control</td><td>R/W</td><td>40</td><td>1000BASE-T configuration (test mode, M/S config, port type)</td></tr>
+<tr><td>10</td><td>1000BASE-T Status</td><td>RO</td><td>40</td><td>LP 1000BASE-T ability, M/S resolution, LP echo, idle err</td></tr>
+<tr><td>11</td><td>Reserved</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>12</td><td>Reserved</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>13</td><td>Reserved</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>14</td><td>Reserved</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>15</td><td>Extended Status</td><td>RO</td><td>22</td><td>1000BASE-X and 1000BASE-T capability</td></tr>
+<tr><td>16</td><td>Vendor Specific</td><td>—</td><td>—</td><td>Vendor defined</td></tr>
+<tr><td>17</td><td>SGMII Status</td><td>RO/RW</td><td>—</td><td>SGMII link status, speed, duplex, AN status</td></tr>
+<tr><td>18</td><td>SGMII Control</td><td>R/W</td><td>—</td><td>SGMII AN advertise, mode configuration</td></tr>
+<tr><td>19-31</td><td>Vendor Specific</td><td>—</td><td>—</td><td>Vendor defined</td></tr>
+</table>
+
+<h3>1.10 Register 9 — 1000BASE-T Control (40.5.1.1)</h3>
+<table>
+<tr><th>Bit</th><th>Name</th><th>Description</th></tr>
+<tr><td>9.15:13</td><td>Test mode</td><td>000=Normal, 001=Test waveform, 010=Master jitter, 011=Slave jitter, 100=Distortion</td></tr>
+<tr><td>9.12</td><td>Master/Slave manual config enable</td><td>1 = Manual M/S configuration</td></tr>
+<tr><td>9.11</td><td>Master/Slave config value</td><td>1 = Master, 0 = Slave (when manual enabled)</td></tr>
+<tr><td>9.10</td><td>Port type</td><td>1 = Multiport device (prefers Master), 0 = Single-port device</td></tr>
+<tr><td>9.9</td><td>1000BASE-T Full Duplex</td><td>1 = Advertise 1000BASE-T FD</td></tr>
+<tr><td>9.8</td><td>1000BASE-T Half Duplex</td><td>1 = Advertise 1000BASE-T HD</td></tr>
+<tr><td>9.7:0</td><td>Reserved</td><td>Write 0</td></tr>
+</table>
+
+<h3>1.11 Register 10 — 1000BASE-T Status (40.5.1.2)</h3>
+<table>
+<tr><th>Bit</th><th>Name</th><th>Description</th></tr>
+<tr><td>10.15</td><td>Master/Slave config fault</td><td>1 = Fault detected (LH)</td></tr>
+<tr><td>10.14</td><td>Master/Slave resolution</td><td>1 = Master, 0 = Slave</td></tr>
+<tr><td>10.13</td><td>LP 1000BASE-T Full Duplex</td><td>1 = LP advertises 1000BASE-T FD</td></tr>
+<tr><td>10.12</td><td>LP 1000BASE-T Half Duplex</td><td>1 = LP advertises 1000BASE-T HD</td></tr>
+<tr><td>10.11:10</td><td>LP echo</td><td>Echo of 1000BASE-T config</td></tr>
+<tr><td>10.9:8</td><td>Reserved</td><td>—</td></tr>
+<tr><td>10.7:0</td><td>Idle error count</td><td>8-bit counter (RO, saturates)</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- EXPANSION: Clause 45 Deep Dive -->
+
+<h3>2.10 PMA/PMD Control 1 (Register 1.0)</h3>
+<table>
+<tr><th>Bit</th><th>Name</th><th>Description</th></tr>
+<tr><td>1.0.15</td><td>Reset</td><td>1 = PMA/PMD reset; self-clearing</td></tr>
+<tr><td>1.0.14</td><td>Loopback</td><td>1 = PMA/PMD loopback</td></tr>
+<tr><td>1.0.13</td><td>Speed selection (LSB)</td><td>See 1.0.6</td></tr>
+<tr><td>1.0.12</td><td>Speed selection (MSB)</td><td>See 1.0.6</td></tr>
+<tr><td>1.0.11</td><td>Low power</td><td>1 = Low power mode</td></tr>
+<tr><td>1.0.6</td><td>Speed selection</td><td>1.0.12:1.0.13:1.0.6 encoding</td></tr>
+</table>
+
+<h3>2.11 PMA/PMD Status 1 (Register 1.1)</h3>
+<table>
+<tr><th>Bit</th><th>Name</th><th>Description</th></tr>
+<tr><td>1.1.15</td><td>Fault</td><td>1 = Fault detected (LH)</td></tr>
+<tr><td>1.1.3</td><td>Receive link status</td><td>1 = Link up (LL); 0 = Link down</td></tr>
+<tr><td>1.1.2</td><td>Low-power ability</td><td>1 = Low power supported</td></tr>
+</table>
+
+<h3>2.12 PMA/PMD Status 2 (Register 1.8)</h3>
+<table>
+<tr><th>Bit</th><th>Name</th><th>Description</th></tr>
+<tr><td>1.8.15:14</td><td>Device present</td><td>10 = Device present and responding</td></tr>
+<tr><td>1.8.13</td><td>Transmit fault ability</td><td>1 = Can detect TX fault</td></tr>
+<tr><td>1.8.12</td><td>Receive fault ability</td><td>1 = Can detect RX fault</td></tr>
+<tr><td>1.8.11</td><td>Transmit fault</td><td>1 = TX fault detected (LH)</td></tr>
+<tr><td>1.8.10</td><td>Receive fault</td><td>1 = RX fault detected (LH)</td></tr>
+<tr><td>1.8.9</td><td>Extended abilities</td><td>1 = Extended abilities in 1.11</td></tr>
+<tr><td>1.8.8</td><td>PMD transmit disable ability</td><td>1 = TX disable supported</td></tr>
+</table>
+
+<h3>2.13 Device Present Detection</h3>
+<div class="note">
+Bits 1.8.15:14 (and equivalent in other MMDs) read as <code>10</code> when a device is present and responding. Reading anything else indicates no device or malfunction. This is the primary mechanism for software to discover which MMDs are implemented.
+</div>
+
+<h3>2.14 Clause 45 Electrical Interface (45.4, Table 45-427)</h3>
+<table>
+<tr><th>Symbol</th><th>Parameter</th><th>Condition</th><th>Min</th><th>Max</th><th>Unit</th></tr>
+<tr><td>VIH</td><td>Input high voltage</td><td>—</td><td>0.84</td><td>1.5</td><td>V</td></tr>
+<tr><td>VIL</td><td>Input low voltage</td><td>—</td><td>-0.3</td><td>0.36</td><td>V</td></tr>
+<tr><td>VOH</td><td>Output high voltage</td><td>IOH=-100µA</td><td>1.0</td><td>1.5</td><td>V</td></tr>
+<tr><td>VOL</td><td>Output low voltage</td><td>IOL=100µA</td><td>-0.3</td><td>0.2</td><td>V</td></tr>
+<tr><td>IOH</td><td>Output high current</td><td>VOH=1.0V</td><td>-4</td><td>—</td><td>mA</td></tr>
+<tr><td>IOL</td><td>Output low current</td><td>VOL=0.2V</td><td>+4</td><td>—</td><td>mA</td></tr>
+<tr><td>Ci</td><td>Input capacitance</td><td>—</td><td>—</td><td>10</td><td>pF</td></tr>
+<tr><td>CL</td><td>Total capacitive load</td><td>—</td><td>—</td><td>470</td><td>pF</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<!-- EXPANSION: Clause 28 NLP Receive State Diagram -->
+
+<h3>3.11 NLP Receive Link Integrity Test (28.2, Figure 28-19)</h3>
+<p>The NLP Receive state diagram monitors for Normal Link Pulses (10BASE-T link integrity). It is active when Auto-Negotiation is disabled or the partner does not support AN.</p>
+<pre>
+States:
+  NLP TEST FAIL       → xmit=disable, rcv=disable
+  NLP TEST FAIL EXTEND→ xmit=disable, rcv=disable
+  NLP TEST FAIL RESET → link_count=0, xmit=disable, rcv=disable
+  NLP TEST FAIL COUNT → link_count=link_count+1
+  NLP TEST PASS       → link_status=READY
+  NLP DETECT FREEZE   → link_control=DISABLE, link_status=FAIL
+
+Variables:
+  link_count: 0 to lc_max (typically 2-10)
+  link_test_rcv: TRUE when valid NLP detected
+  RD: Receive Data state (active/idle)
+  xmit: enable/disable
+  rcv: enable/disable
+</pre>
+
+<h3>3.12 Clause 28 Transmit State Diagram (Figure 28-16)</h3>
+<pre>
+States:
+  IDLE → Start transmit_link_burst_timer, remaining_ack_cnt=done
+  TRANSMIT ABILITY → remaining_ack_cnt=init
+  TRANSMIT REMAINING ACKNOWLEDGE → ack_finished=true
+  TRANSMIT CLOCK BIT → Start interval_timer, tx_bit_cnt=tx_bit_cnt+1
+  TRANSMIT DATA BIT → IF tx_link_code_word[tx_bit_cnt]=1 THEN TD_AUTONEG=link_test_pulse
+  TRANSMIT COUNT ACK → remaining_ack_cnt=remaining_ack_cnt+1
+
+Transitions:
+  From IDLE: power_on=true or mr_autoneg_enable=false → TRANSMIT ABILITY
+  From IDLE: transmit_ability=true → TRANSMIT REMAINING ACKNOWLEDGE
+  From IDLE: transmit_disable=true → IDLE (loop)
+  From TRANSMIT ABILITY: transmit_ability=true → TRANSMIT REMAINING ACKNOWLEDGE
+  From TRANSMIT REMAINING ACKNOWLEDGE: tx_bit_cnt=done &amp; remaining_ack_cnt=done → IDLE
+  From TRANSMIT REMAINING ACKNOWLEDGE: tx_bit_cnt=done &amp; remaining_ack_cnt=not_done → TRANSMIT CLOCK BIT
+  From TRANSMIT CLOCK BIT: interval_timer_done → TRANSMIT DATA BIT
+  From TRANSMIT DATA BIT: interval_timer_done &amp; tx_bit_cnt≠done → TRANSMIT CLOCK BIT
+  From TRANSMIT DATA BIT: tx_bit_cnt=done &amp; remaining_ack_cnt=not_done → TRANSMIT COUNT ACK
+  From TRANSMIT COUNT ACK: remaining_ack_cnt=done → IDLE
+  From TRANSMIT COUNT ACK: remaining_ack_cnt=not_done → TRANSMIT CLOCK BIT
+</pre>
+
+<h3>3.13 Clause 28 Receive State Diagram (Figure 28-17)</h3>
+<pre>
+States:
+  IDLE → flp_cnt=init, flp_receive_idle=true
+  LINK PULSE DETECT → Start flp_test_min_timer, Start flp_test_max_timer
+  LINK PULSE COUNT → flp_cnt=flp_cnt+1
+  FLP PASS → Start flp_test_max_timer
+  FLP CLOCK → rx_bit_cnt=rx_bit_cnt+1
+  FLP DATA_0 → rx_link_code_word[rx_bit_cnt]=0
+  FLP DATA_1 → rx_link_code_word[rx_bit_cnt]=1
+  FLP CAPTURE → rx_bit_cnt=init, Start data_detect timers
+  FLP CHECK → IF rx_bit_cnt ≥ rx_bit_cnt_check THEN ability_match
+
+Key detection logic:
+  - linkpulse=true &amp; flp_test_min_timer_done &amp; flp_test_max_timer_not_done → valid pulse
+  - flp_test_max_timer_done &amp; linkpulse=false → end of burst
+  - nlp_test_min_timer_done &amp; no pulse → NLP detected (not FLP)
+</pre>
+
+<!-- ============================================================ -->
+<!-- EXPANSION: Clause 37 Extended Details -->
+
+<h3>4.12 Clause 37 /C/ Ordered Set Details (36.2.5.1.6)</h3>
+<table>
+<tr><th>Ordered Set</th><th>Code</th><th>8B/10B Value</th><th>Purpose</th></tr>
+<tr><td>/C/</td><td>Configuration</td><td>/K28.5/ /Dxx.yy/ /D16.2/ /D16.2/</td><td>AN config transmission</td></tr>
+<tr><td>/I/</td><td>Idle</td><td>/K28.5/ /D5.6/ or /K28.5/ /D16.2/</td><td>Inter-frame fill</td></tr>
+<tr><td>/S/</td><td>Start</td><td>/K27.7/</td><td>Start of packet delimiter</td></tr>
+<tr><td>/T/</td><td>Terminate</td><td>/K29.7/</td><td>End of packet delimiter</td></tr>
+<tr><td>/R/</td><td>Carrier extend</td><td>/K23.7/</td><td>Carrier extension</td></tr>
+</table>
+
+<h3>4.13 Clause 37 AN State Diagram Detailed Transitions</h3>
+<pre>
+AN_ENABLE:
+  Entry: xmit=CONFIGURATION, start link_timer
+  Exit:  mr_an_enable=TRUE
+  To:   AN_RESTART or ABILITY_DETECT
+
+ABILITY_DETECT:
+  Entry: tx_Config_Reg = mr_adv_ability, toggle_tx = mr_adv_ability&lt;12&gt;
+  Exit:  ability_match=TRUE &amp; rx_Config_Reg≠0
+  To:   ACKNOWLEDGE_DETECT
+  Also: ability_match=TRUE &amp; rx_Config_Reg=0 → ABILITY_DETECT (loop)
+        ability_match=FALSE &amp; link_timer_done → AN_ENABLE (restart)
+
+ACKNOWLEDGE_DETECT:
+  Entry: tx_Config_Reg&lt;D14&gt; = 1
+  Exit:  acknowledge_match=TRUE &amp; consistency_match=TRUE
+  To:   COMPLETE_ACKNOWLEDGE
+  Also: acknowledge_match=TRUE &amp; consistency_match=FALSE → ABILITY_DETECT
+        ability_match=FALSE → ABILITY_DETECT
+
+COMPLETE_ACKNOWLEDGE:
+  Entry: toggle_tx = !toggle_tx, mr_page_rx = TRUE
+  Exit:  link_timer_done
+  To:   NEXT_PAGE_WAIT (if NP on both sides)
+        IDLE_DETECT (if no NP)
+        AN_ENABLE (if rx_Config_Reg=0 or ability_match=FALSE)
+
+NEXT_PAGE_WAIT:
+  Entry: tx_Config_Reg&lt;D15&gt; = mr_np_tx&lt;NP&gt;, tx_Config_Reg&lt;D14&gt; = 0
+  Exit:  mr_np_loaded=TRUE &amp; toggle_match
+  To:   COMPLETE_ACKNOWLEDGE
+
+IDLE_DETECT:
+  Entry: xmit=IDLE, start link_timer
+  Exit:  idle_match=TRUE
+  To:   LINK_OK
+
+LINK_OK:
+  Entry: xmit=DATA, mr_an_complete=TRUE
+  Exit:  an_sync_status=FAIL or mr_restart_an=TRUE
+  To:   AN_ENABLE
+</pre>
+
+<h3>4.14 Clause 37 sync_status and an_sync_status</h3>
+<p><code>sync_status</code> is defined in Clause 36 (PCS) and indicates whether the 8B/10B decoder has achieved code-group alignment. <code>an_sync_status</code> qualifies <code>sync_status</code> with a timeout equal to <code>link_timer</code> (10 ms). If <code>sync_status</code> remains FAIL for ≥10 ms, <code>an_sync_status</code> becomes FAIL and triggers AN restart.</p>
+
+<!-- ============================================================ -->
+<!-- EXPANSION: Clause 98 Extended Details -->
+
+<h3>5.13 Clause 98 Arbitration State Diagram (Figure 98-7)</h3>
+<pre>
+States:
+  TRANSMIT_DISABLE → Start break_link_timer
+  AN_ENABLE → mr_autoneg_enable=true
+  ABILITY_DETECT → tx_link_code_word=mr_adv_ability, base_page=true
+  ACKNOWLEDGE_DETECT → transmit_ack=true
+  COMPLETE_ACKNOWLEDGE → ack_finished=true
+  AN GOOD CHECK → Start link_fail_inhibit_timer
+  LINK_OK → mr_autoneg_complete=true
+  NEXT_PAGE_WAIT → Load Next Page
+  PARALLEL DETECTION FAULT → mr_parallel_detection_fault=true
+
+Key transitions:
+  TRANSMIT_DISABLE → break_link_timer_done → ABILITY_DETECT
+  ABILITY_DETECT → ability_match=true &amp; rx_link_code_word≠0 → ACKNOWLEDGE_DETECT
+  ACKNOWLEDGE_DETECT → acknowledge_match=true &amp; consistency_match=true → COMPLETE_ACKNOWLEDGE
+  COMPLETE_ACKNOWLEDGE → ack_finished=true &amp; no NP → AN GOOD CHECK
+  COMPLETE_ACKNOWLEDGE → ack_finished=true &amp; NP pending → NEXT_PAGE_WAIT
+  AN GOOD CHECK → link_status[HCD]=OK → LINK_OK
+  AN GOOD CHECK → link_fail_inhibit_timer_done &amp; link_status[HCD]=FAIL → TRANSMIT_DISABLE
+</pre>
+
+<h3>5.14 Clause 98 Receive State Diagram</h3>
+<pre>
+States:
+  IDLE → ability_match=false, acknowledge_match=false
+  RX_PAGE → Decode DME page, check CRC16
+  ABILITY_MATCH → Set ability_match if valid page received
+  ACKNOWLEDGE_MATCH → Set acknowledge_match if Ack=1 and valid
+
+CRC16 check:
+  - Polynomial: x^16 + x^15 + x^2 + 1
+  - Initialize S[15:0] = 0
+  - Process 48 data bits with switch=gen
+  - Switch to out, transmit S15...S0
+  - Receiver computes same CRC; match = valid page
+</pre>
+
+<h3>5.15 Clause 98 Nonce Collision Handling</h3>
+<div class="warn">
+If a device receives a DME page with good CRC16 and the partner's Transmitted Nonce Field matches the local device's generated nonce, the device <strong>must</strong> invert T[0] and regenerate T[3:1] randomly. This guarantees nonce_match is never true, preventing deadlock in Master/Slave resolution.
+</div>
+
+<h3>5.16 Clause 98 HSM vs LSM Selection (98.5.6)</h3>
+<p>A PHY supporting both HSM and LSM must automatically choose the appropriate mode:</p>
+<ul>
+<li>Attempt HSM first (faster negotiation)</li>
+<li>If HSM fails (no response within timeout), fall back to LSM</li>
+<li>10BASE-T1L PHYs must support LSM; may optionally support HSM</li>
+<li>1000BASE-T1, 100BASE-T1, 10BASE-T1S PHYs must support HSM; may optionally support LSM</li>
+</ul>
+
+<!-- ============================================================ -->
+<!-- EXPANSION: Clause 78 Extended Details -->
+
+<h3>6.15 EEE PHY-Specific LPI Encoding</h3>
+<table>
+<tr><th>PHY/Interface</th><th>LPI Encoding</th><th>Wake Signal</th><th>Deep Sleep Support</th></tr>
+<tr><td>100BASE-TX</td><td>xMII: TX_ER=1, TXD=0001</td><td>Normal interframe</td><td>Yes (only mode)</td></tr>
+<tr><td>1000BASE-T</td><td>1000BASE-T PCS LPI symbols</td><td>Refresh + wake</td><td>Yes (only mode)</td></tr>
+<tr><td>10GBASE-T</td><td>10GBASE-T PCS LPI</td><td>Alert signal</td><td>Yes (only mode)</td></tr>
+<tr><td>10GBASE-KR</td><td>BASE-R PCS LPI</td><td>Alert + wake</td><td>Yes</td></tr>
+<tr><td>25GBASE-KR/CR</td><td>BASE-R PCS LPI</td><td>Alert + wake</td><td>Optional</td></tr>
+<tr><td>25GBASE-KR/CR</td><td>Fast wake signaling</td><td>Continuous signal</td><td>Mandatory (if EEE)</td></tr>
+<tr><td>40GBASE-KR4/CR4</td><td>BASE-R PCS LPI</td><td>Alert + wake</td><td>Optional</td></tr>
+<tr><td>100GBASE-KR4/CR4</td><td>BASE-R PCS LPI</td><td>Alert + wake</td><td>Optional</td></tr>
+<tr><td>1000BASE-T1</td><td>Single-pair PCS LPI</td><td>Refresh + wake</td><td>Yes (only mode)</td></tr>
+<tr><td>2.5GBASE-T1</td><td>Single-pair PCS LPI</td><td>Refresh + wake</td><td>Yes (only mode)</td></tr>
+</table>
+
+<h3>6.16 EEE Fast Wake TLV (79.3.6)</h3>
+<table>
+<tr><th>Field</th><th>Size</th><th>Description</th></tr>
+<tr><td>TLV type</td><td>7 bits</td><td>127 (Organizationally Specific)</td></tr>
+<tr><td>TLV length</td><td>9 bits</td><td>Variable</td></tr>
+<tr><td>OUI</td><td>3 octets</td><td>00-80-C2</td></tr>
+<tr><td>Subtype</td><td>1 octet</td><td>4 = EEE Fast Wake</td></tr>
+<tr><td>Transmit LPI_FW</td><td>1 octet</td><td>Local TX fast wake capability</td></tr>
+<tr><td>Receive LPI_FW</td><td>1 octet</td><td>Local RX fast wake request</td></tr>
+<tr><td>Echo Transmit LPI_FW</td><td>1 octet</td><td>Echo of remote TX fast wake</td></tr>
+<tr><td>Echo Receive LPI_FW</td><td>1 octet</td><td>Echo of remote RX fast wake</td></tr>
+</table>
+
+<h3>6.17 EEE Tw_sys_tx Formula (78.2)</h3>
+<pre>
+Tw_sys_tx(min) = Tw_sys_rx(min) + Tphy_shrink_tx(max) + Tphy_shrink_rx(max)
+
+Tw_phy(min) = Tphy_wake(min) + Tphy_shrink_tx
+
+Tw_sys_res(min) = max(Tw_sys_tx(min), Tw_phy(min))
+
+Tphy_shrink_tx(max) = Tphy_wake_tx(max) - Tphy_prop_tx(min)
+Tphy_shrink_rx(max) = Tphy_wake_rx(max) - Tphy_prop_rx(min)
+</pre>
+
+<h3>6.18 EEE Wake Error Handling</h3>
+<p>Register 3.22 (PCS EEE wake error counter) increments when the PHY fails to exit LPI within the required time. This indicates:</p>
+<ul>
+<li>Partner violated Tw_sys_tx agreement</li>
+<li>Local PHY timing degraded (temperature, voltage)</li>
+<li>Clock drift during LPI mode</li>
+</ul>
+<div class="warn">
+Wake errors should trigger alarm thresholds in management software. Excessive wake errors indicate a link reliability issue.
+</div>
+
+<!-- ============================================================ -->
+<!-- EXPANSION: Additional RTL Design Guidance -->
+
+<h3>7.19 Clock Generation for AN Timers</h3>
+<div class="rtl-box">
+<h4>Recommended Clocking Strategy</h4>
+<pre>// System clock: e.g., 100 MHz
+// Generate derived clocks:
+//   mdc_clk     : ≤2.5 MHz (Cl 22) via clock divider
+//   mdc_clk_c45 : ≤12 MHz (Cl 45) via clock divider
+//   timer_1us   : 1 MHz tick for AN/EEE timers
+//   timer_10ns  : 100 MHz for FLP data detection (Cl 28)
+//   timer_1ns   : 1 GHz (or DLL/PLL) for DME HSM (Cl 98)
+
+// Clock divider:
+reg [7:0] div_cnt;
+always @(posedge sys_clk) begin
+  if (div_cnt == DIV_VAL-1) begin
+    div_cnt <= 0;
+    tick <= 1;
+  end else begin
+    div_cnt <= div_cnt + 1;
+    tick <= 0;
+  end
+end</pre>
+</div>
+
+<h3>7.20 AN Configuration Register Programming Sequence</h3>
+<div class="rtl-box">
+<h4>Software Bring-Up Sequence</h4>
+<pre>// 1. Read Register 1 (Status) to determine PHY capabilities
+// 2. Write Register 4 (AN Adv) with local abilities
+//    - Set Selector Field = 00001 (IEEE 802.3)
+//    - Set Technology Ability bits for supported modes
+//    - Set Pause bits per local flow control capability
+// 3. Write Register 0 (Control):
+//    - Set bit 0.12 = 1 (Auto-Negotiation Enable)
+//    - Set bit 0.9  = 1 (Restart Auto-Negotiation)
+// 4. Poll Register 1 bit 1.5 until AN Complete = 1
+// 5. Read Register 5 (LP Ability) for partner capabilities
+// 6. Read Register 6 (Expansion) for NP/PD status
+// 7. If NP exchange required:
+//    - Write Register 7 (Next Page TX)
+//    - Poll Register 6 bit 6.1 for Page Received
+//    - Read Register 8 (LP Next Page)
+// 8. Read Register 17/18 for SGMII status if applicable
+
+// Clause 45 equivalent:
+//   1. Write address to MMD7 (AN) or MMD3 (PCS)
+//   2. Read/write data frames
+//   3. For burst: use post-read-increment-address (OP=10)</pre>
+</div>
+
+<h3>7.21 LPI Client Interface Signals</h3>
+<table>
+<tr><th>Signal</th><th>Direction</th><th>Description</th></tr>
+<tr><td>LP_IDLE.request</td><td>LPI Client → RS</td><td>ASSERT or DEASSERT LPI signaling</td></tr>
+<tr><td>LP_IDLE.indication</td><td>RS → LPI Client</td><td>ASSERT or DEASSERT (partner LPI detected)</td></tr>
+<tr><td>PLS_CARRIER.indication</td><td>RS → MAC</td><td>ON when transmitting or receiving; OFF during LPI (after Tw_sys_tx)</td></tr>
+<tr><td>PLS_DATA.indication</td><td>RS → MAC</td><td>Normal nibble data or IDLE</td></tr>
+</table>
+
+<h3>7.22 Common RTL Pitfalls</h3>
+<table>
+<tr><th>Pitfall</th><th>Problem</th><th>Solution</th></tr>
+<tr><td>Missing preamble</td><td>Some PHYs require 32 ones; others accept suppressed preamble</td><td>Default to full preamble; add config bit for suppression</td></tr>
+<tr><td>Wrong bit order</td><td>MSB-first required for all fields</td><td>Use shift-register with MSB loaded first</td></tr>
+<tr><td>TA contention</td><td>STA and PHY both drive MDIO during turnaround</td><td>Tristate STA output exactly at TA start; sample on second MDC</td></tr>
+<tr><td>Timer overflow</td><td>16-bit counter for ms timer overflows at 65s</td><td>Use 20+ bit counters for second-scale timers</td></tr>
+<tr><td>State machine latch</td><td>Incomplete case/default causes latches</td><td>Use default next_state assignment; full case coverage</td></tr>
+<tr><td>Async reset sync</td><td>Reset release causes metastability</td><td>Synchronize reset release to local clock</td></tr>
+<tr><td>LPI race condition</td><td>MAC sends data before Tw_sys_tx expires</td><td>Gate TX_EN with !lpi_active || tw_timer_done</td></tr>
+<tr><td>CRC16 bit order</td><td>Transmitting CRC LSB first vs MSB first</td><td>Clause 98: transmit S15 first, then S14...S0</td></tr>
+<tr><td>DME polarity</td><td>Random initial polarity not implemented</td><td>Use LFSR or free-running counter for random seed</td></tr>
+<tr><td>AN restart glitch</td><td>Management restart bit pulsed too short</td><td>Require bit set for ≥1 MDC cycle; self-clear on read</td></tr>
+</table>
+
+<h3>7.23 Reference Documents and Clauses</h3>
+<table>
+<tr><th>Topic</th><th>Primary Clause</th><th>Related Clauses</th></tr>
+<tr><td>MDIO framing</td><td>22.2.4.5, 45.3</td><td>45A (voltage translation)</td></tr>
+<tr><td>AN twisted pair</td><td>28</td><td>28B (pause), 28C (message codes)</td></tr>
+<tr><td>AN 1000BASE-X</td><td>37</td><td>36 (PCS), 28B (pause)</td></tr>
+<tr><td>AN single pair</td><td>98</td><td>98A (selector), 98B (tech abilities)</td></tr>
+<tr><td>EEE overview</td><td>78</td><td>78.1-78.4</td></tr>
+<tr><td>EEE TLV</td><td>79.3.5, 79.3.6</td><td>78.4 (DLL negotiation)</td></tr>
+<tr><td>LPI on MII</td><td>22.7</td><td>78.1.1</td></tr>
+<tr><td>BASE-T1 AN</td><td>98.2</td><td>98.5 (state diagrams)</td></tr>
+<tr><td>1000BASE-T AN</td><td>40.5</td><td>28, 37</td></tr>
+<tr><td>State diagram conventions</td><td>21.5</td><td>All AN/EEE clauses</td></tr>
+</table>
+
+<div class="note">
+<strong>Revision History:</strong> This reference document synthesizes IEEE Std 802.3-2022 content from Clauses 22, 28, 37, 45, 78, and 98. All register definitions, timing parameters, and state machine descriptions are transcribed directly from the standard text. In case of discrepancy between this document and the official standard, the official IEEE 802.3-2022 standard prevails. State diagrams take precedence over text per Clauses 28, 37, and 98.
+</div>
+
+</body>
+</html>

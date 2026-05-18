@@ -1,0 +1,2339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IEEE 802.3-2022 PCS/PMA Deep-Dive: 100M &amp; 1G Ethernet RTL Design Reference</title>
+<style>
+:root { --bg:#f8f9fa; --fg:#212529; --accent:#0056b3; --code:#e9ecef; --warn:#fff3cd; --crit:#f8d7da; --ok:#d4edda; }
+body { font-family: "Segoe UI", system-ui, sans-serif; line-height:1.7; max-width:1100px; margin:0 auto; padding:20px; background:var(--bg); color:var(--fg); }
+h1 { color:var(--accent); border-bottom:3px solid var(--accent); padding-bottom:8px; }
+h2 { color:var(--accent); margin-top:36px; border-left:6px solid var(--accent); padding-left:12px; }
+h3 { margin-top:28px; color:#004494; }
+h4 { margin-top:20px; color:#333; }
+table { border-collapse:collapse; width:100%; margin:12px 0; font-size:0.95em; }
+th,td { border:1px solid #bbb; padding:8px 10px; text-align:left; }
+th { background:#e2e6ea; }
+code,pre { font-family: "Consolas", "Courier New", monospace; background:var(--code); padding:2px 6px; border-radius:4px; font-size:0.92em; }
+pre { padding:14px; overflow-x:auto; line-height:1.5; }
+.note { background:#e7f3ff; border-left:4px solid var(--accent); padding:10px 14px; margin:12px 0; }
+.warn { background:var(--warn); border-left:4px solid #856404; padding:10px 14px; margin:12px 0; }
+.crit { background:var(--crit); border-left:4px solid #721c24; padding:10px 14px; margin:12px 0; }
+.ok { background:var(--ok); border-left:4px solid #155724; padding:10px 14px; margin:12px 0; }
+.toc { background:#fff; border:1px solid #ccc; padding:16px 20px; border-radius:8px; }
+.toc ul { list-style:none; padding-left:0; }
+.toc li { margin:6px 0; }
+.toc a { text-decoration:none; color:var(--accent); }
+.toc a:hover { text-decoration:underline; }
+.rtl-box { background:#fff; border:2px dashed var(--accent); padding:14px 18px; border-radius:8px; margin:14px 0; }
+.rtl-box h4 { margin-top:0; color:var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>IEEE 802.3-2022 PCS/PMA Deep-Dive Reference<br><small>100M &amp; 1G Ethernet RTL Design Study</small></h1>
+
+<div class="toc">
+<h3>Table of Contents</h3>
+<ul>
+<li><a href="#sec-100basex">1. 100BASE-X PCS (Clause 24) — 4B/5B</a></li>
+<li><a href="#sec-1000basex">2. 1000BASE-X PCS (Clause 36) — 8B/10B</a></li>
+<li><a href="#sec-1000baset">3. 1000BASE-T PCS (Clause 40) — 4D-PAM5</a></li>
+<li><a href="#sec-100baset1">4. 100BASE-T1 PCS (Clause 96) — PAM3</a></li>
+<li><a href="#sec-1000baset1">5. 1000BASE-T1 PCS (Clause 97) — RS-FEC &amp; PAM3</a></li>
+<li><a href="#sec-rtl">6. RTL Design Checklist</a></li>
+</ul>
+</div>
+
+<!-- ===================== 100BASE-X ===================== -->
+<h2 id="sec-100basex">1. 100BASE-X PCS (Clause 24) — 4B/5B Encoding</h2>
+
+<h3>1.1 Overview</h3>
+<p>100BASE-X (100BASE-TX and 100BASE-FX) uses a 4B/5B block coding scheme derived from FDDI (ISO/IEC 9314-1). The PCS maps four-bit MII nibbles into five-bit code-groups, providing:</p>
+<ul>
+<li>16 Data code-groups (0x0–0xF)</li>
+<li>Control code-groups: Idle (/I/), SSD (/J//K/), ESD (/T//R/), SLEEP (/P/), Error (/H/), Invalid (/V/)</li>
+<li>80% coding efficiency: 100 Mb/s data rate on a 125 Mb/s physical channel</li>
+<li>Sufficient transition density for clock recovery</li>
+</ul>
+
+<h3>1.2 Complete 4B/5B Code-Group Table</h3>
+<table>
+<tr><th>Hex</th><th>Binary (4B)</th><th>5B Code-Group [4:0]</th><th>Name</th><th>Interpretation</th></tr>
+<tr><td>0x0</td><td>0000</td><td>11110</td><td>/0/</td><td>Data 0</td></tr>
+<tr><td>0x1</td><td>0001</td><td>01001</td><td>/1/</td><td>Data 1</td></tr>
+<tr><td>0x2</td><td>0010</td><td>10100</td><td>/2/</td><td>Data 2</td></tr>
+<tr><td>0x3</td><td>0011</td><td>10101</td><td>/3/</td><td>Data 3</td></tr>
+<tr><td>0x4</td><td>0100</td><td>01010</td><td>/4/</td><td>Data 4</td></tr>
+<tr><td>0x5</td><td>0101</td><td>01011</td><td>/5/</td><td>Data 5</td></tr>
+<tr><td>0x6</td><td>0110</td><td>01110</td><td>/6/</td><td>Data 6</td></tr>
+<tr><td>0x7</td><td>0111</td><td>01111</td><td>/7/</td><td>Data 7</td></tr>
+<tr><td>0x8</td><td>1000</td><td>10010</td><td>/8/</td><td>Data 8</td></tr>
+<tr><td>0x9</td><td>1001</td><td>10011</td><td>/9/</td><td>Data 9</td></tr>
+<tr><td>0xA</td><td>1010</td><td>10110</td><td>/A/</td><td>Data A</td></tr>
+<tr><td>0xB</td><td>1011</td><td>10111</td><td>/B/</td><td>Data B</td></tr>
+<tr><td>0xC</td><td>1100</td><td>11010</td><td>/C/</td><td>Data C</td></tr>
+<tr><td>0xD</td><td>1101</td><td>11011</td><td>/D/</td><td>Data D</td></tr>
+<tr><td>0xE</td><td>1110</td><td>11100</td><td>/E/</td><td>Data E</td></tr>
+<tr><td>0xF</td><td>1111</td><td>11101</td><td>/F/</td><td>Data F</td></tr>
+</table>
+
+<h3>1.3 Control Code-Groups</h3>
+<table>
+<tr><th>5B Code [4:0]</th><th>Name</th><th>Interpretation</th></tr>
+<tr><td>11111</td><td>/I/</td><td>Idle; inter-stream fill code</td></tr>
+<tr><td>11000</td><td>/J/</td><td>Start-of-Stream Delimiter, Part 1 of 2 (SSD1)</td></tr>
+<tr><td>10001</td><td>/K/</td><td>Start-of-Stream Delimiter, Part 2 of 2 (SSD2)</td></tr>
+<tr><td>01101</td><td>/T/</td><td>End-of-Stream Delimiter, Part 1 of 2 (ESD1)</td></tr>
+<tr><td>00111</td><td>/R/</td><td>End-of-Stream Delimiter, Part 2 of 2 (ESD2)</td></tr>
+<tr><td>00100</td><td>/H/</td><td>Transmit Error; used to force signaling errors</td></tr>
+<tr><td>00000</td><td>/V/</td><td>Invalid code</td></tr>
+<tr><td>00001</td><td>/V/</td><td>Invalid code</td></tr>
+<tr><td>00010</td><td>/V/</td><td>Invalid code</td></tr>
+<tr><td>00011</td><td>/V/</td><td>Invalid code</td></tr>
+<tr><td>00101</td><td>/V/</td><td>Invalid code</td></tr>
+<tr><td>00110</td><td>/V/</td><td>Invalid code</td></tr>
+<tr><td>01000</td><td>/V/</td><td>Invalid code</td></tr>
+<tr><td>01100</td><td>/V/</td><td>Invalid code</td></tr>
+<tr><td>10000</td><td>/V/</td><td>Invalid code</td></tr>
+<tr><td>11001</td><td>/V/</td><td>Invalid code</td></tr>
+<tr><td>00000</td><td>/P/</td><td>SLEEP; LPI code for EEE capability</td></tr>
+</table>
+
+<div class="note">
+<strong>Note:</strong> The /S/ and /Q/ code-groups from FDDI are not used by 100BASE-X and are interpreted as INVALID. The /R/ code-group is repurposed as ESD2 (was Reset in FDDI). The /H/ code-group propagates receive errors (was Halt Line State in FDDI).
+</div>
+
+<h3>1.4 Start-of-Stream Delimiter (SSD) and End-of-Stream Delimiter (ESD)</h3>
+<table>
+<tr><th>Delimiter</th><th>Sequence</th><th>5B Codes</th><th>Usage</th></tr>
+<tr><td>SSD</td><td>/J/K/</td><td>11000 10001</td><td>Replaces first octet of MAC preamble on TX; restored on RX</td></tr>
+<tr><td>ESD</td><td>/T/R/</td><td>01101 00111</td><td>Sent after TX_EN deassertion; terminates data stream</td></tr>
+</table>
+
+<div class="warn">
+<strong>RTL Critical:</strong> The SSD is <em>unique</em> in that it may be recognized independently of previously established code-group boundaries. The Receive process uses the SSD to <strong>establish code-group alignment</strong>. The ESD cannot be recognized without prior alignment.
+</div>
+
+<h3>1.5 PCS Transmit State Machine (Pseudocode)</h3>
+<pre>
+// Constants
+SSD1 = 5'b11000;   // /J/
+SSD2 = 5'b10001;   // /K/
+ESD1 = 5'b01101;   // /T/
+ESD2 = 5'b00111;   // /R/
+IDLE = 5'b11111;   // /I/
+HALT = 5'b00100;   // /H/
+SLEEP = 5'b00000;  // /P/ (EEE)
+
+// States: BEGIN, IDLE, START_STREAM_J, START_STREAM_K, TRANSMIT_DATA,
+//         TRANSMIT_ERROR, END_STREAM_T, END_STREAM_R, START_ERROR_J,
+//         START_ERROR_K, ERROR_CHECK, TX_SLEEP, TX_QUIET, BackToIDLE
+
+BEGIN:
+  transmitting &lt;= FALSE;
+  COL &lt;= FALSE;
+  tx_bits &lt;= IDLE;
+  if (TX_EN == TRUE &amp;&amp; TX_ER == FALSE) goto START_STREAM_J;
+  else if (EEE &amp;&amp; TX_EN == FALSE &amp;&amp; TX_ER == TRUE &amp;&amp; TXD == 4'b0001)
+    goto TX_SLEEP;  // LPI entry
+  else goto IDLE;
+
+IDLE:
+  transmitting &lt;= FALSE;
+  COL &lt;= FALSE;
+  tx_bits &lt;= IDLE;
+  if (TX_EN == TRUE &amp;&amp; TX_ER == FALSE) goto START_STREAM_J;
+  else if (EEE &amp;&amp; TX_EN == FALSE &amp;&amp; TX_ER == TRUE &amp;&amp; TXD == 4'b0001)
+    goto TX_SLEEP;
+
+START_STREAM_J:
+  transmitting &lt;= TRUE;
+  COL &lt;= receiving;   // collision if receiving while transmitting
+  tx_bits &lt;= SSD1;
+  if (sentCodeGroup.indicate) goto START_STREAM_K;
+
+START_STREAM_K:
+  COL &lt;= receiving;
+  tx_bits &lt;= SSD2;
+  if (sentCodeGroup.indicate) goto TRANSMIT_DATA;
+
+TRANSMIT_DATA:
+  COL &lt;= receiving;
+  tx_bits &lt;= ENCODE(TXD&lt;3:0&gt;);
+  if (sentCodeGroup.indicate &amp;&amp; TX_EN == FALSE &amp;&amp; TX_ER == FALSE)
+    goto END_STREAM_T;
+  else if (sentCodeGroup.indicate &amp;&amp; TX_EN == TRUE &amp;&amp; TX_ER == TRUE)
+    goto TRANSMIT_ERROR;
+
+TRANSMIT_ERROR:
+  COL &lt;= receiving;
+  tx_bits &lt;= HALT;
+  if (sentCodeGroup.indicate &amp;&amp; TX_EN == FALSE) goto END_STREAM_T;
+
+END_STREAM_T:
+  transmitting &lt;= FALSE;
+  COL &lt;= FALSE;
+  tx_bits &lt;= ESD1;
+  if (sentCodeGroup.indicate) goto END_STREAM_R;
+
+END_STREAM_R:
+  tx_bits &lt;= ESD2;
+  if (sentCodeGroup.indicate) goto IDLE;
+
+// EEE LPI Transmit States
+TX_SLEEP:
+  tx_bits &lt;= SLEEP;
+  Start lpi_tx_ts_timer;
+  if (sentCodeGroup.indicate &amp;&amp; lpi_tx_ts_timer_done)
+    goto TX_QUIET;
+  else if (sentCodeGroup.indicate &amp;&amp; TX_EN == TRUE)
+    goto START_STREAM_J;  // abort LPI
+
+TX_QUIET:
+  tx_quiet &lt;= TRUE;
+  Start lpi_tx_tq_timer;
+  if (lpi_tx_tq_timer_done) goto TX_SLEEP;  // refresh
+  else if (TX_EN == TRUE || TX_ER == FALSE || TXD != TX_LP_IDLE)
+    goto BackToIDLE;
+
+BackToIDLE:
+  tx_quiet &lt;= FALSE;
+  goto IDLE;
+</pre>
+
+<h3>1.6 PCS Receive State Machine (Pseudocode)</h3>
+<pre>
+// States: BEGIN, IDLE, CARRIER_DETECT, IDENTIFY_JK, START_OF_STREAM_J,
+//         START_OF_STREAM_K, DATA, END_OF_STREAM, PREMATURE_END,
+//         DATA_ERROR, LINK_FAILED, BAD_SSD, RX_SLEEP, RX_QUIET,
+//         RX_WAKE, START_RX_QUIET, START_RX_SLEEP, WAIT_IDLE,
+//         RX_LPI_LINK_FAIL, WAIT_SLEEP
+
+BEGIN:
+  rx_bits[9:0] &lt;= 10'b11111_11111;
+  receiving &lt;= FALSE;
+  RX_DV &lt;= FALSE;
+  RX_ER &lt;= FALSE;
+  goto IDLE;
+
+IDLE:
+  receiving &lt;= FALSE;
+  RX_DV &lt;= FALSE;
+  RX_ER &lt;= FALSE;
+  if (link_status != OK) goto LINK_FAILED;
+  if (rx_bits[0] == 0 &amp;&amp; rx_bits[9:2] != 8'b11111111) goto CARRIER_DETECT;
+
+CARRIER_DETECT:
+  receiving &lt;= TRUE;
+  // Two non-contiguous zeros within 10 bits = carrier
+  if (rx_bits[9:0] == {SSD1, SSD2}) goto START_OF_STREAM_J;
+  else if (rx_bits[9:0] == {SLEEP, SSD1}) goto IDENTIFY_JK;  // EEE
+  else goto DATA_ERROR;  // False carrier
+
+IDENTIFY_JK:  // EEE only
+  if (rx_bits[9:0] == {SLEEP, SLEEP}) goto WAIT_SLEEP;
+  else goto IDLE;
+
+START_OF_STREAM_J:
+  RX_DV &lt;= TRUE;
+  RXD &lt;= 4'b0101;   // preamble nibble replacement
+  goto START_OF_STREAM_K;
+
+START_OF_STREAM_K:
+  RXD &lt;= 4'b0101;   // preamble nibble replacement
+  if (gotCodeGroup.indicate) goto DATA;
+
+DATA:
+  RX_ER &lt;= FALSE;
+  RXD &lt;= DECODE(rx_bits[9:5]);
+  if (gotCodeGroup.indicate &amp;&amp; rx_bits[9:5] not in DATA) goto DATA_ERROR;
+  if (gotCodeGroup.indicate &amp;&amp; rx_bits[9:0] == ESD) goto END_OF_STREAM;
+  if (gotCodeGroup.indicate &amp;&amp; rx_bits[9:0] == IDLES) goto PREMATURE_END;
+
+END_OF_STREAM:
+  rx_bits &lt;= 10'b11111_11111;
+  receiving &lt;= FALSE;
+  goto IDLE;
+
+PREMATURE_END:
+  RX_ER &lt;= TRUE;
+  receiving &lt;= FALSE;
+  goto IDLE;
+
+DATA_ERROR:
+  RX_ER &lt;= TRUE;
+  if (gotCodeGroup.indicate) goto END_OF_STREAM;
+
+LINK_FAILED:
+  RX_ER &lt;= TRUE;
+  receiving &lt;= FALSE;
+  goto IDLE;
+
+BAD_SSD:
+  RX_ER &lt;= TRUE;
+  RXD &lt;= 4'b1110;   // False Carrier Indication
+  if (rx_bits[9:0] == IDLES) goto IDLE;
+
+// EEE LPI Receive States
+WAIT_SLEEP:
+  rx_lpi &lt;= TRUE;
+  Start lpi_rx_ts_timer;
+  if (lpi_rx_ts_timer_done) goto START_RX_QUIET;
+
+START_RX_QUIET:
+  rx_quiet &lt;= TRUE;
+  Start lpi_rx_tq_timer;
+  if (signal_status == OFF || lpi_rx_tq_timer_done)
+    goto RX_LPI_LINK_FAIL;
+  if (rx_bits == IDLES) goto WAIT_IDLE;
+
+WAIT_IDLE:
+  Start lpi_rx_ti_timer;
+  if (lpi_rx_ti_timer_done) goto IDLE;
+  if (rx_bits != IDLES) goto START_RX_SLEEP;
+
+START_RX_SLEEP:
+  Start lpi_rx_ts_timer;
+  goto RX_SLEEP;
+
+RX_SLEEP:
+  rx_quiet &lt;= FALSE;
+  if (rx_bits == IDLES) goto WAIT_IDLE;
+  if (signal_status == OFF) goto RX_LPI_LINK_FAIL;
+
+RX_WAKE:
+  rx_quiet &lt;= FALSE;
+  Start lpi_link_fail_timer;
+  if (rx_bits == IDLES) goto IDLE;
+  if (lpi_link_fail_timer_done) goto RX_LPI_LINK_FAIL;
+
+RX_LPI_LINK_FAIL:
+  lpi_link_fail &lt;= TRUE;
+  rx_quiet &lt;= FALSE;
+  goto IDLE;
+</pre>
+
+<h3>1.7 Carrier Sense and Collision Detection</h3>
+<p>The Carrier Sense process asserts <code>CRS</code> on the MII when either <code>transmitting</code> or <code>receiving</code> is TRUE:</p>
+<pre>
+CARRIER_SENSE_OFF:  CRS &lt;= FALSE;
+  if (transmitting == TRUE || receiving == TRUE) goto CARRIER_SENSE_ON;
+
+CARRIER_SENSE_ON:   CRS &lt;= TRUE;
+  if (transmitting == FALSE &amp;&amp; receiving == FALSE) goto CARRIER_SENSE_OFF;
+</pre>
+
+<p>Collision detection is performed by the Transmit process: <code>COL &lt;= transmitting &amp;&amp; receiving</code>. This follows the 10BASE-T model where a reception occurring simultaneously with transmission indicates a collision.</p>
+
+<h3>1.8 Code-Group Alignment</h3>
+<p>The Receive Bits process collects serial code-bits from the PMA into a 10-bit sliding window <code>rx_bits[9:0]</code>. Before alignment:</p>
+<ul>
+<li>New code-bits shift into <code>rx_bits[0]</code></li>
+<li>The process signals <code>gotCodeGroup.indicate</code> every 5 bits once alignment is achieved</li>
+<li>Alignment is established by detecting the SSD (<code>/J/K/</code> = <code>11000 10001</code>)</li>
+<li>After alignment, code-groups are decoded from <code>rx_bits[9:5]</code> (current) and <code>rx_bits[4:0]</code> (previous)</li>
+</ul>
+
+<div class="rtl-box">
+<h4>RTL Implementation Note: 5-Bit Alignment Logic</h4>
+<pre>
+always_ff @(posedge clk_125mhz) begin
+  if (!aligned) begin
+    rx_bits &lt;= {rx_bits[8:0], rx_code_bit};
+    // Scan for SSD pattern across all 5 possible alignments
+    if (rx_bits[9:5] == SSD1 &amp;&amp; rx_bits[4:0] == SSD2)
+      aligned &lt;= 1'b1;
+  end else begin
+    // Aligned: process 5 bits at a time
+    bit_counter &lt;= bit_counter + 1'b1;
+    rx_bits &lt;= {rx_bits[8:0], rx_code_bit};
+    if (bit_counter == 3'd4) begin
+      gotCodeGroup &lt;= 1'b1;
+      bit_counter &lt;= 3'd0;
+    end
+  end
+end
+</pre>
+</div>
+
+<h3>1.9 Code Violation Detection</h3>
+<p>Code violations are detected when:</p>
+<ul>
+<li>An invalid code-group is received (any /V/ code)</li>
+<li>An ESD is not properly formed (/T/ not followed by /R/)</li>
+<li>An SSD is malformed</li>
+<li>Two Idle code-groups (/I/I/) appear before an ESD (premature termination)</li>
+<li>The /H/ code-group appears in the data stream (transmit error propagation)</li>
+</ul>
+<p>Invalid code-groups result in <code>RX_ER</code> assertion and may cause the Receive state machine to enter the DATA_ERROR state.</p>
+
+
+<!-- ===================== 1000BASE-X ===================== -->
+<h2 id="sec-1000basex">2. 1000BASE-X PCS (Clause 36) — 8B/10B Encoding</h2>
+
+<h3>2.1 Overview</h3>
+<p>1000BASE-X is based on ANSI INCITS 230-1994 (Fibre Channel Physical and Signaling Interface). It uses 8B/10B block coding, providing:</p>
+<ul>
+<li>256 Data code-groups (/Dx.y/) and 12 Special code-groups (/Kx.y/)</li>
+<li>DC balance via Running Disparity (RD)</li>
+<li>High transition density (3–8 transitions per symbol)</li>
+<li>Comma-based alignment via /K28.5/</li>
+<li>Ordered sets for frame delineation and link management</li>
+</ul>
+
+<h3>2.2 8B/10B Notation</h3>
+<p>An unencoded octet is labeled <code>ABCD EFGH</code> (bit A = LSB). The 10-bit encoded code-group is labeled <code>abcdei fghj</code>:</p>
+<ul>
+<li>Data code-group: <code>/Dx.y/</code> where x = decimal value of EDCBA, y = decimal value of HGF</li>
+<li>Special code-group: <code>/Kx.y/</code> where x = decimal value of EDCBA, y = decimal value of HGF</li>
+<li>Bit transmission order: a, b, c, d, e, i, f, g, h, j (bit a first)</li>
+</ul>
+
+<h3>2.3 Running Disparity (RD) Rules</h3>
+<p>Running Disparity is a binary parameter with values negative (–) or positive (+). Initial RD after reset is negative.</p>
+<table>
+<tr><th>Rule</th><th>Description</th></tr>
+<tr><td>Sub-block division</td><td>First 6 bits (abcdei) = six-bit sub-block; last 4 bits (fghj) = four-bit sub-block</td></tr>
+<tr><td>RD+ end condition</td><td>Sub-block has more ones than zeros; OR six-bit = 000111; OR four-bit = 0011</td></tr>
+<tr><td>RD– end condition</td><td>Sub-block has more zeros than ones; OR six-bit = 111000; OR four-bit = 1100</td></tr>
+<tr><td>Neutral sub-block</td><td>Equal ones and zeros: RD passes through unchanged</td></tr>
+<tr><td>Code-group RD</td><td>RD at start of six-bit sub-block = RD at end of last code-group; RD at start of four-bit = RD at end of six-bit; RD at end of code-group = RD at end of four-bit</td></tr>
+</table>
+
+<div class="note">
+<strong>Key Constraint:</strong> Sub-blocks 000111 and 0011 are generated only when RD at sub-block start is positive. Sub-blocks 111000 and 1100 are generated only when RD at sub-block start is negative. This ensures proper DC balance and run-length limiting.
+</div>
+
+<h3>2.4 Special Code-Groups (K-Codes)</h3>
+<table>
+<tr><th>Name</th><th>Octet Bits (HGF EDCBA)</th><th>RD– abcdei fghj</th><th>RD+ abcdei fghj</th><th>Usage</th></tr>
+<tr><td>K28.0</td><td>000 11100</td><td>001111 0100</td><td>110000 1011</td><td>Reserved</td></tr>
+<tr><td>K28.1</td><td>001 11100</td><td>001111 1001</td><td>110000 0110</td><td>Contains comma</td></tr>
+<tr><td>K28.2</td><td>010 11100</td><td>001111 0101</td><td>110000 1010</td><td>Reserved</td></tr>
+<tr><td>K28.3</td><td>011 11100</td><td>001111 0011</td><td>110000 1100</td><td>/A/ — XAUI lane align</td></tr>
+<tr><td>K28.4</td><td>100 11100</td><td>001111 0010</td><td>110000 1101</td><td>/Q/ — Local Fault</td></tr>
+<tr><td>K28.5</td><td>101 11100</td><td>001111 1010</td><td>110000 0101</td><td>COMMA — Sync delimiter</td></tr>
+<tr><td>K28.6</td><td>110 11100</td><td>001111 0110</td><td>110000 1001</td><td>Reserved</td></tr>
+<tr><td>K28.7</td><td>111 11100</td><td>001111 1000</td><td>110000 0111</td><td>Reserved (diagnostic only)</td></tr>
+<tr><td>K23.7</td><td>111 10111</td><td>111010 1000</td><td>000101 0111</td><td>/R/ — Error propagation</td></tr>
+<tr><td>K27.7</td><td>111 11011</td><td>110110 1000</td><td>001001 0111</td><td>/S/ — Start of packet</td></tr>
+<tr><td>K29.7</td><td>111 11101</td><td>101110 1000</td><td>010001 0111</td><td>/T/ — Terminate</td></tr>
+<tr><td>K30.7</td><td>111 11110</td><td>011110 1000</td><td>100001 0111</td><td>/V/ — Invalid code</td></tr>
+</table>
+
+<h3>2.5 Ordered Sets</h3>
+<table>
+<tr><th>Ordered Set</th><th>Encoding</th><th>Purpose</th></tr>
+<tr><td>/I/ (Idle)</td><td>K28.5 Dxx.y</td><td>Inter-frame fill; alternating /I1/ (K28.5 D5.6) and /I2/ (K28.5 D16.2) to maintain DC balance</td></tr>
+<tr><td>/S/ (Start)</td><td>K27.7</td><td>Start of packet delimiter (SPD)</td></tr>
+<tr><td>/T/ (Terminate)</td><td>K29.7</td><td>End of packet delimiter (EPD)</td></tr>
+<tr><td>/R/ (Carrier_Extend)</td><td>K23.7</td><td>Error propagation; carrier extension</td></tr>
+<tr><td>/V/ (Error)</td><td>K30.7</td><td>Invalid code indication</td></tr>
+<tr><td>/Q/ (Local Fault)</td><td>K28.4</td><td>Link fault signaling</td></tr>
+<tr><td>/A/ (Align)</td><td>K28.3</td><td>XAUI lane alignment</td></tr>
+<tr><td>/C/ (Configuration)</td><td>K28.5 D21.5 / D2.2 + Config_Reg</td><td>Auto-Negotiation configuration</td></tr>
+<tr><td>/LI/ (LPI)</td><td>K28.5 Dxx.y (EEE)</td><td>Low Power Idle signaling</td></tr>
+</table>
+
+<h3>2.6 Comma Detection and Synchronization</h3>
+<p>The comma pattern is a 7-bit string used for code-group alignment:</p>
+<ul>
+<li><strong>Comma+</strong>: <code>0011111</code> (appears in /K28.1/, /K28.5/, /K28.7/ when RD–)</li>
+<li><strong>Comma–</strong>: <code>1100000</code> (appears in /K28.1/, /K28.5/, /K28.7/ when RD+)</li>
+</ul>
+<p>The comma is <strong>singular</strong>: in the absence of errors, it cannot appear in any other location within a code-group or across code-group boundaries (except the diagnostic /K28.7/ case).</p>
+
+<div class="rtl-box">
+<h4>RTL Implementation: Comma Detector</h4>
+<pre>
+// Comma detection on raw 10-bit stream (or parallel bus)
+wire comma_plus  = (rx_bits[9:3] == 7'b0011111) || (rx_bits[8:2] == 7'b0011111);
+wire comma_minus = (rx_bits[9:3] == 7'b1100000) || (rx_bits[8:2] == 7'b1100000);
+wire comma_detected = comma_plus || comma_minus;
+
+// Alignment: shift until comma is at bits [9:3]
+always_ff @(posedge rx_clk) begin
+  if (!sync_acquired) begin
+    rx_shift_reg &lt;= {rx_shift_reg[8:0], rx_serial_bit};
+    if (comma_detected &amp;&amp; !alignment_found) begin
+      alignment_offset &lt;= current_bit_position;
+      alignment_found &lt;= 1'b1;
+    end
+  end
+end
+</pre>
+</div>
+
+<h3>2.7 Synchronization State Machine</h3>
+<p>The PCS Synchronization process monitors received code-groups and sets <code>sync_status</code> to indicate reliable operation.</p>
+<pre>
+// States: LOSS_OF_SYNC, COMMA_DETECT_1, ACQUIRE_SYNC_1,
+//         COMMA_DETECT_M, ACQUIRE_SYNC_M, SYNC_ACQUIRED_1, SYNC_ACQUIRED_N
+
+LOSS_OF_SYNC:
+  sync_status &lt;= FAIL;
+  if (comma_detected) goto COMMA_DETECT_1;
+
+COMMA_DETECT_1:
+  if (valid_code_group &amp;&amp; cg_in_even_position) goto ACQUIRE_SYNC_1;
+  else goto LOSS_OF_SYNC;
+
+ACQUIRE_SYNC_1:
+  if (comma_detected) goto COMMA_DETECT_M;
+  else goto LOSS_OF_SYNC;
+
+COMMA_DETECT_M:
+  if (valid_code_group &amp;&amp; cg_in_odd_position) goto ACQUIRE_SYNC_M;
+  else goto LOSS_OF_SYNC;
+
+ACQUIRE_SYNC_M:
+  if (comma_detected) goto SYNC_ACQUIRED_1;
+  else goto LOSS_OF_SYNC;
+
+SYNC_ACQUIRED_1:
+  sync_status &lt;= OK;
+  if (invalid_code_group || unexpected_comma_position)
+    goto LOSS_OF_SYNC;  // or hysteresis counter
+  if (good_cgs == N) goto SYNC_ACQUIRED_N;
+
+SYNC_ACQUIRED_N:
+  sync_status &lt;= OK;
+  // Hysteresis: require M consecutive invalid code-groups before declaring loss
+  if (invalid_cg_counter &gt;= M) goto LOSS_OF_SYNC;
+</pre>
+
+<table>
+<tr><th>Parameter</th><th>Typical Value</th><th>Description</th></tr>
+<tr><td>cg Timer</td><td>8 ns</td><td>Code-group period at 125 MHz</td></tr>
+<tr><td>Good CGs for ACQUIRE_SYNC_N</td><td>3–5</td><td>Consecutive valid code-groups to advance</td></tr>
+<tr><td>Bad CGs for LOSS_OF_SYNC</td><td>3–4</td><td>Consecutive invalid code-groups to lose sync</td></tr>
+<tr><td>comma+ / comma–</td><td>—</td><td>Must be transmitted with equivalent or greater frequency of comma+</td></tr>
+</table>
+
+<h3>2.8 Link Status State Machine</h3>
+<pre>
+// States: LINK_DOWN, LINK_INIT, LINK_UP
+LINK_DOWN:
+  link_status &lt;= FAIL;
+  if (sync_status == OK &amp;&amp; valid_config_received)
+    goto LINK_INIT;
+
+LINK_INIT:
+  if (sync_status == OK &amp;&amp; remote_ready)
+    goto LINK_UP;
+  else if (sync_status == FAIL)
+    goto LINK_DOWN;
+
+LINK_UP:
+  link_status &lt;= OK;
+  if (sync_status == FAIL)
+    goto LINK_DOWN;
+</pre>
+
+<h3>2.9 Carrier Sense and Collision Mapping</h3>
+<p>For half-duplex operation, the Carrier Sense process controls the GMII <code>CRS</code> signal:</p>
+<pre>
+CRS &lt;= transmitting || receiving;
+</pre>
+<p>Collision detection:</p>
+<pre>
+COL &lt;= transmitting &amp;&amp; receiving;
+</pre>
+
+<h3>2.10 Running Disparity Tracking (RTL)</h3>
+<div class="rtl-box">
+<h4>RTL Implementation: RD Tracker</h4>
+<pre>
+// Running Disparity update logic
+function automatic logic rd_next(logic [9:0] cg, logic rd_in);
+  logic [5:0] six = cg[9:4];  // abcdei
+  logic [3:0] four = {cg[3:0], cg[??]};  // fghj
+  // Simplified: count ones
+  int ones6 = $countones(six);
+  int ones4 = $countones(four);
+  logic rd6, rd4;
+  
+  if (ones6 &gt; 3 || six == 6'b000111) rd6 = 1'b1;  // RD+
+  else if (ones6 &lt; 3 || six == 6'b111000) rd6 = 1'b0; // RD-
+  else rd6 = rd_in;
+  
+  if (ones4 &gt; 2 || four == 4'b0011) rd4 = 1'b1;
+  else if (ones4 &lt; 2 || four == 4'b1100) rd4 = 1'b0;
+  else rd4 = rd6;
+  
+  return rd4;
+endfunction
+
+always_ff @(posedge tx_clk)
+  tx_rd &lt;= rd_next(tx_code_group, tx_rd);
+</pre>
+</div>
+
+
+<!-- ===================== 1000BASE-T ===================== -->
+<h2 id="sec-1000baset">3. 1000BASE-T PCS (Clause 40) — 4D-PAM5</h2>
+
+<h3>3.1 Overview</h3>
+<p>1000BASE-T achieves 1 Gb/s over four pairs of Category 5 cabling by transmitting 250 Mb/s per pair using 4D-PAM5 modulation at 125 MBd. Each four-dimensional symbol is a 4-tuple <code>(An, Bn, Cn, Dn)</code> of quinary symbols from the set <code>{–2, –1, 0, +1, +2}</code>.</p>
+<ul>
+<li><strong>Data rate:</strong> 1000 Mb/s aggregate (250 Mb/s per pair)</li>
+<li><strong>Symbol rate:</strong> 125 MBd per pair (8 ns symbol period)</li>
+<li><strong>Modulation:</strong> 5-level PAM (4D-PAM5)</li>
+<li><strong>Encoding:</strong> 8 data bits + 1 convolutional bit → 9 bits → 4 PAM5 symbols</li>
+<li><strong>Full duplex:</strong> Simultaneous TX/RX on same pairs via hybrids and echo cancellers</li>
+</ul>
+
+<h3>3.2 Side-Stream Scrambler Polynomials</h3>
+<p>The PCS Transmit employs side-stream scrambling to ensure uncorrelated symbols and no DC bias. Two different polynomials are used for MASTER and SLAVE:</p>
+
+<table>
+<tr><th>Role</th><th>Polynomial</th><th>LFSR Taps</th></tr>
+<tr><td>MASTER</td><td>g<sub>M</sub>(x) = 1 + x<sup>13</sup> + x<sup>33</sup></td><td>Scrn[0] = Scrn[13] ⊕ Scrn[33]</td></tr>
+<tr><td>SLAVE</td><td>g<sub>S</sub>(x) = 1 + x<sup>20</sup> + x<sup>33</sup></td><td>Scrn[0] = Scrn[20] ⊕ Scrn[33]</td></tr>
+</table>
+
+<p>The 33-bit shift register <code>Scrn[32:0]</code> generates a maximum-length sequence of period 2<sup>33</sup>–1. The state shall <strong>never</strong> be initialized to all zeros.</p>
+
+<div class="rtl-box">
+<h4>RTL Implementation: 33-bit Side-Stream Scrambler</h4>
+<pre>
+module scrambler_33bit (
+  input  wire        clk,
+  input  wire        rst_n,
+  input  wire        master_mode,  // 1=MASTER, 0=SLAVE
+  output wire        scr_out       // Scrn[0]
+);
+  logic [32:0] lfsr;
+  wire tap = master_mode ? lfsr[13] : lfsr[20];
+  
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      lfsr &lt;= 33'h1;  // Non-zero seed (implementer-defined)
+    end else begin
+      lfsr &lt;= {tap ^ lfsr[32], lfsr[32:1]};
+    end
+  end
+  
+  assign scr_out = lfsr[0];
+endmodule
+</pre>
+</div>
+
+<h3>3.3 Generation of Scrambler-Derived Bits</h3>
+<p>From <code>Scrn[0]</code>, three mutually uncorrelated bit streams <code>Xn</code>, <code>Yn</code>, and <code>Scrn[0]</code> are generated. These are then expanded using polynomial <code>g(x) = x<sup>3</sup> ⊕ x<sup>8</sup></code> to create 12 bits:</p>
+
+<table>
+<tr><th>Bits</th><th>Generation</th><th>Purpose</th></tr>
+<tr><td>Xn</td><td>Scrn[4] ⊕ Scrn[6]</td><td>Scrambler auxiliary bit</td></tr>
+<tr><td>Yn</td><td>Scrn[1] ⊕ Scrn[5]</td><td>Sign randomization bit</td></tr>
+<tr><td>Syn[3:0]</td><td>g<sup>k</sup>(Scrn[0])</td><td>Scramble octet Scn[7:0]</td></tr>
+<tr><td>Sxn[3:0]</td><td>g<sup>k</sup>(Xn)</td><td>Scramble data TXD[7:4]</td></tr>
+<tr><td>Sgn[3:0]</td><td>g<sup>k</sup>(Yn)</td><td>Randomize quinary symbol signs</td></tr>
+</table>
+
+<p>Specific equations:</p>
+<pre>
+Syn[0] = Scrn[0]
+Syn[1] = Scrn[3]  ⊕ Scrn[8]
+Syn[2] = Scrn[6]  ⊕ Scrn[16]
+Syn[3] = Scrn[9]  ⊕ Scrn[14] ⊕ Scrn[19] ⊕ Scrn[24]
+
+Sxn[0] = Xn = Scrn[4] ⊕ Scrn[6]
+Sxn[1] = Scrn[7]  ⊕ Scrn[9]  ⊕ Scrn[12] ⊕ Scrn[14]
+Sxn[2] = Scrn[10] ⊕ Scrn[12] ⊕ Scrn[20] ⊕ Scrn[22]
+Sxn[3] = Scrn[13] ⊕ Scrn[15] ⊕ Scrn[18] ⊕ Scrn[20] ⊕ Scrn[23] ⊕ Scrn[25] ⊕ Scrn[28] ⊕ Scrn[30]
+
+Sgn[0] = Yn = Scrn[1] ⊕ Scrn[5]
+Sgn[1] = Scrn[4]  ⊕ Scrn[8]  ⊕ Scrn[9]  ⊕ Scrn[13]
+Sgn[2] = Scrn[7]  ⊕ Scrn[11] ⊕ Scrn[17] ⊕ Scrn[21]
+Sgn[3] = Scrn[10] ⊕ Scrn[14] ⊕ Scrn[15] ⊕ Scrn[19] ⊕ Scrn[20] ⊕ Scrn[24] ⊕ Scrn[25] ⊕ Scrn[29]
+</pre>
+
+<h3>3.4 Convolutional Encoder</h3>
+<p>A 4-state convolutional encoder adds 1 bit of redundancy to 8 scrambled data bits, producing 9 bits that are mapped to four PAM5 symbols. The encoder uses a 3-bit state <code>csn[2:0]</code>:</p>
+
+<pre>
+csn[0] = csn-1[2]   // state feedback
+csresetn = tx_enablen-2 &amp; ~tx_enablen   // reset at end of frame
+
+// State update (during data transmission)
+csn[1] = Sdn[6] ⊕ csn-1[0]   if tx_enablen-2 == 1
+       = 0                    else
+csn[2] = Sdn[7] ⊕ csn-1[1]   if tx_enablen-2 == 1
+       = 0                    else
+
+// Output bit
+Sdn[8] = csn[0]
+</pre>
+
+<p>The convolutional encoder has 4 states (csn[1:0]):</p>
+<table>
+<tr><th>State</th><th>csn[2:0]</th><th>Next State (Sdn[7:6]=00)</th><th>Next State (Sdn[7:6]=01)</th><th>Next State (Sdn[7:6]=10)</th><th>Next State (Sdn[7:6]=11)</th></tr>
+<tr><td>S0</td><td>000</td><td>00</td><td>10</td><td>01</td><td>11</td></tr>
+<tr><td>S1</td><td>001</td><td>10</td><td>00</td><td>11</td><td>01</td></tr>
+<tr><td>S2</td><td>010</td><td>01</td><td>11</td><td>00</td><td>10</td></tr>
+<tr><td>S3</td><td>011</td><td>11</td><td>01</td><td>10</td><td>00</td></tr>
+</table>
+
+<div class="note">
+<strong>Trellis Note:</strong> The encoder is a rate-8/9 systematic convolutional code with 4 states. The Sdn[8] bit is the parity output. The decoder in the PMA uses a Viterbi algorithm on the received PAM5 symbols to recover the most likely transmitted data sequence.
+</div>
+
+<h3>3.5 Generation of Sdn[8:0]</h3>
+<pre>
+// Scrambler octet Scn[7:0]
+Scn[7:4] = (tx_enablen-2 == 1) ? Sxn[3:0] : (tx_mode == SEND_Z) ? 4'b0000 : (Syn-1[3:1] ^ 3'b111);
+Scn[3:1] = (tx_mode == SEND_Z) ? 3'b000 : ((n-n0) == 0 mod 2) ? Syn-1[3:1] : Syn[3:1];
+Scn[0]   = (tx_mode == SEND_Z) ? 1'b0 : Syn[0];
+
+// Scrambled data + control bits
+Sdn[7] = (csresetn == 0 &amp;&amp; tx_enablen-2 == 1) ? Scn[7] ^ TXDn[7] : (csresetn == 1) ? csn-1[1] : Scn[7];
+Sdn[6] = (csresetn == 0 &amp;&amp; tx_enablen-2 == 1) ? Scn[6] ^ TXDn[6] : (csresetn == 1) ? csn-1[0] : Scn[6];
+Sdn[5:4] = (tx_enablen-2 == 1) ? Scn[5:4] ^ TXDn[5:4] : Scn[5:4];
+Sdn[3] = (tx_enablen-2 == 1) ? Scn[3] ^ TXDn[3] : ((loc_lpi_req == TRUE) &amp;&amp; (tx_mode != SEND_Z)) ? Scn[3] ^ 1'b1 : Scn[3];
+Sdn[2] = (tx_enablen-2 == 1) ? Scn[2] ^ TXDn[2] : ((loc_rcvr_status == OK) &amp;&amp; (tx_mode != SEND_Z)) ? Scn[2] ^ 1'b1 : Scn[2];
+Sdn[1] = (tx_enablen-2 == 1) ? Scn[1] ^ TXDn[1] : ((loc_update_done == TRUE) &amp;&amp; (tx_mode != SEND_Z)) ? Scn[1] ^ 1'b1 : Scn[1] ^ cext_errn;
+Sdn[0] = (tx_enablen-2 == 1) ? Scn[0] ^ TXDn[0] : Scn[0] ^ cextn;
+Sdn[8] = csn[0];
+</pre>
+
+<h3>3.6 4D-PAM5 Bit-to-Symbol Mapping</h3>
+<p>The 9-bit word <code>Sdn[8:0]</code> is mapped to a quartet of quinary symbols <code>(TAn, TBn, TCn, TDn)</code> via Table 40–1 (even subsets) and Table 40–2 (odd subsets). The mapping uses <code>Sdn[6:8]</code> to select one of four 2D subsets, and <code>Sdn[5:0]</code> to select the specific symbol quartet.</p>
+
+<p><strong>Subset selection by Sdn[6:8]:</strong></p>
+<table>
+<tr><th>Sdn[6:8]</th><th>Subset</th><th>Symbol Pattern</th></tr>
+<tr><td>000</td><td>Even 0</td><td>Standard mapping</td></tr>
+<tr><td>010</td><td>Even 1</td><td>Shifted by +1 on pairs B,D</td></tr>
+<tr><td>100</td><td>Even 2</td><td>Shifted by +1 on pairs A,B</td></tr>
+<tr><td>110</td><td>Even 3</td><td>Shifted by +1 on pairs A,D</td></tr>
+<tr><td>001</td><td>Odd 0</td><td>Standard +1 on pair D</td></tr>
+<tr><td>011</td><td>Odd 1</td><td>Standard +1 on pair C</td></tr>
+<tr><td>101</td><td>Odd 2</td><td>Standard +1 on pairs B,C,D</td></tr>
+<tr><td>111</td><td>Odd 3</td><td>Standard +1 on pairs A,C,D</td></tr>
+</table>
+
+<p><strong>Selected mapping examples (Even subsets, Sdn[6:8]=000):</strong></p>
+<table>
+<tr><th>Sdn[5:0]</th><th>TAn</th><th>TBn</th><th>TCn</th><th>TDn</th><th>Condition</th></tr>
+<tr><td>000000</td><td>0</td><td>0</td><td>0</td><td>0</td><td>Normal</td></tr>
+<tr><td>000001</td><td>–2</td><td>0</td><td>0</td><td>0</td><td>Normal</td></tr>
+<tr><td>000010</td><td>0</td><td>–2</td><td>0</td><td>0</td><td>Normal</td></tr>
+<tr><td>010000</td><td>+1</td><td>+1</td><td>+1</td><td>+1</td><td>Normal</td></tr>
+<tr><td>100000</td><td>+2</td><td>0</td><td>0</td><td>0</td><td>Normal</td></tr>
+<tr><td>XXXXXX</td><td>0</td><td>+2</td><td>+2</td><td>0</td><td>xmt_err</td></tr>
+<tr><td>XXXXXX</td><td>+2</td><td>0</td><td>0</td><td>+2</td><td>CSReset</td></tr>
+<tr><td>XXXXXX</td><td>+2</td><td>+2</td><td>+2</td><td>+2</td><td>SSD1</td></tr>
+<tr><td>XXXXXX</td><td>+2</td><td>+2</td><td>+2</td><td>–2</td><td>SSD2 / ESD1</td></tr>
+</table>
+
+<div class="warn">
+<strong>Important:</strong> During idle, SSD, and carrier extension, the PCS Transmit <strong>reverses the sign</strong> of the transmitted symbols. This allows the receiver to distinguish data/CSReset/ESD sequences from SSD/idle/carrier extension sequences.
+</div>
+
+<h3>3.7 SSD and ESD Encoding</h3>
+<table>
+<tr><th>Condition</th><th>Symbols (TAn, TBn, TCn, TDn)</th></tr>
+<tr><td>SSD1</td><td>(+2, +2, +2, +2)</td></tr>
+<tr><td>SSD2</td><td>(+2, +2, +2, –2)</td></tr>
+<tr><td>CSReset (normal)</td><td>(+2, –2, –2, +2)</td></tr>
+<tr><td>CSExtend</td><td>(+2, 0, 0, +2)</td></tr>
+<tr><td>CSExtend_Err</td><td>(–2, +2, +2, –2)</td></tr>
+<tr><td>ESD1</td><td>(+2, +2, +2, +2)</td></tr>
+<tr><td>ESD2_Ext_0</td><td>(+2, +2, +2, –2)</td></tr>
+<tr><td>ESD2_Ext_1</td><td>(+2, +2, –2, +2)</td></tr>
+<tr><td>ESD2_Ext_2</td><td>(+2, –2, +2, +2)</td></tr>
+<tr><td>ESD_Ext_Err</td><td>(–2, +2, +2, +2)</td></tr>
+</table>
+
+<h3>3.8 PCS Transmit State Machine</h3>
+<pre>
+// Modes: SEND_N (normal), SEND_I (idle/training), SEND_Z (zeros)
+
+// Data Transmission Enable process:
+if (tx_mode == SEND_N) begin
+  tx_enable &lt;= TX_EN;
+  tx_error  &lt;= TX_ER;
+end else begin
+  tx_enable &lt;= FALSE;
+  tx_error  &lt;= FALSE;
+end
+
+// PCS Transmit:
+// Between frames: transmit idle symbols (restricted to {+2, 0, –2})
+// Upon tx_enable assertion: send SSD1, SSD2, then data
+// Upon tx_enable deassertion: send CSReset (2 symbols), ESD (2 symbols), then idle
+// If TX_ER asserted during frame: xmt_err substitution
+</pre>
+
+<h3>3.9 PCS Receive State Machine</h3>
+<pre>
+// Receive process accepts rx_symb_vector from PMA
+// Detects SSD → asserts RX_DV
+// Decodes PAM5 → Sdn[8:0] → descrambles → GMII octets
+// Detects ESD → deasserts RX_DV
+// During idle: monitors loc_rcvr_status encoding from remote PHY
+// During data: descrambles and presents RXD<7:0>
+</pre>
+
+<h3>3.10 Auto-Negotiation and Training</h3>
+<p>1000BASE-T uses Clause 28 Auto-Negotiation with Fast Link Pulses (FLP) and Normal Link Pulses (NLP):</p>
+<ul>
+<li><strong>FLP:</strong> 33 pulse positions (17 clock, 16 data) at 125 µs intervals — advertises capabilities</li>
+<li><strong>NLP:</strong> 10BASE-T compatibility pulse — used for 10/100/1000 negotiation</li>
+<li><strong>MASTER/SLAVE:</strong> Determined during Auto-Negotiation; MASTER uses local clock, SLAVE uses recovered clock (loop timing)</li>
+</ul>
+
+<p>After Auto-Negotiation, the PHY enters training mode:</p>
+<ol>
+<li>PMA PHY Control sends <code>SEND_I</code> (idle training symbols)</li>
+<li>Receiver trains echo canceller, equalizer, and timing recovery</li>
+<li>Descrambler achieves lock → <code>scr_status = OK</code></li>
+<li>Receiver signals <code>loc_rcvr_status = OK</code> to remote PHY via idle encoding</li>
+<li>Both sides ready → transition to <code>SEND_N</code> (normal data mode)</li>
+</ol>
+
+
+<!-- ===================== 100BASE-T1 ===================== -->
+<h2 id="sec-100baset1">4. 100BASE-T1 PCS (Clause 96) — PAM3 over Single Twisted-Pair</h2>
+
+<h3>4.1 Overview</h3>
+<p>100BASE-T1 operates at 100 Mb/s over a single balanced twisted-pair up to 15 m. It uses full-duplex communication with echo cancellation and 3-level PAM (PAM3) at 66.666 MBd.</p>
+<ul>
+<li><strong>Data rate:</strong> 100 Mb/s at MII</li>
+<li><strong>Symbol rate:</strong> 66.666 MBd (15 ns symbol period)</li>
+<li><strong>Modulation:</strong> PAM3 (ternary: –1, 0, +1)</li>
+<li><strong>Coding:</strong> 4B/3B conversion + side-stream scrambling + ternary pair mapping</li>
+<li><strong>Interface:</strong> Clause 22 MII (4-bit nibble-wide)</li>
+</ul>
+
+<h3>4.2 4B/3B Conversion</h3>
+<p>The PCS converts 4-bit MII nibbles at 25 MHz into 3-bit words at 33.333 MHz, maintaining the same bit throughput:</p>
+<pre>
+4 bits × 25 MHz = 100 Mb/s
+3 bits × 33.333 MHz = 100 Mb/s
+</pre>
+
+<p>When the packet bit count is not a multiple of 3, stuff bits are appended:</p>
+<ul>
+<li><strong>3n bits:</strong> No stuff bits</li>
+<li><strong>3n+1 bits:</strong> 2 stuff bits appended</li>
+<li><strong>3n+2 bits:</strong> 1 stuff bit appended</li>
+</ul>
+
+<p>The stuff bits are discarded at the receiver during 3B/4B conversion. The minimum 12-byte IPG ensures FIFO does not overflow.</p>
+
+<h3>4.3 Side-Stream Scrambler</h3>
+<p>100BASE-T1 uses the <strong>same</strong> side-stream scrambler polynomials as 1000BASE-T (Clause 40.3.1.3.1):</p>
+<table>
+<tr><th>Role</th><th>Polynomial</th></tr>
+<tr><td>MASTER</td><td>g<sub>M</sub>(x) = 1 + x<sup>13</sup> + x<sup>33</sup></td></tr>
+<tr><td>SLAVE</td><td>g<sub>S</sub>(x) = 1 + x<sup>20</sup> + x<sup>33</sup></td></tr>
+</table>
+
+<p>For 100BASE-T1, only 3 bits are used from the scrambler: <code>Syn[2:0]</code> and <code>Scn[2:0]</code>. <code>Syn[3]</code> is unused by definition.</p>
+
+<h3>4.4 Generation of Scrambled Bits Sdn[2:0]</h3>
+<pre>
+Scn[2:0] = (tx_mode == SEND_Z) ? 3'b000 : Syn[2:0];
+
+Sdn[2] = (tx_enable == 1) ? (tx_data[2] ^ Scn[2]) :
+         (loc_rcvr_status == OK) ? (Scn[2] ^ 1'b1) : Scn[2];
+
+Sdn[1:0] = (tx_enable == 1) ? (tx_data[1:0] ^ Scn[1:0]) : Scn[1:0];
+</pre>
+
+<h3>4.5 Ternary Pair Mapping (TAn, TBn)</h3>
+<p>The 3 scrambled bits <code>Sdn[2:0]</code> are mapped to a ternary pair <code>(TAn, TBn)</code>. The pair <code>(0, 0)</code> is reserved for special codes (SSD, ESD).</p>
+
+<table>
+<tr><th>Sdn[2:0]</th><th>TAn</th><th>TBn</th><th>Usage</th></tr>
+<tr><td>000</td><td>0</td><td>0</td><td>Reserved for SSD/ESD</td></tr>
+<tr><td>001</td><td>0</td><td>+1</td><td>Data / Idle</td></tr>
+<tr><td>010</td><td>0</td><td>–1</td><td>Data / Idle</td></tr>
+<tr><td>011</td><td>+1</td><td>0</td><td>Data / Idle</td></tr>
+<tr><td>100</td><td>–1</td><td>0</td><td>Data / Idle</td></tr>
+<tr><td>101</td><td>+1</td><td>–1</td><td>Data / Idle</td></tr>
+<tr><td>110</td><td>–1</td><td>+1</td><td>Data / Idle</td></tr>
+<tr><td>111</td><td>–1</td><td>–1</td><td>Data / Idle</td></tr>
+</table>
+
+<h3>4.6 Special Codes</h3>
+<table>
+<tr><th>Special Code</th><th>Ternary Sequence (3 pairs)</th><th>Binary Equivalent</th></tr>
+<tr><td>SSD</td><td>(0,0), (0,0), (0,0)</td><td>000 000 000</td></tr>
+<tr><td>ESD (normal)</td><td>(0,0), (0,0), (+1,+1)</td><td>000 000 011</td></tr>
+<tr><td>ERR_ESD (error)</td><td>(0,0), (0,0), (–1,–1)</td><td>000 000 111</td></tr>
+</table>
+
+<h3>4.7 Idle Symbol Mapping (Training Mode, SEND_I)</h3>
+<p>During training, only 6 of the 9 possible ternary pairs are used (excluding the SSD/ESD reserved pair):</p>
+<table>
+<tr><th>Sdn[2:0]</th><th>TAn</th><th>TBn</th></tr>
+<tr><td>001</td><td>0</td><td>+1</td></tr>
+<tr><td>010</td><td>0</td><td>–1</td></tr>
+<tr><td>011</td><td>+1</td><td>0</td></tr>
+<tr><td>100</td><td>–1</td><td>0</td></tr>
+<tr><td>101</td><td>+1</td><td>–1</td></tr>
+<tr><td>110</td><td>–1</td><td>+1</td></tr>
+</table>
+
+<h3>4.8 PCS Transmit State Machine</h3>
+<pre>
+// States: SEND_IDLE, SSD1_VECTOR, SSD2_VECTOR, SSD3_VECTOR,
+//         TRANSMIT_DATA, ESD1_VECTOR, ESD2_VECTOR, ESD3_VECTOR,
+//         ERR_ESD1_VECTOR, ERR_ESD2_VECTOR, ERR_ESD3_VECTOR
+
+SEND_IDLE:
+  tx_symb_pair &lt;= IDLE;
+  if (tx_enable == TRUE) goto SSD1_VECTOR;
+
+SSD1_VECTOR:
+  tx_symb_pair &lt;= SSD1;  // (0, 0)
+  if (symb_pair_timer_done) goto SSD2_VECTOR;
+
+SSD2_VECTOR:
+  tx_symb_pair &lt;= SSD2;  // (0, 0)
+  if (symb_pair_timer_done) goto SSD3_VECTOR;
+
+SSD3_VECTOR:
+  tx_symb_pair &lt;= SSD3;  // (0, 0)
+  if (symb_pair_timer_done) goto TRANSMIT_DATA;
+
+TRANSMIT_DATA:
+  tx_symb_pair &lt;= ENCODE(tx_data&lt;2:0&gt;);
+  if (symb_pair_timer_done &amp;&amp; tx_enable == FALSE &amp;&amp; tx_error == FALSE)
+    goto ESD1_VECTOR;
+  else if (symb_pair_timer_done &amp;&amp; tx_enable == FALSE &amp;&amp; tx_error == TRUE)
+    goto ERR_ESD1_VECTOR;
+
+ESD1_VECTOR:
+  tx_symb_pair &lt;= ESD1;  // (0, 0)
+  if (symb_pair_timer_done) goto ESD2_VECTOR;
+
+ESD2_VECTOR:
+  tx_symb_pair &lt;= ESD2;  // (0, 0)
+  if (symb_pair_timer_done) goto ESD3_VECTOR;
+
+ESD3_VECTOR:
+  tx_symb_pair &lt;= ESD3;  // (+1, +1)
+  if (symb_pair_timer_done) goto SEND_IDLE;
+
+ERR_ESD1_VECTOR:
+  tx_symb_pair &lt;= ESD1;  // (0, 0)
+  if (symb_pair_timer_done) goto ERR_ESD2_VECTOR;
+
+ERR_ESD2_VECTOR:
+  tx_symb_pair &lt;= ESD2;  // (0, 0)
+  if (symb_pair_timer_done) goto ERR_ESD3_VECTOR;
+
+ERR_ESD3_VECTOR:
+  tx_symb_pair &lt;= ERR_ESD3;  // (–1, –1)
+  if (symb_pair_timer_done) goto SEND_IDLE;
+</pre>
+
+<h3>4.9 PCS Receive State Machine</h3>
+<pre>
+// States: IDLE, SSD, FIRST_SSD, SECOND_SSD, THIRD_SSD,
+//         CHECK_SSD2, CHECK_SSD3, DATA, CHECK_ESD2, CHECK_ESD3,
+//         ESD, BAD_END, RX_ERROR, BAD_SSD, LINK_FAILED
+
+IDLE:
+  pcs_rx_er &lt;= FALSE; pcs_rx_dv &lt;= FALSE;
+  rx_data &lt;= 3'b000; receiving &lt;= FALSE;
+  if (Rxn == SSD1) goto SSD;
+
+SSD:
+  receiving &lt;= TRUE;
+  if (RSPCD &amp;&amp; Rxn == SSD1) goto FIRST_SSD;
+
+FIRST_SSD:
+  pcs_rx_dv &lt;= TRUE; rx_data &lt;= 3'b101; receiving &lt;= TRUE;
+  if (RSPCD &amp;&amp; Rxn == SSD1) goto SECOND_SSD;
+
+SECOND_SSD:
+  pcs_rx_dv &lt;= TRUE; rx_data &lt;= 3'b010; receiving &lt;= TRUE;
+  if (RSPCD &amp;&amp; Rxn == SSD1) goto THIRD_SSD;
+
+THIRD_SSD:
+  pcs_rx_dv &lt;= TRUE; rx_data &lt;= 3'b101; receiving &lt;= TRUE;
+  if (RSPCD &amp;&amp; Rxn == SSD1) goto CHECK_SSD2;
+  else if (RSPCD &amp;&amp; Rxn != SSD1) goto BAD_SSD;
+
+CHECK_SSD2:
+  if (RSPCD &amp;&amp; Rxn == SSD2) goto CHECK_SSD3;
+  else goto BAD_SSD;
+
+CHECK_SSD3:
+  if (RSPCD &amp;&amp; Rxn == SSD3) goto DATA;
+  else goto BAD_SSD;
+
+DATA:
+  pcs_rx_er &lt;= FALSE; pcs_rx_dv &lt;= TRUE;
+  rx_data &lt;= DECODE(Rxn-4);  // flush-in/out delay compensation
+  receiving &lt;= TRUE;
+  if (RSPCD &amp;&amp; Rxn == ESD1) goto CHECK_ESD2;
+  else if (RSPCD &amp;&amp; Rxn != ESD1 &amp;&amp; Rxn != DATA) goto RX_ERROR;
+
+CHECK_ESD2:
+  if (RSPCD &amp;&amp; Rxn == ESD2) goto CHECK_ESD3;
+  else goto BAD_END;
+
+CHECK_ESD3:
+  if (RSPCD &amp;&amp; Rxn == ESD3) goto ESD;
+  else if (RSPCD &amp;&amp; Rxn == ERR_ESD3) goto BAD_END;
+  else goto BAD_END;
+
+ESD:
+  pcs_rx_er &lt;= FALSE; pcs_rx_dv &lt;= TRUE;
+  rx_data &lt;= DECODE(Rxn-4);
+  if (RSPCD) goto IDLE;
+</pre>
+
+<h3>4.10 PHY Control and Link Monitor</h3>
+<pre>
+// PHY Control states: DISABLE_TRANSMITTER, SLAVE_SILENT, TRAINING, SEND_IDLE_OR_DATA
+
+DISABLE_TRANSMITTER:
+  tx_mode &lt;= SEND_Z;
+  if (link_control == ENABLE) goto SLAVE_SILENT;
+
+SLAVE_SILENT:
+  tx_mode &lt;= SEND_Z;
+  start maxwait_timer;
+  if (config == MASTER &amp;&amp; scr_status == OK) goto TRAINING;
+  if (config == SLAVE) goto TRAINING;
+
+TRAINING:
+  tx_mode &lt;= SEND_I;
+  start minwait_timer;
+  if (minwait_timer_done &amp;&amp; loc_rcvr_status == OK &amp;&amp; rem_rcvr_status == OK)
+    goto SEND_IDLE_OR_DATA;
+
+SEND_IDLE_OR_DATA:
+  tx_mode &lt;= SEND_N;
+  stop maxwait_timer;
+  start minwait_timer;
+  if (minwait_timer_done &amp;&amp; loc_rcvr_status == NOT_OK)
+    goto TRAINING;
+  else if (minwait_timer_done &amp;&amp; rem_rcvr_status == NOT_OK)
+    goto TRAINING;
+
+// Link Monitor: LINK_DOWN → HYSTERESIS → LINK_UP
+LINK_DOWN:
+  link_status &lt;= FAIL;
+  if (loc_rcvr_status == OK) goto HYSTERESIS;
+
+HYSTERESIS:
+  start stabilize_timer;
+  if (stabilize_timer_done &amp;&amp; loc_rcvr_status == OK) goto LINK_UP;
+
+LINK_UP:
+  link_status &lt;= OK;
+  if (loc_rcvr_status == NOT_OK || maxwait_timer_done) goto LINK_DOWN;
+</pre>
+
+<h3>4.11 JAB State Machine</h3>
+<p>A JAB state machine prevents the PCS Receive from locking up in the DATA state due to mis-detected ESD:</p>
+<pre>
+JABIDLE:
+  rcv_jab_detected &lt;= FALSE;
+  if (receiving == TRUE) goto JAB;
+
+JAB:
+  rcv_jab_detected &lt;= TRUE;
+  start rcv_max_timer;
+  if (rcv_max_timer_done) goto JABIDLE;  // force reset
+  if (receiving == FALSE) goto JABIDLE;
+</pre>
+<p>The <code>rcv_max_timer</code> expires at 1.08 ms ± 54 µs.</p>
+
+<h3>4.12 Automatic Polarity Detection</h3>
+<p>During training, the SLAVE PHY can detect and correct polarity inversion:</p>
+<ol>
+<li>MASTER sends known training symbols</li>
+<li>SLAVE assumes one polarity and attempts descrambler lock</li>
+<li>If lock fails within timeout, SLAVE inverts received symbols <code>(RAn, RBn)</code> and tries again</li>
+<li>Once lock is achieved, SLAVE also inverts its transmitted symbols <code>(TAn, TBn)</code></li>
+<li>MASTER always sees correct polarity because SLAVE has self-corrected</li>
+</ol>
+
+<!-- ===================== 1000BASE-T1 ===================== -->
+<h2 id="sec-1000baset1">5. 1000BASE-T1 PCS (Clause 97) — RS-FEC &amp; PAM3 @ 750 MBd</h2>
+
+<h3>5.1 Overview</h3>
+<p>1000BASE-T1 achieves 1 Gb/s over a single twisted-pair copper cable for automotive/industrial applications. It employs:</p>
+<ul>
+<li><strong>Symbol rate:</strong> 750 MBd (4/3 ns symbol period ≈ 1.333 ns)</li>
+<li><strong>Modulation:</strong> PAM3 (ternary: –1, 0, +1)</li>
+<li><strong>Encoding:</strong> 80B/81B block coding + RS-FEC(450,406) + 15-bit scrambling</li>
+<li><strong>FEC:</strong> Reed-Solomon (450,406) over GF(2<sup>9</sup>), correcting up to 22 symbol errors</li>
+<li><strong>Frame size:</strong> 4050 bits = 450 × 9-bit RS symbols = 2700 PAM3 symbols</li>
+</ul>
+
+<h3>5.2 80B/81B Block Encoding</h3>
+<p>Ten GMII transfers (80 bits of data/control) are encoded into an 81-bit block:</p>
+<ul>
+<li><strong>Bit 0:</strong> Data/Ctrl header (0 = data block, 1 = control block)</li>
+<li><strong>Data blocks:</strong> 10 data octets (80 bits) + 1 header bit</li>
+<li><strong>Control blocks:</strong> 5-bit pointer field + control codes + data octets</li>
+</ul>
+
+<p>The pointer field indicates the position of the first control character:</p>
+<table>
+<tr><th>Pointer Bits [4:0]</th><th>Meaning</th></tr>
+<tr><td>[3:0]</td><td>Position of next control octet (0–9)</td></tr>
+<tr><td>[4]</td><td>0 = final control symbol; 1 = more control symbols follow</td></tr>
+</table>
+
+<p><strong>Control codes supported:</strong></p>
+<table>
+<tr><th>GMII Control</th><th>TXD[5:7]</th><th>Name</th></tr>
+<tr><td>Normal Inter-Frame (loc_phy_ready = OK)</td><td>010</td><td>Idle</td></tr>
+<tr><td>Normal Inter-Frame (loc_phy_ready = NOT_OK)</td><td>000</td><td>Idle (not ready)</td></tr>
+<tr><td>Assert Low Power Idle</td><td>101</td><td>LP_IDLE</td></tr>
+<tr><td>Transmit Error Propagation</td><td>001</td><td>Error</td></tr>
+<tr><td>Data Reception Error</td><td>—</td><td>Rx Error</td></tr>
+</table>
+
+<h3>5.3 RS-FEC Encoder (450,406)</h3>
+<p>The RS-FEC code is a shortened Reed-Solomon code over GF(2<sup>9</sup>):</p>
+<ul>
+<li><strong>Code parameters:</strong> (450, 406) — 450 total symbols, 406 information symbols</li>
+<li><strong>Parity symbols:</strong> 44 (450 – 406)</li>
+<li><strong>Error correction:</strong> Up to 22 symbol errors (t = 22)</li>
+<li><strong>Field:</strong> GF(2<sup>9</sup>) with primitive polynomial x<sup>9</sup> + x<sup>4</sup> + 1</li>
+<li><strong>Generator polynomial root:</strong> α = 0x002</li>
+</ul>
+
+<p>Generator polynomial:</p>
+<pre>
+G(Z) = ∏(i=0 to 43) (Z – α^i) = A44·Z^44 + A43·Z^43 + ... + A1·Z + A0
+</pre>
+
+<p>Parity vector:</p>
+<pre>
+P(Z) = D(Z) · Z^44 mod G(Z)
+</pre>
+
+<p>Where <code>D(Z)</code> is the data vector of 406 symbols and <code>P(Z)</code> is the 44-symbol parity vector.</p>
+
+<div class="rtl-box">
+<h4>RTL Implementation: RS-FEC Encoder</h4>
+<pre>
+// Galois Field multiplier for GF(2^9) with primitive poly x^9 + x^4 + 1
+function [8:0] gf_mul(input [8:0] a, input [8:0] b);
+  logic [17:0] p;
+  p = a * b;  // polynomial multiplication
+  // modular reduction by x^9 + x^4 + 1
+  for (int i = 17; i >= 9; i--)
+    if (p[i]) p = p ^ ({9'b0, 1'b1, 4'b0, 1'b1} << (i-9));
+  return p[8:0];
+endfunction
+
+// LFSR-based RS encoder
+always_ff @(posedge clk) begin
+  if (rs_reset) begin
+    shift_reg &lt;= 44*{9'b0};
+  end else if (rs_data_valid) begin
+    feedback &lt;= rs_data_in ^ shift_reg[43];
+    for (int i = 43; i > 0; i--)
+      shift_reg[i] &lt;= gf_mul(feedback, A[i]) ^ shift_reg[i-1];
+    shift_reg[0] &lt;= gf_mul(feedback, A[0]);
+  end
+end
+</pre>
+</div>
+
+<h3>5.4 15-bit PCS Scrambler</h3>
+<p>The data-mode scrambler uses 15-bit LFSR with different polynomials for MASTER and SLAVE:</p>
+<table>
+<tr><th>Role</th><th>Polynomial</th></tr>
+<tr><td>MASTER</td><td>G<sub>M</sub>(x) = 1 + x<sup>4</sup> + x<sup>15</sup></td></tr>
+<tr><td>SLAVE</td><td>G<sub>S</sub>(x) = 1 + x<sup>11</sup> + x<sup>15</sup></td></tr>
+</table>
+
+<p>The scrambler runs continuously on all 4050 PHY frame output bits. Initial seed values are non-zero and exchanged during InfoField transmission in training mode.</p>
+
+<div class="rtl-box">
+<h4>RTL Implementation: 15-bit Scrambler</h4>
+<pre>
+module scrambler_15bit (
+  input  wire        clk,
+  input  wire        rst_n,
+  input  wire        master_mode,
+  output wire        scr_out
+);
+  logic [14:0] lfsr;
+  wire tap = master_mode ? lfsr[4] : lfsr[11];
+  
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+      lfsr &lt;= 15'h1;  // Non-zero seed
+    else
+      lfsr &lt;= {tap ^ lfsr[14], lfsr[14:1]};
+  end
+  
+  assign scr_out = lfsr[0];
+endmodule
+</pre>
+</div>
+
+<h3>5.5 3B2T Mapping to PAM3</h3>
+<p>Every 3 scrambled bits are mapped to 2 PAM3 symbols:</p>
+<table>
+<tr><th>B[2:0]</th><th>T[1]</th><th>T[0]</th></tr>
+<tr><td>000</td><td>–1</td><td>–1</td></tr>
+<tr><td>001</td><td>–1</td><td>0</td></tr>
+<tr><td>010</td><td>–1</td><td>+1</td></tr>
+<tr><td>011</td><td>0</td><td>–1</td></tr>
+<tr><td>100</td><td>0</td><td>+1</td></tr>
+<tr><td>101</td><td>+1</td><td>–1</td></tr>
+<tr><td>110</td><td>+1</td><td>0</td></tr>
+<tr><td>111</td><td>+1</td><td>+1</td></tr>
+</table>
+
+<p>The 4050 bits in a PHY frame become 2700 PAM3 symbols. <code>B[0]</code> is the LSB and <code>T[0]</code> is the first symbol transmitted.</p>
+
+<h3>5.6 PHY Frame Structure</h3>
+<pre>
+PHY Frame (4050 bits = 450 × 9-bit RS symbols = 2700 PAM3 symbols)
+
++--------------------------------+-------------------------------+
+|  45 × 80B/81B blocks = 3645 bits  |  9 bits 1000BASE-T1 OAM  |
++--------------------------------+-------------------------------+
+                  |                              |
+                  v                              v
+        +------------------+           +------------------+
+        | RS-FEC Encoder   |           | RS Parity = 396  |
+        | (adds 44 symbols)|           | bits (44 × 9)    |
+        +------------------+           +------------------+
+                  |
+                  v
+        +------------------+
+        | 15-bit Scrambler |
+        +------------------+
+                  |
+                  v
+        +------------------+
+        | 3B2T Mapper      |
+        | (4050 → 2700)    |
+        +------------------+
+                  |
+                  v
+        +------------------+
+        | PAM3 TX @ 750MBd |
+        +------------------+
+</pre>
+
+<h3>5.7 Training Mode</h3>
+<p>Training uses PAM2 (binary: –1, +1) instead of PAM3:</p>
+<ul>
+<li>Training pattern: periodic embedded data in PAM2 stream</li>
+<li>Alignment: 1-bit pattern every 180 PAM2 symbols, aligned with partial PHY frame boundary</li>
+<li>InfoField: inserted in the 15th partial PHY frame</li>
+<li>Partial PHY frame: 180 bits long; 15 partial frames = 1 PHY frame (2700 bits)</li>
+<li>Training scrambler: 33-bit LFSR (same as 1000BASE-T/100BASE-T1)</li>
+</ul>
+
+<p>Training bit generation:</p>
+<pre>
+Sn = Scrn[0] ⊕ InfoField[n mod 180]  if (n mod 2700) ≤ 96 and (n mod 180) == 0
+   = ~Scrn[0]                          if (n mod 180) == 0 and first 14 partial frames
+   = Scrn[0]                           otherwise
+
+Tn = +1 if Sn == 0
+   = –1 if Sn == 1
+</pre>
+
+<h3>5.8 PCS Transmit State Machine (Data Mode)</h3>
+<pre>
+// States: SEND_IDLES, SEND_DATA, SEND_ENTER_LPI, SEND_LPI, SEND_WAKE,
+//         DISABLE_TRANSMITTER
+
+SEND_IDLES:
+  tx_coded &lt;= ENCODE(IBLOCK_T);
+  if (tx_aggregate &amp;&amp; tx_data_mode) goto SEND_DATA;
+  if (tx_aggregate &amp;&amp; tx_data_mode &amp;&amp; tx_lpi_active)
+    goto SEND_ENTER_LPI;
+
+SEND_DATA:
+  tx_coded &lt;= ENCODE(tx_raw&lt;99:0&gt;);
+  if (tx_aggregate &amp;&amp; tx_data_mode &amp;&amp; tx_lpi_active)
+    goto SEND_ENTER_LPI;
+  if (tx_aggregate &amp;&amp; !tx_data_mode) goto SEND_IDLES;
+
+SEND_ENTER_LPI:
+  tx_coded &lt;= ENCODE(LPBLOCK_T);  // Sleep frame
+  if (tx_aggregate &amp;&amp; tx_data_mode &amp;&amp; tx_lpi_active &amp;&amp; tx_sleep_frame_complete)
+    goto SEND_LPI;
+
+SEND_LPI:
+  tx_coded &lt;= ZBLOCK_T;  // Zeros (quiet)
+  if (tx_aggregate &amp;&amp; tx_data_mode &amp;&amp; !tx_lpi_active)
+    goto SEND_WAKE;
+
+SEND_WAKE:
+  tx_coded &lt;= ENCODE(IBLOCK_T);  // Wake frame
+  if (tx_aggregate &amp;&amp; tx_data_mode &amp;&amp; tx_wake_frame_complete)
+    goto SEND_DATA;
+</pre>
+
+<h3>5.9 PCS Receive State Machine</h3>
+<pre>
+// States: RECEIVE_INIT, RECEIVE_DATA, RECEIVE_LPI, RECEIVE_WAKE
+
+RECEIVE_INIT:
+  rx_raw &lt;= IBLOCK_R;
+  if (pcs_reset == ON || hi_rfer || !block_lock) goto RECEIVE_INIT;
+  if (rx_aggregate &amp;&amp; !rx_lpi_active) goto RECEIVE_DATA;
+  if (rx_aggregate &amp;&amp; rx_lpi_active) goto RECEIVE_LPI;
+
+RECEIVE_DATA:
+  rx_raw &lt;= DECODE(rx_coded&lt;81:0&gt;);
+  if (rx_aggregate &amp;&amp; !rx_lpi_active) goto RECEIVE_DATA;
+  if (rx_aggregate &amp;&amp; rx_lpi_active) goto RECEIVE_LPI;
+
+RECEIVE_LPI:
+  rx_raw &lt;= LPBLOCK_R;
+  if (rx_aggregate &amp;&amp; !rx_lpi_active) goto RECEIVE_WAKE;
+
+RECEIVE_WAKE:
+  rx_raw &lt;= IBLOCK_R;
+  if (rx_aggregate &amp;&amp; rx_wake_frame_complete) goto RECEIVE_DATA;
+</pre>
+
+<h3>5.10 RFER Monitor</h3>
+<p>The Received Frame Error Rate monitor tracks PHY frame quality:</p>
+<pre>
+INIT_CNT:
+  rfer_cnt &lt;= 0; rfrx_cnt &lt;= 0;
+  goto WAIT;
+
+WAIT:
+  if (rx_frame) goto INC_CNT;
+  if (pcs_reset || !block_lock || rx_lpi_active) goto RFER_MT_INIT;
+
+INC_CNT:
+  rfrx_cnt++;
+  if (!rf_valid) goto RFER_BAD_RF;
+  if (rfrx_cnt &lt; RFRX_CNT_LIMIT) goto WAIT;
+  else goto GOOD_RFER;
+
+RFER_BAD_RF:
+  rfer_cnt++;
+  if (rfer_cnt == RFER_CNT_LIMIT) goto HI_RFER;
+  if (rfrx_cnt &lt; RFRX_CNT_LIMIT) goto WAIT;
+  else goto GOOD_RFER;
+
+HI_RFER:
+  hi_rfer &lt;= true;
+  if (rfrx_cnt &lt; RFRX_CNT_LIMIT) goto INC_CNT2;
+  else goto GOOD_RFER;
+
+INC_CNT2:
+  rfrx_cnt++;
+  if (rfrx_cnt &lt; RFRX_CNT_LIMIT) goto INC_CNT2;
+  else goto GOOD_RFER;
+
+GOOD_RFER:
+  hi_rfer &lt;= false;
+  goto INIT_CNT;
+</pre>
+
+<table>
+<tr><th>Parameter</th><th>Value</th></tr>
+<tr><td>RFER_CNT_LIMIT</td><td>16</td></tr>
+<tr><td>RFRX_CNT_LIMIT</td><td>88</td></tr>
+<tr><td>Threshold BER</td><td>&gt; 4 × 10<sup>–4</sup></td></tr>
+</table>
+
+<h3>5.11 LPI Signaling</h3>
+<p>EEE-capable PHYs use a quiet-refresh cycle:</p>
+<ul>
+<li><strong>lpi_quiet_time:</strong> 354 partial PHY frame periods</li>
+<li><strong>lpi_refresh_time:</strong> 6 partial PHY frame periods</li>
+<li><strong>lpi_qr_time:</strong> 360 partial PHY frame periods (24 × 15)</li>
+<li><strong>lpi_offset:</strong> lpi_qr_time/2 + 15 = 195 partial frames (SLAVE delayed from MASTER)</li>
+<li><strong>wake_period:</strong> 30 partial PHY frames</li>
+</ul>
+
+<p>Quiet period: transmitter outputs PAM3 symbol 0 (may power down). Refresh period: scrambled zeros with RS-FEC parity generated with D405...D1 = 0, D0 = OAM.</p>
+
+<h3>5.12 1000BASE-T1 OAM</h3>
+<p>Optional out-of-band OAM uses a 9-bit field in each PHY frame:</p>
+<ul>
+<li><strong>OAM frame:</strong> 12 octets + 12 parity bits = 12 × 9-bit symbols</li>
+<li><strong>Symbol 0:</strong> Even parity; Symbols 1–11: Odd parity</li>
+<li><strong>Frame structure:</strong> Toggle, Valid, Ack, TogAck, Message_Number[3:0], PingRx, PingTx, SNR[1:0], Message[7:0][7:0], CRC16</li>
+</ul>
+
+<p><strong>PHY Health (SNR[1:0]):</strong></p>
+<table>
+<tr><th>SNR[1:0]</th><th>Meaning</th></tr>
+<tr><td>00</td><td>PHY link failing; will drop and relink within 2–4 ms</td></tr>
+<tr><td>01</td><td>LPI refresh insufficient; request exit LPI</td></tr>
+<tr><td>10</td><td>PHY SNR marginal</td></tr>
+<tr><td>11</td><td>PHY SNR good</td></tr>
+</table>
+
+
+<!-- ===================== RTL DESIGN CHECKLIST ===================== -->
+<h2 id="sec-rtl">6. RTL Design Checklist &amp; Implementation Guide</h2>
+
+<h3>6.1 8B/10B Running Disparity Tracking</h3>
+<table>
+<tr><th>Check</th><th>Requirement</th><th>Verification</th></tr>
+<tr><td>RD initialization</td><td>Transmitter RD = negative after reset; Receiver RD = positive or negative</td><td>Simulate reset sequence; verify initial RD state</td></tr>
+<tr><td>Sub-block RD calculation</td><td>Six-bit and four-bit sub-blocks computed independently</td><td>Verify with all 256 D-codes and 12 K-codes</td></tr>
+<tr><td>Neutral sub-blocks</td><td>Equal ones/zeros pass RD through unchanged</td><td>Test D0.0, D17.0, D31.0, etc.</td></tr>
+<tr><td>RD+ generation</td><td>000111 (6b) and 0011 (4b) only when start RD is +</td><td>Formal property check</td></tr>
+<tr><td>RD– generation</td><td>111000 (6b) and 1100 (4b) only when start RD is –</td><td>Formal property check</td></tr>
+<tr><td>Invalid RD code</td><td>Code received in wrong RD column = invalid code-group</td><td>Inject RD errors; verify detection</td></tr>
+<tr><td>RD mismatch</td><td>Running disparity mismatch across >1 code-group indicates burst error</td><td>Monitor invalid_code_group counter</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL: 8B/10B Encoder with RD Tracking</h4>
+<pre>
+module encoder_8b10b (
+  input  wire        clk,
+  input  wire        rst_n,
+  input  wire  [7:0] data_in,
+  input  wire        k_char,     // 1 = K-code, 0 = D-code
+  input  wire        rd_in,      // 0 = RD-, 1 = RD+
+  output logic [9:0] code_group,
+  output logic       rd_out
+);
+  // Six-bit sub-block encoding (abcdei)
+  logic [5:0] six_bit;
+  logic rd_six;
+  
+  always_comb begin
+    case ({k_char, data_in[4:0]})
+      // D0.0 / K28.0
+      6'b0_00000: begin six_bit = rd_in ? 6'b000111 : 6'b111000; rd_six = 1'b1; end
+      6'b1_11100: begin six_bit = rd_in ? 6'b110000 : 6'b001111; rd_six = 1'b0; end
+      // ... (full 32-entry table)
+      default:    begin six_bit = 6'bxxxxxx; rd_six = rd_in; end
+    endcase
+  end
+  
+  // Four-bit sub-block encoding (fghj)
+  logic [3:0] four_bit;
+  logic rd_four;
+  
+  always_comb begin
+    case (data_in[7:5])
+      3'b000: begin four_bit = rd_six ? 4'b0100 : 4'b1011; rd_four = ~rd_six; end
+      3'b001: begin four_bit = rd_six ? 4'b1001 : 4'b0110; rd_four = ~rd_six; end
+      // ... (full 8-entry table)
+      default: begin four_bit = 4'bxxxx; rd_four = rd_six; end
+    endcase
+  end
+  
+  assign code_group = {six_bit, four_bit};
+  assign rd_out = rd_four;
+endmodule
+</pre>
+</div>
+
+<h3>6.2 Comma Alignment Logic</h3>
+<table>
+<tr><th>Check</th><th>Requirement</th><th>Verification</th></tr>
+<tr><td>Comma pattern</td><td>Detect 0011111 (comma+) or 1100000 (comma–)</td><td>Pattern match on sliding 7-bit window</td></tr>
+<tr><td>Bit-slip range</td><td>Must handle up to 9 bit-slip positions (10-bit CG)</td><td>Test all 10 alignment phases</td></tr>
+<tr><td>Singular comma</td><td>Comma cannot appear in data except in /K28.x/</td><td>Formal: comma+ only when rx_cg[7:0] == 8'b00111110 (K28.1 RD–)</td></tr>
+<tr><td>Comma polarity</td><td>Comma+ transmitted with ≥ frequency of comma–</td><td>Monitor over 10,000 code-groups</td></tr>
+<tr><td>Lock time</td><td>Sync acquired within N valid code-groups after comma</td><td>Measure in simulation: target &lt; 5 µs</td></tr>
+<tr><td>Loss hysteresis</td><td>M consecutive invalid CGs before declaring loss</td><td>M = 3–4 typical; verify no flapping</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL: Comma Detector and Alignment State Machine</h4>
+<pre>
+module comma_align (
+  input  wire        clk,
+  input  wire        rst_n,
+  input  wire  [9:0] rx_code_group,
+  output logic       aligned,
+  output logic [3:0] align_offset,
+  output logic       comma_det
+);
+  logic [19:0] shift_reg;
+  logic [3:0]  slip_cnt;
+  
+  // Comma detection on 20-bit window (2 CGs)
+  wire c_plus  = (shift_reg[19:13] == 7'b0011111) || (shift_reg[18:12] == 7'b0011111) ||
+                 (shift_reg[17:11] == 7'b0011111) || (shift_reg[16:10] == 7'b0011111);
+  wire c_minus = (shift_reg[19:13] == 7'b1100000) || (shift_reg[18:12] == 7'b1100000) ||
+                 (shift_reg[17:11] == 7'b1100000) || (shift_reg[16:10] == 7'b1100000);
+  
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      shift_reg   &lt;= 20'h0;
+      aligned     &lt;= 1'b0;
+      slip_cnt    &lt;= 4'd0;
+      align_offset &lt;= 4'd0;
+    end else begin
+      shift_reg &lt;= {shift_reg[9:0], rx_code_group};
+      
+      if (!aligned) begin
+        if (c_plus || c_minus) begin
+          // Determine offset: comma should be at [19:13] or [9:3]
+          if (c_plus) begin
+            casez (shift_reg[19:13])
+              7'b0011111: begin aligned &lt;= 1'b1; align_offset &lt;= 4'd0; end
+              7'b?001111: begin aligned &lt;= 1'b1; align_offset &lt;= 4'd1; end
+              7'b??00111: begin aligned &lt;= 1'b1; align_offset &lt;= 4'd2; end
+              // ...
+            endcase
+          end
+        end else begin
+          slip_cnt &lt;= slip_cnt + 1'b1;
+          if (slip_cnt == 4'd9) slip_cnt &lt;= 4'd0;  // wrap after 10 slips
+        end
+      end
+    end
+  end
+  
+  assign comma_det = c_plus || c_minus;
+endmodule
+</pre>
+</div>
+
+<h3>6.3 Scrambler LFSR Implementation</h3>
+<table>
+<tr><th>Check</th><th>Requirement</th><th>Verification</th></tr>
+<tr><td>Non-zero seed</td><td>Scrambler state must never be all zeros</td><td>Assert in RTL; verify reset value ≠ 0</td></tr>
+<tr><td>Parallel vs serial</td><td>Parallel LFSR must match serial output</td><td>Bit-accurate compare over 2^20 cycles</td></tr>
+<tr><td>Side-stream property</td><td>Scrambler runs continuously; data XORed with state</td><td>Verify Scn bits are not reloaded per frame</td></tr>
+<tr><td>Master/Slave poly</td><td>Correct polynomial selected per config</td><td>Formal: if master_mode then tap == lfsr[13] else tap == lfsr[20]</td></tr>
+<tr><td>1000BASE-T: 33-bit</td><td>g<sub>M</sub>(x) = 1 + x<sup>13</sup> + x<sup>33</sup>; g<sub>S</sub>(x) = 1 + x<sup>20</sup> + x<sup>33</sup></td><td>Verify sequence period = 2<sup>33</sup>–1</td></tr>
+<tr><td>1000BASE-T1: 15-bit</td><td>G<sub>M</sub>(x) = 1 + x<sup>4</sup> + x<sup>15</sup>; G<sub>S</sub>(x) = 1 + x<sup>11</sup> + x<sup>15</sup></td><td>Verify sequence period = 2<sup>15</sup>–1</td></tr>
+<tr><td>Clock domain</td><td>LFSR runs at symbol rate (125/66.6/750 MHz)</td><td>CDC check if data crosses domains</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL: Parallel 33-bit Scrambler (8 bits/cycle)</h4>
+<pre>
+module scrambler_33bit_parallel (
+  input  wire        clk,
+  input  wire        rst_n,
+  input  wire        master_mode,
+  input  wire  [7:0] data_in,
+  input  wire        data_valid,
+  output logic [7:0] data_out
+);
+  logic [32:0] lfsr;
+  logic [7:0]  scr_byte;
+  
+  // Pre-compute 8 advance steps
+  // Tap for master: lfsr[13]; for slave: lfsr[20]
+  wire tap = master_mode ? lfsr[13] : lfsr[20];
+  
+  // Parallel scramble: data_out[i] = data_in[i] ^ lfsr[i] after i shifts
+  // Use matrix multiplication or pre-computed XOR tree
+  always_comb begin
+    scr_byte[0] = lfsr[0];
+    scr_byte[1] = lfsr[1];
+    scr_byte[2] = lfsr[2];
+    scr_byte[3] = lfsr[3];
+    scr_byte[4] = lfsr[4];
+    scr_byte[5] = lfsr[5];
+    scr_byte[6] = lfsr[6];
+    scr_byte[7] = lfsr[7];
+  end
+  
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      lfsr &lt;= 33'h1A5B3C7D;  // Non-zero seed
+    end else if (data_valid) begin
+      // Advance LFSR by 8 positions
+      // New lfsr[0] = old lfsr[8] (for master, includes tap feedback)
+      // This requires a parallel advance matrix
+      lfsr &lt;= parallel_advance(lfsr, master_mode);
+    end
+  end
+  
+  assign data_out = data_in ^ scr_byte;
+endmodule
+</pre>
+</div>
+
+<h3>6.4 PAM5 DAC/ADC Interface Considerations</h3>
+<table>
+<tr><th>Check</th><th>Requirement</th><th>Verification</th></tr>
+<tr><td>Symbol levels</td><td>{–2, –1, 0, +1, +2} mapped to DAC codes with ±2% accuracy</td><td>Calibrate DAC; verify INL/DNL</td></tr>
+<tr><td>Linearity</td><td>5-level PAM requires 4 decision thresholds</td><td>Adaptive threshold tracking in PMA</td></tr>
+<tr><td>Tx pre-emphasis</td><td>May be required for CAT5 channel equalization</td><td>Verify eye opening at cable end</td></tr>
+<tr><td>Rx equalization</td><td>FFE/DFE + echo canceller for full-duplex</td><td>Convergence time &lt; 50 ms</td></tr>
+<tr><td>ADC resolution</td><td>≥ 6 bits for PAM5 at BER ≤ 10<sup>–10</sup></td><td>SNR budget analysis</td></tr>
+<tr><td>Clock recovery</td><td>CDR from PAM5 transitions (not all symbols have transitions)</td><td>Verify lock on idle pattern {+2,0,–2}</td></tr>
+<tr><td>Symbol mapping</td><td>Idle uses subset {+2, 0, –2}; data uses all 5 levels</td><td>Verify no +1/–1 during idle</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL: PAM5 Symbol Mapper</h4>
+<pre>
+module pam5_mapper (
+  input  wire        clk,
+  input  wire  [8:0] sdn,          // Sdn[8:0]
+  input  wire  [1:0] subset,       // Even/odd subset select
+  output logic [2:0] ta, tb, tc, td // Quinary symbols (–2 to +2)
+);
+  // Level encoding: 3'b000 = –2, 3'b001 = –1, 3'b010 = 0, 3'b011 = +1, 3'b100 = +2
+  // Table lookup for Sdn[5:0] across 4 subset columns
+  logic [11:0] sym_raw;
+  
+  always_ff @(posedge clk) begin
+    case (subset)
+      2'b00: sym_raw &lt;= table_even0[sdn[5:0]];
+      2'b01: sym_raw &lt;= table_even1[sdn[5:0]];
+      2'b10: sym_raw &lt;= table_even2[sdn[5:0]];
+      2'b11: sym_raw &lt;= table_even3[sdn[5:0]];
+    endcase
+  end
+  
+  assign ta = sym_raw[2:0];
+  assign tb = sym_raw[5:3];
+  assign tc = sym_raw[8:6];
+  assign td = sym_raw[11:9];
+endmodule
+</pre>
+</div>
+
+<h3>6.5 Timing Closure</h3>
+<table>
+<tr><th>Interface</th><th>Clock</th><th>Period</th><th>Critical Path</th><th>Budget</th></tr>
+<tr><td>GMII (1000BASE-T)</td><td>125 MHz</td><td>8 ns</td><td>TXD→scrambler→conv encoder→PAM5 mapper</td><td>&lt; 6 ns (75%)</td></tr>
+<tr><td>MII (100BASE-X)</td><td>25 MHz</td><td>40 ns</td><td>TXD→4B/5B encoder→serializer</td><td>&lt; 30 ns (75%)</td></tr>
+<tr><td>MII (100BASE-T1)</td><td>25 MHz</td><td>40 ns</td><td>TXD→4B/3B→scrambler→PAM3 mapper</td><td>&lt; 30 ns (75%)</td></tr>
+<tr><td>GMII (1000BASE-T1)</td><td>125 MHz</td><td>8 ns</td><td>TXD→80B/81B→RS-FEC→scrambler→3B2T</td><td>&lt; 6 ns (75%)</td></tr>
+<tr><td>PMA serial (100BASE-X)</td><td>125 MHz</td><td>8 ns</td><td>Serializer→PMD</td><td>&lt; 6 ns</td></tr>
+<tr><td>PMA serial (1000BASE-X)</td><td>1.25 GHz</td><td>0.8 ns</td><td>10-bit interface→SERDES</td><td>Typically ASIC macro</td></tr>
+<tr><td>PMA (1000BASE-T)</td><td>125 MHz</td><td>8 ns</td><td>4 parallel PAM5 DAC drivers</td><td>&lt; 6 ns</td></tr>
+<tr><td>PMA (1000BASE-T1)</td><td>750 MHz</td><td>1.33 ns</td><td>PAM3 symbol→DAC</td><td>High-speed mixed-signal</td></tr>
+</table>
+
+<div class="warn">
+<strong>Timing Critical:</strong> 1000BASE-T1 at 750 MBd requires careful clock distribution. The PCS digital logic runs at 125 MHz (GMII) and 750 MHz (PAM3 symbol). Use multi-cycle paths for the 80B/81B→RS-FEC→scrambler pipeline. The 3B2T mapper must produce one PAM3 symbol every 1.333 ns; consider parallel processing (e.g., 3 bits/cycle at 250 MHz) if 750 MHz digital is not feasible.
+</div>
+
+<h3>6.6 Clock Recovery from Encoded Data</h3>
+<table>
+<tr><th>PHY Type</th><th>Clock Recovery Method</th><th>Key Requirements</th></tr>
+<tr><td>100BASE-X</td><td>PMD recovers clock from NRZI data; 125 MHz</td><td>PLL bandwidth ~1 MHz; lock time &lt; 100 µs</td></tr>
+<tr><td>1000BASE-X</td><td>CDR from 8B/10B transitions at 1.25 Gb/s</td><td>Comma alignment provides coarse phase; transitions provide fine tracking</td></tr>
+<tr><td>1000BASE-T</td><td>SLAVE recovers 125 MHz from PAM5; MASTER uses local oscillator</td><td>Loop timing: SLAVE TX clock = recovered RX clock; jitter &lt; 0.15 UI</td></tr>
+<tr><td>100BASE-T1</td><td>SLAVE recovers 66.666 MHz from PAM3; MASTER uses local TX_TCLK</td><td>Training sequence provides known pattern for acquisition</td></tr>
+<tr><td>1000BASE-T1</td><td>SLAVE recovers 750 MHz from PAM3; MASTER uses local clock</td><td>Training mode PAM2 at 750 MBd; InfoField alignment markers</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL: Clock Recovery Interface (SLAVE Mode)</h4>
+<pre>
+module clock_recovery_slave (
+  input  wire        rx_pam3,      // Sampled PAM3 input
+  input  wire        adc_clk,      // Free-running ADC clock (oversampled)
+  output logic       recovered_clk,
+  output logic       recovered_clk_90,
+  output logic       clk_locked
+);
+  // Bang-bang CDR or digital PLL
+  logic [7:0] phase_acc;
+  logic [7:0] phase_error;
+  
+  // Transition detector: PAM3 transitions occur on every symbol edge
+  // Early/late detection based on zero-crossing timing
+  always_ff @(posedge adc_clk) begin
+    if (zero_crossing_detected) begin
+      if (sample_position == EARLY)
+        phase_error &lt;= phase_error + 1;
+      else if (sample_position == LATE)
+        phase_error &lt;= phase_error - 1;
+    end
+  end
+  
+  // Digital loop filter
+  always_ff @(posedge adc_clk) begin
+    phase_acc &lt;= phase_acc + (phase_error >>> 4);  // PI filter
+  end
+  
+  // DCO: digitally controlled oscillator
+  assign recovered_clk = phase_acc[7];  // MSB as recovered clock
+  
+  // Lock detection: phase error within threshold for N cycles
+  assign clk_locked = (|phase_error[7:3] == 1'b0) &amp;&amp; lock_counter > 1000;
+endmodule
+</pre>
+</div>
+
+<h3>6.7 Symbol Error Rate Monitoring</h3>
+<table>
+<tr><th>PHY Type</th><th>Error Indicator</th><th>Monitoring Method</th><th>Threshold</th></tr>
+<tr><td>100BASE-X</td><td>Invalid code-group (/V/)</td><td>Count invalid CGs per frame</td><td>&gt; 1 invalid CG in ESD window = error</td></tr>
+<tr><td>1000BASE-X</td><td>Invalid code-group + RD error</td><td>Invalid code counter + sync_status</td><td>&gt; M invalid CGs → sync loss</td></tr>
+<tr><td>1000BASE-T</td><td>Mean-square error (MSE) at slicer</td><td>PMA monitors MSE; asserts loc_rcvr_status</td><td>MSE &gt; threshold → NOT_OK</td></tr>
+<tr><td>100BASE-T1</td><td>Invalid ternary pair + descrambler lock</td><td>PCS checks pair validity; PMA checks MSE</td><td>rcv_max_timer timeout → jabber reset</td></tr>
+<tr><td>1000BASE-T1</td><td>RS-FEC parity failure</td><td>RFER monitor counts uncorrectable frames</td><td>16 errors in 88 frames → hi_rfer</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL: Symbol Error Counter (1000BASE-X)</h4>
+<pre>
+module symbol_error_counter (
+  input  wire        clk,
+  input  wire        rst_n,
+  input  wire        cg_valid,     // 0 = invalid code-group
+  input  wire        cg_en,        // code-group strobe
+  input  wire        sample_window, // e.g., 1 ms window
+  output logic [15:0] error_count,
+  output logic       error_threshold_exceeded
+);
+  logic [15:0] window_cnt;
+  logic [15:0] err_cnt;
+  
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      window_cnt &lt;= 16'd0;
+      err_cnt    &lt;= 16'd0;
+      error_count &lt;= 16'd0;
+    end else begin
+      if (sample_window) begin
+        // End of window: latch and reset
+        error_count &lt;= err_cnt;
+        err_cnt &lt;= 16'd0;
+        window_cnt &lt;= 16'd0;
+        error_threshold_exceeded &lt;= (err_cnt > THRESHOLD);
+      end else begin
+        window_cnt &lt;= window_cnt + 1'b1;
+        if (cg_en &amp;&amp; !cg_valid)
+          err_cnt &lt;= err_cnt + 1'b1;
+      end
+    end
+  end
+endmodule
+</pre>
+</div>
+
+<h3>6.8 Additional RTL Checks</h3>
+<table>
+<tr><th>Category</th><th>Check Item</th><th>Pass Criteria</th></tr>
+<tr><td rowspan="4">Reset</td><td>All state machines initialize to known states</td><td>Formal reset property</td></tr>
+<tr><td>Scrambler seed non-zero</td><td>Assert(seed != 0)</td></tr>
+<tr><td>Running disparity initialized to negative (TX)</td><td>Verify first code-group uses RD– column</td></tr>
+<tr><td>RX_RD can initialize to either + or –</td><td>Both cases verified in sim</td></tr>
+<tr><td rowspan="4">CDC</td><td>GMII/MII clocks asynchronous to PMA clocks</td><td>FIFO or handshake implemented</td></tr>
+<tr><td>Scrambler state crosses from TX clock to RX clock (loop timing)</td><td>Not needed; independent scramblers</td></tr>
+<tr><td>Config registers cross from management to datapath</td><td>2-flop synchronizer</td></tr>
+<tr><td>loc_rcvr_status from PMA to PCS</td><td>Level signal; no pulse stretching</td></tr>
+<tr><td rowspan="4">Power</td><td>EEE LPI: transmitter quiet mode disables DAC</td><td>Power saving &gt; 90% in LPI</td></tr>
+<tr><td>EEE LPI: receiver quiet mode disables ADC/eq</td><td>Wake within 20.5 µs (100BASE-X)</td></tr>
+<tr><td>Clock gating on idle pipelines</td><td>Gate clocks when TX_EN=0</td></tr>
+<tr><td>Retention registers for scrambler state in LPI</td><td>State maintained across quiet periods</td></tr>
+<tr><td rowspan="4">Testability</td><td>Loopback mode: MII→PCS→PMA→PCS→MII</td><td>Verify in loopback bit set</td></tr>
+<tr><td>PRBS generator/checker in PMA</td><td>Built-in self-test pattern</td></tr>
+<tr><td>JTAG boundary scan on MII/GMII</td><td>Compliant to 1149.1</td></tr>
+<tr><td>MDIO register access to all counters/status</td><td>Clause 22/45 register map</td></tr>
+</table>
+
+<h3>6.9 Verification Test Plan</h3>
+<table>
+<tr><th>Test</th><th>Stimulus</th><th>Expected Response</th><th>Coverage</th></tr>
+<tr><td>4B/5B encode/decode</td><td>All 16 data nibbles + control codes</td><td>Correct 5-bit code-group output</td><td>100% code-group table</td></tr>
+<tr><td>8B/10B RD tracking</td><td>Alternating D21.5 / D21.5</td><td>RD toggles every code-group</td><td>RD+ and RD– columns</td></tr>
+<tr><td>SSD/ESD detection</td><td>/J/K/ followed by data then /T/R/</td><td>RX_DV asserted correctly; preamble replaced</td><td>Alignment and delimiters</td></tr>
+<tr><td>Comma alignment</td><td>Bit-slipped /I1/ /I1/ /I1/</td><td>Alignment achieved within 10 bits</td><td>All 10 slip positions</td></tr>
+<tr><td>Scrambler sequence</td><td>Reset then run 2^20 cycles</td><td>Match expected LFSR sequence</td><td>Known-answer test</td></tr>
+<tr><td>PAM5 idle pattern</td><td>Continuous idle (SEND_I)</td><td>Symbols restricted to {+2, 0, –2}</td><td>No +1/–1 during idle</td></tr>
+<tr><td>Convolutional encoder</td><td>All 256 data octets × 4 states</td><td>Correct Sdn[8] parity</td><td>State transition table</td></tr>
+<tr><td>RS-FEC encode/decode</td><td>Random 406-symbol blocks</td><td>Correct parity; decode corrects 22 errors</td><td>Corner cases: all zeros, all ones</td></tr>
+<tr><td>1000BASE-T1 frame lock</td><td>Training pattern then data</td><td>block_lock asserted; rf_valid true</td><td>Training→data transition</td></tr>
+<tr><td>LPI entry/exit</td><td>Assert LP_IDLE on GMII</td><td>Sleep frame sent; quiet-refresh cycle; wake on deassert</td><td>EEE state transitions</td></tr>
+<tr><td>False carrier</td><td>Non-SSD pattern after carrier detect</td><td>RX_ER asserted; RX_DV remains low</td><td>Error handling</td></tr>
+<tr><td>Link failure</td><td>Signal off or excessive errors</td><td>link_status → FAIL; PMA enters training</td><td>Recovery behavior</td></tr>
+<tr><td>Auto-Negotiation</td><td>FLP burst from link partner</td><td>Config reg exchange; MASTER/SLAVE resolved</td><td>Clause 28/37/98</td></tr>
+</table>
+
+<div class="ok">
+<strong>Final Sign-Off Criteria:</strong>
+<ul>
+<li>Lint: 0 errors, &lt; 10 warnings (with justification)</li>
+<li>CDC: All clock crossings formally verified or protected by FIFO/sync</li>
+<li>Formal: No assertion failures on critical properties (RD, comma, scrambler)</li>
+<li>Simulation: 100% code-group table coverage; 100% state machine arc coverage</li>
+<li>Gate-level sim: Timing closure at specified clock frequencies</li>
+<li>Power: EEE LPI power savings verified; no leakage in quiet mode</li>
+</ul>
+</div>
+
+<h3>6.10 Quick Reference: Parameter Summary</h3>
+<table>
+<tr><th>Parameter</th><th>100BASE-X</th><th>1000BASE-X</th><th>1000BASE-T</th><th>100BASE-T1</th><th>1000BASE-T1</th></tr>
+<tr><td>Line Rate (Mb/s)</td><td>125</td><td>1250</td><td>1000</td><td>66.666×3=200</td><td>750×log2(3)≈1188</td></tr>
+<tr><td>Symbol Rate (MBd)</td><td>125</td><td>1250</td><td>125</td><td>66.666</td><td>750</td></tr>
+<tr><td>Modulation</td><td>NRZI</td><td>NRZ</td><td>4D-PAM5</td><td>PAM3</td><td>PAM3</td></tr>
+<tr><td>Coding</td><td>4B/5B</td><td>8B/10B</td><td>8B1Q4 + conv</td><td>4B/3B + scrambler</td><td>80B/81B + RS-FEC</td></tr>
+<tr><td>Scrambler</td><td>None</td><td>None</td><td>33-bit LFSR</td><td>33-bit LFSR</td><td>15-bit LFSR</td></tr>
+<tr><td>FEC</td><td>None</td><td>None</td><td>None</td><td>None</td><td>RS(450,406)</td></tr>
+<tr><td>Interface</td><td>MII</td><td>GMII</td><td>GMII</td><td>MII</td><td>GMII</td></tr>
+<tr><td>Clock (MHz)</td><td>25/125</td><td>125/1250</td><td>125</td><td>25/33.3/66.6</td><td>125/750</td></tr>
+<tr><td>Pairs</td><td>1 (TX) + 1 (RX)</td><td>1 (fiber)</td><td>4</td><td>1</td><td>1</td></tr>
+<tr><td>Reach</td><td>100 m</td><td>5 km</td><td>100 m</td><td>15 m</td><td>15/40 m</td></tr>
+<tr><td>Auto-Neg</td><td>Clause 28</td><td>Clause 37</td><td>Clause 28</td><td>Clause 98</td><td>Clause 98</td></tr>
+</table>
+
+<hr>
+<p style="text-align:center; color:#666; font-size:0.9em;">
+Generated from IEEE Std 802.3-2022 — Clause 24, 36, 40, 96, 97<br>
+For RTL design reference only. Always consult the official standard for normative requirements.
+</p>
+
+</body>
+</html>
+
+<!-- ===================== APPENDIX: ADDITIONAL DETAIL ===================== -->
+<h2 id="sec-appendix">Appendix A: Extended Technical Reference</h2>
+
+<h3>A.1 1000BASE-X Synchronization State Machine — Full Detail</h3>
+<p>The PCS Synchronization process in 1000BASE-X manages code-group alignment and declares <code>sync_status</code>. The complete state machine from IEEE 802.3-2022 Clause 36 is reproduced below with implementation notes:</p>
+
+<pre>
+// Variables
+sync_status: OK or FAIL
+cg[9:0]: received code-group
+good_cg: boolean indicating valid code-group in correct RD column
+enable_sync: boolean from Link Status state machine
+
+// States
+LOSS_OF_SYNC:
+  sync_status &lt;= FAIL;
+  if (cg == /K28.5/ in any RD) goto COMMA_DETECT_1;
+
+COMMA_DETECT_1:
+  // Wait for next code-group; must be even position relative to comma
+  if (good_cg &amp;&amp; even_position) goto ACQUIRE_SYNC_1;
+  else if (!good_cg) goto LOSS_OF_SYNC;
+
+ACQUIRE_SYNC_1:
+  if (cg == /K28.5/) goto COMMA_DETECT_M;
+  else if (good_cg) goto ACQUIRE_SYNC_1;  // stay, count good CGs
+  else goto LOSS_OF_SYNC;
+
+COMMA_DETECT_M:
+  // Multiple commas detected; confirm alternating even/odd
+  if (good_cg &amp;&amp; odd_position) goto ACQUIRE_SYNC_M;
+  else goto LOSS_OF_SYNC;
+
+ACQUIRE_SYNC_M:
+  if (cg == /K28.5/) goto SYNC_ACQUIRED_1;
+  else if (good_cg) goto ACQUIRE_SYNC_M;
+  else goto LOSS_OF_SYNC;
+
+SYNC_ACQUIRED_1:
+  sync_status &lt;= OK;
+  if (!good_cg) goto LOSS_OF_SYNC;
+  if (consecutive_good_cgs >= N1) goto SYNC_ACQUIRED_N;
+  // N1 typically = 3
+
+SYNC_ACQUIRED_N:
+  sync_status &lt;= OK;
+  if (!good_cg) begin
+    bad_cg_counter++;
+    if (bad_cg_counter >= N2) goto LOSS_OF_SYNC;  // N2 typically = 4
+  end else begin
+    bad_cg_counter &lt;= 0;
+  end
+  if (cg == /K28.5/ &amp;&amp; unexpected_position) goto LOSS_OF_SYNC;
+</pre>
+
+<table>
+<tr><th>Counter</th><th>Typical Value</th><th>Purpose</th></tr>
+<tr><td>N1 (acquire threshold)</td><td>3</td><td>Consecutive good CGs to advance from SYNC_ACQUIRED_1 to SYNC_ACQUIRED_N</td></tr>
+<tr><td>N2 (loss threshold)</td><td>3–4</td><td>Consecutive bad CGs to lose sync (hysteresis)</td></tr>
+<tr><td>cg_timer</td><td>8 ns ± 100 ppm</td><td>Code-group period derived from recovered clock</td></tr>
+</table>
+
+<div class="note">
+<strong>Implementation Note:</strong> The synchronization FSM is typically clocked by the recovered byte clock (125 MHz). A <code>comma_det</code> signal from the 10-bit barrel shifter drives the initial state transition. The "position" (even/odd) is tracked by a simple toggle flip-flop that toggles on every valid /K28.5/.
+</div>
+
+<h3>A.2 1000BASE-X Auto-Negotiation Ordered Sets</h3>
+<p>During Auto-Negotiation (Clause 37), the PCS Transmit sends Configuration ordered sets instead of /I/:</p>
+
+<table>
+<tr><th>Ordered Set</th><th>Code-Group Sequence</th><th>Purpose</th></tr>
+<tr><td>/C1/</td><td>/K28.5/ /D21.5/ /Config_Reg[7:0]/ /Config_Reg[15:8]/</td><td>Config register, even position</td></tr>
+<tr><td>/C2/</td><td>/K28.5/ /D2.2/ /Config_Reg[7:0]/ /Config_Reg[15:8]/</td><td>Config register, odd position</td></tr>
+<tr><td>/I1/</td><td>/K28.5/ /D5.6/</td><td>Idle even</td></tr>
+<tr><td>/I2/</td><td>/K28.5/ /D16.2/</td><td>Idle odd</td></tr>
+<tr><td>/S/</td><td>/K27.7/</td><td>Start of packet</td></tr>
+<tr><td>/T/</td><td>/K29.7/</td><td>Terminate</td></tr>
+<tr><td>/R/</td><td>/K23.7/</td><td>Carrier extend / error propagation</td></tr>
+<tr><td>/V/</td><td>/K30.7/</td><td>Error</td></tr>
+</table>
+
+<p>The /C1/ and /C2/ ordered sets alternate to maintain DC balance. <code>Config_Reg</code> is the 16-bit Auto-Negotiation base page. The receiver synchronizes on /K28.5/ and then latches <code>Config_Reg</code> from the third and fourth code-groups.</p>
+
+<h3>A.3 1000BASE-T Trellis Diagram and Viterbi Decoder</h3>
+<p>The 1000BASE-T convolutional encoder is a 4-state, rate-8/9 systematic code. The state is defined by <code>csn[1:0]</code> (two bits). The trellis has the following characteristics:</p>
+
+<table>
+<tr><th>Current State<br>csn-1[1:0]</th><th>Input<br>Sdn[7:6]</th><th>Output<br>Sdn[8]</th><th>Next State<br>csn[1:0]</th></tr>
+<tr><td rowspan="4">00 (S0)</td><td>00</td><td>0</td><td>00</td></tr>
+<tr><td>01</td><td>0</td><td>10</td></tr>
+<tr><td>10</td><td>0</td><td>01</td></tr>
+<tr><td>11</td><td>0</td><td>11</td></tr>
+<tr><td rowspan="4">01 (S1)</td><td>00</td><td>0</td><td>10</td></tr>
+<tr><td>01</td><td>0</td><td>00</td></tr>
+<tr><td>10</td><td>0</td><td>11</td></tr>
+<tr><td>11</td><td>0</td><td>01</td></tr>
+<tr><td rowspan="4">10 (S2)</td><td>00</td><td>0</td><td>01</td></tr>
+<tr><td>01</td><td>0</td><td>11</td></tr>
+<tr><td>10</td><td>0</td><td>00</td></tr>
+<tr><td>11</td><td>0</td><td>10</td></tr>
+<tr><td rowspan="4">11 (S3)</td><td>00</td><td>0</td><td>11</td></tr>
+<tr><td>01</td><td>0</td><td>01</td></tr>
+<tr><td>10</td><td>0</td><td>10</td></tr>
+<tr><td>11</td><td>0</td><td>00</td></tr>
+</table>
+
+<p>The output bit <code>Sdn[8]</code> is always the current state bit <code>csn-1[0]</code> during data mode (the systematic property). The Viterbi decoder in the PMA operates on the received PAM5 symbols to find the most likely transmitted sequence. The branch metric is the Euclidean distance between the received symbol quartet and the expected symbol quartet for each trellis branch.</p>
+
+<div class="rtl-box">
+<h4>RTL: Simplified Viterbi Branch Metric Unit (BMU)</h4>
+<pre>
+module viterbi_bmu (
+  input  wire signed [3:0] rx_ta, rx_tb, rx_tc, rx_td,  // Received PAM5 (–2 to +2)
+  input  wire        [8:0] expected_sdn,                // Expected Sdn for branch
+  output logic [7:0] branch_metric                      // Euclidean distance squared
+);
+  // Map expected Sdn to expected PAM5 via lookup
+  logic signed [3:0] exp_ta, exp_tb, exp_tc, exp_td;
+  
+  always_comb begin
+    case (expected_sdn[6:8])
+      3'b000: {exp_ta, exp_tb, exp_tc, exp_td} = table_even0[expected_sdn[5:0]];
+      3'b001: {exp_ta, exp_tb, exp_tc, exp_td} = table_odd0[expected_sdn[5:0]];
+      // ... etc
+    endcase
+  end
+  
+  // Compute squared Euclidean distance (scaled)
+  logic signed [4:0] da = rx_ta - exp_ta;
+  logic signed [4:0] db = rx_tb - exp_tb;
+  logic signed [4:0] dc = rx_tc - exp_tc;
+  logic signed [4:0] dd = rx_td - exp_td;
+  
+  assign branch_metric = (da*da + db*db + dc*dc + dd*dd);
+endmodule
+</pre>
+</div>
+
+<h3>A.4 Extended 4D-PAM5 Mapping Table</h3>
+<p>The full mapping from <code>Sdn[5:0]</code> to quinary symbols for even subsets is essential for RTL implementation. Below is an expanded view of the even subset mappings:</p>
+
+<table>
+<tr><th>Sdn[5:0]</th><th>Sdn[6:8]=000</th><th>Sdn[6:8]=010</th><th>Sdn[6:8]=100</th><th>Sdn[6:8]=110</th></tr>
+<tr><td>000000</td><td>0,0,0,0</td><td>0,0,+1,+1</td><td>0,+1,+1,0</td><td>0,+1,0,+1</td></tr>
+<tr><td>000001</td><td>–2,0,0,0</td><td>–2,0,+1,+1</td><td>–2,+1,+1,0</td><td>–2,+1,0,+1</td></tr>
+<tr><td>000010</td><td>0,–2,0,0</td><td>0,–2,+1,+1</td><td>0,–1,+1,0</td><td>0,–1,0,+1</td></tr>
+<tr><td>000011</td><td>–2,–2,0,0</td><td>–2,–2,+1,+1</td><td>–2,–1,+1,0</td><td>–2,–1,0,+1</td></tr>
+<tr><td>000100</td><td>0,0,–2,0</td><td>0,0,–1,+1</td><td>0,+1,–1,0</td><td>0,+1,–2,+1</td></tr>
+<tr><td>000101</td><td>–2,0,–2,0</td><td>–2,0,–1,+1</td><td>–2,+1,–1,0</td><td>–2,+1,–2,+1</td></tr>
+<tr><td>000110</td><td>0,–2,–2,0</td><td>0,–2,–1,+1</td><td>0,–1,–1,0</td><td>0,–1,–2,+1</td></tr>
+<tr><td>000111</td><td>–2,–2,–2,0</td><td>–2,–2,–1,+1</td><td>–2,–1,–1,0</td><td>–2,–1,–2,+1</td></tr>
+<tr><td>001000</td><td>0,0,0,–2</td><td>0,0,+1,–1</td><td>0,+1,+1,–2</td><td>0,+1,0,–1</td></tr>
+<tr><td>001001</td><td>–2,0,0,–2</td><td>–2,0,+1,–1</td><td>–2,+1,+1,–2</td><td>–2,+1,0,–1</td></tr>
+<tr><td>001010</td><td>0,–2,0,–2</td><td>0,–2,+1,–1</td><td>0,–1,+1,–2</td><td>0,–1,0,–1</td></tr>
+<tr><td>001011</td><td>–2,–2,0,–2</td><td>–2,–2,+1,–1</td><td>–2,–1,+1,–2</td><td>–2,–1,0,–1</td></tr>
+<tr><td>001100</td><td>0,0,–2,–2</td><td>0,0,–1,–1</td><td>0,+1,–1,–2</td><td>0,+1,–2,–1</td></tr>
+<tr><td>001101</td><td>–2,0,–2,–2</td><td>–2,0,–1,–1</td><td>–2,+1,–1,–2</td><td>–2,+1,–2,–1</td></tr>
+<tr><td>001110</td><td>0,–2,–2,–2</td><td>0,–2,–1,–1</td><td>0,–1,–1,–2</td><td>0,–1,–2,–1</td></tr>
+<tr><td>001111</td><td>–2,–2,–2,–2</td><td>–2,–2,–1,–1</td><td>–2,–1,–1,–2</td><td>–2,–1,–2,–1</td></tr>
+<tr><td>010000</td><td>+1,+1,+1,+1</td><td>+1,+1,0,0</td><td>+1,0,0,+1</td><td>+1,0,+1,0</td></tr>
+<tr><td>010001</td><td>–1,+1,+1,+1</td><td>–1,+1,0,0</td><td>–1,0,0,+1</td><td>–1,0,+1,0</td></tr>
+<tr><td>010010</td><td>+1,–1,+1,+1</td><td>+1,–1,0,0</td><td>+1,–2,0,+1</td><td>+1,–2,+1,0</td></tr>
+<tr><td>010011</td><td>–1,–1,+1,+1</td><td>–1,–1,0,0</td><td>–1,–2,0,+1</td><td>–1,–2,+1,0</td></tr>
+<tr><td>010100</td><td>+1,+1,–1,+1</td><td>+1,+1,–2,0</td><td>+1,0,–2,+1</td><td>+1,0,–1,0</td></tr>
+<tr><td>010101</td><td>–1,+1,–1,+1</td><td>–1,+1,–2,0</td><td>–1,0,–2,+1</td><td>–1,0,–1,0</td></tr>
+<tr><td>010110</td><td>+1,–1,–1,+1</td><td>+1,–1,–2,0</td><td>+1,–2,–2,+1</td><td>+1,–2,–1,0</td></tr>
+<tr><td>010111</td><td>–1,–1,–1,+1</td><td>–1,–1,–2,0</td><td>–1,–2,–2,+1</td><td>–1,–2,–1,0</td></tr>
+<tr><td>011000</td><td>+1,+1,+1,–1</td><td>+1,+1,0,–2</td><td>+1,0,0,–1</td><td>+1,0,+1,–2</td></tr>
+<tr><td>011001</td><td>–1,+1,+1,–1</td><td>–1,+1,0,–2</td><td>–1,0,0,–1</td><td>–1,0,+1,–2</td></tr>
+<tr><td>011010</td><td>+1,–1,+1,–1</td><td>+1,–1,0,–2</td><td>+1,–2,0,–1</td><td>+1,–2,+1,–2</td></tr>
+<tr><td>011011</td><td>–1,–1,+1,–1</td><td>–1,–1,0,–2</td><td>–1,–2,0,–1</td><td>–1,–2,+1,–2</td></tr>
+<tr><td>011100</td><td>+1,+1,–1,–1</td><td>+1,+1,–2,–2</td><td>+1,0,–2,–1</td><td>+1,0,–1,–2</td></tr>
+<tr><td>011101</td><td>–1,+1,–1,–1</td><td>–1,+1,–2,–2</td><td>–1,0,–2,–1</td><td>–1,0,–1,–2</td></tr>
+<tr><td>011110</td><td>+1,–1,–1,–1</td><td>+1,–1,–2,–2</td><td>+1,–2,–2,–1</td><td>+1,–2,–1,–2</td></tr>
+<tr><td>011111</td><td>–1,–1,–1,–1</td><td>–1,–1,–2,–2</td><td>–1,–2,–2,–1</td><td>–1,–2,–1,–2</td></tr>
+<tr><td>100000</td><td>+2,0,0,0</td><td>+2,0,+1,+1</td><td>+2,+1,+1,0</td><td>+2,+1,0,+1</td></tr>
+<tr><td>100001</td><td>+2,–2,0,0</td><td>+2,–2,+1,+1</td><td>+2,–1,+1,0</td><td>+2,–1,0,+1</td></tr>
+<tr><td>100010</td><td>+2,0,–2,0</td><td>+2,0,–1,+1</td><td>+2,+1,–1,0</td><td>+2,+1,–2,+1</td></tr>
+<tr><td>100011</td><td>+2,–2,–2,0</td><td>+2,–2,–1,+1</td><td>+2,–1,–1,0</td><td>+2,–1,–2,+1</td></tr>
+<tr><td>100100</td><td>+2,0,0,–2</td><td>+2,0,+1,–1</td><td>+2,+1,+1,–2</td><td>+2,+1,0,–1</td></tr>
+<tr><td>100101</td><td>+2,–2,0,–2</td><td>+2,–2,+1,–1</td><td>+2,–1,+1,–2</td><td>+2,–1,0,–1</td></tr>
+<tr><td>100110</td><td>+2,0,–2,–2</td><td>+2,0,–1,–1</td><td>+2,+1,–1,–2</td><td>+2,+1,–2,–1</td></tr>
+<tr><td>100111</td><td>+2,–2,–2,–2</td><td>+2,–2,–1,–1</td><td>+2,–1,–1,–2</td><td>+2,–1,–2,–1</td></tr>
+<tr><td>101000</td><td>0,0,+2,0</td><td>+1,+1,+2,0</td><td>+1,0,+2,+1</td><td>0,+1,+2,+1</td></tr>
+<tr><td>101001</td><td>–2,0,+2,0</td><td>–1,+1,+2,0</td><td>–1,0,+2,+1</td><td>–2,+1,+2,+1</td></tr>
+<tr><td>101010</td><td>0,–2,+2,0</td><td>+1,–1,+2,0</td><td>+1,–2,+2,+1</td><td>0,–1,+2,+1</td></tr>
+<tr><td>101011</td><td>–2,–2,+2,0</td><td>–1,–1,+2,0</td><td>–1,–2,+2,+1</td><td>–2,–1,+2,+1</td></tr>
+<tr><td>101100</td><td>0,0,+2,–2</td><td>+1,+1,+2,–2</td><td>+1,0,+2,–1</td><td>0,+1,+2,–1</td></tr>
+<tr><td>101101</td><td>–2,0,+2,–2</td><td>–1,+1,+2,–2</td><td>–1,0,+2,–1</td><td>–2,+1,+2,–1</td></tr>
+<tr><td>101110</td><td>0,–2,+2,–2</td><td>+1,–1,+2,–2</td><td>+1,–2,+2,–1</td><td>0,–1,+2,–1</td></tr>
+<tr><td>101111</td><td>–2,–2,+2,–2</td><td>–1,–1,+2,–2</td><td>–1,–2,+2,–1</td><td>–2,–1,+2,–1</td></tr>
+<tr><td>110000</td><td>0,+2,0,0</td><td>0,+2,+1,+1</td><td>+1,+2,0,+1</td><td>+1,+2,+1,0</td></tr>
+<tr><td>110001</td><td>–2,+2,0,0</td><td>–2,+2,+1,+1</td><td>–1,+2,0,+1</td><td>–1,+2,+1,0</td></tr>
+<tr><td>110010</td><td>0,+2,–2,0</td><td>0,+2,–1,+1</td><td>+1,+2,–2,+1</td><td>+1,+2,–1,0</td></tr>
+<tr><td>110011</td><td>–2,+2,–2,0</td><td>–2,+2,–1,+1</td><td>–1,+2,–2,+1</td><td>–1,+2,–1,0</td></tr>
+<tr><td>110100</td><td>0,+2,0,–2</td><td>0,+2,+1,–1</td><td>+1,+2,0,–1</td><td>+1,+2,+1,–2</td></tr>
+<tr><td>110101</td><td>–2,+2,0,–2</td><td>–2,+2,+1,–1</td><td>–1,+2,0,–1</td><td>–1,+2,+1,–2</td></tr>
+<tr><td>110110</td><td>0,+2,–2,–2</td><td>0,+2,–1,–1</td><td>+1,+2,–2,–1</td><td>+1,+2,–1,–2</td></tr>
+<tr><td>110111</td><td>–2,+2,–2,–2</td><td>–2,+2,–1,–1</td><td>–1,+2,–2,–1</td><td>–1,+2,–1,–2</td></tr>
+<tr><td>111000</td><td>0,0,0,+2</td><td>+1,+1,0,+2</td><td>0,+1,+1,+2</td><td>+1,0,+1,+2</td></tr>
+<tr><td>111001</td><td>–2,0,0,+2</td><td>–1,+1,0,+2</td><td>–2,+1,+1,+2</td><td>–1,0,+1,+2</td></tr>
+<tr><td>111010</td><td>0,–2,0,+2</td><td>+1,–1,0,+2</td><td>0,–1,+1,+2</td><td>+1,–2,+1,+2</td></tr>
+<tr><td>111011</td><td>–2,–2,0,+2</td><td>–1,–1,0,+2</td><td>–2,–1,+1,+2</td><td>–1,–2,+1,+2</td></tr>
+<tr><td>111100</td><td>0,0,–2,+2</td><td>+1,+1,–2,+2</td><td>0,+1,–1,+2</td><td>+1,0,–1,+2</td></tr>
+<tr><td>111101</td><td>–2,0,–2,+2</td><td>–1,+1,–2,+2</td><td>–2,+1,–1,+2</td><td>–1,0,–1,+2</td></tr>
+<tr><td>111110</td><td>0,–2,–2,+2</td><td>+1,–1,–2,+2</td><td>0,–1,–1,+2</td><td>+1,–2,–1,+2</td></tr>
+<tr><td>111111</td><td>–2,–2,–2,+2</td><td>–1,–1,–2,+2</td><td>–2,–1,–1,+2</td><td>–1,–2,–1,+2</td></tr>
+</table>
+
+<div class="note">
+<strong>Note:</strong> The odd subset mappings (Sdn[6:8] = 001, 011, 101, 111) follow a similar structure but with levels shifted by +1 on different pair combinations. Refer to IEEE 802.3-2022 Table 40–2 for the complete odd subset table.
+</div>
+
+<h3>A.5 100BASE-T1 Differential Manchester Encoding (DME) for Training</h3>
+<p>100BASE-T1 uses Differential Manchester Encoding during Auto-Negotiation (Clause 98) to exchange capabilities before transitioning to PAM3 data mode:</p>
+<ul>
+<li><strong>DME clock:</strong> Transitions at the center of every bit cell</li>
+<li><strong>DME data:</strong> A transition at the cell boundary represents logic 1; no transition represents logic 0</li>
+<li><strong>Bit rate:</strong> 66.666 Mb/s (same symbol rate as PAM3)</li>
+<li><strong>Purpose:</strong> Half-duplex negotiation; does not require echo cancellation</li>
+</ul>
+
+<p>DME encoding rules:</p>
+<table>
+<tr><th>Previous State</th><th>Data Bit</th><th>Output Transition</th></tr>
+<tr><td>High</td><td>0</td><td>Fall at center only</td></tr>
+<tr><td>High</td><td>1</td><td>Fall at start, rise at center</td></tr>
+<tr><td>Low</td><td>0</td><td>Rise at center only</td></tr>
+<tr><td>Low</td><td>1</td><td>Rise at start, fall at center</td></tr>
+</table>
+
+<h3>A.6 1000BASE-T1 RS-FEC Syndrome Calculation</h3>
+<p>The RS-FEC decoder computes syndromes S<sub>0</sub> through S<sub>43</sub> by evaluating the received polynomial R(Z) at α<sup>i</sup>:</p>
+<pre>
+Si = R(α^i) for i = 0, 1, ..., 43
+</pre>
+<p>If all S<sub>i</sub> = 0, the received frame is error-free. Otherwise, the Berlekamp-Massey algorithm computes the error locator polynomial, and the Chien search finds error locations. Forney's algorithm computes error magnitudes.</p>
+
+<div class="rtl-box">
+<h4>RTL: Syndrome Calculator (Simplified)</h4>
+<pre>
+module rs_syndrome (
+  input  wire        clk,
+  input  wire        rst_n,
+  input  wire  [8:0] rx_symbol,
+  input  wire        symbol_valid,
+  input  wire        frame_start,
+  output logic [8:0] syndrome [0:43]
+);
+  // GF(2^9) multiplier and accumulator
+  logic [8:0] acc [0:43];
+  logic [8:0] alpha_power [0:43];  // Pre-computed α^i
+  
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      for (int i = 0; i < 44; i++) begin
+        acc[i] &lt;= 9'd0;
+        syndrome[i] &lt;= 9'd0;
+      end
+    end else begin
+      if (frame_start) begin
+        for (int i = 0; i < 44; i++) acc[i] &lt;= 9'd0;
+      end
+      if (symbol_valid) begin
+        for (int i = 0; i < 44; i++) begin
+          acc[i] &lt;= gf_mul(acc[i], alpha_power[i]) ^ rx_symbol;
+        end
+      end
+      if (frame_end) begin
+        for (int i = 0; i < 44; i++) syndrome[i] &lt;= acc[i];
+      end
+    end
+  end
+endmodule
+</pre>
+</div>
+
+<h3>A.7 Link Synchronization (1000BASE-T1 without Auto-Negotiation)</h3>
+<p>When Auto-Negotiation is disabled, 1000BASE-T1 uses Link Synchronization:</p>
+<ol>
+<li>MASTER sends synchronization sequence for 1 µs</li>
+<li>If no SLAVE response, MASTER repeats every 5 µs</li>
+<li>SLAVE detects sequence, responds with 1 µs synchronization sequence</li>
+<li>If no other detection for 4 µs after SLAVE response, Link Synchronization is complete</li>
+<li>Link Monitor timers start; PHY Control begins Training</li>
+</ol>
+
+<pre>
+// MASTER Link Synchronization
+MASTER_SEND:
+  tx_mode &lt;= SEND_T;  // PAM2 training
+  send_sync_sequence(1us);
+  wait 5us;
+  if (!slave_detected) goto MASTER_SEND;
+  else goto LINK_SYNC_DONE;
+
+// SLAVE Link Synchronization  
+SLAVE_LISTEN:
+  if (sync_sequence_detected) goto SLAVE_RESPOND;
+
+SLAVE_RESPOND:
+  send_sync_sequence(1us);
+  wait 4us;
+  if (no_other_detection) goto LINK_SYNC_DONE;
+</pre>
+
+<h3>A.8 100BASE-X PMA Carrier Detect State Machine</h3>
+<pre>
+// States: INITIALIZE, RECEIVE_NEXT_BIT, CARRIER_DETECT, CARRIER_OFF,
+//         WAIT_FOR_NEXT, GET_NEXT_QUINT, CONFIRM_K, BAD_CARRIER
+
+INITIALIZE:
+  r_bits[9:0] &lt;= 10'b11111_11111;
+  carrier_status &lt;= OFF;
+  rxerror_status &lt;= NO_ERROR;
+  goto RECEIVE_NEXT_BIT;
+
+RECEIVE_NEXT_BIT:
+  SHIFTLEFT(r_bits);
+  r_bits[0] &lt;= rx_code_bit;
+  if (r_bits[0] == 0 &amp;&amp; r_bits[9:2] != 8'b11111111)
+    goto CARRIER_DETECT;  // Two non-contiguous zeros in 10 bits
+
+CARRIER_DETECT:
+  carrier_status &lt;= ON;
+  rxerror_status &lt;= NO_ERROR;
+  // Look for SSD pattern 11000_10001 in next 10 bits
+  if (r_bits[9:0] == 10'b11000_10001)
+    goto GET_NEXT_QUINT;
+  else if (r_bits[9:0] == 10'b11111_11000)
+    goto CONFIRM_K;
+  else
+    goto RECEIVE_NEXT_BIT;
+
+CONFIRM_K:
+  rxerror_status &lt;= NO_ERROR;
+  goto GET_NEXT_QUINT;
+
+GET_NEXT_QUINT:
+  // Wait for 5 more bits
+  5xPMD_UNITDATA.indicates;
+  if (r_bits[9:0] == 10'b11000_10001)
+    goto WAIT_FOR_NEXT;
+  else
+    goto BAD_CARRIER;
+
+BAD_CARRIER:
+  rxerror_status &lt;= ERROR;
+  if (carrier_status == ON) goto RECEIVE_NEXT_BIT;
+  else goto CARRIER_OFF;
+
+CARRIER_OFF:
+  carrier_status &lt;= OFF;
+  if (r_bits[9:0] == 10'b11111_11111) goto INITIALIZE;
+  else goto RECEIVE_NEXT_BIT;
+
+WAIT_FOR_NEXT:
+  if (link_status != OK) goto INITIALIZE;
+  goto RECEIVE_NEXT_BIT;
+</pre>
+
+<h3>A.9 1000BASE-T PHY Control State Machine</h3>
+<pre>
+// States: SILENT, TRAINING, ANALYZE, LINK_OK, SEND_IDLE_OR_DATA,
+//         SEND_I, SEND_N, SEND_Z
+
+SILENT:
+  tx_mode &lt;= SEND_Z;
+  if (link_control == ENABLE) goto TRAINING;
+
+TRAINING:
+  tx_mode &lt;= SEND_I;
+  start minwait_timer;
+  if (minwait_timer_done &amp;&amp; scr_status == OK)
+    goto ANALYZE;
+
+ANALYZE:
+  tx_mode &lt;= SEND_I;
+  if (loc_rcvr_status == OK &amp;&amp; rem_rcvr_status == OK)
+    goto LINK_OK;
+  else if (maxwait_timer_done)
+    goto SILENT;
+
+LINK_OK:
+  tx_mode &lt;= SEND_N;
+  if (loc_rcvr_status == NOT_OK || rem_rcvr_status == NOT_OK)
+    goto TRAINING;
+
+SEND_IDLE_OR_DATA:
+  if (tx_enable) goto SEND_N;
+  else goto SEND_I;
+</pre>
+
+<h3>A.10 100BASE-T1 4B/3B and 3B/4B Conversion Detail</h3>
+<p>The 4B/3B conversion packs 4-bit nibbles into 3-bit words:</p>
+<pre>
+// 4B/3B conversion example (3n bits, no stuff bits)
+// d0<3:0> d1<3:0> d2<3:0> → d0<2:0> d1<1:0>,d0<3> d2<0>,d1<3:2> d2<3:1>
+//
+// 4B/3B conversion (3n+1 bits, 2 stuff bits)
+// d0<3:0> d1<3:0> → d0<2:0> d1<1:0>,d0<3> <xx>,d1<3>  (2 stuff bits appended)
+//
+// 4B/3B conversion (3n+2 bits, 1 stuff bit)
+// d0<3:0> d1<3:0> d2<3:0> → d0<2:0> d1<1:0>,d0<3> d2<0>,d1<3:2> d2<3:1>
+// ... d3<3:0> → d3<2:0> <x>,d3<3>  (1 stuff bit appended)
+</pre>
+
+<p>The 3B/4B conversion at the receiver reverses this, discarding stuff bits:</p>
+<pre>
+// 3B/4B conversion
+// rx_data<2:0> at 33.333 MHz → RXD<3:0> at 25 MHz
+// Accumulate 3 bits → form nibbles → output on MII
+// If residual bits remain at end of packet (stuff bits), discard them
+</pre>
+
+<h3>A.11 Clock Tolerance and Jitter Budgets</h3>
+<table>
+<tr><th>Parameter</th><th>100BASE-X</th><th>1000BASE-X</th><th>1000BASE-T</th><th>100BASE-T1</th><th>1000BASE-T1</th></tr>
+<tr><td>TX Clock Tolerance</td><td>±50 ppm</td><td>±100 ppm</td><td>±50 ppm</td><td>±100 ppm</td><td>±100 ppm</td></tr>
+<tr><td>RX Clock Recovery</td><td>PMD PLL</td><td>CDR @ 1.25 Gb/s</td><td>SLAVE loop timing</td><td>SLAVE loop timing</td><td>SLAVE loop timing</td></tr>
+<tr><td>Phase Jitter</td><td>&lt; ±8° @ 20 kHz</td><td>—</td><td>&lt; 1.4 ns peak</td><td>—</td><td>—</td></tr>
+<tr><td>Symbol Skew (pair-to-pair)</td><td>N/A</td><td>N/A</td><td>&lt; 50 ns</td><td>N/A</td><td>N/A</td></tr>
+<tr><td>MDI Return Loss</td><td>—</td><td>—</td><td>&gt; 16 dB</td><td>&gt; 16 dB</td><td>&gt; 16 dB</td></tr>
+</table>
+
+<h3>A.12 MDI Interface Signal Mapping</h3>
+<table>
+<tr><th>PHY Type</th><th>MDI Signals</th><th>Voltage / Optical</th><th>Connector</th></tr>
+<tr><td>100BASE-TX</td><td>BI_DA±, BI_DB± (2 pairs)</td><td>±1V differential</td><td>RJ-45</td></tr>
+<tr><td>100BASE-FX</td><td>TX_Fiber, RX_Fiber</td><td>1300 nm multimode</td><td>SC/ST</td></tr>
+<tr><td>1000BASE-SX</td><td>TX_Fiber, RX_Fiber</td><td>850 nm multimode</td><td>SC/LC</td></tr>
+<tr><td>1000BASE-LX</td><td>TX_Fiber, RX_Fiber</td><td>1310 nm singlemode</td><td>SC/LC</td></tr>
+<tr><td>1000BASE-CX</td><td>BI_DA±, BI_DB± (2 pairs)</td><td>±1V differential, 150Ω</td><td>9-pin D-sub</td></tr>
+<tr><td>1000BASE-T</td><td>BI_DA±, BI_DB±, BI_DC±, BI_DD±</td><td>±1V differential, 100Ω</td><td>RJ-45</td></tr>
+<tr><td>100BASE-T1</td><td>BI_DA± (1 pair)</td><td>±1V differential, 100Ω</td><td>Automotive (e.g., H-MTD)</td></tr>
+<tr><td>1000BASE-T1</td><td>BI_DA± (1 pair)</td><td>±1V differential, 100Ω</td><td>Automotive/industrial</td></tr>
+</table>
+
+<h3>A.13 Management Register Map (MDIO)</h3>
+<table>
+<tr><th>Register</th><th>Address</th><th>PHY</th><th>Description</th></tr>
+<tr><td>Control</td><td>3.0 / 1.0</td><td>All</td><td>Reset, loopback, speed select, AN enable</td></tr>
+<tr><td>Status</td><td>3.1 / 1.1</td><td>All</td><td>Link status, AN complete, remote fault</td></tr>
+<tr><td>PHY ID 1/2</td><td>3.2-3.3</td><td>All</td><td>Organizationally Unique Identifier</td></tr>
+<tr><td>AN Adv</td><td>3.4 / 4.0</td><td>All</td><td>Advertised abilities</td></tr>
+<tr><td>AN LP Adv</td><td>3.5 / 5.0</td><td>All</td><td>Link partner abilities</td></tr>
+<tr><td>AN Expansion</td><td>3.6 / 6.0</td><td>All</td><td>Parallel detection, NP capable</td></tr>
+<tr><td>1000BASE-T Control</td><td>3.9 / 9.0</td><td>1000BASE-T</td><td>MASTER/SLAVE config, test modes</td></tr>
+<tr><td>1000BASE-T Status</td><td>3.10 / 10.0</td><td>1000BASE-T</td><td>MASTER/SLAVE resolution, pair status</td></tr>
+<tr><td>1000BASE-T1 Status</td><td>3.2305-3.2306</td><td>1000BASE-T1</td><td>block_lock, hi_rfer, LPI status</td></tr>
+<tr><td>1000BASE-T1 OAM</td><td>3.2307-3.2308</td><td>1000BASE-T1</td><td>OAM control/status</td></tr>
+</table>
+
+</body>
+</html>
+
+
+<h3>A.14 SystemVerilog Testbench Skeleton</h3>
+<div class="rtl-box">
+<h4>Testbench: 1000BASE-X PCS Loopback</h4>
+<pre>
+module tb_pcs_1000basex;
+  logic        gtx_clk = 0;
+  logic [7:0]  txd;
+  logic        tx_en, tx_er;
+  logic [7:0]  rxd;
+  logic        rx_dv, rx_er;
+  logic        crs, col;
+  logic        rx_clk;
+  logic [9:0]  pma_tx, pma_rx;
+  logic        pma_clk = 0;
+
+  // DUT
+  pcs_1000basex dut (.*);
+
+  // Clocks
+  always #4ns gtx_clk = ~gtx_clk;   // 125 MHz
+  always #0.8ns pma_clk = ~pma_clk; // 1.25 GHz (simplified)
+
+  // Stimulus
+  initial begin
+    // Reset
+    tx_en = 0; tx_er = 0; txd = 8'h00;
+    @(posedge gtx_clk);
+
+    // Send Idle ordered sets
+    repeat(10) send_idle();
+
+    // Send packet: SSD + preamble + data + ESD
+    send_packet(64);  // 64-byte packet
+
+    // Verify RX
+    @(posedge rx_dv);
+    $display("RX_DV asserted at %0t", $time);
+    repeat(64) @(posedge rx_clk);
+    if (!rx_dv) $display("RX_DV deasserted correctly");
+
+    // Check loopback
+    assert(rxd == txd) else $error("Data mismatch!");
+
+    $finish;
+  end
+
+  task send_idle();
+    tx_en = 0; tx_er = 0;
+    txd = 8'h00;
+    @(posedge gtx_clk);
+  endtask
+
+  task send_packet(int len);
+    // SSD
+    tx_en = 1; tx_er = 0; txd = 8'h55;  // preamble
+    repeat(2) @(posedge gtx_clk);
+    // Data
+    for (int i = 0; i < len; i++) begin
+      txd = i[7:0];
+      @(posedge gtx_clk);
+    end
+    // ESD
+    tx_en = 0;
+    repeat(2) @(posedge gtx_clk);
+  endtask
+endmodule
+</pre>
+</div>
+
+<h3>A.15 Common RTL Pitfalls</h3>
+<table>
+<tr><th>Pitfall</th><th>Impact</th><th>Prevention</th></tr>
+<tr><td>Scrambler seeded to zero</td><td>Output stuck at zero; link never comes up</td><td>Assert seed != 0; use random or fixed non-zero seed</td></tr>
+<tr><td>RD tracker not reset to negative</td><td>First transmitted code-group may be invalid</td><td>Initialize tx_rd = 1'b0 (RD–)</td></tr>
+<tr><td>Comma detector only checks one alignment</td><td>Cannot acquire sync on slipped input</td><td>Implement barrel shifter or 10-phase check</td></tr>
+<tr><td>PAM5 mapper uses wrong subset</td><td>Symbol levels incorrect; high BER</td><td>Formal verify subset selection against Sdn[6:8]</td></tr>
+<tr><td>Convolutional encoder state not reset</td><td>Residual state corrupts first data after idle</td><td>Reset csn[2:0] on csresetn</td></tr>
+<tr><td>RS-FEC parity not cleared between frames</td><td>Parity accumulates across frames</td><td>Clear shift register on frame_start</td></tr>
+<tr><td>LPI timer values in wrong units</td><td>PHY enters quiet too early/late</td><td>Verify timer counts in symbol periods, not clock cycles</td></tr>
+<tr><td>3B/4B conversion discards valid bits</td><td>Packet truncation or corruption</td><td>Track bit count modulo 4; only discard known stuff bits</td></tr>
+<tr><td>False carrier on single-bit noise</td><td>Spurious RX_ER assertions</td><td>Require 2 non-contiguous zeros in 10 bits (per spec)</td></tr>
+<tr><td>GMII TX_EN/RX_DV metastability</td><td>Spurious frame start/end</td><td>2-flop sync if crossing clock domains</td></tr>
+</table>
+
+</body>
+</html>

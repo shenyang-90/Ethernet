@@ -1,0 +1,1553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IEEE 802.3-2022 MAC &amp; MAC Control — RTL Design Reference</title>
+<style>
+:root { --bg:#f8f9fa; --fg:#212529; --accent:#0056b3; --code:#e9ecef; --warn:#fff3cd; --crit:#f8d7da; --ok:#d4edda; }
+body { font-family: "Segoe UI", system-ui, sans-serif; line-height:1.7; max-width:1100px; margin:0 auto; padding:20px; background:var(--bg); color:var(--fg); }
+h1 { color:var(--accent); border-bottom:3px solid var(--accent); padding-bottom:8px; }
+h2 { color:var(--accent); margin-top:36px; border-left:6px solid var(--accent); padding-left:12px; }
+h3 { margin-top:28px; color:#004494; }
+h4 { margin-top:20px; color:#333; }
+table { border-collapse:collapse; width:100%; margin:12px 0; font-size:0.95em; }
+th,td { border:1px solid #bbb; padding:8px 10px; text-align:left; }
+th { background:#e2e6ea; }
+code,pre { font-family: "Consolas", "Courier New", monospace; background:var(--code); padding:2px 6px; border-radius:4px; font-size:0.92em; }
+pre { padding:14px; overflow-x:auto; line-height:1.5; }
+.note { background:#e7f3ff; border-left:4px solid var(--accent); padding:10px 14px; margin:12px 0; }
+.warn { background:var(--warn); border-left:4px solid #856404; padding:10px 14px; margin:12px 0; }
+.crit { background:var(--crit); border-left:4px solid #721c24; padding:10px 14px; margin:12px 0; }
+.ok { background:var(--ok); border-left:4px solid #155724; padding:10px 14px; margin:12px 0; }
+.toc { background:#fff; border:1px solid #ccc; padding:16px 20px; border-radius:8px; }
+.toc ul { list-style:none; padding-left:0; }
+.toc li { margin:6px 0; }
+.toc a { text-decoration:none; color:var(--accent); }
+.toc a:hover { text-decoration:underline; }
+.rtl-box { background:#fff; border:2px dashed var(--accent); padding:14px 18px; border-radius:8px; margin:14px 0; }
+.rtl-box h4 { margin-top:0; color:var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>IEEE 802.3-2022 MAC &amp; MAC Control — RTL Design Reference</h1>
+<p><strong>Source:</strong> Clause 3 (MAC Frame), Clause 4 (MAC Operation), Clause 31 (MAC Control), Annex 31B (PAUSE)<br>
+<strong>Scope:</strong> Deep-dive for RTL implementation of Ethernet MAC transmit, receive, FCS, and PAUSE flow control.<br>
+<strong>Target:</strong> 10/100/1000 Mb/s half-duplex &amp; full-duplex MAC cores.</p>
+
+<div class="toc">
+<h3>Table of Contents</h3>
+<ul>
+<li><a href="#sec-frame">1. MAC Frame Format</a></li>
+<li><a href="#sec-fcs">2. CRC-32 / FCS</a></li>
+<li><a href="#sec-tx">3. MAC Transmit State Machine</a></li>
+<li><a href="#sec-rx">4. MAC Receive State Machine</a></li>
+<li><a href="#sec-pause">5. PAUSE / MAC Control</a></li>
+<li><a href="#sec-csma">6. CSMA/CD Parameters Table</a></li>
+<li><a href="#sec-checklist">7. RTL Design Checklist</a></li>
+</ul>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sec-frame">1. MAC Frame Format</h2>
+<!-- ================================================================ -->
+
+<h3>1.1 Packet Layout Overview</h3>
+<p>A packet consists of a <strong>Preamble</strong>, <strong>SFD</strong>, the <strong>MAC frame</strong> (DA, SA, Length/Type, Data, Pad, FCS), and an optional <strong>Extension</strong> field (1000 Mb/s half-duplex only). Octets are transmitted top-to-bottom; bits within each octet are transmitted <strong>least significant bit (LSB) first</strong>.</p>
+
+<table>
+<tr><th>Field</th><th>Size (octets)</th><th>Size (bits)</th><th>Byte Offset</th><th>Notes</th></tr>
+<tr><td>Preamble</td><td>7</td><td>56</td><td>–</td><td>Sync pattern 0x55 repeated 7×</td></tr>
+<tr><td>SFD</td><td>1</td><td>8</td><td>–</td><td>Start Frame Delimiter = 0xD5</td></tr>
+<tr><td>Destination Address (DA)</td><td>6</td><td>48</td><td>0–5</td><td>First bit transmitted is I/G bit</td></tr>
+<tr><td>Source Address (SA)</td><td>6</td><td>48</td><td>6–11</td><td>First bit transmitted is U/L = 0</td></tr>
+<tr><td>Length/Type</td><td>2</td><td>16</td><td>12–13</td><td>MSB-first within field</td></tr>
+<tr><td>MAC Client Data</td><td>46–1500</td><td>variable</td><td>14–</td><td>Basic frame</td></tr>
+<tr><td>Pad</td><td>0–46</td><td>variable</td><td>–</td><td>Appended to meet minFrameSize</td></tr>
+<tr><td>FCS (CRC-32)</td><td>4</td><td>32</td><td>last 4</td><td>Computed over DA through Pad</td></tr>
+<tr><td>Extension</td><td>0–(slotTime–minFrameSize)/8</td><td>variable</td><td>after FCS</td><td>1000 Mb/s half-duplex only</td></tr>
+</table>
+
+<div class="note">
+<strong>Note:</strong> The MAC frame proper begins at the DA field and ends at the FCS field inclusive. The Preamble, SFD, and Extension are packet-level encapsulation added/removed by the MAC sublayer, not part of the MAC frame delivered to the MAC client.
+</div>
+
+<h3>1.2 Preamble and SFD — Exact Bit Patterns</h3>
+<p>The Preamble allows the PLS circuitry to reach steady-state synchronization. The SFD marks the start of the MAC frame.</p>
+
+<table>
+<tr><th>Field</th><th>Hex Value</th><th>Binary (LSB first on wire)</th><th>Description</th></tr>
+<tr><td>Preamble byte 0</td><td>0x55</td><td><code>1 0 1 0 1 0 1 0</code></td><td>First byte transmitted</td></tr>
+<tr><td>Preamble byte 1</td><td>0x55</td><td><code>1 0 1 0 1 0 1 0</code></td><td></td></tr>
+<tr><td>Preamble byte 2</td><td>0x55</td><td><code>1 0 1 0 1 0 1 0</code></td><td></td></tr>
+<tr><td>Preamble byte 3</td><td>0x55</td><td><code>1 0 1 0 1 0 1 0</code></td><td></td></tr>
+<tr><td>Preamble byte 4</td><td>0x55</td><td><code>1 0 1 0 1 0 1 0</code></td><td></td></tr>
+<tr><td>Preamble byte 5</td><td>0x55</td><td><code>1 0 1 0 1 0 1 0</code></td><td></td></tr>
+<tr><td>Preamble byte 6</td><td>0x55</td><td><code>1 0 1 0 1 0 1 0</code></td><td>Last preamble byte; ends with 0</td></tr>
+<tr><td>SFD</td><td>0xD5</td><td><code>1 0 1 0 1 0 1 1</code></td><td>Pattern <code>10101011</code></td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL Check — Preamble/SFD Generator</h4>
+<pre>// Transmit side: shift out 8 bytes = 56 bits preamble + 8 bits SFD
+localparam [63:0] PREAMBLE_SFD = {
+    8'hD5,   // SFD ( transmitted last among header bytes, but LSB first )
+    8'h55, 8'h55, 8'h55, 8'h55, 8'h55, 8'h55, 8'h55
+};
+// Bit ordering: TXD[0] is the LSB of each byte and is transmitted FIRST.
+// For MII (nibble), TXD[3:0] transmits low nibble first, then high nibble.
+</pre>
+</div>
+
+<h3>1.3 DA / SA Address Field Bit Numbering</h3>
+<p>Each address is 48 bits. The <strong>first bit transmitted</strong> (bit 0 of the first octet) is the LSB of the first octet. The octets are transmitted in order: octet 0 first, octet 5 last. Within each octet, bits are transmitted LSB first.</p>
+
+<table>
+<tr><th>Bit Position (transmission order)</th><th>Name</th><th>Value</th><th>Meaning</th></tr>
+<tr><td>Bit 0 (first on wire)</td><td>I/G</td><td>0</td><td>Individual address</td></tr>
+<tr><td>Bit 0 (first on wire)</td><td>I/G</td><td>1</td><td>Group (multicast/broadcast) address</td></tr>
+<tr><td>Bit 1</td><td>U/L</td><td>0</td><td>Globally administered (U) address</td></tr>
+<tr><td>Bit 1</td><td>U/L</td><td>1</td><td>Locally administered address</td></tr>
+<tr><td>Bits 2–47</td><td>46-bit address</td><td>any</td><td>Remaining address bits</td></tr>
+</table>
+
+<div class="note">
+<strong>Broadcast Address:</strong> All 48 bits = 1 (0xFF-FF-FF-FF-FF-FF). Both I/G and U/L bits are 1. All stations shall recognize the broadcast address.<br>
+<strong>Source Address:</strong> I/G bit is reserved and set to 0. U/L bit may be 0 or 1 depending on address administration.
+</div>
+
+<h3>1.4 Length/Type Field Threshold</h3>
+<p>The two-octet field is interpreted based on its numeric value (first octet is most significant):</p>
+<ul>
+<li><strong>Length interpretation:</strong> Value ≤ 1500 decimal (0x05DC). Indicates the number of MAC client data octets in the basic frame.</li>
+<li><strong>Type interpretation:</strong> Value ≥ 1536 decimal (0x0600). Indicates the EtherType of the MAC client protocol (e.g., 0x0800 = IPv4, 0x86DD = IPv6, 0x8808 = MAC Control).</li>
+</ul>
+
+<div class="warn">
+<strong>RTL Trap:</strong> Values between 0x05DD and 0x05FF (1501–1535) are technically undefined. Do not use these values. MAC Control uses 0x8808.
+</div>
+
+<h3>1.5 Minimum / Maximum Frame Sizes</h3>
+
+<table>
+<tr><th>Frame Type</th><th>Max Client Data (octets)</th><th>Max MAC Frame (octets)</th><th>Min MAC Frame (octets)</th></tr>
+<tr><td>Basic frame (untagged)</td><td>1500</td><td>1518 (DA through FCS)</td><td>64</td></tr>
+<tr><td>Q-tagged frame</td><td>1504</td><td>1522</td><td>64</td></tr>
+<tr><td>Envelope frame</td><td>1982</td><td>2000</td><td>64</td></tr>
+</table>
+
+<p>The minimum MAC frame size is <strong>512 bits = 64 octets</strong> (from DA through FCS inclusive). If the MAC client data is smaller than required, a Pad field is appended.</p>
+
+<h3>1.6 Pad Calculation Formula</h3>
+<p>From IEEE 802.3-2022 Clause 3.2.8:</p>
+<pre>padSize = max[ 0, minFrameSize – (clientDataSize + 2 × addressSize + lengthOrTypeSize + crcSize) ]
+
+Where:
+  minFrameSize   = 512 bits  (64 octets)
+  addressSize    = 48 bits   (6 octets)
+  lengthOrTypeSize = 16 bits (2 octets)
+  crcSize        = 32 bits   (4 octets)
+  clientDataSize = bits of MAC client data supplied by the client
+
+In octets:
+  pad_octets = max(0, 46 – client_data_octets)   // for basic frames
+</pre>
+
+<p>For a basic frame, the minimum client data + pad is <strong>46 octets</strong> (to make DA+SA+Length/Type+Data+Pad = 60 octets before FCS). With FCS = 4 octets, total = 64 octets = 512 bits.</p>
+
+<h3>1.7 Extension Field Conditions</h3>
+<p>The Extension field is used only in <strong>half-duplex mode at 1000 Mb/s</strong>. It follows the FCS field and contains non-data extension bits.</p>
+<ul>
+<li>Length range: <strong>0 to (slotTime – minFrameSize) bits</strong> inclusive.</li>
+<li>slotTime at 1 Gb/s half-duplex = 4096 bit times.</li>
+<li>minFrameSize = 512 bit times.</li>
+<li>Max extension = 4096 – 512 = <strong>3584 bits = 448 octets</strong>.</li>
+</ul>
+<div class="note">
+The Extension field is <strong>not included in the FCS computation</strong>. It ensures the carrier event duration is at least one slotTime so that CSMA/CD operates correctly on the desired network topologies.
+</div>
+
+<h3>1.8 VLAN Tag Insertion — Exact TCI Format</h3>
+<p>A Q-tagged frame carries a 4-octet VLAN tag (IEEE 802.1Q) inserted between the Source Address and the Length/Type field. The tag consists of:</p>
+
+<table>
+<tr><th>Sub-field</th><th>Width (bits)</th><th>Bit Position</th><th>Description</th></tr>
+<tr><td>TPID (Tag Protocol Identifier)</td><td>16</td><td>12–13 (relative to DA)</td><td>Always 0x8100</td></tr>
+<tr><td>PCP (Priority Code Point)</td><td>3</td><td>15:13 of TCI</td><td>802.1p priority 0–7</td></tr>
+<tr><td>DEI (Drop Eligible Indicator)</td><td>1</td><td>12 of TCI</td><td>0 = not drop eligible, 1 = drop eligible</td></tr>
+<tr><td>VID (VLAN Identifier)</td><td>12</td><td>11:0 of TCI</td><td>VLAN ID 0–4095 (0x000 = null, 0xFFF = reserved)</td></tr>
+</table>
+
+<p>The <strong>Tag Control Information (TCI)</strong> is the 2 octets following the TPID. The overall VLAN tag increases the maximum client data from 1500 to 1504 octets so that the maximum MAC frame remains 1522 octets (1518 + 4).</p>
+
+<div class="rtl-box">
+<h4>RTL Check — VLAN Tag Awareness</h4>
+<pre>// MAC frame layout with VLAN tag:
+// DA[6] | SA[6] | TPID[2]=0x8100 | TCI[2] | Length/Type[2] | Data+Pad[46-1504] | FCS[4]
+// Min frame size remains 64 bytes from DA through FCS.
+// When stripping VLAN tag in RX, shift offset of Length/Type by +4 bytes.
+</pre>
+</div>
+
+
+<!-- ================================================================ -->
+<h2 id="sec-fcs">2. CRC-32 / FCS</h2>
+<!-- ================================================================ -->
+
+<h3>2.1 Generating Polynomial</h3>
+<p>The Frame Check Sequence is a 32-bit CRC computed over all MAC frame fields <strong>except the FCS itself</strong>: Destination Address, Source Address, Length/Type, MAC Client Data, and Pad.</p>
+
+<p>Exact generating polynomial (from Clause 3.2.9):</p>
+<pre>G(x) = x<sup>32</sup> + x<sup>26</sup> + x<sup>23</sup> + x<sup>22</sup> + x<sup>16</sup> + x<sup>12</sup> + x<sup>11</sup> + x<sup>10</sup> + x<sup>8</sup> + x<sup>7</sup> + x<sup>5</sup> + x<sup>4</sup> + x<sup>2</sup> + x + 1</pre>
+
+<p>In hex representation, the polynomial is <code>0x04C11DB7</code>. Note: this is the <strong>reversed</strong> (reflected) polynomial used in many software CRC-32 implementations; Ethernet hardware typically uses the normal (non-reversed) form.</p>
+
+<h3>2.2 Mathematical Procedure</h3>
+<ol>
+<li>The first 32 bits of the frame are <strong>complemented</strong> (inverted).</li>
+<li>The <em>n</em> bits of the protected fields are considered as coefficients of a polynomial M(x) of degree <em>n – 1</em>. The first bit of DA corresponds to the x<sup>n–1</sup> term; the last bit of Pad corresponds to the x<sup>0</sup> term.</li>
+<li>M(x) is multiplied by x<sup>32</sup> and divided by G(x), producing a remainder R(x) of degree ≤ 31.</li>
+<li>The coefficients of R(x) form a 32-bit sequence.</li>
+<li>This bit sequence is <strong>complemented</strong> to produce the final CRC.</li>
+</ol>
+
+<h3>2.3 Bit Ordering on the Wire</h3>
+<ul>
+<li>Each octet of the MAC frame (except FCS) is transmitted <strong>LSB first</strong>.</li>
+<li>The 32 bits of the CRC are placed in the FCS field so that the <strong>x<sup>31</sup> term is the left-most bit of the first octet</strong>, and the <strong>x<sup>0</sup> term is the right-most bit of the last octet</strong>.</li>
+<li>The bits of the CRC are transmitted in the order x<sup>31</sup>, x<sup>30</sup>, …, x<sup>1</sup>, x<sup>0</sup>.</li>
+</ul>
+
+<div class="warn">
+<strong>Critical RTL Trap:</strong> Standard software CRC-32 (PKZIP, Ethernet, etc.) uses reflected input and reflected output with final XOR 0xFFFFFFFF, producing a residue of <code>0xC704DD7B</code> on valid frames. <strong>Ethernet FCS</strong> uses the same polynomial but with MSB-first transmission within each byte for the FCS field specifically, yielding a verification residue of <code>0x2144DF1C</code> (a.k.a. the "magic residue") when the FCS is included in the CRC computation over the entire received packet.
+</div>
+
+<h3>2.4 Serial LFSR Implementation</h3>
+<p>The canonical hardware implementation is a 32-bit LFSR with taps at the polynomial positions.</p>
+
+<pre>// 32-bit CRC LFSR (serial, one bit per clock)
+// Polynomial: G(x) = x^32 + x^26 + x^23 + x^22 + x^16 + x^12 + x^11 + x^10
+//                    + x^8 + x^7 + x^5 + x^4 + x^2 + x + 1
+// Initial value: all 1's (0xFFFFFFFF)
+// Final XOR: all 1's (0xFFFFFFFF)
+// Input bit order: LSB of each data byte first (matches wire order)
+
+module crc32_serial (
+    input        clk,
+    input        rst_n,
+    input        data_valid,
+    input        data_bit,   // serial bit stream, LSB first
+    output [31:0] crc_out    // final FCS value
+);
+
+    reg [31:0] crc;
+    wire feedback = data_bit ^ crc[31];
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            crc <= 32'hFFFFFFFF;          // Initial value: all 1s
+        else if (data_valid) begin
+            crc[0]  <= feedback;
+            crc[1]  <= crc[0]  ^ feedback;
+            crc[2]  <= crc[1]  ^ feedback;
+            crc[3]  <= crc[2];
+            crc[4]  <= crc[3]  ^ feedback;
+            crc[5]  <= crc[4]  ^ feedback;
+            crc[6]  <= crc[5];
+            crc[7]  <= crc[6]  ^ feedback;
+            crc[8]  <= crc[7]  ^ feedback;
+            crc[9]  <= crc[8];
+            crc[10] <= crc[9]  ^ feedback;
+            crc[11] <= crc[10] ^ feedback;
+            crc[12] <= crc[11] ^ feedback;
+            crc[13] <= crc[12];
+            crc[14] <= crc[13];
+            crc[15] <= crc[14];
+            crc[16] <= crc[15] ^ feedback;
+            crc[17] <= crc[16];
+            crc[18] <= crc[17];
+            crc[19] <= crc[18];
+            crc[20] <= crc[19];
+            crc[21] <= crc[20];
+            crc[22] <= crc[21] ^ feedback;
+            crc[23] <= crc[22] ^ feedback;
+            crc[24] <= crc[23];
+            crc[25] <= crc[24];
+            crc[26] <= crc[25] ^ feedback;
+            crc[27] <= crc[26];
+            crc[28] <= crc[27];
+            crc[29] <= crc[28];
+            crc[30] <= crc[29];
+            crc[31] <= crc[30];
+        end
+    end
+
+    assign crc_out = ~crc;   // Final XOR: complement before appending to frame
+endmodule
+</pre>
+
+<h3>2.5 Parallel Byte-Wise LFSR Implementation</h3>
+<p>For high-speed MACs (100M/1G+), a byte-wide (or nibble-wide) parallel CRC update is required. The next-state logic is derived by iterating the serial LFSR 8 times.</p>
+
+<pre>// Parallel CRC-32 update for one data byte (LSB-first input)
+// data_in[0] is transmitted first on the wire.
+module crc32_byte (
+    input  [31:0] crc_in,
+    input  [7:0]  data_in,
+    output [31:0] crc_out
+);
+    reg [31:0] crc;
+    reg [7:0]  d;
+    integer i;
+
+    always @(*) begin
+        crc = crc_in;
+        d   = data_in;
+        for (i = 0; i < 8; i = i + 1) begin
+            crc = {crc[30:0], 1'b0} ^ ({32{d[0] ^ crc[31]}} & 32'h04C11DB7);
+            d   = d >> 1;
+        end
+    end
+    assign crc_out = crc;
+endmodule
+</pre>
+
+<div class="note">
+<strong>Implementation Note:</strong> The above loop unrolls to pure combinational logic. For a pipelined 1 Gb/s MAC running at 125 MHz (8-bit datapath), this logic comfortably meets timing in modern FPGAs. For 10 Gb/s, a 64-bit parallel CRC is typically used.
+</div>
+
+<h3>2.6 8-Bit Lookup Table (LUT) Implementation</h3>
+<p>A table-based approach pre-computes the CRC update for each possible byte value. This is common in firmware and can also be instantiated in RTL using a ROM.</p>
+
+<pre>// CRC-32 table (first 16 entries shown; full table has 256 entries)
+// Polynomial: 0x04C11DB7 (normal form, MSB-first computation)
+// Each entry = CRC32 of the byte value with leading 24 zeros.
+// Usage: crc = (crc << 8) ^ table[ (crc >> 24) ^ data_byte ];
+// Note: bit/byte reflection is required to match Ethernet wire ordering.
+
+localparam [31:0] CRC32_LUT [0:255] = '{
+    32'h00000000, 32'h04C11DB7, 32'h09823B6E, 32'h0D4326D9,
+    32'h130476DC, 32'h17C56B6B, 32'h1A864DB2, 32'h1E475005,
+    32'h2608EDB8, 32'h22C9F00F, 32'h2F8AD6D6, 32'h2B4CB61,
+    32'h350C9B64, 32'h31CD86D3, 32'h3C8EA00A, 32'h384FBDBD,
+    // ... (remaining 240 entries)
+    32'hB40BBE37, 32'hB30C08FA, 32'hB60C8F5D, 32'hB70B0A90,
+    32'hB6168E7B, 32'hB7111AB6, 32'hB4119D11, 32'hB51608DC,
+    32'hBD06A33E, 32'hBC0137F3, 32'hB901B054, 32'hB8062499,
+    32'hBF1B8072, 32'hBE1C14BF, 32'hBB1C9318, 32'hBA1B07D5
+};
+</pre>
+
+<div class="rtl-box">
+<h4>RTL Check — CRC Byte Reflection</h4>
+<pre>// Ethernet transmits LSB of each byte first.
+// If your CRC engine expects MSB-first input, reflect each byte:
+function automatic [7:0] reflect8(input [7:0] data);
+    reflect8 = {data[0], data[1], data[2], data[3],
+                data[4], data[5], data[6], data[7]};
+endfunction
+
+// After computing CRC over reflected bytes, reflect the 32-bit result
+// and complement:  crc_fcs = ~reflect32(crc_accumulator);
+</pre>
+</div>
+
+<h3>2.7 FCS Verification Residue</h3>
+<table>
+<tr><th>Mode</th><th>Residue (hex)</th><th>Condition</th></tr>
+<tr><td>Standard CRC-32 (PKZIP, etc.)</td><td><code>0xC704DD7B</code></td><td>Input reflected, output reflected, final XOR 0xFFFFFFFF</td></tr>
+<tr><td>Ethernet FCS (including FCS in check)</td><td><code>0x2144DF1C</code></td><td>Frame + FCS appended; LSB-first per byte; MSB-first within FCS byte</td></tr>
+</table>
+
+<div class="ok">
+<strong>RX Verification Shortcut:</strong> If the RX CRC engine computes over the entire received packet including the FCS field, a correct frame yields residue <code>0x2144DF1C</code>. This is the most common hardware check — simply run the CRC over all bits from DA through FCS and compare against the magic residue.
+</div>
+
+
+<!-- ================================================================ -->
+<h2 id="sec-tx">3. MAC Transmit State Machine</h2>
+<!-- ================================================================ -->
+
+<h3>3.1 Overview</h3>
+<p>The transmit path comprises <strong>Transmit Data Encapsulation</strong> (frame assembly, pad insertion, FCS generation) and <strong>Transmit Media Access Management</strong> (carrier deference, interpacket gap, collision detection, backoff, carrier extension, and bursting).</p>
+
+<h3>3.2 Complete State Diagram (Pseudo-code)</h3>
+<pre>
+STATE IDLE:
+    if (transmitEnabled && frameWaiting) {
+        attempts = 0;
+        transmitSucceeding = false;
+        lateCollisionCount = 0;
+        deferred = false;
+        goto STATE_DEFER;
+    }
+
+STATE DEFER:
+    if (bursting) {
+        // Burst continuation: skip deference, transmit immediately
+        frameWaiting = true;
+        goto STATE_TRANSMIT;
+    }
+    if (attempts > 0) {
+        BackOff();   // compute and wait random backoff
+    }
+    frameWaiting = true;
+    while (deferring) {
+        // wait for medium to become idle
+        if (halfDuplex) deferred = true;
+    }
+    burstStart = true;
+    if (burstMode) bursting = true;
+    goto STATE_TRANSMIT;
+
+STATE_TRANSMIT:
+    lateCollisionError = false;
+    StartTransmit();
+    frameWaiting = false;
+    if (halfDuplex) {
+        while (transmitting) {
+            WatchForCollision();
+        }
+        if (lateCollisionError)
+            lateCollisionCount = lateCollisionCount + 1;
+        attempts = attempts + 1;
+        if (transmitSucceeding) goto STATE_DONE_OK;
+        if (attempts >= attemptLimit) goto STATE_DONE_EXCESSIVE;
+        if (extend && lateCollisionCount > 0) goto STATE_DONE_LATE;
+        // collision occurred: send jam then backoff
+        goto STATE_BACKOFF;
+    } else {
+        // Full duplex: no collision handling
+        while (transmitting) { /* wait */ }
+        goto STATE_DONE_OK;
+    }
+
+STATE_BACKOFF:
+    // Jam has already been sent by BitTransmitter/StartJam
+    // BackOff() schedules retransmission after random delay
+    goto STATE_DEFER;
+
+STATE_DONE_OK:
+    if (burstMode) burstStart = false;
+    return transmitOK;
+
+STATE_DONE_EXCESSIVE:
+    return excessiveCollisionError;
+
+STATE_DONE_LATE:
+    return lateCollisionErrorStatus;
+</pre>
+
+<h3>3.3 State Transition Conditions</h3>
+
+<table>
+<tr><th>Transition</th><th>Condition</th><th>Action</th></tr>
+<tr><td>IDLE → DEFER</td><td><code>transmitEnabled && frameWaiting</code></td><td>Initialize attempt counters</td></tr>
+<tr><td>DEFER → TRANSMIT</td><td>Medium idle (not deferring) AND backoff complete</td><td>StartTransmit()</td></tr>
+<tr><td>TRANSMIT → BACKOFF</td><td>halfDuplex && collisionDetect && !transmitSucceeding</td><td>Send jam, increment attempts</td></tr>
+<tr><td>TRANSMIT → DONE_OK</td><td>transmitting complete && transmitSucceeding</td><td>Return transmitOK</td></tr>
+<tr><td>TRANSMIT → DONE_EXCESSIVE</td><td>attempts >= attemptLimit</td><td>Return excessiveCollisionError</td></tr>
+<tr><td>TRANSMIT → DONE_LATE</td><td>extend && lateCollisionCount > 0</td><td>Return lateCollisionErrorStatus (1G half-duplex only)</td></tr>
+<tr><td>BACKOFF → DEFER</td><td>After jam + random backoff time</td><td>Retry frame transmission</td></tr>
+</table>
+
+<h3>3.4 InterFrame Gap (IFG)</h3>
+<ul>
+<li><strong>Minimum interPacketGap:</strong> 96 bit times for all speeds.</li>
+<li>In half duplex, timing starts when carrierSense goes false.</li>
+<li>In full duplex, timing starts when <code>transmitting</code> goes false.</li>
+<li>Optional robustness measure: reset IFG timer if carrierSense becomes true during the first 2/3 of the gap; do NOT reset during the final 1/3.</li>
+</ul>
+
+<div class="rtl-box">
+<h4>RTL Check — IFG Timer</h4>
+<pre>// For 1 Gb/s: 96 bit times @ 125 MHz (8 ns/bit) = 12 clock cycles.
+// For 100 Mb/s MII: 96 bit times @ 25 MHz (40 ns/bit) = 24 clock cycles.
+// For 10 Mb/s MII: 96 bit times @ 2.5 MHz = 240 clock cycles.
+localparam IFG_BITS = 96;
+reg [7:0] ifg_counter;
+always @(posedge clk)
+    if (!rst_n) ifg_counter <= 0;
+    else if (tx_state == TX_IFG) ifg_counter <= ifg_counter + 1;
+    else ifg_counter <= 0;
+</pre>
+</div>
+
+<h3>3.5 Truncated Binary Exponential Backoff</h3>
+<p>After a collision, the MAC waits a random integer multiple of slotTime before retransmitting.</p>
+<pre>
+Random delay = r × slotTime
+
+where:
+    r = uniformly distributed integer in range [0, 2<sup>k</sup> – 1]
+    k = min(n, 10)
+    n = current attempt number (1st retry n=1, 2nd retry n=2, ...)
+
+Maximum backoff range:
+    Attempt 1:  r ∈ [0, 1]      → 0 or 1 slotTimes
+    Attempt 2:  r ∈ [0, 3]      → 0..3 slotTimes
+    Attempt 3:  r ∈ [0, 7]      → 0..7 slotTimes
+    ...
+    Attempt 10+: r ∈ [0, 1023]  → 0..1023 slotTimes
+</pre>
+
+<div class="warn">
+<strong>attemptLimit = 16.</strong> After 16 failed attempts, the frame is discarded with <code>excessiveCollisionError</code>. The backoff counter must be a true random or pseudo-random number; a simple LFSR is acceptable but must minimize correlation between stations.
+</div>
+
+<h3>3.6 Jam Sequence</h3>
+<ul>
+<li><strong>jamSize = 32 bits</strong> for all half-duplex speeds (10M, 100M, 1G).</li>
+<li>The jam content is <strong>unspecified</strong>; it may be any fixed or variable pattern.</li>
+<li>It must NOT be intentionally designed to be the 32-bit CRC value of the partial packet.</li>
+<li>The jam is <strong>not octet-aligned</strong>; it is a bit count.</li>
+</ul>
+
+<h3>3.7 slotTime by Speed</h3>
+
+<table>
+<tr><th>Speed</th><th>slotTime (bit times)</th><th>slotTime (octets)</th><th>Purpose</th></tr>
+<tr><td>10 Mb/s half-duplex</td><td>512</td><td>64</td><td>Collision window + scheduling quantum</td></tr>
+<tr><td>100 Mb/s half-duplex</td><td>512</td><td>64</td><td>Same as 10 Mb/s</td></tr>
+<tr><td>1 Gb/s half-duplex</td><td>4096</td><td>512</td><td>Extended for larger topologies</td></tr>
+<tr><td>Full duplex (all speeds)</td><td>N/A</td><td>N/A</td><td>Not applicable — no CSMA/CD</td></tr>
+</table>
+
+<h3>3.8 Carrier Extension (1000 Mb/s Half-Duplex Only)</h3>
+<p>If a frame is shorter than slotTime bits, non-data <strong>extension bits</strong> are appended after the FCS so that the total carrier event is at least slotTime bits long.</p>
+<ul>
+<li>Extension bits are readily distinguished from data bits by the Physical Layer.</li>
+<li>Max extension length = slotTime – minFrameSize = 4096 – 512 = <strong>3584 bits</strong>.</li>
+<li>The MAC monitors for collisions during extension; a collision after slotTime is a <strong>late collision</strong>.</li>
+</ul>
+
+<h3>3.9 Packet Bursting (1000 Mb/s Half-Duplex Only)</h3>
+<p>After a successful first frame, the MAC may transmit additional frames without relinquishing the medium.</p>
+<ul>
+<li>The interpacket gap between burst frames is filled with <strong>extensionBits</strong> (not idle).</li>
+<li><strong>burstLimit = 65536 bits</strong> (65,536 bit times).</li>
+<li>Only the first frame of a burst may require carrier extension.</li>
+<li>Any collision after the first frame (or after slotTime in the first frame) is treated as a late collision.</li>
+</ul>
+
+<h3>3.10 RTL Implementation Checklist — Transmit</h3>
+
+<table>
+<tr><th>Item</th><th>Requirement</th><th>Verification</th></tr>
+<tr><td>Frame assembly</td><td>DA | SA | Length/Type | Data | Pad | FCS appended in correct order</td><td>SVA property check on byte order</td></tr>
+<tr><td>Pad insertion</td><td>Pad to 64 bytes (DA through FCS) minimum</td><td>SVA: if frame_length &lt; 64, pad_bytes = 64 – frame_length</td></tr>
+<tr><td>FCS generation</td><td>CRC-32 computed over DA..Pad; appended MSB-first within FCS bytes</td><td>Known-good test vectors (e.g., RFC 3309)</td></tr>
+<tr><td>Preamble/SFD</td><td>7×0x55 + 0xD5, LSB first</td><td>Logic analyzer capture match</td></tr>
+<tr><td>IFG enforcement</td><td>Minimum 96 bit times between frames</td><td>Counter-based SVA assertion</td></tr>
+<tr><td>Half-duplex deferral</td><td>Defer to carrierSense; wait IFG after carrier drops</td><td>Test with simultaneous TX/RX traffic</td></tr>
+<tr><td>Collision detect</td><td>Watch collisionDetect during TX; send 32-bit jam</td><td>Inject collision at bit 256 and 600</td></tr>
+<tr><td>Backoff</td><td>Truncated binary exponential; attemptLimit=16; maxBackOff=1024</td><td>Statistical test: verify uniform distribution</td></tr>
+<tr><td>Late collision</td><td>At 1G: collision after slotTime = late; abort retransmission</td><td>Inject collision at bit 4100</td></tr>
+<tr><td>Carrier extension</td><td>1G half-duplex only: extend frames &lt; 4096 bits with extension bits</td><td>Verify carrier event duration ≥ 4096 bits</td></tr>
+</table>
+
+
+<!-- ================================================================ -->
+<h2 id="sec-rx">4. MAC Receive State Machine</h2>
+<!-- ================================================================ -->
+
+<h3>4.1 Overview</h3>
+<p>Receive frame operations comprise <strong>Receive Data Decapsulation</strong> (address recognition, FCS validation, frame disassembly) and <strong>Receive Media Access Management</strong> (collision fragment filtering, octet-boundary alignment).</p>
+
+<h3>4.2 Complete State Diagram (Pseudo-code)</h3>
+<pre>
+STATE RX_IDLE:
+    if (receiveEnabled) {
+        StartReceive();
+        goto STATE_RX_SFD;
+    } else {
+        return receiveDisabled;
+    }
+
+STATE RX_SFD:
+    // PhysicalSignalDecap discards idle/extension, strips preamble, detects SFD
+    PhysicalSignalDecap();
+    if (sfd_detected) {
+        enableBitReceiver = true;
+        extensionOK = true;
+        goto STATE_RX_DATA;
+    } else if (receiveDataValid == false) {
+        // No frame arrived
+        goto STATE_RX_IDLE;
+    }
+
+STATE RX_DATA:
+    while (receiveDataValid && !frameFinished) {
+        b = ReceiveBit();
+        incomingFrameSize = incomingFrameSize + 1;
+        if (b == 0 || b == 1) {
+            if (enableBitReceiver) {
+                if (incomingFrameSize > currentReceiveBit)
+                    extensionOK = false;   // error mapped to data during extension
+                incomingFrame[currentReceiveBit] = b;
+                currentReceiveBit = currentReceiveBit + 1;
+            }
+        } else if (!extending) {
+            frameFinished = true;   // b is extensionBit after data done
+        }
+        if (incomingFrameSize >= slotTime)
+            extending = false;      // past collision window
+    }
+    if (enableBitReceiver) {
+        frameSize = currentReceiveBit – 1;
+        receiveSucceeding = !extending;
+        receiving = false;
+        goto STATE_RX_FCS;
+    } else {
+        goto STATE_RX_IDLE;   // frame was not for us or aborted
+    }
+
+STATE RX_FCS:
+    excessBits = frameSize mod 8;
+    frameSize = frameSize – excessBits;   // truncate to octet boundary
+    receiveSucceeding = receiveSucceeding && (frameSize >= minFrameSize);
+    if (!receiveSucceeding) {
+        // Collision fragment or too short
+        goto STATE_RX_FAILED;
+    }
+    // Perform address recognition and FCS check
+    status = ReceiveDataDecap();
+    if (status == receiveOK)       goto STATE_RX_PASSED;
+    if (status == frameCheckError) goto STATE_RX_FAILED;
+    if (status == alignmentError)  goto STATE_RX_FAILED;
+    if (status == lengthError)     goto STATE_RX_FAILED;
+    if (status == frameTooLong)    goto STATE_RX_FAILED;
+    goto STATE_RX_FAILED;
+
+STATE RX_PASSED:
+    return receiveOK;
+
+STATE RX_FAILED:
+    // Invalid frames are discarded; not passed to MAC client.
+    // Optionally count in management counters.
+    goto STATE_RX_IDLE;
+</pre>
+
+<h3>4.3 Address Recognition Filter Logic</h3>
+<p>The MAC sublayer shall recognize the following destination addresses:</p>
+
+<table>
+<tr><th>Filter Type</th><th>Match Condition</th><th>RX Action</th></tr>
+<tr><td>Exact match (unicast)</td><td>DA == station individual address</td><td>Accept frame</td></tr>
+<tr><td>Broadcast</td><td>DA == 0xFF-FF-FF-FF-FF-FF</td><td>Accept frame</td></tr>
+<tr><td>Multicast (hash table)</td><td>DA is in active multicast address list</td><td>Accept frame</td></tr>
+<tr><td>Promiscuous mode</td><td>Any valid frame</td><td>Accept all frames regardless of DA</td></tr>
+<tr><td>Individual address miss</td><td>None of the above</td><td>Discard frame (do not pass to client)</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL Implementation — Hash Filter</h4>
+<pre>// Typical multicast hash filter using upper bits of CRC-32 over DA
+wire [31:0] da_crc = crc32_da(da);          // CRC over 48-bit DA
+wire [5:0]  hash_index = da_crc[5:0];       // 64-entry hash table
+wire        hash_match = hash_table[hash_index];
+wire        addr_match = (da == mac_addr) || (da == BROADCAST) || hash_match || promiscuous;
+
+// Note: The exact hash function is implementation-specific.
+// Common choices: CRC-32 upper bits, XOR-fold of DA bits, or simple bit-select.
+</pre>
+</div>
+
+<h3>4.4 Frame Length Validation</h3>
+<ul>
+<li><strong>Minimum valid frame size:</strong> minFrameSize = 512 bits = 64 octets (from DA through FCS inclusive).</li>
+<li>Frames shorter than 64 octets are presumed to be collision fragments and are <strong>silently discarded</strong>.</li>
+<li>In half-duplex mode at 1 Gb/s, the first frame of a burst must be at least <strong>slotTime = 4096 bits</strong> long to be accepted; subsequent frames must be at least minFrameSize.</li>
+<li>In full duplex mode, the shortest valid frame is minFrameSize (64 octets).</li>
+</ul>
+
+<h3>4.5 FCS Check at End of Frame</h3>
+<p>FCS validation is performed by computing the CRC over the received bits from DA through the last data/pad octet, then comparing with the received FCS field.</p>
+<ul>
+<li>If the computed CRC does not match the received FCS, the frame is marked <code>frameCheckError</code>.</li>
+<li>If <code>passReceiveFCSMode</code> is enabled, the FCS field is passed to the MAC client along with the frame.</li>
+</ul>
+
+<h3>4.6 Runt / Giant Frame Detection</h3>
+
+<table>
+<tr><th>Term</th><th>Definition</th><th>Action</th></tr>
+<tr><td>Runt frame</td><td>Frame &lt; 64 octets (DA through FCS)</td><td>Discard as collision fragment (half-duplex) or error (full-duplex)</td></tr>
+<tr><td>Giant frame</td><td>Frame &gt; maxFrameSizeLimit</td><td>Truncate at maxFrameSizeLimit; may report frameTooLong</td></tr>
+<tr><td>maxBasicFrameSize</td><td>1518 octets</td><td>Standard maximum</td></tr>
+<tr><td>maxEnvelopeFrameSize</td><td>2000 octets</td><td>Envelope frame maximum</td></tr>
+<tr><td>Jumbo frame</td><td>&gt; 2000 octets (non-standard)</td><td>Implementation-dependent; not in 802.3-2022</td></tr>
+</table>
+
+<div class="warn">
+<strong>RTL Trap:</strong> Truncated giant frames should be invalidated (marked frameTooLong) and <strong>not</strong> passed to the MAC client, as their FCS protection has been weakened by truncation.
+</div>
+
+<h3>4.7 RX Error Propagation (RX_ER, MII)</h3>
+<p>The MII/GMII provides <code>RX_ER</code> (Receive Error) to propagate physical-layer errors to the MAC:</p>
+<ul>
+<li><code>RX_ER</code> asserted during a frame causes the frame to be marked with an error.</li>
+<li>In 10/100 MII, <code>RX_ER</code> is synchronous with <code>RX_CLK</code> and <code>RXD[3:0]</code>.</li>
+<li>In GMII (1 Gb/s), <code>RX_ER</code> is synchronous with <code>RX_CLK</code> and <code>RXD[7:0]</code>.</li>
+<li>The RS (Reconciliation Sublayer) maps GMII error indications into the MAC's receive data stream.</li>
+</ul>
+
+<h3>4.8 BitReceiver Process — Detailed Behavior</h3>
+<pre>
+process BitReceiver:
+    currentReceiveBit = 1;
+    incomingFrameSize = 0;
+    frameFinished = false;
+    enableBitReceiver = receiving;
+    PhysicalSignalDecap();   // strip preamble/SFD
+    if (enableBitReceiver) extensionOK = true;
+
+    while (receiveDataValid && !frameFinished) {
+        b = ReceiveBit();
+        incomingFrameSize++;
+        if (b == 0 || b == 1) {
+            if (enableBitReceiver) {
+                if (incomingFrameSize > currentReceiveBit)
+                    extensionOK = false;
+                incomingFrame[currentReceiveBit] = b;
+                currentReceiveBit++;
+            }
+        } else if (!extending) {
+            frameFinished = true;   // extensionBit after data
+        }
+        if (incomingFrameSize >= slotTime)
+            extending = false;
+    }
+
+    if (enableBitReceiver) {
+        frameSize = currentReceiveBit – 1;
+        receiveSucceeding = !extending;
+        receiving = false;
+    }
+</pre>
+
+<div class="note">
+<strong>Extension Handling:</strong> Extension bits are received from the Physical Layer but are <strong>not appended</strong> to <code>incomingFrame</code>. The BitReceiver checks whether data bits appear after extension has started; if so, <code>extensionOK</code> is cleared, causing the frame to be discarded.
+</div>
+
+
+<!-- ================================================================ -->
+<h2 id="sec-pause">5. PAUSE / MAC Control</h2>
+<!-- ================================================================ -->
+
+<h3>5.1 MAC Control Frame Format</h3>
+<p>MAC Control frames are distinguished from data frames by their Length/Type field = <strong>0x8808</strong>. They are fixed-length frames containing minFrameSize–32 bits of payload (excluding preamble, SFD, and FCS which are added by the underlying MAC).</p>
+
+<table>
+<tr><th>Field</th><th>Size (octets)</th><th>Byte Offset</th><th>Value / Description</th></tr>
+<tr><td>Destination Address (DA)</td><td>6</td><td>0–5</td><td><code>01:80:C2:00:00:01</code> (multicast)</td></tr>
+<tr><td>Source Address (SA)</td><td>6</td><td>6–11</td><td>Individual address of transmitting station</td></tr>
+<tr><td>Length/Type</td><td>2</td><td>12–13</td><td><code>0x8808</code> (MAC Control EtherType)</td></tr>
+<tr><td>MAC Control Opcode</td><td>2</td><td>14–15</td><td>0x0001 = PAUSE; others see opcode table</td></tr>
+<tr><td>MAC Control Parameters</td><td>2</td><td>16–17</td><td>PAUSE: 16-bit pause_time (quanta)</td></tr>
+<tr><td>Reserved</td><td>42</td><td>18–59</td><td>Transmitted as all zeros (for 64-byte min frame)</td></tr>
+<tr><td>FCS</td><td>4</td><td>60–63</td><td>CRC-32 over DA through Reserved</td></tr>
+</table>
+
+<div class="note">
+<strong>DA = 01:80:C2:00:00:01</strong> is the reserved multicast address for MAC Control PAUSE frames. It is a group address (I/G = 1) and locally administered (U/L = 1). Stations implementing MAC Control PAUSE shall recognize this address.
+</div>
+
+<h3>5.2 PAUSE Opcode and Parameters</h3>
+<ul>
+<li><strong>Opcode:</strong> <code>0x0001</code> (2 octets, transmitted high-order octet first).</li>
+<li><strong>Parameter:</strong> <code>pause_time</code> — a 16-bit unsigned integer specifying the number of <strong>pause quanta</strong> to pause.</li>
+<li><strong>1 pause quantum = 512 bit times</strong>.</li>
+<li><strong>Max PAUSE time = 65535 quanta</strong> = 65535 × 512 = 33,553,920 bit times.</li>
+</ul>
+
+<table>
+<tr><th>Speed</th><th>1 quantum duration</th><th>Max PAUSE duration</th></tr>
+<tr><td>10 Mb/s</td><td>51.2 µs</td><td>~3.36 seconds</td></tr>
+<tr><td>100 Mb/s</td><td>5.12 µs</td><td>~336 milliseconds</td></tr>
+<tr><td>1 Gb/s</td><td>512 ns</td><td>~33.6 milliseconds</td></tr>
+<tr><td>10 Gb/s</td><td>51.2 ns</td><td>~3.36 milliseconds</td></tr>
+</table>
+
+<h3>5.3 PAUSE Transmit State Machine (XOFF / XON Timer)</h3>
+<pre>
+STATE PAUSE_TX_IDLE:
+    if (mac_client_requests_pause) {
+        pause_time_reg = requested_pause_quanta;
+        goto STATE PAUSE_TX_SEND;
+    }
+
+STATE PAUSE_TX_SEND:
+    // Assemble MAC Control frame:
+    //   DA  = 01:80:C2:00:00:01
+    //   SA  = station_address
+    //   L/T = 0x8808
+    //   Opcode = 0x0001
+    //   Param  = pause_time_reg
+    //   Reserved = all zeros
+    // Submit frame to MAC via MA_DATA.request
+    TransmitFrame(...);
+    goto STATE PAUSE_TX_IDLE;
+
+// XON (resume) is sent by issuing a PAUSE frame with pause_time = 0.
+</pre>
+
+<div class="rtl-box">
+<h4>RTL Check — PAUSE Frame Assembly</h4>
+<pre>// Transmit-side PAUSE frame builder
+localparam [47:0] PAUSE_DA = 48'h01_80_C2_00_00_01;
+localparam [15:0] MAC_CTRL_TYPE = 16'h8808;
+localparam [15:0] PAUSE_OPCODE  = 16'h0001;
+
+always @(posedge clk) begin
+    if (send_pause) begin
+        pause_da   <= PAUSE_DA;
+        pause_sa   <= station_mac_addr;
+        pause_type <= MAC_CTRL_TYPE;
+        pause_op   <= PAUSE_OPCODE;
+        pause_param<= pause_quantum;   // 16-bit timer value
+    end
+end
+</pre>
+</div>
+
+<h3>5.4 PAUSE Receive State Machine</h3>
+<pre>
+STATE PAUSE_RX_WAIT:
+    Wait for MA_DATA.indication from MAC sublayer.
+    Parse lengthOrType.
+    if (lengthOrType == 0x8808) goto STATE PAUSE_RX_CHECK;
+    else pass frame to MAC client (data frame).
+
+STATE PAUSE_RX_CHECK:
+    opcode = data[1:16];   // first 2 bytes of payload
+    if (opcode == 0x0001) {
+        pause_time = data[17:32];   // next 2 bytes
+        goto STATE PAUSE_RX_APPLY;
+    } else if (opcode is supported) {
+        initiate opcode-specific function;
+    } else {
+        discard frame;   // unsupported opcode
+    }
+
+STATE PAUSE_RX_APPLY:
+    // Reload the pause timer with the received pause_time
+    pause_timer <= pause_time;
+    pause_active <= (pause_time != 0);
+    goto STATE PAUSE_RX_WAIT;
+</pre>
+
+<h3>5.5 PAUSE Timer Operation</h3>
+<p>The receiving station maintains a <strong>pause timer</strong> that decrements once per pause quantum (512 bit times):</p>
+<ul>
+<li>On receipt of a PAUSE frame, the timer is <strong>reloaded</strong> with the received <code>pause_time</code>.</li>
+<li>If <code>pause_time = 0</code>, the timer is cleared and transmission resumes immediately (XON).</li>
+<li>The timer decrements by 1 every 512 bit times while the link is active.</li>
+<li>If a new PAUSE frame arrives while the timer is non-zero, the timer is <strong>reloaded</strong> with the new value (overwriting the old).</li>
+<li>Transmission of non-control frames is inhibited while <code>pause_active</code> is true.</li>
+<li>PAUSE frames themselves may be transmitted regardless of the timer state (to send XON).</li>
+</ul>
+
+<div class="rtl-box">
+<h4>RTL Check — Pause Timer Reload &amp; Underflow</h4>
+<pre>// Pause timer: counts in units of 512 bit times (1 quantum)
+// For 1 Gb/s @ 125 MHz: 512 bits / 8 bits/clk = 64 clock cycles per quantum.
+localparam QUANTA_CLKS = 64;   // speed-dependent
+reg [15:0] pause_timer;
+reg [5:0]  quantum_counter;
+reg        pause_active;
+
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        pause_timer <= 0;
+        pause_active <= 0;
+        quantum_counter <= 0;
+    end else begin
+        if (pause_rx_valid) begin
+            pause_timer <= rx_pause_time;      // Reload on any valid PAUSE
+            pause_active <= (rx_pause_time != 0);
+            quantum_counter <= 0;
+        end else if (pause_active) begin
+            if (quantum_counter == QUANTA_CLKS - 1) begin
+                quantum_counter <= 0;
+                if (pause_timer == 0) begin
+                    pause_active <= 0;           // Underflow: resume TX
+                end else begin
+                    pause_timer <= pause_timer - 1;
+                end
+            end else begin
+                quantum_counter <= quantum_counter + 1;
+            end
+        end
+    end
+end
+
+// Underflow assertion: pause_timer should never wrap below 0 because
+// we check == 0 before decrement.
+</pre>
+</div>
+
+<h3>5.6 MAC Control Opcode Table</h3>
+
+<table>
+<tr><th>Opcode (hex)</th><th>Name</th><th>Description</th><th>Clause / Annex</th></tr>
+<tr><td>0x0001</td><td>PAUSE</td><td>Flow control pause operation</td><td>Annex 31B</td></tr>
+<tr><td>0x0002</td><td>—</td><td>Reserved</td><td>—</td></tr>
+<tr><td>0x0003</td><td>MPCP</td><td>Multi-Point Control Protocol (EPON)</td><td>Clause 64 / 77</td></tr>
+<tr><td>0x0004–0x00FF</td><td>—</td><td>Reserved for future use</td><td>—</td></tr>
+<tr><td>0x0101</td><td>PFC</td><td>Priority-based Flow Control (802.1Qbb)</td><td>Annex 31D</td></tr>
+<tr><td>0x0102–0xFFFF</td><td>—</td><td>Reserved / vendor-specific</td><td>—</td></tr>
+</table>
+
+<div class="warn">
+<strong>Unsupported Opcodes:</strong> MAC Control frames with unsupported opcodes shall be <strong>discarded</strong> and may be reported to network management. They shall not be passed to the MAC client.
+</div>
+
+<h3>5.7 Delay Constraints for PAUSE Operation</h3>
+<p>Predictable PAUSE operation requires an upper bound on round-trip propagation delay. From Clause 44.3 and Annex 31B:</p>
+<ul>
+<li>The sum of MAC + RS + MAC Control delay shall not exceed <strong>8192 bit times</strong> (16 pause_quanta) for 10 Gb/s systems.</li>
+<li>For 1 Gb/s GMII systems, the bound is proportionally smaller.</li>
+<li>Network designers must ensure cable topology delays do not exceed the allowance configured in <code>aPAUSELinkDelayAllowance</code>.</li>
+</ul>
+
+
+<!-- ================================================================ -->
+<h2 id="sec-csma">6. CSMA/CD Parameters Table</h2>
+<!-- ================================================================ -->
+
+<h3>6.1 Full Parameter Table by Speed and Duplex</h3>
+
+<table>
+<tr><th>Parameter</th><th>10 Mb/s HD</th><th>10 Mb/s FD</th><th>100 Mb/s HD</th><th>100 Mb/s FD</th><th>1 Gb/s HD</th><th>1 Gb/s FD</th><th>≥10 Gb/s FD</th></tr>
+<tr><td><code>slotTime</code></td><td>512 BT</td><td>N/A</td><td>512 BT</td><td>N/A</td><td>4096 BT</td><td>N/A</td><td>N/A</td></tr>
+<tr><td><code>interPacketGap</code> (min)</td><td>96 BT</td><td>96 BT</td><td>96 BT</td><td>96 BT</td><td>96 BT</td><td>96 BT</td><td>96 BT</td></tr>
+<tr><td><code>attemptLimit</code></td><td>16</td><td>N/A</td><td>16</td><td>N/A</td><td>16</td><td>N/A</td><td>N/A</td></tr>
+<tr><td><code>backoffLimit</code></td><td>10</td><td>N/A</td><td>10</td><td>N/A</td><td>10</td><td>N/A</td><td>N/A</td></tr>
+<tr><td><code>jamSize</code></td><td>32 bits</td><td>N/A</td><td>32 bits</td><td>N/A</td><td>32 bits</td><td>N/A</td><td>N/A</td></tr>
+<tr><td><code>minFrameSize</code></td><td>512 bits (64 B)</td><td>512 bits (64 B)</td><td>512 bits (64 B)</td><td>512 bits (64 B)</td><td>512 bits (64 B)</td><td>512 bits (64 B)</td><td>512 bits (64 B)</td></tr>
+<tr><td><code>maxBasicFrameSize</code></td><td>1518 B</td><td>1518 B</td><td>1518 B</td><td>1518 B</td><td>1518 B</td><td>1518 B</td><td>1518 B</td></tr>
+<tr><td><code>maxEnvelopeFrameSize</code></td><td>2000 B</td><td>2000 B</td><td>2000 B</td><td>2000 B</td><td>2000 B</td><td>2000 B</td><td>2000 B</td></tr>
+<tr><td><code>burstLimit</code></td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>65536 bits</td><td>N/A</td><td>N/A</td></tr>
+<tr><td><code>preambleSize</code></td><td>56 bits</td><td>56 bits</td><td>56 bits</td><td>56 bits</td><td>56 bits</td><td>56 bits</td><td>56 bits (or 64b/66b sync)</td></tr>
+<tr><td><code>sfdSize</code></td><td>8 bits</td><td>8 bits</td><td>8 bits</td><td>8 bits</td><td>8 bits</td><td>8 bits</td><td>8 bits</td></tr>
+<tr><td><code>headerSize</code></td><td>64 bits</td><td>64 bits</td><td>64 bits</td><td>64 bits</td><td>64 bits</td><td>64 bits</td><td>64 bits</td></tr>
+<tr><td><code>ipgStretchRatio</code></td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>N/A</td><td>104 bits (10G WAN mode)</td></tr>
+<tr><td>CSMA/CD</td><td>Yes</td><td>No</td><td>Yes</td><td>No</td><td>Yes</td><td>No</td><td>No</td></tr>
+<tr><td>Carrier Extension</td><td>No</td><td>No</td><td>No</td><td>No</td><td>Yes</td><td>No</td><td>No</td></tr>
+<tr><td>Burst Mode</td><td>No</td><td>No</td><td>No</td><td>No</td><td>Optional</td><td>No</td><td>No</td></tr>
+<tr><td>PAUSE</td><td>No</td><td>Optional</td><td>No</td><td>Optional</td><td>No</td><td>Optional</td><td>Optional</td></tr>
+</table>
+
+<p><strong>BT</strong> = bit times. <strong>B</strong> = octets (bytes). <strong>HD</strong> = half duplex. <strong>FD</strong> = full duplex.</p>
+
+<h3>6.2 Key Differences: Half-Duplex vs Full-Duplex</h3>
+
+<table>
+<tr><th>Aspect</th><th>Half Duplex</th><th>Full Duplex</th></tr>
+<tr><td>Medium sharing</td><td>Shared medium; CSMA/CD required</td><td>Point-to-point; no contention</td></tr>
+<tr><td>Carrier sense</td><td>Used for deference</td><td>Ignored for transmission (used for LPI in EEE)</td></tr>
+<tr><td>Collision detect</td><td>Monitored; jam + backoff on collision</td><td>Ignored</td></tr>
+<tr><td>Late collision</td><td>Possible; reported at 1G</td><td>Does not occur</td></tr>
+<tr><td>Minimum IFG</td><td>96 BT after carrierSense false</td><td>96 BT after transmitting false</td></tr>
+<tr><td>Frame size min</td><td>64 octets</td><td>64 octets</td></tr>
+<tr><td>Frame size max</td><td>1518 / 1522 / 2000 octets</td><td>Same</td></tr>
+<tr><td>Extension / Burst</td><td>1G HD only</td><td>Not applicable</td></tr>
+<tr><td>PAUSE</td><td>Not used</td><td>Optional (requires full-duplex link)</td></tr>
+</table>
+
+<div class="note">
+<strong>Note on 10 Gb/s and above:</strong> Half-duplex operation is not defined for speeds above 1 Gb/s. All higher-speed operation is full-duplex only. The <code>slotTime</code>, <code>attemptLimit</code>, <code>backoffLimit</code>, and <code>jamSize</code> parameters are marked "not applicable" because CSMA/CD is not used.
+</div>
+
+<h3>6.3 InterPacket Gap Shrinkage</h3>
+<ul>
+<li><strong>10 Mb/s:</strong> Minimum spacing between packets can be as low as <strong>47 BT</strong> at the AUI receive line due to clock skew and variable delays.</li>
+<li><strong>1 Gb/s:</strong> Minimum spacing can be as low as <strong>64 BT</strong> at the GMII due to clock tolerances.</li>
+<li><strong>10 Gb/s / 25 Gb/s:</strong> Minimum spacing can be as low as <strong>40 BT</strong> at the XGMII / 25GMII.</li>
+<li><strong>40+ Gb/s:</strong> Minimum spacing can be as low as <strong>8 BT</strong> at the XLGMII / CGMII / 200GMII / 400GMII due to lane alignment requirements.</li>
+</ul>
+
+<div class="warn">
+<strong>RTL Trap:</strong> RX MACs must accept interpacket gaps <em>smaller</em> than 96 BT (down to the limits above) without dropping frames. TX MACs should generate at least 96 BT, but must tolerate shrinkage on the receive path.
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sec-checklist">7. RTL Design Checklist</h2>
+<!-- ================================================================ -->
+
+<h3>7.1 Byte Ordering Checks</h3>
+
+<table>
+<tr><th>Check</th><th>Rule</th><th>Test Method</th></tr>
+<tr><td>MII nibble order</td><td>TXD[3:0] transmits low nibble first, then high nibble of each byte</td><td>Capture MII waveform; verify 0x55 preamble = 0101, 0101 per nibble</td></tr>
+<tr><td>GMII byte order</td><td>TXD[7:0] transmits full byte per clock; byte 0 of DA first</td><td>ILA capture of first 8 bytes after TX_EN assertion</td></tr>
+<tr><td>DA/SA bit order</td><td>LSB of each octet transmitted first; I/G is bit 0 on wire</td><td>Verify broadcast DA 0xFF transmits as eight 0xFF bytes with LSB-first = all 1s</td></tr>
+<tr><td>Length/Type field</td><td>High-order octet transmitted first (big-endian within field)</td><td>For 0x0800 (IPv4), first byte = 0x08, second = 0x00</td></tr>
+<tr><td>FCS bit order</td><td>x<sup>31</sup> first, x<sup>0</sup> last; MSB of each FCS byte first</td><td>CRC residue check must yield 0x2144DF1C</td></tr>
+</table>
+
+<h3>7.2 Clock Domain Crossings (CDC)</h3>
+<p>When the MAC runs at a different clock than the MII/GMII interface, CDC is required:</p>
+
+<table>
+<tr><th>Path</th><th>Typical Clocks</th><th>Recommended Sync</th></tr>
+<tr><td>MAC core ↔ MII</td><td>125 MHz ↔ 25 MHz (100M)</td><td>Async FIFO (dual-clock) for TX/RX data</td></tr>
+<tr><td>MAC core ↔ GMII</td><td>125 MHz ↔ 125 MHz (1G)</td><td>Same domain; no CDC needed if phase-aligned</td></tr>
+<tr><td>MAC ↔ Host CPU</td><td>125 MHz ↔ 50–200 MHz AXI/APB</td><td>Register slice or async FIFO + handshake</td></tr>
+<tr><td>PAUSE timer</td><td>Bit-time counter ↔ MAC clock</td><td>Gray-coded counter or pulse synchronizer</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL Check — Async FIFO Depth for MAC ↔ MII</h4>
+<pre>// Example: MAC @ 125 MHz, MII @ 25 MHz (100 Mb/s)
+// Data width: 4 bits (MII nibble)
+// Max frame: 1522 bytes = 3044 nibbles
+// Min IFG: 96 bits = 24 nibbles
+// Use a small FIFO (e.g., 16-deep) for clock adaptation; larger FIFO
+// for packet buffering should be in the client domain.
+
+// For GMII @ 125 MHz (1 Gb/s), 8-bit data path:
+// Max frame: 1522 bytes.  A 2KB async FIFO is typical.
+</pre>
+</div>
+
+<h3>7.3 FIFO Depth Calculations for PAUSE Thresholds</h3>
+<p>PAUSE is used to prevent RX FIFO overflow. The threshold must account for:</p>
+<ul>
+<li>Round-trip wire delay (link segment + PHY delay).</li>
+<li>MAC/RS/MAC Control delay (up to 8192 BT = 16 pause_quanta for 10G).</li>
+<li>PHY PMA/PCS delay (see Clause 44 delay tables).</li>
+<li>Time to transmit the PAUSE frame (64 bytes minimum + IFG).</li>
+<li>Time for the link partner to react and stop transmitting.</li>
+</ul>
+
+<pre>
+Worst-case bytes in flight during PAUSE =
+    (link_delay_BT + mac_delay_BT + phy_delay_BT) / 8
+    + max_frame_size
+    + pause_frame_size
+    + IFG_bytes
+
+Example for 1 Gb/s full-duplex copper (moderate delay):
+    Link delay    ≈ 512 BT  (1 quantum)
+    MAC+RS delay  ≈ 512 BT
+    PHY delay     ≈ 2048 BT (GMII to MDI and back)
+    Total delay   ≈ 3072 BT = 384 bytes
+    In-flight     ≈ 384 + 1518 + 64 + 12 ≈ 1978 bytes
+
+Recommended RX FIFO "XOFF" threshold = FIFO_depth – 2048 bytes (margin)
+Recommended RX FIFO "XON"  threshold = FIFO_depth – 4096 bytes (hysteresis)
+</pre>
+
+<h3>7.4 CRC Calculation Latency (Pipeline Stages)</h3>
+
+<table>
+<tr><th>Architecture</th><th>Datapath Width</th><th>Latency</th><th>Max Speed</th><th>Area</th></tr>
+<tr><td>Serial LFSR</td><td>1 bit</td><td>1 clk/bit</td><td>Any</td><td>Tiny</td></tr>
+<tr><td>Byte-parallel</td><td>8 bits</td><td>1 clk/byte</td><td>~1 Gb/s</td><td>Small</td></tr>
+<tr><td>Nibble-parallel (MII)</td><td>4 bits</td><td>1 clk/nibble</td><td>~100 Mb/s</td><td>Small</td></tr>
+<tr><td>32-bit parallel</td><td>32 bits</td><td>1 clk/4 bytes</td><td>~10 Gb/s</td><td>Medium</td></tr>
+<tr><td>64-bit parallel</td><td>64 bits</td><td>1 clk/8 bytes</td><td>~100 Gb/s</td><td>Large</td></tr>
+</table>
+
+<div class="note">
+<strong>Pipeline Tip:</strong> For 1 Gb/s GMII (125 MHz, 8-bit), the combinational byte-parallel CRC update is typically a single level of XOR gates and easily meets timing. For 10 Gb/s XGMII (156.25 MHz, 64-bit), the parallel CRC logic is deeper; pipelining into 2–3 stages may be required.
+</div>
+
+<h3>7.5 Address Filter Hash Function Implementation</h3>
+
+<table>
+<tr><th>Hash Method</th><th>Logic Depth</th><th>Collision Rate</th><th>Use Case</th></tr>
+<tr><td>CRC-32 upper 6 bits</td><td>Medium</td><td>~1.5%</td><td>Most common; good distribution</td></tr>
+<tr><td>XOR-fold DA[47:0]</td><td>Low</td><td>~3–5%</td><td>Very small MACs</td></tr>
+<tr><td>Perfect hash (CAM)</td><td>Low (match chain)</td><td>0%</td><td>Enterprise switches</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL Check — Hash Table Size</h4>
+<pre>// 64-bit hash table (commonly used)
+reg [63:0] multicast_hash_table;
+wire [5:0] hash_idx = da_crc32[28:23];   // upper bits of CRC-32 over DA
+wire hash_hit = multicast_hash_table[hash_idx];
+
+// Because of hash collisions, a hash_hit does NOT guarantee DA match.
+// Software must filter false positives, or use exact-match CAM for RX.
+// A typical RX path: hash_hit → exact_match (48-bit comparator) → accept.
+</pre>
+</div>
+
+<h3>7.6 Minimum Frame Size Enforcement in TX</h3>
+<ul>
+<li>TX MAC must pad any frame with client data &lt; 46 octets so that DA+SA+L/T+Data+Pad = 60 octets before FCS.</li>
+<li>Pad bytes are arbitrary; commonly 0x00.</li>
+<li>If the MAC client supplies the FCS (<code>fcsParamPresent</code> = true), the MAC <strong>shall not</strong> pad; the client is responsible for meeting minFrameSize.</li>
+<li>SVA assertion: <code>assert property (@(posedge clk) tx_done |-> tx_byte_count >= 64);</code></li>
+</ul>
+
+<h3>7.7 Jumbo Frame Support</h3>
+<p>IEEE 802.3-2022 does <strong>not</strong> standardize jumbo frames (&gt; 2000 octets). However, many implementations support them:</p>
+<ul>
+<li>Maximum non-standard sizes: 9018 bytes (4× standard data + header), 9216 bytes, or 9600 bytes.</li>
+<li>If jumbo frames are supported, <code>maxFrameSizeLimit</code> must be increased accordingly.</li>
+<li>FCS coverage remains over the entire frame; CRC-32 does not change.</li>
+<li>PAUSE quanta remain 512 bit times regardless of frame size.</li>
+<li>Management counters for oversized frames may need wider fields.</li>
+</ul>
+
+<div class="warn">
+<strong>Interoperability Warning:</strong> Jumbo frames are not guaranteed to pass through standard-compliant bridges. If your MAC supports jumbo frames, ensure the connected PHY and switch also support the chosen maximum size.
+</div>
+
+<h3>7.8 Comprehensive RTL Verification Checklist</h3>
+
+<table>
+<tr><th>#</th><th>Category</th><th>Check</th><th>Pass Criteria</th></tr>
+<tr><td>1</td><td>TX Basic</td><td>Transmit minimum-size frame (64 B)</td><td>Frame on wire = 64 B + preamble/SFD</td></tr>
+<tr><td>2</td><td>TX Basic</td><td>Transmit maximum basic frame (1518 B)</td><td>Frame on wire = 1518 B + preamble/SFD</td></tr>
+<tr><td>3</td><td>TX Pad</td><td>Transmit 46 B client data</td><td>No pad; FCS appended directly</td></tr>
+<tr><td>4</td><td>TX Pad</td><td>Transmit 45 B client data</td><td>1 pad byte inserted before FCS</td></tr>
+<tr><td>5</td><td>TX Pad</td><td>Transmit 0 B client data</td><td>46 pad bytes inserted before FCS</td></tr>
+<tr><td>6</td><td>TX FCS</td><td>CRC over known test vector</td><td>Residue = 0x2144DF1C</td></tr>
+<tr><td>7</td><td>TX IFG</td><td>Back-to-back frames</td><td>≥96 BT between frames</td></tr>
+<tr><td>8</td><td>TX HD</td><td>Defer to carrier</td><td>TX starts only after carrierSense false + IFG</td></tr>
+<tr><td>9</td><td>TX HD</td><td>Collision at bit 32</td><td>Jam 32 bits sent; backoff initiated</td></tr>
+<tr><td>10</td><td>TX HD</td><td>16 collisions</td><td> excessiveCollisionError reported</td></tr>
+<tr><td>11</td><td>TX HD 1G</td><td>Short frame with carrier extension</td><td>Extension bits appended to reach 4096 BT</td></tr>
+<tr><td>12</td><td>RX Basic</td><td>Receive minimum frame</td><td>Passed to client with receiveOK</td></tr>
+<tr><td>13</td><td>RX Basic</td><td>Receive maximum basic frame</td><td>Passed to client; no truncation</td></tr>
+<tr><td>14</td><td>RX Filter</td><td>Unicast DA match</td><td>Frame accepted</td></tr>
+<tr><td>15</td><td>RX Filter</td><td>Unicast DA mismatch</td><td>Frame discarded (unless promiscuous)</td></tr>
+<tr><td>16</td><td>RX Filter</td><td>Broadcast DA</td><td>Frame accepted</td></tr>
+<tr><td>17</td><td>RX Filter</td><td>Multicast hash hit</td><td>Frame accepted (or exact-match verified)</td></tr>
+<tr><td>18</td><td>RX Error</td><td>Runt frame (63 B)</td><td>Discarded silently</td></tr>
+<tr><td>19</td><td>RX Error</td><td>FCS mismatch</td><td>frameCheckError; frame not passed to client</td></tr>
+<tr><td>20</td><td>RX Error</td><td>Misaligned frame (not multiple of 8 bits)</td><td>alignmentError reported</td></tr>
+<tr><td>21</td><td>PAUSE</td><td>Receive PAUSE with quanta = 0x0100</td><td>TX pauses for 256 quanta</td></tr>
+<tr><td>22</td><td>PAUSE</td><td>Receive PAUSE with quanta = 0x0000</td><td>TX resumes immediately</td></tr>
+<tr><td>23</td><td>PAUSE</td><td>Receive new PAUSE while timer active</td><td>Timer reloads with new value</td></tr>
+<tr><td>24</td><td>PAUSE</td><td>Timer underflow</td><td>pause_active deasserts; TX resumes</td></tr>
+<tr><td>25</td><td>VLAN</td><td>Q-tagged frame (0x8100)</td><td>Length/Type parsed at offset +4</td></tr>
+<tr><td>26</td><td>CDC</td><td>Async FIFO overflow/underflow</td><td>No errors under sustained throughput</td></tr>
+<tr><td>27</td><td>Perf</td><td>Line-rate back-to-back</td><td>No dropped frames at 100% utilization</td></tr>
+</table>
+
+<div class="ok">
+<strong>Final Sign-off:</strong> Before tape-out or release, run the above checklist with both directed and constrained-random tests. Use SVA assertions for all safety properties (FIFO overflow, min frame size, IFG timing, FCS residue). Achieve &gt;95% functional coverage on all MAC state-machine arcs.
+</div>
+
+
+<h3>7.9 MII / GMII / XGMII Interface Mapping</h3>
+<p>The Reconciliation Sublayer (RS) maps MAC frame signals to the Media Independent Interface. The following table summarizes the key signals.</p>
+
+<table>
+<tr><th>Signal</th><th>MII (10/100)</th><th>GMII (1G)</th><th>XGMII (10G)</th><th>Direction</th></tr>
+<tr><td>TX_CLK</td><td>2.5/25 MHz</td><td>125 MHz</td><td>156.25 MHz</td><td>PHY → MAC</td></tr>
+<tr><td>TXD</td><td>[3:0]</td><td>[7:0]</td><td>[31:0] (DDR)</td><td>MAC → PHY</td></tr>
+<tr><td>TX_EN</td><td>1 bit</td><td>1 bit</td><td>4 bits (per lane)</td><td>MAC → PHY</td></tr>
+<tr><td>TX_ER</td><td>1 bit</td><td>1 bit</td><td>4 bits</td><td>MAC → PHY</td></tr>
+<tr><td>RX_CLK</td><td>2.5/25 MHz</td><td>125 MHz</td><td>156.25 MHz</td><td>PHY → MAC</td></tr>
+<tr><td>RXD</td><td>[3:0]</td><td>[7:0]</td><td>[31:0] (DDR)</td><td>PHY → MAC</td></tr>
+<tr><td>RX_DV</td><td>1 bit</td><td>1 bit</td><td>4 bits</td><td>PHY → MAC</td></tr>
+<tr><td>RX_ER</td><td>1 bit</td><td>1 bit</td><td>4 bits</td><td>PHY → MAC</td></tr>
+<tr><td>CRS</td><td>1 bit</td><td>N/A (FD only)</td><td>N/A</td><td>PHY → MAC</td></tr>
+<tr><td>COL</td><td>1 bit</td><td>N/A (FD only)</td><td>N/A</td><td>PHY → MAC</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL Check — MII Nibble Ordering</h4>
+<pre>// MII transmits one nibble per TX_CLK edge.
+// For byte 0x55 (preamble), low nibble 0x5 is sent first, then high nibble 0x5.
+// TXD[3:0] mapping on wire:
+//   cycle 0: TXD = 4'b0101 (nibble 0, bits [3:0] of byte)
+//   cycle 1: TXD = 4'b0101 (nibble 1, bits [7:4] of byte)
+//
+// GMII transmits full byte per clock:
+//   cycle 0: TXD = 8'b0101_0101 (byte 0x55, LSB-first on wire = same value)
+//
+// Note: Because Ethernet sends LSB first, the byte value 0x55 on GMII
+// directly corresponds to the bit stream 01010101 without bit reversal.
+</pre>
+</div>
+
+<h3>7.10 Collision Scenarios and Timing</h3>
+
+<table>
+<tr><th>Scenario</th><th>Condition</th><th>Expected Behavior</th></tr>
+<tr><td>Early collision</td><td>collisionDetect asserted before slotTime bits transmitted</td><td>Send jam, backoff, retry (up to 16×)</td></tr>
+<tr><td>Late collision (1G HD)</td><td>collisionDetect asserted after slotTime bits</td><td>Abort, report lateCollisionErrorStatus, no retry</td></tr>
+<tr><td>Late collision (&lt;1G)</td><td>collisionDetect after slotTime</td><td>Optional: may abort or continue; implementation-dependent</td></tr>
+<tr><td>Collision during preamble</td><td>collisionDetect while sending preamble/SFD</td><td>Continue sending remaining preamble/SFD, then jam</td></tr>
+<tr><td>Collision during extension</td><td>collisionDetect while sending extension bits</td><td>Set extendError; burst terminated</td></tr>
+<tr><td>Multiple collisions</td><td>16 consecutive collisions</td><td>Discard frame; excessiveCollisionError</td></tr>
+<tr><td>SQE test (10 Mb/s)</td><td>COL asserted briefly after TX (heartbeat)</td><td>Ignore if not during TX (implementation-specific)</td></tr>
+</table>
+
+<h3>7.11 Management Counters (MIBs)</h3>
+<p>IEEE 802.3 Clause 30 defines management objects. Key counters for MAC diagnostics:</p>
+
+<table>
+<tr><th>Counter (dot3)</th><th>Object Name</th><th>Increment Condition</th></tr>
+<tr><td>dot3StatsAlignmentErrors</td><td>aAlignmentErrors</td><td>RX frame not integer octets + bad FCS</td></tr>
+<tr><td>dot3StatsFCSErrors</td><td>aFrameCheckSequenceErrors</td><td>RX frame with bad FCS</td></tr>
+<tr><td>dot3StatsSingleCollisionFrames</td><td>aSingleCollisionFrames</td><td>TX frames succeeding after exactly 1 collision</td></tr>
+<tr><td>dot3StatsMultipleCollisionFrames</td><td>aMultipleCollisionFrames</td><td>TX frames succeeding after 2–15 collisions</td></tr>
+<tr><td>dot3StatsSQETestErrors</td><td>aSQETestErrors</td><td>COL asserted outside TX window (10 Mb/s)</td></tr>
+<tr><td>dot3StatsDeferredTransmissions</td><td>aDeferredTransmissions</td><td>TX deferred due to busy medium</td></tr>
+<tr><td>dot3StatsLateCollisions</td><td>aLateCollisions</td><td>Collision after slotTime</td></tr>
+<tr><td>dot3StatsExcessiveCollisions</td><td>aExcessiveCollisions</td><td>TX aborted after 16 collisions</td></tr>
+<tr><td>dot3StatsInternalMacTransmitErrors</td><td>aInternalMacTransmitErrors</td><td>Any TX error not counted above</td></tr>
+<tr><td>dot3StatsInternalMacReceiveErrors</td><td>aInternalMacReceiveErrors</td><td>Any RX error not counted above</td></tr>
+<tr><td>dot3StatsFrameTooLongs</td><td>aFrameTooLongs</td><td>RX frame exceeds maxFrameSizeLimit</td></tr>
+<tr><td>dot3StatsCarrierSenseErrors</td><td>aCarrierSenseErrors</td><td>carrierSense lost during TX or unexpected during RX</td></tr>
+<tr><td>dot3StatsSymbolErrors</td><td>aSymbolErrors</td><td>Invalid symbol received from PCS</td></tr>
+<tr><td>dot3ControlInUnknownOpcodes</td><td>aMACControlFramesReceived</td><td>Valid MAC Control frame with unsupported opcode</td></tr>
+<tr><td>dot3InPauseFrames</td><td>aPAUSEMACCtrlFramesReceived</td><td>Valid PAUSE frame received</td></tr>
+<tr><td>dot3OutPauseFrames</td><td>aPAUSEMACCtrlFramesTransmitted</td><td>PAUSE frame passed to MAC for TX</td></tr>
+</table>
+
+<h3>7.12 SVA Assertion Templates</h3>
+<pre>
+// Minimum frame size enforcement
+property p_min_frame_size;
+    @(posedge clk)
+    (tx_state == TX_DATA && tx_eof) |-> (tx_byte_cnt >= 64);
+endproperty
+assert property (p_min_frame_size);
+
+// IFG minimum spacing
+property p_min_ifg;
+    @(posedge clk)
+    (tx_state == TX_IFG && tx_sof_next) |-> (ifg_cnt >= IFG_MIN);
+endproperty
+assert property (p_min_ifg);
+
+// Backoff limit
+property p_backoff_limit;
+    @(posedge clk)
+    (collision_occurred && attempts >= 16) |-> ##1 tx_status == EXCESSIVE_COLLISION;
+endproperty
+assert property (p_backoff_limit);
+
+// FCS residue on RX
+property p_fcs_residue;
+    @(posedge clk)
+    (rx_state == RX_CHECK_FCS && rx_fcs_valid) |-> (rx_crc_residue == 32'h2144DF1C);
+endproperty
+assert property (p_fcs_residue);
+
+// PAUSE timer reload
+property p_pause_reload;
+    @(posedge clk)
+    (rx_pause_valid) |=> (pause_timer == $past(rx_pause_time));
+endproperty
+assert property (p_pause_reload);
+
+// PAUSE timer underflow → resume
+property p_pause_resume;
+    @(posedge clk)
+    (pause_active && pause_timer == 0 && quantum_cnt == QUANTA_MAX) |=> !pause_active;
+endproperty
+assert property (p_pause_resume);
+</pre>
+
+<h3>7.13 Asymmetric PAUSE (Annex 28B / Clause 37)</h3>
+<p>Auto-Negotiation advertises PAUSE capability via the PAUSE (C0) and ASM_DIR (C1) bits. The resolved configuration determines which direction(s) may send PAUSE frames:</p>
+
+<table>
+<tr><th>Local PAUSE</th><th>Local ASM_DIR</th><th>Remote PAUSE</th><th>Remote ASM_DIR</th><th>Local Resolution</th><th>Remote Resolution</th></tr>
+<tr><td>0</td><td>0</td><td>any</td><td>any</td><td>Disable PAUSE</td><td>Disable PAUSE</td></tr>
+<tr><td>0</td><td>1</td><td>0</td><td>1</td><td>Disable PAUSE</td><td>Disable PAUSE</td></tr>
+<tr><td>0</td><td>1</td><td>1</td><td>0</td><td>Enable TX PAUSE, Disable RX PAUSE</td><td>Enable RX PAUSE, Disable TX PAUSE</td></tr>
+<tr><td>0</td><td>1</td><td>1</td><td>1</td><td>Enable TX PAUSE, Disable RX PAUSE</td><td>Enable RX PAUSE, Disable TX PAUSE</td></tr>
+<tr><td>1</td><td>0</td><td>0</td><td>any</td><td>Disable PAUSE</td><td>Disable PAUSE</td></tr>
+<tr><td>1</td><td>0</td><td>1</td><td>0</td><td>Enable Symmetric PAUSE</td><td>Enable Symmetric PAUSE</td></tr>
+<tr><td>1</td><td>0</td><td>1</td><td>1</td><td>Enable Symmetric PAUSE</td><td>Enable Symmetric PAUSE</td></tr>
+<tr><td>1</td><td>1</td><td>0</td><td>1</td><td>Enable RX PAUSE, Disable TX PAUSE</td><td>Enable TX PAUSE, Disable RX PAUSE</td></tr>
+<tr><td>1</td><td>1</td><td>1</td><td>0</td><td>Enable Symmetric PAUSE</td><td>Enable Symmetric PAUSE</td></tr>
+<tr><td>1</td><td>1</td><td>1</td><td>1</td><td>Enable Symmetric PAUSE</td><td>Enable Symmetric PAUSE</td></tr>
+</table>
+
+<div class="note">
+<strong>Asymmetric PAUSE summary:</strong> A device with <code>PAUSE=0, ASM_DIR=1</code> requests to <em>receive</em> PAUSE frames (it wants the partner to pause it). The partner must have <code>PAUSE=1, ASM_DIR=0</code> or <code>PAUSE=1, ASM_DIR=1</code> to honor this request. The local <code>ASM_DIR=1</code> when <code>PAUSE=0</code> means "I can be paused but I won't pause you."
+</div>
+
+<h3>7.14 Energy-Efficient Ethernet (EEE) Interactions</h3>
+<p>When EEE (Clause 78) is implemented, the MAC may see LPI (Low Power Idle) assertions:</p>
+<ul>
+<li>The RS asserts <code>PLS_CARRIER.indication(CARRIER_ON)</code> during LPI to prevent the MAC from transmitting.</li>
+<li>The MAC TX state machine treats this as an extended deferral condition.</li>
+<li>PAUSE frames should not be sent during LPI; the MAC defers until LPI ends.</li>
+<li>Wake time (<code>Tw_sys_tx</code>) must be respected before resuming normal transmission.</li>
+</ul>
+
+<h3>7.15 Reset and Initialization Requirements</h3>
+<pre>
+// Initialize procedure (from Clause 4.2.7.4)
+procedure Initialize;
+begin
+    frameWaiting := false;
+    deferring := false;
+    newCollision := false;
+    transmitting := false;
+    receiving := false;
+    halfDuplex := ...;   // configured mode
+    bursting := false;
+    burstMode := ...;    // true for 1G half-duplex burst desired
+    extending := extend and halfDuplex;
+    ipgStretchMode := ...;
+    ipgStretchCount := 0;
+    ipgStretchSize := 0;
+    passReceiveFCSMode := ...;
+    if halfDuplex then
+        while carrierSense or receiveDataValid do nothing;
+    else
+        while receiveDataValid do nothing;
+    // Start all concurrent processes
+end;
+</pre>
+
+<div class="warn">
+<strong>RTL Trap:</strong> After hardware reset, wait at least one interPacketGap before allowing the first transmission. Failure to do so may cause the first frame to violate IFG and be dropped by the link partner.
+</div>
+
+<h3>7.16 Additional Directed Test Vectors</h3>
+
+<table>
+<tr><th>Test #</th><th>Vector Description</th><th>Expected Result</th></tr>
+<tr><td>TX-001</td><td>Single 64-byte frame, no contention</td><td>transmitOK; IFG ≥ 96 BT</td></tr>
+<tr><td>TX-002</td><td>Single 1518-byte frame</td><td>transmitOK</td></tr>
+<tr><td>TX-003</td><td>Back-to-back 64-byte frames</td><td>All transmitOK; IFG = 96 BT exactly</td></tr>
+<tr><td>TX-004</td><td>Frame with 42-byte client data</td><td>4 pad bytes inserted; total 64 bytes</td></tr>
+<tr><td>TX-005</td><td>Collision on first attempt, success on second</td><td>transmitOK; aSingleCollisionFrames++</td></tr>
+<tr><td>TX-006</td><td>2 collisions then success</td><td>transmitOK; aMultipleCollisionFrames++</td></tr>
+<tr><td>TX-007</td><td>16 collisions</td><td>excessiveCollisionError; frame discarded</td></tr>
+<tr><td>TX-008</td><td>Late collision at 1G HD (after 4096 bits)</td><td>lateCollisionErrorStatus; no retry</td></tr>
+<tr><td>TX-009</td><td>Client-provided FCS, short frame</td><td>FCS used as-is; NO pad inserted</td></tr>
+<tr><td>TX-010</td><td>PAUSE frame generation (quanta=0x00FF)</td><td>DA=01:80:C2:00:00:01; Type=0x8808; Opcode=0x0001</td></tr>
+<tr><td>RX-001</td><td>64-byte unicast frame, DA matches</td><td>receiveOK; passed to client</td></tr>
+<tr><td>RX-002</td><td>64-byte unicast frame, DA mismatch</td><td>Discarded (unless promiscuous)</td></tr>
+<tr><td>RX-003</td><td>Broadcast frame</td><td>receiveOK; passed to client</td></tr>
+<tr><td>RX-004</td><td>Multicast frame, hash hit</td><td>receiveOK (after exact match verify)</td></tr>
+<tr><td>RX-005</td><td>Runt frame (60 bytes on wire)</td><td>Discarded silently</td></tr>
+<tr><td>RX-006</td><td>Frame with bit error in FCS</td><td>frameCheckError; not passed to client</td></tr>
+<tr><td>RX-007</td><td>Frame with extra nibble (not octet-aligned)</td><td>alignmentError</td></tr>
+<tr><td>RX-008</td><td>Q-tagged frame (0x8100 TPID)</td><td>receiveOK; VLAN tag stripped or passed per config</td></tr>
+<tr><td>RX-009</td><td>MAC Control frame (0x8808), unsupported opcode</td><td>Discarded; aMACControlFramesReceived++</td></tr>
+<tr><td>RX-010</td><td>PAUSE frame with quanta=0x0100</td><td>pause_timer loaded with 0x0100; pause_active=1</td></tr>
+<tr><td>RX-011</td><td>PAUSE frame with quanta=0x0000 while paused</td><td>pause_timer cleared; pause_active=0; TX resumes</td></tr>
+<tr><td>RX-012</td><td>Giant frame (2004 bytes)</td><td>frameTooLong; optionally truncated</td></tr>
+<tr><td>PERF-001</td><td>100% throughput, 1518-byte frames</td><td>Zero loss; latency within spec</td></tr>
+<tr><td>PERF-002</td><td>100% throughput, 64-byte frames</td><td>Zero loss; all IFG exactly 96 BT</td></tr>
+<tr><td>PERF-003</td><td>IMIX pattern (64/512/1518 mix)</td><td>Zero loss; jitter within spec</td></tr>
+<tr><td>CDC-001</td><td>Async FIFO near-full with bursty RX</td><td>No overflow; PAUSE sent before overflow</td></tr>
+<tr><td>CDC-002</td><td>Clock frequency drift (±100 ppm)</td><td>Frame alignment maintained; no slips</td></tr>
+</table>
+
+<h3>7.17 CRC-32 Test Vectors</h3>
+<p>These vectors are essential for validating any CRC-32 implementation against known-good results.</p>
+
+<table>
+<tr><th>Input (hex bytes)</th><th>Description</th><th>FCS (hex, big-endian wire order)</th></tr>
+<tr><td><code>00 00 00 00 00 00 00 00</code> (8 bytes)</td><td>All zeros</td><td><code>89 19 2E 6B</code></td></tr>
+<tr><td><code>FF FF FF FF FF FF FF FF</code> (8 bytes)</td><td>All ones</td><td><code>8E C9 5F 1A</code></td></tr>
+<tr><td><code>01 02 03 04 05 06 07 08</code></td><td>Incrementing bytes</td><td><code>58 39 B5 7B</code> (verify with known tool)</td></tr>
+<tr><td>64-byte min frame (DA+SA+L/T+46×0x00)</td><td>Minimum valid frame payload</td><td>Compute and verify residue = 0x2144DF1C when FCS included</td></tr>
+<tr><td>Any frame + appended FCS</td><td>Residue check</td><td><code>21 44 DF 1C</code> (Ethernet magic residue)</td></tr>
+</table>
+
+<pre>
+// SystemVerilog CRC self-test module
+module crc32_self_test;
+    reg [31:0] crc;
+    integer i;
+    initial begin
+        // Test vector: 8 bytes of 0x00
+        crc = 32'hFFFFFFFF;
+        for (i = 0; i < 8; i = i + 1)
+            crc = crc32_byte(crc, 8'h00);
+        crc = ~crc;
+        $display("All-zeros FCS = %08X (expected 89192E6B)", crc);
+        if (crc !== 32'h89192E6B) $fatal(1, "CRC mismatch!");
+
+        // Test vector: 8 bytes of 0xFF
+        crc = 32'hFFFFFFFF;
+        for (i = 0; i < 8; i = i + 1)
+            crc = crc32_byte(crc, 8'hFF);
+        crc = ~crc;
+        $display("All-ones FCS = %08X (expected 8EC95F1A)", crc);
+        if (crc !== 32'h8EC95F1A) $fatal(1, "CRC mismatch!");
+    end
+endmodule
+</pre>
+
+<h3>7.18 High-Speed MAC Pipeline Architecture (1 Gb/s)</h3>
+<p>A typical 1 Gb/s MAC runs at 125 MHz with an 8-bit datapath (GMII). The following pipeline stages are common:</p>
+
+<table>
+<tr><th>Stage</th><th>Function</th><th>Latency (clks)</th></tr>
+<tr><td>S0: FIFO Read</td><td>Read from TX client FIFO</td><td>1</td></tr>
+<tr><td>S1: Header Insert</td><td>Prepend DA, SA, Length/Type</td><td>6</td></tr>
+<tr><td>S2: Pad Insert</td><td>Append pad if needed</td><td>1</td></tr>
+<tr><td>S3: CRC Gen</td><td>Parallel CRC-32 computation</td><td>1</td></tr>
+<tr><td>S4: FCS Append</td><td>Append complement CRC</td><td>4</td></tr>
+<tr><td>S5: Preamble Gen</td><td>Insert 7×0x55 + 0xD5</td><td>8</td></tr>
+<tr><td>S6: IFG Insert</td><td>Idle / deferral / collision handling</td><td>variable</td></tr>
+<tr><td>S7: GMII Drive</td><td>Drive TXD[7:0], TX_EN, TX_ER</td><td>1</td></tr>
+</table>
+
+<div class="note">
+<strong>Pipeline total latency:</strong> ~22–30 clock cycles for the data path, plus variable IFG wait. At 125 MHz this is ~180–240 ns. For cut-through switches, the first byte can be forwarded before the full frame is received.
+</div>
+
+<h3>7.19 Cut-Through vs Store-and-Forward</h3>
+
+<table>
+<tr><th>Mode</th><th>Latency</th><th>Requirements</th><th>Risks</th></tr>
+<tr><td>Store-and-Forward</td><td>Full frame + processing</td><td>Buffer entire frame; verify FCS before forward</td><td>Lowest risk; highest latency</td></tr>
+<tr><td>Cut-Through</td><td>First 14–64 bytes</td><td>Forward after DA/SA parse; FCS check on fly-out</td><td>May forward bad frames; needs abort mechanism</td></tr>
+<tr><td>Fragment-Free</td><td>First 64 bytes</td><td>Wait until collision window passes</td><td>Filters runts; moderate latency</td></tr>
+</table>
+
+<h3>7.20 BackOff Implementation — Verilog</h3>
+<pre>
+module backoff_unit (
+    input        clk,
+    input        rst_n,
+    input        collision_detected,
+    input  [3:0] attempts,
+    input        start_backoff,
+    output reg   backoff_done,
+    output reg   excessive_collision
+);
+    localparam MAX_ATTEMPTS = 16;
+    localparam MAX_BACKOFF  = 1024;  // 2^10
+
+    reg [9:0]  max_backoff;
+    reg [9:0]  random_val;
+    reg [15:0] slot_counter;
+    reg        backing_off;
+
+    // Truncated binary exponential backoff limit
+    always @(*) begin
+        if (attempts == 1)       max_backoff = 2;      // 0..1
+        else if (attempts <= 10) max_backoff = 10'd1 << attempts; // 2^n
+        else                     max_backoff = MAX_BACKOFF;        // 1024
+    end
+
+    // Simple LFSR for pseudo-random number (11-bit, taps at 11,9)
+    reg [10:0] lfsr;
+    always @(posedge clk or negedge rst_n)
+        if (!rst_n) lfsr <= 11'h7FF;
+        else if (collision_detected)
+            lfsr <= {lfsr[9:0], lfsr[10] ^ lfsr[8]};
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            backing_off <= 0;
+            backoff_done <= 0;
+            excessive_collision <= 0;
+            slot_counter <= 0;
+        end else begin
+            backoff_done <= 0;
+            if (start_backoff) begin
+                if (attempts >= MAX_ATTEMPTS) begin
+                    excessive_collision <= 1;
+                end else begin
+                    random_val <= lfsr % max_backoff;
+                    slot_counter <= 0;
+                    backing_off <= 1;
+                end
+            end else if (backing_off) begin
+                // Wait random_val * slotTime bit times
+                // slotTime = 512 bits; at 1G = 64 clocks per slotTime
+                if (slot_counter >= random_val * 64 - 1) begin
+                    backing_off <= 0;
+                    backoff_done <= 1;
+                end else begin
+                    slot_counter <= slot_counter + 1;
+                end
+            end
+        end
+    end
+endmodule
+</pre>
+
+<div class="warn">
+<strong>RTL Trap:</strong> The LFSR random number generator above is simplistic. For production, use a larger LFSR (≥16 bits) with good spectral properties, or a true random source (e.g., thermal noise sampler). The standard requires minimizing correlation between stations.
+</div>
+
+<h3>7.21 Envelope Frame and Q-Tagged Frame Handling</h3>
+<p>Envelope frames (max client data 1982 octets) are intended for higher-layer encapsulations such as Provider Bridges (802.1ad), MACsec (802.1AE), or MPLS.</p>
+
+<ul>
+<li><strong>Basic frame:</strong> DA(6) + SA(6) + L/T(2) + Data(46–1500) + Pad(0–46) + FCS(4) = 64–1518 octets.</li>
+<li><strong>Q-tagged frame:</strong> DA(6) + SA(6) + TPID(2)=0x8100 + TCI(2) + L/T(2) + Data(46–1504) + Pad(0–42) + FCS(4) = 64–1522 octets.</li>
+<li><strong>Envelope frame:</strong> Same as Q-tagged but Data can be up to 1982 octets, total up to 2000 octets.</li>
+</ul>
+
+<div class="rtl-box">
+<h4>RTL Check — Double-Tagged (QinQ) Frames</h4>
+<pre>// A frame may carry multiple VLAN tags (e.g., C-tag + S-tag).
+// The MAC does NOT parse tags; it treats them as part of client data.
+// The Length/Type field at offset 12 is the OUTER TPID (0x8100).
+// The REAL Length/Type is at offset 16 (or further for multiple tags).
+// Therefore:
+//   - RX pad stripping MUST use the Length field if present.
+//   - If outer field is 0x8100, the MAC client (not the MAC) handles tag removal.
+//   - The MAC's maxFrameSizeLimit must account for all tags.
+</pre>
+</div>
+
+<h3>7.22 IPG Stretch Mode (10 Gb/s WAN)</h3>
+<p>For WAN-compatible applications, the MAC may extend the interpacket gap to adapt the average data rate to SONET/SDH rates.</p>
+<ul>
+<li><code>ipgStretchRatio = 104 bits</code> for 10 Gb/s (adapts to STS-192).</li>
+<li>After each frame, the MAC counts bits transmitted. The next IFG is extended by <code>frame_bits / ipgStretchRatio</code> octets.</li>
+<li>This is only applicable at 10 Gb/s and above in full-duplex mode.</li>
+<li>Not applicable to 1 Gb/s or standard LAN operation.</li>
+</ul>
+
+<h3>7.23 Link Fault Signaling (10 Gb/s+)</h3>
+<p>At 10 Gb/s and above, the Reconciliation Sublayer supports Local Fault (LF) and Remote Fault (RF) signaling:</p>
+<ul>
+<li><strong>Local Fault:</strong> PHY detects a receive fault; RS substitutes fault sequences on RXD and stops MAC receive.</li>
+<li><strong>Remote Fault:</strong> Received from link partner; indicates partner's receive path is faulty.</li>
+<li>The MAC should not transmit normal frames during Local Fault; only Idle control characters are sent.</li>
+<li>PAUSE frames should not be transmitted during fault conditions.</li>
+</ul>
+
+<h3>7.24 Timing Closure Considerations</h3>
+
+<table>
+<tr><th>Speed</th><th>Clock</th><th>Datapath</th><th>Critical Path</th><th>Typical FPGA Resource</th></tr>
+<tr><td>10 Mb/s</td><td>2.5 MHz</td><td>4-bit MII</td><td>Trivial</td><td>&lt;100 LUTs</td></tr>
+<tr><td>100 Mb/s</td><td>25 MHz</td><td>4-bit MII</td><td>Trivial</td><td>&lt;200 LUTs</td></tr>
+<tr><td>1 Gb/s</td><td>125 MHz</td><td>8-bit GMII</td><td>CRC XOR tree</td><td>~500 LUTs + 2 BRAM</td></tr>
+<tr><td>10 Gb/s</td><td>156.25 MHz</td><td>64-bit XGMII</td><td>64-bit CRC + alignment</td><td>~3K LUTs + 8 BRAM</td></tr>
+<tr><td>25 Gb/s</td><td>390.625 MHz</td><td>64-bit 25GMII</td><td>SerDes + PCS + MAC</td><td>~5K LUTs + hard IP</td></tr>
+<tr><td>100 Gb/s</td><td>322 MHz</td><td>256-bit CGMII</td><td>Lane alignment + CRC</td><td>~15K LUTs + hard IP</td></tr>
+</table>
+
+<div class="ok">
+<strong>Final Checklist Summary:</strong>
+<ol>
+<li>Byte ordering verified on all interfaces (MII nibble order, GMII byte order, FCS MSB-first).</li>
+<li>CRC residue 0x2144DF1C confirmed with known test vectors.</li>
+<li>Min frame size 64 bytes enforced; pad inserted correctly.</li>
+<li>IFG ≥ 96 BT on TX; RX tolerates shrinkage down to 8 BT (400G).</li>
+<li>Half-duplex: collision detect, jam, backoff, attemptLimit=16 verified.</li>
+<li>PAUSE: timer reload, underflow, XON (quanta=0) verified.</li>
+<li>Address filter: unicast, broadcast, multicast hash, promiscuous modes verified.</li>
+<li>CDC: async FIFO depth adequate for speed and burst size.</li>
+<li>Management counters: all 17 counters increment correctly.</li>
+<li>SVA assertions: min frame, IFG, backoff limit, FCS residue, PAUSE timer active.</li>
+</ol>
+</div>
+
+<hr>
+<p style="font-size:0.85em; color:#666;"><em>Generated from IEEE Std 802.3-2022, Clauses 3, 4, 31 and Annex 31B. For authoritative specifications, consult the official IEEE standard.</em></p>
+
+</body>
+</html>

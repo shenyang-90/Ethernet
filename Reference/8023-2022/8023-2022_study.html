@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>IEEE 802.3-2022 Ethernet 协议学习笔记 (RTL设计参考)</title>
+<style>
+  :root { --bg:#f8f9fa; --fg:#212529; --accent:#0056b3; --code:#e9ecef; --warn:#fff3cd; --crit:#f8d7da; --ok:#d4edda; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; line-height:1.7; max-width:1100px; margin:0 auto; padding:20px; background:var(--bg); color:var(--fg); }
+  h1 { color:var(--accent); border-bottom:3px solid var(--accent); padding-bottom:8px; }
+  h2 { color:var(--accent); margin-top:36px; border-left:6px solid var(--accent); padding-left:12px; }
+  h3 { margin-top:28px; color:#004494; }
+  h4 { margin-top:20px; color:#333; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:0.95em; }
+  th,td { border:1px solid #bbb; padding:8px 10px; text-align:left; }
+  th { background:#e2e6ea; }
+  code,pre { font-family: "Consolas", "Courier New", monospace; background:var(--code); padding:2px 6px; border-radius:4px; font-size:0.92em; }
+  pre { padding:14px; overflow-x:auto; line-height:1.5; }
+  .note { background:#e7f3ff; border-left:4px solid var(--accent); padding:10px 14px; margin:12px 0; }
+  .warn { background:var(--warn); border-left:4px solid #856404; padding:10px 14px; margin:12px 0; }
+  .crit { background:var(--crit); border-left:4px solid #721c24; padding:10px 14px; margin:12px 0; }
+  .ok { background:var(--ok); border-left:4px solid #155724; padding:10px 14px; margin:12px 0; }
+  .toc { background:#fff; border:1px solid #ccc; padding:16px 20px; border-radius:8px; }
+  .toc ul { list-style:none; padding-left:0; }
+  .toc li { margin:6px 0; }
+  .toc a { text-decoration:none; color:var(--accent); }
+  .toc a:hover { text-decoration:underline; }
+  .rtl-box { background:#fff; border:2px dashed var(--accent); padding:14px 18px; border-radius:8px; margin:14px 0; }
+  .rtl-box h4 { margin-top:0; color:var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>IEEE 802.3-2022 Ethernet 协议学习笔记</h1>
+<p style="color:#666;font-size:0.9em;">本文档基于 IEEE Std 802.3-2022 整理，聚焦 RTL 可实现的数字逻辑部分（MAC、MII 系列接口、PCS/PMA 数字、Auto-Negotiation、MDIO、EEE、10Base-T1S、2.5G/5G）。生成日期: 2026-05-15</p>
+
+<div class="toc">
+<h3>目录</h3>
+<ul>
+  <li><a href="#sec-overview">1. 协议概述</a></li>
+  <li><a href="#sec-mac-frame">2. MAC 帧格式 (Clause 3)</a></li>
+  <li><a href="#sec-mac">3. MAC 操作 (Clause 4)</a></li>
+  <li><a href="#sec-mac-control">4. MAC Control / PAUSE (Clause 31)</a></li>
+  <li><a href="#sec-mii">5. MII / GMII / XGMII 接口</a></li>
+  <li><a href="#sec-mdio">6. MDIO 管理接口 (Clause 45)</a></li>
+  <li><a href="#sec-autoneg">7. Auto-Negotiation</a></li>
+  <li><a href="#sec-pcs100">8. 100BASE-X PCS/PMA (Clause 24)</a></li>
+  <li><a href="#sec-pcs1g">9. 1000BASE-X PCS/PMA (Clause 36)</a></li>
+  <li><a href="#sec-pcs1gt">10. 1000BASE-T PCS/PMA (Clause 40)</a></li>
+  <li><a href="#sec-pcs10g">11. 10GBASE-R PCS (Clause 49)</a></li>
+  <li><a href="#sec-10gt">12. 10GBASE-T (Clause 55)</a></li>
+  <li><a href="#sec-eee">13. Energy-Efficient Ethernet (Clause 78)</a></li>
+  <li><a href="#sec-t1">14. 单对以太网 (100BASE-T1 / 1000BASE-T1)</a></li>
+  <li><a href="#sec-t1s">15. 10BASE-T1S / PLCA (Clause 147)</a></li>
+  <li><a href="#sec-nbase">16. 2.5GBASE-T / 5GBASE-T (Clause 126)</a></li>
+  <li><a href="#sec-rtl">17. RTL 设计要点</a></li>
+</ul>
+</div>
+
+<h2 id="sec-overview">1. 协议概述</h2>
+<p>IEEE Std 802.3-2022 定义了 <strong>Ethernet</strong> 标准，涵盖从 10 Mb/s 到 400 Gb/s 的多种物理层实现。标准采用分层架构：MAC 子层、Reconciliation 子层（RS）、Media Independent Interface（MII 系列）、Physical Coding Sublayer（PCS）、Physical Medium Attachment（PMA）、Physical Medium Dependent（PMD）。</p>
+
+<div class="ok">
+<strong>核心功能</strong>：在共享或点对点介质上实现帧的可靠传输；提供 MAC 帧格式、介质访问控制、物理层编码/调制、自动协商、能源管理等功能。
+</div>
+
+<h3>1.1 协议范围</h3>
+<table>
+<tr><th>功能</th><th>说明</th></tr>
+<tr><td>MAC 帧封装</td><td>DA/SA/Length-Type/Data/Pad/FCS 格式，Preamble/SFD</td></tr>
+<tr><td>介质访问控制</td><td>CSMA/CD（半双工）/ 全双工操作</td></tr>
+<tr><td>MAC Control</td><td>PAUSE 帧流量控制</td></tr>
+<tr><td>MII 系列接口</td><td>MII(100M) / GMII(1G) / XGMII(10G) / 25GMII/50GMII/200GMII/400GMII</td></tr>
+<tr><td>PCS 编码</td><td>4B/5B(100M) / 8B/10B(1G) / 64B/66B(10G+) / NRZ/PAM3/PAM16</td></tr>
+<tr><td>Auto-Negotiation</td><td>链路速率/双工模式自动协商</td></tr>
+<tr><td>MDIO 管理</td><td>Clause 22/45 寄存器访问接口</td></tr>
+<tr><td>EEE</td><td>低功耗空闲 (LPI) 状态管理</td></tr>
+<tr><td>单对以太网</td><td>100BASE-T1 / 1000BASE-T1 / 10BASE-T1S (PLCA)</td></tr>
+</table>
+
+<h2 id="sec-mac-frame">2. MAC 帧格式 (Clause 3)</h2>
+
+<h3>2.1 数据包结构</h3>
+<pre>
+[ Preamble (7B) ] [ SFD (1B) ] [ DA (6B) ] [ SA (6B) ] [ Length/Type (2B) ] [ MAC Client Data ] [ Pad ] [ FCS (4B) ] [ Extension ]
+</pre>
+
+<table>
+<tr><th>字段</th><th>长度</th><th>说明</th></tr>
+<tr><td>Preamble</td><td>7 octets</td><td><code>0x55</code> 重复 7 次，用于时钟同步</td></tr>
+<tr><td>SFD</td><td>1 octet</td><td><code>0xD5</code> (<code>10101011</code>)，帧起始定界符</td></tr>
+<tr><td>Destination Address (DA)</td><td>6 octets</td><td>目的 MAC 地址，bit 0=I/G (0=单播, 1=组播)，bit 1=U/L (0=全球, 1=本地)</td></tr>
+<tr><td>Source Address (SA)</td><td>6 octets</td><td>源 MAC 地址，bit 0 固定为 0</td></tr>
+<tr><td>Length/Type</td><td>2 octets</td><td>≤1500 (0x05DC)：Length；≥1536 (0x0600)：EtherType</td></tr>
+<tr><td>MAC Client Data</td><td>变长</td><td>基本帧最大 1500B；Q-tagged 帧最大 1504B；Envelope 帧最大 1982B</td></tr>
+<tr><td>Pad</td><td>变长</td><td>满足最小帧长要求（见 4.2.3.3）</td></tr>
+<tr><td>FCS</td><td>4 octets</td><td>CRC-32 校验值</td></tr>
+<tr><td>Extension</td><td>0–slotTime 位</td><td>仅 1000 Mb/s 半双工需要</td></tr>
+</table>
+
+<h3>2.2 地址字段格式</h3>
+<pre>
+bit 47          bit 1   bit 0
+[ 46-bit Address ] [U/L] [I/G]
+</pre>
+<ul>
+  <li><strong>I/G (bit 0)</strong>：0 = Individual Address，1 = Group Address（多播/广播）</li>
+  <li><strong>U/L (bit 1)</strong>：0 = Globally Administered，1 = Locally Administered</li>
+  <li><strong>Broadcast</strong>：全 1 (FF-FF-FF-FF-FF-FF)</li>
+  <li>每个八位组 <strong>LSB first</strong> 传输</li>
+</ul>
+
+<h3>2.3 Length/Type 字段</h3>
+<table>
+<tr><th>值范围</th><th>解释</th></tr>
+<tr><td>0x0000 – 0x05DC (≤1500)</td><td>Length：后续 MAC Client Data 的字节数</td></tr>
+<tr><td>0x0600 – 0xFFFF (≥1536)</td><td>Type：EtherType（如 0x0800=IPv4, 0x8100=VLAN）</td></tr>
+</table>
+
+<h3>2.4 FCS (CRC-32)</h3>
+<p>生成多项式：</p>
+<pre>
+G(x) = x³² + x²⁶ + x²³ + x²² + x¹⁶ + x¹² + x¹¹ + x¹⁰ + x⁸ + x⁷ + x⁵ + x⁴ + x² + x + 1
+</pre>
+<p>计算步骤：</p>
+<ol>
+  <li>前 32 位（DA 前 4 字节）取反</li>
+  <li>受保护字段（DA + SA + Length/Type + Data + Pad）作为 M(x)</li>
+  <li>M(x) × x³² 除以 G(x)，得余数 R(x)</li>
+  <li>R(x) 系数取反，即为 FCS</li>
+  <li>FCS 传输顺序：x³¹ 在前（第一个八位组的 MSB）</li>
+</ol>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：CRC-32 实现</h4>
+<ul>
+  <li>可使用 LFSR 并行实现（每时钟处理 1/4/8/32 bit）</li>
+  <li>常见优化：按字节查表法（256×32 bit LUT）</li>
+  <li>注意初始值和最终 XOR：802.3 要求前 32 bit 和余数都取反</li>
+  <li>FCS 字节序：传输时 x³¹ 在前，但存储时通常按大端</li>
+</ul>
+</div>
+
+<h3>2.5 最小帧长与 Pad</h3>
+<p>Pad 长度计算公式：</p>
+<pre>
+Pad = max[0, minFrameSize – (clientDataSize + 2×addressSize + 48)] bits
+</pre>
+<p>其中 addressSize = 48 bit，minFrameSize 见 Clause 4.4（通常为 512 bit = 64 byte）。</p>
+
+<h3>2.6 无效 MAC 帧判定</h3>
+<ul>
+  <li>帧长度与 Length/Type 字段中的 Length 值不一致（Type 解释时忽略此项）</li>
+  <li>帧长度不是八位组的整数倍</li>
+  <li>CRC 校验失败</li>
+</ul>
+<div class="warn">
+无效 MAC 帧的内容 <strong>不得</strong> 传递给 LLC 或 MAC Control 子层。
+</div>
+
+
+<h2 id="sec-mac">3. MAC 操作 (Clause 4)</h2>
+
+<h3>3.1 MAC 分层架构</h3>
+<pre>
+        MAC Client (LLC / Bridge / IP)
+                |
+        +-------+-------+
+        |   MAC Control  |  (Clause 31, optional)
+        +-------+-------+
+                |
+        +-------+-------+
+        |      MAC       |  (Clause 3-4)
+        +-------+-------+
+                |
+        +-------+-------+
+        |       RS       |  (Reconciliation Sublayer)
+        +-------+-------+
+                |
+        +-------+-------+
+        | MII/GMII/XGMII |  (Media Independent Interface)
+        +-------+-------+
+                |
+        +-------+-------+
+        |      PCS       |  (Physical Coding Sublayer)
+        +-------+-------+
+                |
+        +-------+-------+
+        |      PMA       |  (Physical Medium Attachment)
+        +-------+-------+
+                |
+        +-------+-------+
+        |      PMD       |  (Physical Medium Dependent)
+        +-------+-------+
+                |
+              MDI
+</pre>
+
+<h3>3.2 半双工 CSMA/CD 操作</h3>
+<table>
+<tr><th>参数</th><th>10M</th><th>100M</th><th>1G</th><th>注释</th></tr>
+<tr><td>slotTime</td><td>512 bit times (51.2 µs)</td><td>512 bit times (5.12 µs)</td><td>4096 bit times (4.096 µs)</td><td>碰撞检测窗口</td></tr>
+<tr><td>interFrameGap</td><td>96 bit times (9.6 µs)</td><td>96 bit times (0.96 µs)</td><td>96 bit times (96 ns)</td><td>帧间最小间隔</td></tr>
+<tr><td>attemptLimit</td><td>16</td><td>16</td><td>16</td><td>最大重传次数</td></tr>
+<tr><td>backoffLimit</td><td>10</td><td>10</td><td>10</td><td>最大退避指数</td></tr>
+<tr><td>jamSize</td><td>32 bits</td><td>32 bits</td><td>32 bits</td><td>Jam 信号长度</td></tr>
+<tr><td>minFrameSize</td><td>512 bits (64B)</td><td>512 bits (64B)</td><td>512 bits (64B)</td><td>最小帧长</td></tr>
+<tr><td>maxFrameSize</td><td>1518B</td><td>1518B</td><td>1518B</td><td>不含 FCS</td></tr>
+<tr><td>burstLimit</td><td>N/A</td><td>N/A</td><td>65 536 bits</td><td>帧突发限制（1G 半双工）</td></tr>
+</table>
+
+<h3>3.3 退避算法</h3>
+<pre>
+r = random(k)  where k = min(n, backoffLimit)
+wait_time = r × slotTime
+</pre>
+<p>其中 n 为当前冲突次数（从 0 开始），backoffLimit = 10。第 10 次及以后的冲突，k 固定为 1024。</p>
+
+<h3>3.4 全双工操作</h3>
+<p>全双工模式下：</p>
+<ul>
+  <li>CSMA/CD 算法禁用（carrierSense 和 transmitDeference 不活动）</li>
+  <li>无碰撞检测，无退避</li>
+  <li>MAC 可连续发送，仅需满足 interFrameGap</li>
+  <li>需要 PAUSE 帧进行流量控制（见 Clause 31）</li>
+</ul>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：MAC 核心设计</h4>
+<ul>
+  <li>现代实现几乎全部使用 <strong>全双工</strong>，CSMA/CD 逻辑可作为可选项或完全省略</li>
+  <li>TX 路径：添加 Preamble/SFD → 计算并追加 FCS → 插入 Pad（若需要）</li>
+  <li>RX 路径：检测 SFD → 提取 DA/SA/Length-Type/Data → 验证 FCS → 去除 Pad</li>
+  <li>interFrameGap 用计数器实现，对接 MII 的 TX_EN 时序</li>
+  <li>地址过滤：可选实现 hash 表或 CAM 用于多播/单播过滤</li>
+</ul>
+</div>
+
+<h2 id="sec-mii">5. MII / GMII / XGMII 接口</h2>
+
+<h3>5.1 接口对比</h3>
+<table>
+<tr><th>特性</th><th>MII (Clause 22)</th><th>GMII (Clause 35)</th><th>XGMII (Clause 46)</th></tr>
+<tr><td>数据宽度</td><td>4 bit (nibble)</td><td>8 bit (byte)</td><td>32 bit</td></tr>
+<tr><td>TX 时钟</td><td>TX_CLK = 25 MHz</td><td>TX_CLK = 125 MHz</td><td>TX_CLK = 156.25 MHz (DDR)</td></tr>
+<tr><td>RX 时钟</td><td>RX_CLK 来自 PHY</td><td>RX_CLK 来自 PHY</td><td>RX_CLK = 156.25 MHz (DDR)</td></tr>
+<tr><td>控制信号</td><td>TX_EN, TX_ER, RX_DV, RX_ER, CRS, COL</td><td>TX_EN, TX_ER, RX_DV, RX_ER</td><td>TXC, RXC, 控制字符 (S/T/E/R/A/Q)</td></tr>
+<tr><td>管理接口</td><td>MDC/MDIO (Clause 22)</td><td>MDC/MDIO (Clause 45)</td><td>MDC/MDIO (Clause 45)</td></tr>
+<tr><td>速率</td><td>100 Mb/s</td><td>1 Gb/s</td><td>10 Gb/s</td></tr>
+<tr><td>编码方式</td><td>NRZ</td><td>NRZ</td><td>8B/10B 或 64B/66B (在 PCS 中)</td></tr>
+</table>
+
+<div class="note">
+RGMII (Reduced GMII) 和 SGMII (Serial GMII) 是 <strong>厂商定义</strong> 的接口，不在 IEEE 802.3 原生标准中：
+<ul>
+  <li><strong>RGMII</strong> (Marvell)：将 GMII 的 TX/RX 数据和控制信号复用到 4 根数据线上，同时利用时钟边沿（DDR），减少引脚数</li>
+  <li><strong>SGMII</strong> (Cisco)：串行 GMII，使用 1.25 Gbps 差分对传输，通常映射到 1000BASE-X PCS</li>
+  <li><strong>USXGMII</strong> (Multi-vendor)：通用串行 XGMII，单/多通道串行接口</li>
+</ul>
+</div>
+
+<h3>5.2 MII 信号定义 (Clause 22)</h3>
+<table>
+<tr><th>信号</th><th>方向 (MAC→PHY)</th><th>说明</th></tr>
+<tr><td>TX_CLK</td><td>PHY→MAC</td><td>发送参考时钟，100M = 25 MHz</td></tr>
+<tr><td>TXD[3:0]</td><td>MAC→PHY</td><td>发送数据（nibble），TX_CLK 上升沿采样</td></tr>
+<tr><td>TX_EN</td><td>MAC→PHY</td><td>发送使能，高电平表示有效数据</td></tr>
+<tr><td>TX_ER</td><td>MAC→PHY</td><td>发送错误，高电平表示帧中有错误</td></tr>
+<tr><td>RX_CLK</td><td>PHY→MAC</td><td>接收参考时钟</td></tr>
+<tr><td>RXD[3:0]</td><td>PHY→MAC</td><td>接收数据（nibble）</td></tr>
+<tr><td>RX_DV</td><td>PHY→MAC</td><td>接收数据有效</td></tr>
+<tr><td>RX_ER</td><td>PHY→MAC</td><td>接收错误</td></tr>
+<tr><td>CRS</td><td>PHY→MAC</td><td>载波侦听（半双工）</td></tr>
+<tr><td>COL</td><td>PHY→MAC</td><td>碰撞检测（半双工）</td></tr>
+<tr><td>MDC</td><td>MAC→PHY</td><td>管理接口时钟（≤2.5 MHz）</td></tr>
+<tr><td>MDIO</td><td>双向</td><td>管理接口数据</td></tr>
+</table>
+
+<h3>5.3 MII TX 帧格式</h3>
+<pre>
+TX_CLK  _|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_|‾|_
+TX_EN   ___|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾|_____
+TXD[3:0]    |P1|P2|P3|P4|P5|P6|P7|SD|D0|D1|...|DN|FCS|IDLE
+            |<--- Preamble (7 nibbles) --->|
+                              |SFD|
+                                 |<-- MAC Frame -->|
+</pre>
+<ul>
+  <li>Preamble：7 个 nibble 的 <code>0x5</code>（即 0101）</li>
+  <li>SFD：1 个 nibble 的 <code>0x5</code> 后接 <code>0xD</code>（完整 SFD = 0xD5）</li>
+  <li>TX_EN 在 Preamble 第一个 nibble 前上升，在最后一个 FCS nibble 后下降</li>
+  <li>TX_ER 可在帧内任何时间断言，表示错误帧</li>
+</ul>
+
+<h3>5.4 GMII 信号定义 (Clause 35)</h3>
+<table>
+<tr><th>信号</th><th>方向</th><th>说明</th></tr>
+<tr><td>TX_CLK</td><td>PHY→MAC</td><td>发送参考时钟，1G = 125 MHz</td></tr>
+<tr><td>TXD[7:0]</td><td>MAC→PHY</td><td>发送数据（byte）</td></tr>
+<tr><td>TX_EN</td><td>MAC→PHY</td><td>发送使能</td></tr>
+<tr><td>TX_ER</td><td>MAC→PHY</td><td>发送错误</td></tr>
+<tr><td>RX_CLK</td><td>PHY→MAC</td><td>接收参考时钟</td></tr>
+<tr><td>RXD[7:0]</td><td>PHY→MAC</td><td>接收数据（byte）</td></tr>
+<tr><td>RX_DV</td><td>PHY→MAC</td><td>接收数据有效</td></tr>
+<tr><td>RX_ER</td><td>PHY→MAC</td><td>接收错误</td></tr>
+<tr><td>CRS</td><td>PHY→MAC</td><td>载波侦听（半双工，可选）</td></tr>
+<tr><td>COL</td><td>PHY→MAC</td><td>碰撞检测（半双工，可选）</td></tr>
+</table>
+
+<h3>5.5 XGMII 控制字符 (Clause 46)</h3>
+<table>
+<tr><th>控制字符</th><th>编码</th><th>说明</th></tr>
+<tr><td>Idle (/I/)</td><td>0x07</td><td> lane 空闲填充</td></tr>
+<tr><td>Start (/S/)</td><td>0xFB</td><td>帧起始，仅出现在 lane 0</td></tr>
+<tr><td>Terminate (/T/)</td><td>0xFD</td><td>帧结束，可出现在任意 lane</td></tr>
+<tr><td>Error (/E/)</td><td>0xFE</td><td>错误指示</td></tr>
+<tr><td>Sequence (/R/)</td><td>0x9C</td><td>用于有序集（如 Fault）</td></tr>
+<tr><td>Reserved0 (/A/)</td><td>0x7C</td><td>对齐有序集</td></tr>
+<tr><td>Reserved1 (/Q/)</td><td>0x9C</td><td>保留</td></tr>
+</table>
+
+<p>XGMII 使用 32-bit 数据 + 4-bit 控制（每字节一个控制位）：</p>
+<pre>
+TXD[31:0] + TXC[3:0]  (DDR @ 156.25 MHz → 10 Gb/s)
+RXD[31:0] + RXC[3:0]
+</pre>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：MII/GMII/XGMII 接口实现</h4>
+<ul>
+  <li>MII：4-bit 数据在 25 MHz 采样，跨时钟域到 MAC 的更快时钟</li>
+  <li>GMII：8-bit 数据在 125 MHz，通常直连 FPGA 的 IO，需要 IOB 寄存器满足时序</li>
+  <li>XGMII：32-bit DDR @ 156.25 MHz，需要专用 IO 或 XGXS 扩展到 XAUI</li>
+  <li>全双工模式下 CRS/COL 可忽略，简化设计</li>
+  <li>注意 TX_CLK 和 RX_CLK 可能不同频（尤其是 100M 自协商后），需要异步 FIFO</li>
+</ul>
+</div>
+
+
+<h2 id="sec-mac-control">4. MAC Control / PAUSE (Clause 31)</h2>
+
+<h3>4.1 MAC Control 帧格式</h3>
+<table>
+<tr><th>字段</th><th>长度</th><th>偏移</th><th>说明</th></tr>
+<tr><td>Destination Address</td><td>6B</td><td>0</td><td>单播、多播或广播地址</td></tr>
+<tr><td>Source Address</td><td>6B</td><td>6</td><td>发送方单播地址</td></tr>
+<tr><td>Length/Type</td><td>2B</td><td>12</td><td><strong>0x8808</strong> (MAC Control EtherType)</td></tr>
+<tr><td>MAC Control Opcode</td><td>2B</td><td>14</td><td>操作码 (如 PAUSE = 0x0001)</td></tr>
+<tr><td>MAC Control Parameters</td><td>0..N</td><td>16</td><td>操作码特定参数</td></tr>
+<tr><td>Reserved (padding)</td><td>变长</td><td>16+N</td><td>补零至 minFrameSize – 160 bits</td></tr>
+</table>
+
+<div class="note">
+PAUSE 操作码 = <strong>0x0001</strong>。每个帧只包含一个操作码。PAUSE 参数为 2 字节的无符号整数，表示请求的 pause_quantum 数量（1 quantum = 512 bit times）。
+</div>
+
+<h3>4.2 Opcode-Independent 接收状态机</h3>
+<pre>
+BEGIN (receiveEnabled=FALSE)
+  ↓
+WAIT FOR RX ←────────────────────────────────────────┐
+  ↓                                                  │
+收到 MAC:MA_DATA.indication(...)                      │
+  ↓                                                  │
+CHECK TYPE                                           │
+  ↓                                                  │
+├─ lengthOrType ≠ 0x8808 ──→ 传递给 MAC Client       │
+│                                ↓                    │
+│                    MCF:MA_DATA.indication(...)      │
+│                                │                    │
+└─ lengthOrType = 0x8808 ───→ CHECK OPCODE           │
+                                   ↓                  │
+                        opcode = 支持的码             │
+                                   ↓                  │
+                        启动 MAC Control 功能         │
+                        (并行的操作码特定进程)        │
+                                   │                  │
+                        opcode 不支持                 │
+                                   ↓                  │
+                                丢弃 ─────────────────┘
+</pre>
+
+<ul>
+  <li>无效 MAC 帧<strong>不会</strong>传递给 MAC Control（由 MAC 过滤）</li>
+  <li>长度超过 minFrameSize 的 MAC Control 帧可能被截断或丢弃</li>
+  <li>不支持的 MAC Control 帧被<strong>丢弃</strong></li>
+</ul>
+
+<h2 id="sec-mdio">6. MDIO 管理接口 (Clauses 22 & 45)</h2>
+
+<h3>6.1 Clause 22 MDIO 帧格式</h3>
+<table>
+<tr><th>字段</th><th>位数</th><th>值/方向</th><th>说明</th></tr>
+<tr><td>PRE (Preamble)</td><td>32</td><td>全 1</td><td>同步前导码</td></tr>
+<tr><td>ST (Start)</td><td>2</td><td><code>01</code></td><td>帧起始</td></tr>
+<tr><td>OP (Operation)</td><td>2</td><td><code>10</code>=读, <code>01</code>=写</td><td>操作类型</td></tr>
+<tr><td>PHYAD</td><td>5</td><td>AAAAA</td><td>PHY 地址 (MSB first)，范围 0–31</td></tr>
+<tr><td>REGAD</td><td>5</td><td>RRRRR</td><td>寄存器地址 (MSB first)，范围 0–31</td></tr>
+<tr><td>TA (Turnaround)</td><td>2</td><td>读:<code>Z0</code> 写:<code>10</code></td><td>转向时间</td></tr>
+<tr><td>DATA</td><td>16</td><td>D[15:0]</td><td>寄存器数据 (bit 15 先传)</td></tr>
+<tr><td>IDLE</td><td>1</td><td>Z</td><td>高阻态</td></tr>
+</table>
+
+<h3>6.2 Clause 22 关键寄存器</h3>
+<table>
+<tr><th>寄存器</th><th>地址</th><th>位</th><th>名称</th><th>功能</th></tr>
+<tr><td rowspan="8">Control</td><td rowspan="8">0</td><td>0.15</td><td>Reset</td><td>自清除；最大 0.5s 复位时间</td></tr>
+<tr><td>0.14</td><td>Loopback</td><td>1 = 使能环回</td></tr>
+<tr><td>0.13</td><td>Speed LSB</td><td>{0.6,0.13}: 00=10M, 01=100M, 10=1000M</td></tr>
+<tr><td>0.12</td><td>AN Enable</td><td>1 = 使能 Auto-Negotiation</td></tr>
+<tr><td>0.11</td><td>Power Down</td><td>1 = 低功耗</td></tr>
+<tr><td>0.9</td><td>Restart AN</td><td>自清除</td></tr>
+<tr><td>0.8</td><td>Duplex Mode</td><td>1 = 全双工, 0 = 半双工</td></tr>
+<tr><td>0.6</td><td>Speed MSB</td><td>见 0.13</td></tr>
+<tr><td rowspan="3">Status</td><td rowspan="3">1</td><td>1.5</td><td>AN Complete</td><td>1 = Auto-Negotiation 完成</td></tr>
+<tr><td>1.4</td><td>Remote Fault</td><td>锁存高</td></tr>
+<tr><td>1.3</td><td>AN Ability</td><td>1 = PHY 支持 Auto-Negotiation</td></tr>
+<tr><td>AN Advertisement</td><td>4</td><td>4.15:0</td><td>Adv Ability</td><td>本地通告能力 (Base Page)</td></tr>
+<tr><td>AN LP Ability</td><td>5</td><td>5.15:0</td><td>LP Ability</td><td>链路伙伴能力</td></tr>
+<tr><td>AN Expansion</td><td>6</td><td>6.15:0</td><td>Expansion</td><td>页面接收、LP AN 能力、NP 能力</td></tr>
+</table>
+
+<h3>6.3 Clause 45 扩展 MDIO 帧格式</h3>
+<table>
+<tr><th>帧类型</th><th>PRE</th><th>ST</th><th>OP</th><th>PRTAD</th><th>DEVAD</th><th>TA</th><th>ADDRESS/DATA</th></tr>
+<tr><td>Address</td><td>32×1</td><td><code>00</code></td><td><code>00</code></td><td>5b</td><td>5b</td><td><code>10</code></td><td>16-bit 寄存器地址 A[15:0]</td></tr>
+<tr><td>Write</td><td>32×1</td><td><code>00</code></td><td><code>01</code></td><td>5b</td><td>5b</td><td><code>10</code></td><td>16-bit 写数据 D[15:0]</td></tr>
+<tr><td>Read</td><td>32×1</td><td><code>00</code></td><td><code>11</code></td><td>5b</td><td>5b</td><td><code>Z0</code></td><td>16-bit 读数据 D[15:0]</td></tr>
+<tr><td>Post-read-inc-addr</td><td>32×1</td><td><code>00</code></td><td><code>10</code></td><td>5b</td><td>5b</td><td><code>Z0</code></td><td>16-bit 读数据；读后地址自动+1</td></tr>
+</table>
+
+<h3>6.4 Clause 22 vs Clause 45 对比</h3>
+<table>
+<tr><th>特性</th><th>Clause 22</th><th>Clause 45</th></tr>
+<tr><td>ST 码</td><td><code>01</code></td><td><code>00</code></td></tr>
+<tr><td>地址空间</td><td>直接：每 PHY 32 个寄存器</td><td>间接：每 MMD 最多 <strong>65,536</strong> 个寄存器</td></tr>
+<tr><td>地址机制</td><td>REGAD (5b) 在每帧中</td><td>MMD 内地址寄存器；通过 Address 帧设置</td></tr>
+<tr><td>PHY 数量</td><td>32</td><td>32 (作为 PRTAD)</td></tr>
+<tr><td>每 PHY MMD 数</td><td>1 (隐式)</td><td>最多 32 (DEVAD)</td></tr>
+<tr><td>电气</td><td>较高电压</td><td>1.2V CMOS 兼容</td></tr>
+</table>
+
+<h3>6.5 MMD 设备地址映射</h3>
+<table>
+<tr><th>DEVAD</th><th>MMD 名称</th></tr>
+<tr><td>1</td><td>PMA/PMD</td></tr>
+<tr><td>2</td><td>WIS</td></tr>
+<tr><td>3</td><td>PCS</td></tr>
+<tr><td>4</td><td>PHY XS</td></tr>
+<tr><td>5</td><td>DTE XS</td></tr>
+<tr><td>6</td><td>TC</td></tr>
+<tr><td>7</td><td>Auto-Negotiation</td></tr>
+<tr><td>29</td><td>Clause 22 extension</td></tr>
+<tr><td>30–31</td><td>Vendor specific</td></tr>
+</table>
+
+<h3>6.6 Clause 45 PMA/PMD 速度选择编码</h3>
+<table>
+<tr><th>1.0.5:2</th><th>速度</th></tr>
+<tr><td><code>0000</code></td><td>10 Gb/s</td></tr>
+<tr><td><code>0010</code></td><td>40 Gb/s</td></tr>
+<tr><td><code>0011</code></td><td>100 Gb/s</td></tr>
+<tr><td><code>0100</code></td><td>25 Gb/s</td></tr>
+<tr><td><code>0101</code></td><td>50 Gb/s</td></tr>
+<tr><td><code>0110</code></td><td>2.5 Gb/s</td></tr>
+<tr><td><code>0111</code></td><td>5 Gb/s</td></tr>
+<tr><td><code>1000</code></td><td>200 Gb/s</td></tr>
+<tr><td><code>1001</code></td><td>400 Gb/s</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：MDIO 控制器</h4>
+<ul>
+  <li>Clause 22 和 Clause 45 可共用同一个 bit-bang FSM：32-bit preamble → 2-bit ST → 2-bit OP → 5-bit addr → 5-bit reg/dev → 2-bit TA → 16-bit data</li>
+  <li>MDC 最大频率 ≤ 2.5 MHz (周期 ≥ 400 ns)</li>
+  <li>Clause 45 需要先发送 Address 帧设置寄存器地址，再发送 Read/Write 帧访问数据</li>
+  <li>MDIO 为双向开漏信号，需配置上拉电阻；RTL 中需要三态控制</li>
+  <li>对于 32-bit 计数器：读 MSB 会锁存整个 32-bit 值并清零；读 LSB 返回锁存的 LSB</li>
+</ul>
+</div>
+
+<h2 id="sec-autoneg">7. Auto-Negotiation</h2>
+
+<h3>7.1 双绞线 Auto-Negotiation (Clause 28)</h3>
+
+<h4>FLP 突发格式</h4>
+<ul>
+  <li><strong>普通 FLP 突发 (16-bit page)</strong>：33 个脉冲位置，17 个时钟脉冲 + 16 个数据脉冲</li>
+  <li><strong>扩展 FLP 突发 (48-bit page)</strong>：97 个脉冲位置，49 个时钟脉冲 + 48 个数据脉冲</li>
+  <li>脉冲存在 = 逻辑 1，脉冲 absent = 逻辑 0</li>
+</ul>
+
+<table>
+<tr><th>参数</th><th>描述</th><th>最小</th><th>典型</th><th>最大</th><th>单位</th></tr>
+<tr><td>T1</td><td>时钟/数据脉冲宽度</td><td>—</td><td>100</td><td>—</td><td>ns</td></tr>
+<tr><td>T2</td><td>时钟到时钟</td><td>111</td><td>125</td><td>139</td><td>µs</td></tr>
+<tr><td>T3</td><td>时钟到数据 (Data=1)</td><td>55.5</td><td>62.5</td><td>69.5</td><td>µs</td></tr>
+<tr><td>T6</td><td>FLP 突发间隔 (非优化)</td><td>8</td><td>16</td><td>24</td><td>ms</td></tr>
+<tr><td>T7</td><td>FLP 突发间隔 (优化)</td><td>8</td><td>8.5</td><td>—</td><td>ms</td></tr>
+</table>
+
+<h4>Base Page 编码 (16 bits，D0 先传)</h4>
+<table>
+<tr><th>位</th><th>字段</th><th>宽度</th><th>说明</th></tr>
+<tr><td>D4:D0</td><td>Selector Field (S[4:0])</td><td>5</td><td>消息类型选择器 (IEEE 802.3 = <code>0_0001</code>)</td></tr>
+<tr><td>D11:D5</td><td>Technology Ability (A[6:0])</td><td>7</td><td>通告的技术能力</td></tr>
+<tr><td>D12</td><td>Extended Next Page (XNP)</td><td>1</td><td>1 = 支持扩展 Next Page</td></tr>
+<tr><td>D13</td><td>Remote Fault (RF)</td><td>1</td><td>1 = 检测到远端故障</td></tr>
+<tr><td>D14</td><td>Acknowledge (Ack)</td><td>1</td><td>1 = 收到 ≥3 个一致的 FLP 突发</td></tr>
+<tr><td>D15</td><td>Next Page (NP)</td><td>1</td><td>1 = 还有更多页面</td></tr>
+</table>
+
+<h4>Arbitration 状态机</h4>
+<pre>
+1. AUTO-NEGOTIATION ENABLE  ──→ mr_autoneg_enable=true
+2. TRANSMIT DISABLE          ──→ 启动 break_link_timer (1200–1500 ms)
+3. ABILITY DETECT            ──→ 发送 Base Page (tx_link_code_word ← mr_adv_ability)
+4. ACKNOWLEDGE DETECT        ──→ 等待 acknowledge_match=true & consistency_match=true
+5. COMPLETE ACKNOWLEDGE      ──→ 发送 6–8 个 Ack=1 的突发
+6. NEXT PAGE WAIT            ──→ 处理 Next Page 交换
+7. LINK STATUS CHECK         ──→ 启动 autoneg_wait_timer (500–1000 ms)
+8. PARALLEL DETECTION FAULT  ──→ multiple/single_link_ready 不匹配
+9. FLP LINK GOOD CHECK       ──→ 使能 HCD PMA
+10. FLP LINK GOOD            ──→ 协商完成
+</pre>
+
+<p><strong>优先级解析</strong>：HCD (Highest Common Denominator) = 本地设备和链路伙伴共同支持的优先级最高的技术位。</p>
+
+<h4>关键定时器</h4>
+<table>
+<tr><th>定时器</th><th>最小</th><th>最大</th><th>触发条件</th></tr>
+<tr><td>autoneg_wait_timer</td><td>500 ms</td><td>1000 ms</td><td>link_status=READY</td></tr>
+<tr><td>break_link_timer</td><td>1200 ms</td><td>1500 ms</td><td>重新协商请求</td></tr>
+<tr><td>link_fail_inhibit_timer (10/100/1000)</td><td>750 ms</td><td>1000 ms</td><td>进入 FLP LINK GOOD CHECK</td></tr>
+<tr><td>link_fail_inhibit_timer (MultiGBASE-T)</td><td>2000 ms</td><td>2250 ms</td><td>进入 FLP LINK GOOD CHECK</td></tr>
+</table>
+
+<div class="note">
+Auto-Negotiation 的双绞线机制通过 FLP 突发在链路上交换能力信息。协商完成后，PHY 切换到 HCD 对应的 PMA/PMD 模式。RTL 实现时，AN 状态机通常由 PHY 内部的微控制器或专用逻辑实现。
+</div>
+
+
+<h2 id="sec-pcs100">8. 100BASE-X PCS/PMA (Clause 24)</h2>
+
+<h3>8.1 4B/5B 编码表</h3>
+<table>
+<tr><th>Code-Group</th><th>PCS Code [4:0]</th><th>MII Nibble [3:0]</th><th>解释</th></tr>
+<tr><td>0</td><td>11110</td><td>0000</td><td>Data 0</td></tr>
+<tr><td>1</td><td>01001</td><td>0001</td><td>Data 1</td></tr>
+<tr><td>2</td><td>10100</td><td>0010</td><td>Data 2</td></tr>
+<tr><td>3</td><td>10101</td><td>0011</td><td>Data 3</td></tr>
+<tr><td>4</td><td>01010</td><td>0100</td><td>Data 4</td></tr>
+<tr><td>5</td><td>01011</td><td>0101</td><td>Data 5</td></tr>
+<tr><td>6</td><td>01110</td><td>0110</td><td>Data 6</td></tr>
+<tr><td>7</td><td>01111</td><td>0111</td><td>Data 7</td></tr>
+<tr><td>8</td><td>10010</td><td>1000</td><td>Data 8</td></tr>
+<tr><td>9</td><td>10011</td><td>1001</td><td>Data 9</td></tr>
+<tr><td>A</td><td>10110</td><td>1010</td><td>Data A</td></tr>
+<tr><td>B</td><td>10111</td><td>1011</td><td>Data B</td></tr>
+<tr><td>C</td><td>11010</td><td>1100</td><td>Data C</td></tr>
+<tr><td>D</td><td>11011</td><td>1101</td><td>Data D</td></tr>
+<tr><td>E</td><td>11100</td><td>1110</td><td>Data E</td></tr>
+<tr><td>F</td><td>11101</td><td>1111</td><td>Data F</td></tr>
+<tr><td><strong>/I/</strong></td><td><strong>11111</strong></td><td>undefined</td><td><strong>IDLE</strong></td></tr>
+<tr><td><strong>/J/</strong></td><td><strong>11000</strong></td><td>0101</td><td><strong>SSD Part 1</strong></td></tr>
+<tr><td><strong>/K/</strong></td><td><strong>10001</strong></td><td>0101</td><td><strong>SSD Part 2</strong></td></tr>
+<tr><td><strong>/T/</strong></td><td><strong>01101</strong></td><td>undefined</td><td><strong>ESD Part 1</strong></td></tr>
+<tr><td><strong>/R/</strong></td><td><strong>00111</strong></td><td>undefined</td><td><strong>ESD Part 2</strong></td></tr>
+<tr><td><strong>/H/</strong></td><td><strong>00100</strong></td><td>undefined</td><td><strong>Transmit Error</strong></td></tr>
+<tr><td>V</td><td>其他</td><td>undefined</td><td>Invalid</td></tr>
+</table>
+
+<h3>8.2 流格式</h3>
+<pre>
+[IDLE] ... [IDLE]  /J/ /K/  &lt;Data code-groups&gt;  /T/ /R/  [IDLE] ... [IDLE]
+|&lt;------ IFG ------&gt;||SSD||&lt;------ SDU ------&gt;||ESD||&lt;------ IFG ------&gt;|
+</pre>
+
+<h3>8.3 TX 状态机</h3>
+<pre>
+IDLE: tx_bits = /I/
+  TX_EN=TRUE, TX_ER=FALSE → START_STREAM_J
+
+START_STREAM_J: tx_bits = /J/ (SSD1)
+  transmitting = TRUE; COL = receiving → START_STREAM_K
+
+START_STREAM_K: tx_bits = /K/ (SSD2) → TRANSMIT_DATA
+
+TRANSMIT_DATA:
+  TX_EN=TRUE, TX_ER=TRUE → tx_bits = /H/
+  否则 → tx_bits = ENCODE(TXD[3:0])
+  COL = receiving
+  TX_EN=FALSE → END_STREAM_T
+
+END_STREAM_T: tx_bits = /T/ (ESD1)
+  transmitting = FALSE; COL = FALSE → END_STREAM_R
+
+END_STREAM_R: tx_bits = /R/ (ESD2) → IDLE
+</pre>
+
+<h3>8.4 RX 状态机</h3>
+<pre>
+IDLE: receiving = FALSE; RX_DV = FALSE
+  监测 rx_bits[9:0] 中 10 bit 内两个非连续 0 → CARRIER DETECT
+
+CARRIER DETECT: receiving = TRUE
+  扫描 /I/J/ 或 /J/K/
+  /J/K/ 找到 → START_OF_STREAM_J
+  错误 SSD → RX_ER=TRUE, RXD=1110, BAD_SSD
+
+START_OF_STREAM_J: RX_DV = TRUE; RXD = 0101 → START_OF_STREAM_K
+START_OF_STREAM_K: RXD = 0101 → DATA
+
+DATA:
+  rx_bits[9:5] ∈ DATA → RXD = DECODE(rx_bits[9:5])
+  /T/R/ (ESD) → END_OF_STREAM
+  IDLES → PREMATURE_END
+  其他 → RX_ER = TRUE
+
+END_OF_STREAM: receiving = FALSE → IDLE
+</pre>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：100BASE-X PCS</h4>
+<ul>
+  <li>5-bit code-group 内部按 MSB-first 传输（bit 4 先，bit 0 后）</li>
+  <li>rx_bits[9:0] 是 10-bit 滑动窗口，用于码组对齐和 ESD 检测</li>
+  <li>载波检测准则：任意 10 个 code-bit 内两个非连续的 ZERO</li>
+  <li>通过检测 SSD (/J/K/) 实现码组对齐</li>
+</ul>
+</div>
+
+<h2 id="sec-pcs1g">9. 1000BASE-X PCS/PMA (Clause 36)</h2>
+
+<h3>9.1 8B/10B 编码概述</h3>
+<ul>
+  <li>Data code-groups：/Dxx.y/ — 256 个有效数据码组</li>
+  <li>Special code-groups：/Kxx.y/ — 12 个有效特殊码组</li>
+  <li>Running Disparity (RD)：Current RD− 或 Current RD+，上电后从负开始</li>
+  <li>Comma：<code>0011111</code> (comma+) 或 <code>1100000</code> (comma−)，包含在 /K28.1/、/K28.5/、/K28.7/ 中用于对齐</li>
+</ul>
+
+<h3>9.2 有序集 (Ordered Sets)</h3>
+<table>
+<tr><th>有序集</th><th>编码</th><th>用途</th></tr>
+<tr><td>/C1/</td><td>/K28.5/ /D21.5/ /Config_Reg[7:0]/ /Config_Reg[15:8]/</td><td>Configuration 1</td></tr>
+<tr><td>/C2/</td><td>/K28.5/ /D2.2/ /Config_Reg[7:0]/ /Config_Reg[15:8]/</td><td>Configuration 2</td></tr>
+<tr><td>/I1/</td><td>/K28.5/ /D5.6/</td><td>IDLE (RD 纠正)</td></tr>
+<tr><td>/I2/</td><td>/K28.5/ /D16.2/</td><td>IDLE (RD 保持)</td></tr>
+<tr><td>/R/</td><td>/K23.7/</td><td>Carrier Extend</td></tr>
+<tr><td>/S/</td><td>/K27.7/</td><td>Start-of-Packet (SPD)</td></tr>
+<tr><td>/T/</td><td>/K29.7/</td><td>End-of-Packet (EPD)</td></tr>
+<tr><td>/V/</td><td>/K30.7/</td><td>Error Propagation</td></tr>
+<tr><td>/LI/</td><td>/K28.0/ with D20.5</td><td>Low Power Idle (EEE)</td></tr>
+</table>
+
+<h3>9.3 特殊码组摘录</h3>
+<table>
+<tr><th>名称</th><th>八位组值</th><th>RD− 编码</th><th>RD+ 编码</th></tr>
+<tr><td>K28.0</td><td>0x1C</td><td>001111 0100</td><td>110000 1011</td></tr>
+<tr><td>K28.1</td><td>0x3C</td><td>001111 1001</td><td>110000 0110</td></tr>
+<tr><td>K28.5</td><td>0xBC</td><td>001111 1010</td><td>110000 0101</td></tr>
+<tr><td>K27.7 (/S/)</td><td>0xFB</td><td>110110 1000</td><td>001001 0111</td></tr>
+<tr><td>K29.7 (/T/)</td><td>0xFD</td><td>101110 1000</td><td>010001 0111</td></tr>
+<tr><td>K30.7 (/V/)</td><td>0xFE</td><td>011110 1000</td><td>100001 0111</td></tr>
+</table>
+
+<h3>9.4 PCS 状态机摘要</h3>
+<ul>
+  <li><strong>PCS Transmit</strong>：编码 GMII 八位组 → 10-bit code-groups；监测 Auto-Negotiation xmit 标志</li>
+  <li><strong>PCS Synchronization</strong>：从 PMA 接收 code-groups，通过 comma 检测建立同步，设置 sync_status</li>
+  <li><strong>PCS Receive</strong>：解码 code-groups → GMII RXD[7:0], RX_DV, RX_ER</li>
+  <li><strong>Carrier Sense</strong>：控制 GMII CRS（半双工需求）</li>
+</ul>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：1000BASE-X PCS</h4>
+<ul>
+  <li>码组 bit 传输顺序：a b c d e i f g h j（bit 0=a, bit 9=j）</li>
+  <li>Comma+ (0011111) 必须比 comma− 更频繁或同等频率地传输（用于 /I/ 和 /C/）</li>
+  <li>10-bit 接口 (TBI) 可选地位于 PMA 服务接口</li>
+  <li>8B/10B 编解码器可用查找表或组合逻辑实现</li>
+</ul>
+</div>
+
+<h2 id="sec-pcs1gt">10. 1000BASE-T PCS/PMA (Clause 40)</h2>
+
+<h3>10.1 Scrambler 多项式 (Side-Stream)</h3>
+<table>
+<tr><th>PHY 角色</th><th>多项式</th><th>实现</th></tr>
+<tr><td><strong>MASTER</strong></td><td><code>gM(x) = 1 + x¹³ + x³³</code></td><td>33-bit LFSR，抽头在 bit 13 和 33</td></tr>
+<tr><td><strong>SLAVE</strong></td><td><code>gS(x) = 1 + x²⁰ + x³³</code></td><td>33-bit LFSR，抽头在 bit 20 和 33</td></tr>
+</table>
+<ul>
+  <li>状态向量：Scrn[32:0]，<strong>不得</strong>初始化为全零</li>
+  <li>每个符号周期推进一次（8 ns，125 MHz）</li>
+</ul>
+
+<h3>10.2 4D-PAM5 符号映射</h3>
+<ul>
+  <li>正常数据：Sdn[6:8] + Sdn[5:0] → 通过 Sdn[6:8] 选择子集，Sdn[5:0] 选择符号</li>
+  <li>PAM5 电平：{−2, −1, 0, +1, +2}</li>
+  <li>4 对线同时传输，每对线一个 PAM5 符号</li>
+  <li>符号率：125 MBaud（每对线 250 Mb/s，总 1 Gb/s）</li>
+</ul>
+
+<h3>10.3 特殊符号行</h3>
+<table>
+<tr><th>状态</th><th>符号 (A,B,C,D)</th></tr>
+<tr><td>SSD1</td><td>(+2,+2,+2,+2)</td></tr>
+<tr><td>SSD2</td><td>(+2,+2,+2,−2)</td></tr>
+<tr><td>ESD1</td><td>(+2,+2,+2,+2)</td></tr>
+<tr><td>ESD2_Ext_0</td><td>(+2,+2,+2,−2)</td></tr>
+<tr><td>ESD2_Ext_1</td><td>(+2,+2,−2,+2)</td></tr>
+<tr><td>ESD2_Ext_2</td><td>(+2,−2,+2,+2)</td></tr>
+<tr><td>ESD_Ext_Err</td><td>(−2,+2,+2,+2)</td></tr>
+<tr><td>CSReset</td><td>(+2,−2,−2,+2)</td></tr>
+<tr><td>CSExtend</td><td>(+2,0,0,+2)</td></tr>
+<tr><td>CSExtend_Err</td><td>(−2,+2,+2,−2)</td></tr>
+</table>
+
+<h3>10.4 卷积编码器 (3-State)</h3>
+<pre>
+csn[0] = csn-1[2]
+csreset_n = (tx_enable_{n-2}) AND (NOT tx_enable_n)
+
+csn[1] = Sdn[6] XOR csn-1[0]   if tx_enable_{n-2} == 1
+         0                      else
+
+csn[2] = Sdn[7] XOR csn-1[1]   if tx_enable_{n-2} == 1
+         0                      else
+</pre>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：1000BASE-T PCS</h4>
+<ul>
+  <li>Scrambler 为 side-stream 类型，需要外部初始值（非全零）</li>
+  <li>卷积编码器提供额外的前向纠错增益（≈ 5.6 dB coding gain）</li>
+  <li>4D-PAM5 映射表可用 ROM 或组合逻辑实现</li>
+  <li>PMA 包含回声消除器、NEXT 消除器（模拟/混合信号部分）</li>
+</ul>
+</div>
+
+<h2 id="sec-pcs10g">11. 10GBASE-R PCS (Clause 49)</h2>
+
+<h3>11.1 64B/66B 块格式</h3>
+<pre>
+Bit 0-1  : Sync Header (SH)
+  01 = Data block
+  10 = Control block
+  00, 11 = Invalid
+Bit 2-65 : Payload (scrambled for data blocks; sync header bypasses scrambler)
+</pre>
+
+<h3>11.2 块类型字段 (Control Blocks)</h3>
+<table>
+<tr><th>块类型</th><th>十六进制值</th><th>格式</th></tr>
+<tr><td>0x1E</td><td>01111000</td><td>All control (C0-C7)</td></tr>
+<tr><td>0xE1</td><td>10000111</td><td>D0-D5, T6, C7</td></tr>
+<tr><td>0xB4</td><td>00101101</td><td>D0-D4, T5, C6, C7</td></tr>
+<tr><td>0xAA</td><td>01010101</td><td>D0-D3, T4, C5-C7</td></tr>
+<tr><td>0x99</td><td>10011001</td><td>D0-D2, T3, C4-C7</td></tr>
+<tr><td>0x87</td><td>11100001</td><td>D0-D1, T2, C3-C7</td></tr>
+<tr><td>0x78</td><td>00011110</td><td>D0, T1, C2-C7</td></tr>
+<tr><td>0x33</td><td>11001100</td><td>T0, C1-C7</td></tr>
+<tr><td>0xCC</td><td>00110011</td><td>S0, D1-D7</td></tr>
+<tr><td>0xD2</td><td>01001011</td><td>C0-C3, S4, D5-D7</td></tr>
+<tr><td>0x2D</td><td>10110100</td><td>C0-C3, O4, D5-D7</td></tr>
+<tr><td>0x66</td><td>01100110</td><td>O0, D1-D3, S4, D5-D7</td></tr>
+<tr><td>0x55</td><td>10101010</td><td>O0, D1-D3, O4, D5-D7</td></tr>
+<tr><td>0x4B</td><td>11010010</td><td>O0, D1-D3, C4-C7</td></tr>
+</table>
+
+<h3>11.3 Scrambler 多项式</h3>
+<pre>
+G(x) = 1 + x³⁹ + x⁵⁸
+</pre>
+<ul>
+  <li>自同步 scrambler，连续运行在 payload bits 上</li>
+  <li>Sync header (2 bits) <strong>绕过</strong> scrambler</li>
+  <li>无初始值要求</li>
+</ul>
+
+<h3>11.4 块同步状态机</h3>
+<pre>
+STATE LOCK_INIT:
+  rx_block_lock = FALSE; sh_cnt = 0; sh_invalid_cnt = 0
+
+STATE TEST_SH:
+  sh_valid (rx_coded&lt;0&gt; ≠ rx_coded&lt;1&gt;) → VALID_SH
+  否则 → INVALID_SH
+
+STATE VALID_SH:
+  sh_cnt++
+  sh_cnt &lt; 64 → TEST_SH
+  sh_cnt == 64 and sh_invalid_cnt == 0:
+    rx_block_lock = TRUE → 64_GOOD
+
+STATE INVALID_SH:
+  sh_cnt++; sh_invalid_cnt++
+  sh_cnt == 64 and sh_invalid_cnt &gt; 0:
+    → SLIP (rx_block_lock = FALSE, shift by 1 bit)
+
+STATE 64_GOOD:
+  继续测试；发现无效 SH → TEST_SH/INVALID_SH
+</pre>
+
+<h3>11.5 BER 监测</h3>
+<ul>
+  <li>125 µs 定时器窗口</li>
+  <li>统计无效 sync header 数量 (ber_cnt)</li>
+  <li>若 125 µs 内 ber_cnt == 16：hi_ber = TRUE</li>
+  <li>BER 改善后 hi_ber 解除</li>
+</ul>
+
+<h3>11.6 TX/RX 状态机</h3>
+<pre>
+TX_INIT → tx_coded = LBLOCK_T (Local Fault)
+TX_C → T_TYPE=C: tx_coded = ENCODE(tx_raw)
+TX_D → T_TYPE=D: tx_coded = ENCODE(tx_raw)
+TX_S → T_TYPE=S: tx_coded = ENCODE(tx_raw)
+TX_T → T_TYPE=T: tx_coded = ENCODE(tx_raw)
+TX_E → tx_coded = EBLOCK_T
+TX_LI → (EEE) tx_coded = ENCODE(tx_raw)
+
+RX_INIT → rx_raw = LBLOCK_R
+RX_C → R_TYPE=C: rx_raw = DECODE(rx_coded)
+RX_D → R_TYPE=D: rx_raw = DECODE(rx_coded)
+RX_S → R_TYPE=S: rx_raw = DECODE(rx_coded)
+RX_T → R_TYPE=T: rx_raw = DECODE(rx_coded)
+RX_E → rx_raw = EBLOCK_R
+RX_LI → (EEE) rx_raw = LI
+</pre>
+
+<h2 id="sec-10gt">12. 10GBASE-T (Clause 55)</h2>
+
+<h3>12.1 64B/65B 块格式</h3>
+<pre>
+Bit 0    : Data/Ctrl Header (0=Data, 1=Control)
+Bit 1-64 : Payload
+</pre>
+<ul>
+  <li>Data blocks：8 个数据八位组 (D0-D7)</li>
+  <li>Control blocks：8-bit 块类型字段 + 控制码/数据</li>
+  <li>块类型字段值与 64B/66B 相同</li>
+</ul>
+
+<h3>12.2 Scrambler 多项式</h3>
+<table>
+<tr><th>PHY 角色</th><th>多项式</th></tr>
+<tr><td>MASTER</td><td><code>G(x) = 1 + x³⁹ + x⁵⁸</code></td></tr>
+<tr><td>SLAVE</td><td><code>G(x) = 1 + x¹⁹ + x⁵⁸</code></td></tr>
+</table>
+
+<h3>12.3 CRC8 多项式</h3>
+<pre>
+C(x) = 1 + x + x⁵ + x⁶ + x⁸
+</pre>
+<ul>
+  <li>初始化为零</li>
+  <li>覆盖 50 × 65B blocks = 3250 bits</li>
+  <li>8 个校验位附加在 50 个块之后</li>
+</ul>
+
+<h3>12.4 LDPC 编码</h3>
+<ul>
+  <li>码型：LDPC(1723, 2048) systematic</li>
+  <li>输入：1723-bit 向量 x</li>
+  <li>输出：2048-bit 码字 c = x × G</li>
+  <li>生成矩阵 G 定义在 Annex 55A</li>
+</ul>
+
+<h3>12.5 PHY 帧结构</h3>
+<pre>
+[1 aux bit] + [50 × 65B blocks] + [8 CRC8 bits] = 3259 bits
+    ↓
+  1536 uncoded bits (3 × 512, mapped to 512 DSQ128 symbols)
++ 1723 coded bits
+    ↓
+  LDPC encode → 2048 coded bits (4 × 512)
+    ↓
+  512 groups of (3 uncoded + 4 coded) = 7 bits/DSQ128 symbol
+    ↓
+  512 DSQ128 2D symbols
+    ↓
+  256 4D-PAM16 symbols (2 PAM16 per DSQ128)
+    ↓
+  4 wire pairs × 256 PAM16 symbols
+</pre>
+
+<h3>12.6 DSQ128 位映射算法</h3>
+<pre>
+输入: u0 u1 u2 (3 uncoded), c0 c1 c2 c3 (4 coded)
+
+Step 1:
+  x13 = (!u0) &amp; u2
+  x12 = u0 XOR u2
+  x11 = c0
+  x10 = c0 XOR c1
+  x23 = (u1 &amp; u2) OR (u0 &amp; !u1)
+  x22 = u1 XOR u2
+  x21 = c2
+  x20 = c2 XOR c3
+
+Step 2:
+  x1 = 8*x13 + 4*x12 + 2*x11 + x10
+  x2 = 8*x23 + 4*x22 + 2*x21 + x20
+
+Step 3:
+  y1 = (x1 + x2) mod 16
+  y2 = (-x1 + x2) mod 16
+
+Step 4:
+  PAM16_1 = 2*y1 - 15
+  PAM16_2 = 2*y2 - 15
+</pre>
+
+<h3>12.7 4D-PAM16 映射</h3>
+<ul>
+  <li>512 DSQ128 symbols → 256 4D symbols</li>
+  <li>每个 DSQ128 提供两个 PAM16 值，映射到<strong>同一对线上的两个连续时间周期</strong></li>
+  <li>PAM16 值：{−15, −13, −11, −9, −7, −5, −3, −1, 1, 3, 5, 7, 9, 11, 13, 15}</li>
+</ul>
+
+<h3>12.8 训练 Scrambler (PAM2 模式)</h3>
+<table>
+<tr><th>角色</th><th>多项式</th></tr>
+<tr><td>MASTER</td><td><code>1 + x¹³ + x³³</code></td></tr>
+<tr><td>SLAVE</td><td><code>1 + x²⁰ + x³³</code></td></tr>
+</table>
+
+<h3>12.9 状态机</h3>
+<ul>
+  <li><strong>PCS TX</strong>：65B blocks → scrambler → CRC8 → LDPC → DSQ128 → 4D-PAM16</li>
+  <li><strong>PCS RX</strong>：PAM2 训练模式对齐 → LDPC decode → CRC8 check → descramble → 65B decode</li>
+  <li>block_lock 在 40 个连续 LDPC 帧错误后解除</li>
+</ul>
+
+<div class="rtl-box">
+<h4>RTL 设计提示：10GBASE-T PCS</h4>
+<ul>
+  <li>符号周期：<strong>1.25 ns</strong>（每对线 800 Msymbols/s）</li>
+  <li>总速率：10 Gb/s over 4 pairs（每对线 2500 Mb/s）</li>
+  <li>LDPC 解码器是最大硬件挑战，需要迭代解码（通常 10-20 次迭代）</li>
+  <li>Tomlinson-Harashima Precoder (THP) 在 PMA TX 中将 PAM16 映射为准连续离散时间值</li>
+  <li>DSQ128 映射可用查找表或组合逻辑实现</li>
+</ul>
+</div>
+
+<h2 id="sec-eee">13. Energy-Efficient Ethernet (Clause 78)</h2>
+
+<h3>13.1 LPI (Low Power Idle) 概述</h3>
+<p>EEE 允许 PHY 在链路空闲时进入低功耗状态。LPI 信号通过 MII/GMII/XGMII 的控制编码传递，PCS 将 LPI 转换为 PHY 特定的低功耗信号。</p>
+
+<h3>13.2 LPI 定时参数</h3>
+<table>
+<tr><th>参数</th><th>10M/100M</th><th>1G</th><th>10G</th><th>说明</th></tr>
+<tr><td>tw_phy</td><td>—</td><td>2.5 µs</td><td>7.5 µs</td><td>TX  Wake 时间</td></tr>
+<tr><td>ts_phy</td><td>—</td><td>3.6 µs</td><td>11.5 µs</td><td>TX Sleep 时间</td></tr>
+<tr><td>tq_phy</td><td>—</td><td>2.2 µs</td><td>7.6 µs</td><td>TX Quiet 时间</td></tr>
+<tr><td>tr_phy</td><td>—</td><td>1.4 µs</td><td>5.5 µs</td><td>RX  Refresh 间隔</td></tr>
+</table>
+
+<h3>13.3 LPI 状态机 (以 10GBASE-R 为例)</h3>
+<pre>
+TX_ACTIVE → T_TYPE=LI → TX_SLEEP (start tx_ts_timer)
+TX_SLEEP → timer done → TX_QUIET (tx_mode=QUIET, start tx_tq_timer)
+TX_QUIET → timer done + T_TYPE=LI → TX_ALERT (tx_mode=ALERT)
+TX_ALERT → one_us_timer_done → TX_WAKE (tx_mode=DATA, start tx_tw_timer)
+TX_WAKE → tx_tw_timer_done → TX_ACTIVE
+
+RX_ACTIVE → R_TYPE=LI → RX_SLEEP (rx_lpi_active=TRUE)
+RX_SLEEP → !energy_detect + rx_tq_timer_done → RX_QUIET (rx_mode=QUIET)
+RX_QUIET → energy_detect → RX_WAKE (rx_mode=DATA, start rx_tw_timer)
+RX_WAKE → rx_tw_timer_done + rx_block_lock → RX_ACTIVE
+RX_WAKE → !rx_tw_timer_done + !rx_block_lock → RX_WTF (wake_error_counter++)
+RX_WTF → rx_wf_timer_done → RX_LINK_FAIL
+</pre>
+
+<div class="note">
+不同 PHY 类型的 LPI 编码方式不同：
+<ul>
+  <li>MII/GMII：TX_ER/RX_ER = 1，TXD/RXD = 0x01</li>
+  <li>XGMII：TXC/RXC = 1，TXD/RXD = 0x06 (所有 lane 同时)</li>
+  <li>1000BASE-X：/LI/ ordered set</li>
+  <li>10GBASE-R：/LI/ control block</li>
+</ul>
+</div>
+
+<h2 id="sec-t1">14. 单对以太网 (100BASE-T1 / 1000BASE-T1)</h2>
+
+<h3>14.1 100BASE-T1 (Clause 96)</h3>
+<ul>
+  <li><strong>编码</strong>：Differential Manchester Encoding (DME) + 4B/5B + 17-bit 自同步扰码器</li>
+  <li><strong>调制</strong>：PAM3（3 电平脉冲幅度调制）</li>
+  <li><strong>速率</strong>：100 Mb/s，全双工，单对双绞线</li>
+  <li><strong>PCS</strong>：4B/5B 编码 → 17-bit 扰码 → DME 编码</li>
+  <li><strong>PMA</strong>：PAM3 符号映射，时钟恢复</li>
+</ul>
+
+<h3>14.2 1000BASE-T1 (Clause 97)</h3>
+<ul>
+  <li><strong>编码</strong>：80B/81B 编码 + 15-bit side-stream 扰码器 + RS-FEC</li>
+  <li><strong>调制</strong>：PAM3 @ 750 MBd</li>
+  <li><strong>速率</strong>：1 Gb/s，全双工，单对双绞线</li>
+  <li><strong>帧结构</strong>：45 个 80B/81B blocks (3645 bits) + 9 bits OAM + 396 bits RS-FEC parity = 4050 bits/PHY frame</li>
+  <li><strong>映射</strong>：4050 bits → 2700 PAM3 symbols (3B2T mapper)</li>
+  <li><strong>RS-FEC</strong>：Reed-Solomon 前向纠错</li>
+</ul>
+
+<h3>14.3 Auto-Negotiation for Single Pair (Clause 98)</h3>
+<ul>
+  <li>使用 Differential Manchester Encoding (DME) 页面交换</li>
+  <li>高速模式：16.667 Mb/s；低速模式：625 kb/s</li>
+  <li>DME 页面：48-bit Auto-Negotiation page，157 个 transition positions</li>
+  <li>支持 Link Code Word 交换（Nonce, Ack, RF, NP 等字段）</li>
+</ul>
+
+<h3>14.4 PoDL (Clause 104)</h3>
+<ul>
+  <li>Power over Data Lines：通过单对双绞线同时传输数据和电力</li>
+  <li>支持 100BASE-T1 和 1000BASE-T1</li>
+</ul>
+
+<h2 id="sec-t1s">15. 10BASE-T1S / PLCA (Clause 147)</h2>
+
+<h3>15.1 10BASE-T1S 概述 (Clause 147)</h3>
+<ul>
+  <li><strong>速率</strong>：10 Mb/s，半双工，单对双绞线</li>
+  <li><strong>拓扑</strong>：支持点对点 (point-to-point) 和多点总线 (multidrop) 模式</li>
+  <li><strong>编码</strong>：Differential Manchester Encoding (DME) + 4B/5B + 17-bit 自同步扰码器</li>
+  <li><strong>PLCA</strong>：可选的 PHY Level Collision Avoidance (Clause 148)，替代 CSMA/CD</li>
+  <li><strong>工作模式</strong>：
+    <ul>
+      <li>半双工点对点 (Clause 147.7)</li>
+      <li>全双工点对点 (Clause 147.7，可选)</li>
+      <li>半双工多点共享介质 (multidrop，Clause 147.8，可选)</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>15.2 PLCA (Physical Layer Collision Avoidance)</h3>
+<ul>
+  <li><strong>BEACON</strong>：协调节点发送时序的广播信号</li>
+  <li><strong>COMMIT</strong>：节点声明发送意图的信号</li>
+  <li><strong>节点 ID</strong>：每个节点唯一的 ID (0-255)</li>
+  <li><strong>发送机会</strong>：每个节点在分配的时隙内获得发送机会</li>
+  <li><strong>MII 编码</strong>：
+    <ul>
+      <li>BEACON request：TX_ER=1, TXD=0x02</li>
+      <li>COMMIT request：TX_ER=1, TXD=0x03</li>
+      <li>BEACON indication：RX_ER=1, RXD=0x02</li>
+      <li>COMMIT indication：RX_ER=1, RXD=0x03</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>15.3 10BASE-T1S PCS/PMA 数字部分</h3>
+<ul>
+  <li><strong>扰码器</strong>：17-bit 自同步扰码器（与 100BASE-T1 相同结构）</li>
+  <li><strong>4B/5B 编码</strong>：与 100BASE-X (Clause 24) 相同的编码表</li>
+  <li><strong>DME 编码</strong>：差分曼彻斯特编码，自带时钟恢复，低直流漂移</li>
+  <li><strong>碰撞检测</strong>：半双工模式下支持碰撞检测（CSMA/CD 或 PLCA）</li>
+</ul>
+
+<h2 id="sec-nbase">16. 2.5GBASE-T / 5GBASE-T (Clause 126)</h2>
+
+<h3>16.1 2.5GBASE-T / 5GBASE-T 概述 (Clause 126)</h3>
+<ul>
+  <li><strong>2.5GBASE-T</strong>：2.5 Gb/s over Cat5e/Cat6，4 对线</li>
+  <li><strong>5GBASE-T</strong>：5 Gb/s over Cat6，4 对线</li>
+  <li><strong>PCS</strong>：64B/65B 编码 → 扰码 → CRC8 → LDPC(1723,2048) → PAM16</li>
+  <li><strong>PHY 帧</strong>：512 PAM16 symbols over 4 pairs (128 symbols/pair)</li>
+  <li><strong>映射</strong>：4-bit labels (LDPC-encoded) → PAM16 symbols</li>
+  <li><strong>PMA</strong>：Tomlinson-Harashima Precoder (THP)，回声消除，NEXT/FEXT 消除</li>
+</ul>
+
+<h3>16.2 2.5GBASE-X (Clause 127)</h3>
+<ul>
+  <li>2.5 Gb/s 8B/10B 编码</li>
+  <li>PCS + PMA 数字接口</li>
+</ul>
+
+<h2 id="sec-rtl">17. RTL 设计要点</h2>
+
+<h3>17.1 模块划分建议</h3>
+<table>
+<tr><th>模块</th><th>功能</th></tr>
+<tr><td>MAC TX</td><td>帧组装 (Preamble/SFD/DA/SA/Len/Data/Pad/FCS)，Pad 计算，CRC-32 生成</td></tr>
+<tr><td>MAC RX</td><td>帧解析，FCS 校验，地址过滤，长度检查</td></tr>
+<tr><td>MAC Control</td><td>PAUSE 帧检测/生成，opcode 解析</td></tr>
+<tr><td>MII/GMII 接口</td><td>nibble/byte 收发，TX_EN/RX_DV 时序</td></tr>
+<tr><td>XGMII 接口</td><td>32-bit DDR 收发，lane 对齐 (DIC)，控制字符处理</td></tr>
+<tr><td>MDIO 控制器</td><td>Clause 22/45 寄存器访问，bit-bang FSM</td></tr>
+<tr><td>Auto-Negotiation</td><td>FLP 突发生成/检测，Base Page 交换，优先级解析</td></tr>
+<tr><td>PCS 100M</td><td>4B/5B 编解码，SSD/ESD 检测</td></tr>
+<tr><td>PCS 1G-X</td><td>8B/10B 编解码，comma 对齐，Running Disparity</td></tr>
+<tr><td>PCS 1G-T</td><td>扰码，卷积编码，4D-PAM5 映射</td></tr>
+<tr><td>PCS 10G-R</td><td>64B/66B 编解码，scrambler，block sync，BER monitor</td></tr>
+<tr><td>PCS 10G-T</td><td>64B/65B，LDPC 编解码，CRC8，DSQ128/PAM16 映射</td></tr>
+<tr><td>XGXS</td><td>8B/10B 编解码，lane deskew，clock compensation</td></tr>
+<tr><td>EEE 控制</td><td>LPI 请求/检测，sleep/wake 时序控制</td></tr>
+</table>
+
+<h3>17.2 Scrambler 多项式速查</h3>
+<table>
+<tr><th>Clause</th><th>PHY</th><th>多项式</th><th>类型</th></tr>
+<tr><td>40</td><td>1000BASE-T MASTER</td><td><code>1 + x¹³ + x³³</code></td><td>Side-stream</td></tr>
+<tr><td>40</td><td>1000BASE-T SLAVE</td><td><code>1 + x²⁰ + x³³</code></td><td>Side-stream</td></tr>
+<tr><td>49</td><td>10GBASE-R</td><td><code>1 + x³⁹ + x⁵⁸</code></td><td>Self-synchronizing</td></tr>
+<tr><td>55</td><td>10GBASE-T MASTER</td><td><code>1 + x³⁹ + x⁵⁸</code></td><td>Self-synchronizing</td></tr>
+<tr><td>55</td><td>10GBASE-T SLAVE</td><td><code>1 + x¹⁹ + x⁵⁸</code></td><td>Self-synchronizing</td></tr>
+<tr><td>55</td><td>10GBASE-T CRC8</td><td><code>1 + x + x⁵ + x⁶ + x⁸</code></td><td>CRC</td></tr>
+<tr><td>55</td><td>10GBASE-T Training MASTER</td><td><code>1 + x¹³ + x³³</code></td><td>Side-stream</td></tr>
+<tr><td>55</td><td>10GBASE-T Training SLAVE</td><td><code>1 + x²⁰ + x³³</code></td><td>Side-stream</td></tr>
+</table>
+
+<h3>17.3 实现检查清单</h3>
+<table>
+<tr><th>项目</th><th>要求</th></tr>
+<tr><td>CRC-32</td><td>多项式 0x04C11DB7，前 32 bit 和余数均取反</td></tr>
+<tr><td>最小帧长</td><td>64 字节 (DA 到 FCS)；不足时补 Pad</td></tr>
+<tr><td>字节序</td><td>每个八位组 LSB first 传输（FCS 按 x³¹ 在前）</td></tr>
+<tr><td>MII 时序</td><td>TX_EN 在 Preamble 第一个 nibble 前上升</td></tr>
+<tr><td>GMII 时钟</td><td>GTX_CLK 由 RS 提供 (125 MHz)，RX_CLK 由 PHY 提供</td></tr>
+<tr><td>XGMII 对齐</td><td>Start (0xFB) 必须在 Lane 0；实现 DIC 计数器</td></tr>
+<tr><td>8B/10B RD</td><td>Running Disparity 跟踪，初始为负</td></tr>
+<tr><td>64B/66B 同步</td><td>Block sync 状态机，64 个有效 SH 后锁定</td></tr>
+<tr><td>BER 监测</td><td>125 µs 窗口内 16 个无效 SH → hi_ber</td></tr>
+<tr><td>MDIO 时序</td><td>MDC ≤ 2.5 MHz； Clause 45 需要先 Address 后 Read/Write</td></tr>
+<tr><td>Auto-Neg</td><td>FLP 突发间隔、Base Page 格式、优先级解析</td></tr>
+<tr><td>EEE LPI</td><td>各接口 LPI 编码正确，wake/sleep 时序满足</td></tr>
+</table>
+
+<div class="note">
+本文档基于 IEEE Std 802.3-2022 的已转换章节 (Clause 2–55) 和部分 PDF 提取内容整理。Clause 78 (EEE)、Clause 96/97/98 (单对以太网)、Clause 104 (PoDL)、Clause 126/127 (2.5G/5G)、Clause 147 (10BASE-T1S/PLCA) 的详细内容需要进一步从 PDF 提取补充。
+</div>
+
+</body>
+</html>
