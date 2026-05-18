@@ -506,9 +506,423 @@ addend = (2^32) / (clk_ts_freq / 1e9)
 | `PHC_TS_CTRL` | 0x814 | 时间戳使能 / 捕获模式 |
 | `PHC_PPS_CTRL` | 0x818 | PPS 输出配置（周期/脉宽） |
 
+### 3.3.8 IEEE 1588-2019 通用消息头规范 (Clause 13)
+
+本 IP 同时支持 802.1AS-2020 (gPTP) 与 IEEE 1588-2019 标准 PTP 模式，后者提供更完整的域隔离、BMCA 与 Transparent Clock 能力。
+
+#### 通用消息头格式 (34 字节)
+
+| 字段 | 八位组 | 偏移 | 位宽 | 说明 |
+|------|--------|------|------|------|
+| `majorSdoId` | 1 | 0 | [7:4] | 4-bit Nibble，默认 = 0（向后兼容 transportSpecific） |
+| `messageType` | 1 | 0 | [3:0] | 4-bit Enumeration4，定义消息类别 |
+| `minorVersionPTP` | 1 | 1 | [7:4] | 4-bit UInteger4 |
+| `versionPTP` | 1 | 1 | [3:0] | 4-bit UInteger4，portDS.versionNumber |
+| `messageLength` | 2 | 2 | [15:0] | UInteger16：PTP 消息总八位组数 |
+| `domainNumber` | 1 | 4 | [7:0] | UInteger8，域 ID |
+| `minorSdoId` | 1 | 5 | [7:0] | UInteger8，默认 = 0 |
+| `flagField` | 2 | 6 | [15:0] | Octet[2]，位标志（见下表） |
+| `correctionField` | 8 | 8 | [63:0] | Integer64：ns × 2¹⁶（亚纳秒分数在低 16 位） |
+| `messageTypeSpecific` | 4 | 16 | [31:0] | Octet[4]，线路上保留（传输时必须发 0） |
+| `sourcePortIdentity` | 10 | 20 | — | PortIdentity：clockIdentity[8] + portNumber[2] |
+| `sequenceId` | 2 | 30 | [15:0] | UInteger16，每消息类型独立计数 |
+| `controlField` | 1 | 32 | [7:0] | UInteger8，已废弃（传输 0，接收忽略） |
+| `logMessageInterval` | 1 | 33 | [7:0] | Integer8 |
+
+#### Message Type 值 (Enumeration4)
+
+| 值 (hex) | 消息 | 类别 | RTL 时间戳需求 |
+|----------|------|------|----------------|
+| 0x0 | **Sync** | Event | ✅ 硬件时间戳捕获 |
+| 0x1 | **Delay_Req** | Event | ✅ 硬件时间戳捕获 |
+| 0x2 | **Pdelay_Req** | Event | ✅ 硬件时间戳捕获 |
+| 0x3 | **Pdelay_Resp** | Event | ✅ 硬件时间戳捕获 |
+| 0x8 | **Follow_Up** | General | ❌ 无需时间戳 |
+| 0x9 | **Delay_Resp** | General | ❌ 无需时间戳 |
+| 0xA | **Pdelay_Resp_Follow_Up** | General | ❌ 无需时间戳 |
+| 0xB | **Announce** | General | ❌ 无需时间戳 |
+| 0xC | Signaling | General | ❌ 无需时间戳 |
+| 0xD | Management | General | ❌ 无需时间戳 |
+
+> **RTL 关键提示**：messageType 的 MSB（bit 3）区分 Event（0）和 General（1）消息。所有 Event 消息都需要在 reference plane（MII/GMII/RGMII 边界）处捕获硬件时间戳。
+
+#### flagField 位定义 (2 个八位组)
+
+| 八位组 | 位 | 名称 | 适用消息 |
+|--------|-----|------|----------|
+| 0 | 0 | `alternateMasterFlag` | Announce, Sync, Follow_Up, Delay_Resp |
+| 0 | 1 | `twoStepFlag` | Sync, Pdelay_Resp |
+| 0 | 2 | `unicastFlag` | ALL |
+| 0 | 5 | PTP Profile Specific 1 | ALL |
+| 0 | 6 | PTP Profile Specific 2 | ALL |
+| 0 | 7 | Reserved | — |
+| 1 | 0 | `leap61` | Announce |
+| 1 | 1 | `leap59` | Announce |
+| 1 | 2 | `currentUtcOffsetValid` | Announce |
+| 1 | 3 | `ptpTimescale` | Announce |
+| 1 | 4 | `timeTraceable` | Announce |
+| 1 | 5 | `frequencyTraceable` | Announce |
+| 1 | 6 | `synchronizationUncertain` | Announce（可选） |
+| 1 | 7 | Reserved | — |
+
+#### correctionField 语义
+
+| 消息类型 | correctionField 内容 |
+|----------|----------------------|
+| Sync, Delay_Req, Pdelay_Req, Pdelay_Resp, Follow_Up, Delay_Resp, Pdelay_Resp_Follow_Up | 亚纳秒分数、驻留时间、delayAsymmetry、meanDelay 的修正 |
+| Announce, Signaling, Management | Zero |
+
+**单位**：Integer64，表示 nanoseconds × 2¹⁶。示例：2.5 ns = `0x0000000000028000`。
+全 1 值（除最高位外）表示修正值过大，无法表示。
+
+#### 时间戳与 PortIdentity 格式
+
+```
+struct Timestamp {
+    UInteger48 secondsField;      // 6 bytes, big-endian
+    UInteger32 nanosecondsField;  // 4 bytes, big-endian
+};  // 总计 10 字节，nanosecondsField 必须始终 < 10⁹
+
+struct PortIdentity {
+    ClockIdentity clockIdentity;  // 8 bytes (OUI/CID + 实现者定义)
+    UInteger16    portNumber;     // 2 bytes
+};  // 总计 10 字节
+```
+
 ---
 
-## 4. 性能分析
+### 3.3.9 IEEE 1588-2019 消息体格式与长度
+
+所有 PTP 消息共享 34 字节通用头；用 `messageType` 索引跳转表处理不同消息体。
+
+#### 各消息体长度汇总
+
+| 消息类型 | messageType | 消息体长度 | 总长度 (含 34B 头) |
+|----------|-------------|-----------|-------------------|
+| **Sync** | 0x0 | 10 bytes | 44 bytes |
+| **Delay_Req** | 0x1 | 10 bytes | 44 bytes |
+| **Pdelay_Req** | 0x2 | 20 bytes | 54 bytes |
+| **Pdelay_Resp** | 0x3 | 20 bytes | 54 bytes |
+| **Follow_Up** | 0x8 | 10 bytes | 44 bytes |
+| **Delay_Resp** | 0x9 | 20 bytes | 54 bytes |
+| **Pdelay_Resp_Follow_Up** | 0xA | 20 bytes | 54 bytes |
+| **Announce** | 0xB | 30 bytes | 64 bytes |
+| Signaling | 0xC | Variable | 34 + TLV |
+| Management | 0xD | Variable | 34 + TLV |
+
+#### Announce Message Body (30 bytes, offset 34)
+
+| 字段 | 八位组 | 说明 |
+|------|--------|------|
+| `originTimestamp` | 10 | 发送时间戳（seconds[48] + nanoseconds[32]） |
+| `currentUtcOffset` | 2 | TAI-UTC 偏移，秒（有符号） |
+| `reserved` | 1 | 保留 |
+| `grandmasterPriority1` | 1 | BMCA 第一优先级（默认 128） |
+| `grandmasterClockQuality` | 4 | clockClass + clockAccuracy + offsetScaledLogVariance |
+| `grandmasterPriority2` | 1 | BMCA 第二优先级（默认 128） |
+| `grandmasterIdentity` | 8 | Grandmaster 的 ClockIdentity |
+| `stepsRemoved` | 2 | 距 GM 的跳数 |
+| `timeSource` | 1 | 时间来源枚举（见 IEEE 1588 Table 6） |
+
+#### Sync / Delay_Req / Follow_Up Message Body (10 bytes)
+
+| 字段 | 八位组 | 说明 |
+|------|--------|------|
+| `originTimestamp` / `preciseOriginTimestamp` | 10 | 秒[48] + 纳秒[32] |
+
+> **RTL 设计提示**：Sync 的一步式时钟在消息体中携带 `originTimestamp`（发送时刻），两步式时钟则置 0 并通过 Follow_Up 分发 `preciseOriginTimestamp`。
+
+#### Pdelay 消息族 Body (20 bytes)
+
+| 字段 | 八位组 | 说明 |
+|------|--------|------|
+| `originTimestamp` / `requestReceiptTimestamp` / `responseOriginTimestamp` | 10 | 时间戳 |
+| `requestingPortIdentity` | 10 | 请求方 PortIdentity |
+
+---
+
+### 3.3.10 时钟类型与 BMCA 最佳主时钟算法 (Clause 6/7/9)
+
+本 IP 支持三种 IEEE 1588-2019 时钟类型，由配置参数 `PTP_CLOCK_TYPE` 选择。
+
+#### 时钟类型对比
+
+| 特性 | Ordinary Clock (OC) | Boundary Clock (BC) | Transparent Clock (TC) |
+|------|---------------------|---------------------|------------------------|
+| **PTP 端口数** | 1 | N ≥ 2 | N ≥ 2 |
+| **Master/Slave** | 单端口可切换 | 一端口 Slave，其余 Master | 无 Master/Slave 状态 |
+| **PTP 消息处理** | 终止并生成 | 终止并生成 | **透明转发**（修正 correctionField） |
+| **延迟机制** | E2E 或 P2P 之一 | E2E 或 P2P（可桥接区域） | E2E TC 或 P2P TC |
+| **适用场景** | 终端节点（ECU） | 网关节点 | Switch/Bridge 节点 |
+| **RTL 复杂度** | 中 | 高 | 高（correctionField 累加） |
+
+#### TC 子类型详细行为
+
+| 特性 | E2E TC | P2P TC |
+|------|--------|--------|
+| **驻留时间** | 测量并累积到 correctionField | 测量并累积到 correctionField |
+| **路径延迟** | 不修正路径延迟 | 通过 Pdelay_Req/Resp 测量每端口 `meanLinkDelay` |
+| **Pdelay 消息** | 透明转发 | **终止** Pdelay 消息 |
+| **Sync/Follow_Up** | 转发所有，添加 residenceTime | 仅转发 Sync/Follow_Up，添加 residenceTime + meanLinkDelay |
+| **Delay_Req/Resp** | 转发所有，添加 residenceTime | **丢弃** Delay_Req/Resp |
+
+> **关键区别**：E2E TC 只修正驻留时间，路径延迟由端点的 Slave 通过 Delay_Req/Resp 测量；P2P TC 额外修正链路延迟，因此 Slave 不需要发送 Delay_Req。
+
+#### BMCA 数据集比较算法 (Clause 9.3)
+
+按以下字段的 **严格优先级顺序** 比较两个数据集 A 和 B（值越小越好）：
+
+| 优先级 | 字段 | 说明 |
+|--------|------|------|
+| 1 | `GM priority1` | 用户配置，默认 128 |
+| 2 | `GM identity` (clockIdentity) | 64-bit 唯一标识 |
+| 3 | `GM clockClass` | 6=locked, 7=holdover, 52=disabled, 187=slave-only, 248=default |
+| 4 | `GM clockAccuracy` | 0x20=25ns, 0x21=100ns, 0x22=250ns, ... |
+| 5 | `GM offsetScaledLogVariance` | 16-bit 时钟稳定性度量 |
+| 6 | `GM priority2` | 用户配置，默认 128 |
+| 7 | `GM identity`（再次，决胜） | 防止相同属性冲突 |
+| 8 | `stepsRemoved` | 距 GM 的跳数 |
+| 9 | `topology tie-breaker` | 接收方 portNumber vs 发送方 portNumber |
+
+**状态决策码** (Clause 9.3.2, Figure 33)：
+
+| 条件 | 决策码 | 推荐状态 |
+|------|--------|----------|
+| D0 优于 Erbest 且 D0.clockClass 1–127 | M1 | **MASTER** |
+| D0 优于 Erbest 且 D0.clockClass ≥128 | M2 | **MASTER** |
+| D0 优于 Ebest | M3 | **MASTER** |
+| D0 不优于 Ebest 且 Ebest 在端口 R 接收 | S1 | **SLAVE** |
+| D0 不优于 Ebest 且 Ebest == Erbest | S1 | **SLAVE** |
+| 其他情况 | P1/P2 | **PASSIVE** |
+
+其中：D0 = defaultDS of C0, Erbest = 端口 r 上接收到的最佳 Announce, Ebest = 所有端口上 Erbest 中的最佳者。
+
+**外国主时钟资格**：
+- `FOREIGN_MASTER_TIME_WINDOW` = 4 × announceInterval
+- `FOREIGN_MASTER_THRESHOLD` = 窗口内 2 条 Announce 消息
+- 外国主列表最小容量 = 5 条记录
+
+---
+
+### 3.3.11 PTP 端口状态机与延迟测量 (Clause 9.2 / Clause 11)
+
+#### 端口状态定义 (Enumeration8)
+
+| 值 (hex) | 状态 | 说明 |
+|----------|------|------|
+| 0x01 | **INITIALIZING** | 初始化数据集、硬件、通信。不发送。 |
+| 0x02 | **FAULTY** | 故障状态。不发送，除管理响应外。 |
+| 0x03 | **DISABLED** | 不发送。丢弃所有接收（管理除外）。 |
+| 0x04 | **LISTENING** | 等待 announceReceiptTimeout 或 Announce。仅发送 Pdelay/Signaling/Mgmt。 |
+| 0x05 | **PRE_MASTER** | 行为同 MASTER 但不发送定时消息。暂态。 |
+| 0x06 | **MASTER** | 发送所有必需 PTP 消息。 |
+| 0x07 | **PASSIVE** | 不发送，除 Pdelay/Signaling/Mgmt 外。 |
+| 0x08 | **UNCALIBRATED** | 暂态：准备伺服，更新数据集。 |
+| 0x09 | **SLAVE** | 执行时钟调整以跟踪 Master。 |
+
+#### 关键状态转换 (Figure 30)
+
+| 转换条件 | 目标状态 |
+|----------|----------|
+| POWERUP / INITIALIZE | INITIALIZING |
+| INITIALIZATION_COMPLETE + PL=FALSE | LISTENING |
+| INITIALIZATION_COMPLETE + PL=TRUE | MASTER |
+| STATE_DECISION_EVENT + BMC_SLAVE + PU | UNCALIBRATED |
+| MASTER_CLOCK_SELECTED + PU | SLAVE |
+| ANNOUNCE_RECEIPT_TIMEOUT_EXPIRES（无其他 Slave 端口） | MASTER |
+| ANNOUNCE_RECEIPT_TIMEOUT_EXPIRES（有其他 Slave 端口） | LISTENING |
+| FAULT_DETECTED + PF | FAULTY |
+| DESIGNATED_DISABLED + PD + PF | DISABLED |
+
+> PL = portList（端口列表非空），PU = portUp（端口运行），PF = portFaulty（端口故障），PD = portDisabled（端口禁用）。
+
+#### E2E 延迟测量 (Delay Request-Response, Clause 11.3)
+
+**时间戳**：
+- t1 = Sync 发送时间戳（Master 时间）
+- t2 = Sync 接收时间戳（Slave 时间）
+- t3 = Delay_Req 发送时间戳（Slave 时间）
+- t4 = Delay_Req 接收时间戳（Master 时间）
+
+**公式**：
+```
+<meanPathDelay> = [(t2 - t1) + (t4 - t3)] / 2
+                = [(t2 - t3) + (t4 - t1)] / 2
+```
+
+**一步式 Sync**：
+```
+<offsetFromMaster> = t2 - originTimestamp - <meanPathDelay> - <correctedSyncCorrectionField>
+```
+
+**两步式 Sync**：
+```
+<offsetFromMaster> = t2 - preciseOriginTimestamp - <meanPathDelay>
+                     - <correctedSyncCorrectionField> - correctionField(Follow_Up)
+```
+
+#### P2P 延迟测量 (Peer Delay, Clause 11.4)
+
+**时间戳**：
+- t1 = Pdelay_Req 发送时间戳（Requester）
+- t2 = Pdelay_Req 接收时间戳（Responder）
+- t3 = Pdelay_Resp 发送时间戳（Responder）
+- t4 = Pdelay_Resp 接收时间戳（Requester）
+
+**一步式 Responder**：设置 `requestReceiptTimestamp = 0`，计算周转时间 `t3 - t2` 加到 Pdelay_Resp 的 correctionField。
+
+**两步式 Responder（选项 B）**：设置 `requestReceiptTimestamp = t2`，`responseOriginTimestamp = t3`，分数纳秒修正到 correctionField。
+
+**Requester 计算**：
+```
+<meanLinkDelay> = [(t4 - t1) - <correctedPdelayRespCorrectionField>] / 2   （一步式）
+<meanLinkDelay> = [(t4 - t1) - (responseOriginTimestamp - requestReceiptTimestamp)
+                   - <correctedPdelayRespCorrectionField>
+                   - correctionField(Pdelay_Resp_Follow_Up)] / 2   （两步式）
+```
+
+---
+
+### 3.3.12 Transparent Clock 操作与数据集 (Clause 8/10)
+
+#### TC correctionField 修正规则
+
+**驻留时间计算**：
+```
+<residenceTime> = <egressTimestamp> - <ingressTimestamp>
+```
+
+**E2E TC — Sync 消息（一步式出口端口）**：
+```
+correctionField(Sync_egress) = correctionField(Sync_ingress)
+                               + <residenceTime> + ingress<delayAsymmetry>
+```
+
+**P2P TC — Sync 消息（一步式出口端口）**：
+```
+correctionField(Sync_egress) = correctionField(Sync_ingress)
+                               + <residenceTime> + <meanLinkDelay> + ingress<delayAsymmetry>
+```
+
+**两步式出口端口（入口 Sync twoStepFlag = FALSE）**：
+- 在出口 Sync 上设置 `twoStepFlag = TRUE`
+- 生成 Follow_Up：`preciseOriginTimestamp = originTimestamp(入口 Sync)`
+- `correctionField(Follow_Up) = <residenceTime> + <meanLinkDelay> + ingress<delayAsymmetry>`
+
+> **RTL 关键提示**：correctionField 是 64-bit 有符号整数，单位 ns × 2¹⁶。累加操作需处理溢出（全 1 除符号位表示"过大"）。建议用 96-bit 或更宽内部累加器避免中间溢出。P2P TC 需要每端口维护 `meanLinkDelay` 值（通过 Pdelay 机制测量）。
+
+#### PTP 数据集结构 (Clause 8)
+
+**defaultDS**（默认数据集）：
+
+| 成员 | 类型 | 类别 | 说明 |
+|------|------|------|------|
+| `clockIdentity` | ClockIdentity (8B) | static | 此 PTP 实例的唯一 ID |
+| `numberPorts` | UInteger16 | static | OC=1，BC=N |
+| `clockQuality` | ClockQuality (6B) | dynamic | clockClass + clockAccuracy + offsetScaledLogVariance |
+| `priority1` | UInteger8 | config | BMCA 优先级，默认 128 |
+| `priority2` | UInteger8 | config | BMCA 次优先级，默认 128 |
+| `domainNumber` | UInteger8 | config | 域 ID，默认 0 |
+| `slaveOnly` | Boolean | config | TRUE = 不能成为 Master |
+| `sdoId` | UInteger12 | config | 默认 0x000 |
+
+**portDS**（端口数据集）：
+
+| 成员 | 类型 | 说明 |
+|------|------|------|
+| `portIdentity` | PortIdentity | 此端口的身份 |
+| `portState` | Enumeration8 | 当前状态 (0x01–0x09) |
+| `logMinDelayReqInterval` | Integer8 | log₂(minDelayReqInterval) |
+| `meanLinkDelay` | TimeInterval | P2P 测量的链路延迟 |
+| `logAnnounceInterval` | Integer8 | log₂(announceInterval) |
+| `announceReceiptTimeout` | UInteger8 | announceInterval 超时的乘数 |
+| `logSyncInterval` | Integer8 | log₂(syncInterval) |
+| `delayMechanism` | Enumeration8 | 01=E2E, 02=P2P, FE=NO_MECHANISM |
+| `logMinPdelayReqInterval` | Integer8 | log₂(minPdelayReqInterval) |
+| `versionNumber` | UInteger4 | PTP 主版本（1588-2019 为 2） |
+| `delayAsymmetry` | TimeInterval | 配置/静态不对称 |
+
+---
+
+### 3.3.13 IEEE 1588-2019 以太网传输与默认 Profile (Annex E / Annex I)
+
+#### 以太网传输参数 (Annex E)
+
+| 参数 | 值 | 说明 |
+|------|------|------|
+| **Ethertype** | **0x88F7** | PTP 专用 Ethertype |
+| **标准 PTP 组播目的 MAC** | 01-1B-19-00-00-00 | 除 peer delay 外的所有消息 |
+| **P2P 延迟消息目的 MAC** | 01-80-C2-00-00-0E | Pdelay_Req/Resp/Follow_Up，802.1Q 桥不转发 |
+| **networkProtocol** | 0x0003 (IEEE 802.3) | PortAddress 中的协议标识 |
+| **addressLength** | 6 | MAC 地址长度 |
+
+> 按 Profile 允许对所有消息使用任一地址。`majorSdoId` 解释为 Ethertype 子类型；若子类型未被识别 → 丢弃。
+
+#### 默认 Profile 参数 (Annex I)
+
+**Delay Request-Response 默认 Profile (#1)**：
+
+| 参数 | 默认值 | 可配置范围 |
+|------|--------|-----------|
+| `defaultDS.domainNumber` | 0 | Per Table 2 |
+| `portDS.logAnnounceInterval` | 1 (2s) | 0 to 4 |
+| `portDS.logSyncInterval` | 0 (1s) | -1 to +1 |
+| `portDS.logMinDelayReqInterval` | 0 (1s) | 0 to 5 |
+| `portDS.announceReceiptTimeout` | 3 | 2 to 10 |
+| `defaultDS.priority1` | 128 | — |
+| `defaultDS.priority2` | 128 | — |
+| `defaultDS.slaveOnly` | FALSE | — |
+| `defaultDS.sdoId` | 0x000 | — |
+| τ (tau) | 1.0 s | — |
+
+**Peer-to-Peer 默认 Profile (#2)**：
+
+| 参数 | 默认值 | 可配置范围 |
+|------|--------|-----------|
+| `defaultDS.domainNumber` | 0 | Per Table 2 |
+| `portDS.logAnnounceInterval` | 1 (2s) | 0 to 4 |
+| `portDS.logSyncInterval` | 0 (1s) | -1 to +1 |
+| `portDS.logMinPdelayReqInterval` | 0 (1s) | 0 to 5 |
+| `portDS.announceReceiptTimeout` | 3 | 2 to 10 |
+| `defaultDS.priority1` | 128 | — |
+| `defaultDS.priority2` | 128 | — |
+| `defaultDS.slaveOnly` | FALSE | — |
+| `defaultDS.sdoId` | 0x000 | — |
+| τ (tau) | 1.0 s | — |
+
+**间隔计算**：
+```
+announceInterval       = 2^(portDS.logAnnounceInterval)       seconds
+syncInterval           = 2^(portDS.logSyncInterval)           seconds
+minDelayReqInterval    = 2^(portDS.logMinDelayReqInterval)    seconds
+minPdelayReqInterval   = 2^(portDS.logMinPdelayReqInterval)   seconds
+announceReceiptTimeoutInterval = portDS.announceReceiptTimeout × announceInterval
+```
+
+**定时容差**：平均间隔在 ±30% 内。至少 90% 的间隔在 ±30% 内。
+
+---
+
+### 3.3.14 PTP RTL 模块划分建议
+
+基于 IEEE 1588-2019 标准，PTP 时间同步子系统的 RTL 模块划分如下：
+
+| 模块 | 功能 | 复杂度 | 备注 |
+|------|------|--------|------|
+| **PTP Header Parser** | 解析 34-byte 通用头，提取 messageType、domainNumber、sdoId、flagField、correctionField、sourcePortIdentity、sequenceId | 中 | 所有消息共用 |
+| **Timestamp Engine** | 在 reference plane 捕获 Event 消息的 ingress/egress 时间戳 | 中 | 250MHz clk_ts |
+| **correctionField ALU** | 64-bit 有符号整数加法/累加，处理 ns × 2¹⁶ 单位 | 中 | 建议 96-bit 内部累加器 |
+| **BMCA Engine** | 数据集比较（priority1→class→accuracy→variance→priority2→identity→steps→topology） | 高 | 需维护外国主列表 |
+| **State Machine Controller** | 实现 9 个端口状态及转换 | 中 | INITIALIZING→LISTENING→MASTER/SLAVE |
+| **Sync/Delay Handler** | OC/BC 的 Sync 生成、Delay_Req/Resp 处理 | 高 | E2E 机制 |
+| **Pdelay Handler** | P2P 的 Pdelay_Req/Resp/Follow_Up 生成与处理 | 高 | 802.1AS 强制 |
+| **TC Engine** | residenceTime 计算、correctionField 累加、消息转发 | 高 | Switch 模式必需 |
+| **Dataset RAM** | 存储 defaultDS/currentDS/parentDS/timePropertiesDS/portDS | 中 | 每端口/每实例 |
+| **Follow_Up Generator** | 两步式时钟的 Follow_Up 消息生成 | 低 | 绑定时间戳 FIFO |
+| **Announce Generator** | 周期性 Announce 消息生成 | 低 | 含 priority vector |
+
+---
+
 
 ### 4.1 吞吐率
 
