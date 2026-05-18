@@ -535,6 +535,248 @@ RTL Implementation Notes:
 
 ---
 
+#### 2.1.7 MDIO Management Interface - RTL-Coding Detail
+
+**Frame Format (IEEE 802.3-2022 Clause 22):**
+
+```
+MDIO Frame: 32 bits total (preamble + start + op + PHYAD + REGAD + TA + data)
+
+Bit Position | Field      | Size | Value
+-------------|------------|------|--------
+0-31         | Preamble   | 32   | 1's (optional, may be shorter)
+32-33        | Start      | 2    | 01 (always)
+34-35        | Op Code    | 2    | 01=write, 10=read
+36-40        | PHYAD      | 5    | PHY address (0-31)
+41-45        | REGAD      | 5    | Register address (0-31)
+46-47        | TA         | 2    | Z0 (read) or 10 (write)
+48-63        | Data       | 16   | Register data
+```
+
+**Timing:**
+```
+          ┌─┐ ┌─┐ ┌─┐ ┌─┐ ┌─┐ ┌─┐ ┌─┐ ┌─┐
+MDC       ─┘ └─┘ └─┘ └─┘ └─┘ └─┘ └─┘ └─┘ └─
+           ↑   ↑   ↑   ↑   ↑   ↑   ↑   ↑
+MDIO       P   P   P   S   S   O   O   A  ...
+           ↑preamble↑  ↑st↑  ↑op↑  ↑phy↑
+```
+- MDC max frequency: 2.5MHz
+- MDIO setup time: 10ns min (before MDC rising)
+- MDIO hold time: 10ns min (after MDC rising)
+
+**Basic Registers (Clause 22):**
+
+| Register | Address | Description |
+|----------|---------|-------------|
+| Control | 0 | Reset, loopback, speed select, duplex, autoneg |
+| Status | 1 | Autoneg complete, link status, capability |
+| PHY ID 1 | 2 | OUI bits [3:18] |
+| PHY ID 2 | 3 | OUI bits [19:24], model, revision |
+| Autoneg Advertisement | 4 | Advertised abilities |
+| Autoneg Link Partner | 5 | Link partner abilities |
+
+**Control Register (Reg 0) Bit Map:**
+```
+Bit 15: Reset (1=reset, self-clearing)
+Bit 14: Loopback (1=loopback mode)
+Bit 13: Speed Select [1] (1=1000Mbps if bit 6=1, else 100Mbps)
+Bit 12: Autoneg Enable (1=enable)
+Bit 11: Power Down (1=power down)
+Bit 10: Isolate (1=electrical isolation)
+Bit 9:  Restart Autoneg (1=restart, self-clearing)
+Bit 8:  Duplex Mode (1=full, 0=half)
+Bit 7:  Collision Test (1=enable collision test)
+Bit 6:  Speed Select [0] (1=1000Mbps, see bit 13)
+Bits 5-0: Reserved
+```
+
+**Status Register (Reg 1) Bit Map:**
+```
+Bit 15: 100BASE-T4 capability (always 0)
+Bit 14: 100BASE-X Full Duplex capability
+Bit 13: 100BASE-X Half Duplex capability
+Bit 12: 10Mbps Full Duplex capability
+Bit 11: 10Mbps Half Duplex capability
+Bit 10: 100BASE-T2 Full Duplex capability
+Bit 9:  100BASE-T2 Half Duplex capability
+Bit 8:  Extended Status (1=Reg 17 supported)
+Bit 7:  Reserved
+Bit 6:  MF Preamble Suppression (1=can suppress preamble)
+Bit 5:  Autoneg Complete (1=complete)
+Bit 4:  Remote Fault (1=fault detected)
+Bit 3:  Autoneg Capability (1=can perform autoneg)
+Bit 2:  Link Status (1=link up, 0=link down; latches low)
+Bit 1:  Jabber Detect (1=jabber detected; latches high)
+Bit 0:  Extended Capability (1=supports registers beyond 0-15)
+```
+
+**RTL Implementation:**
+```verilog
+module mdio_controller (
+    input  wire        clk_sys,       // System clock (>= 25MHz)
+    input  wire        rst_n,
+    // MDIO interface
+    output reg         mdc,
+    inout  wire        mdio,
+    // Control interface
+    input  wire        start,
+    input  wire        op,            // 0=write, 1=read
+    input  wire [4:0]  phy_addr,
+    input  wire [4:0]  reg_addr,
+    input  wire [15:0] write_data,
+    output reg  [15:0] read_data,
+    output reg         done,
+    output reg         busy
+);
+    // MDC generation: clk_sys / 10 (2.5MHz from 25MHz)
+    reg [3:0] mdc_div;
+    always @(posedge clk_sys or negedge rst_n) begin
+        if (!rst_n) begin
+            mdc_div <= 0;
+            mdc <= 0;
+        end else begin
+            if (mdc_div >= 4'd9) begin
+                mdc_div <= 0;
+                mdc <= ~mdc;
+            end else begin
+                mdc_div <= mdc_div + 1;
+            end
+        end
+    end
+
+    // MDIO state machine
+    localparam IDLE      = 4'd0;
+    localparam PREAMBLE  = 4'd1;
+    localparam START     = 4'd2;
+    localparam OP        = 4'd3;
+    localparam PHYAD     = 4'd4;
+    localparam REGAD     = 4'd5;
+    localparam TA        = 4'd6;
+    localparam DATA      = 4'd7;
+    localparam DONE      = 4'd8;
+
+    reg [3:0]  state;
+    reg [4:0]  bit_cnt;
+    reg [31:0] shift_reg;
+    reg        mdio_out;
+    reg        mdio_oe;
+
+    assign mdio = mdio_oe ? mdio_out : 1'bz;
+
+    always @(posedge mdc or negedge rst_n) begin
+        if (!rst_n) begin
+            state <= IDLE;
+            bit_cnt <= 0;
+            shift_reg <= 0;
+            mdio_out <= 1;
+            mdio_oe <= 0;
+            done <= 0;
+            busy <= 0;
+        end else begin
+            done <= 0;
+            case (state)
+                IDLE: begin
+                    if (start) begin
+                        state <= PREAMBLE;
+                        bit_cnt <= 0;
+                        shift_reg <= {32'hFFFFFFFF, 2'b01, ~op, op, phy_addr, reg_addr, (op ? 2'bZ0 : 2'b10), write_data};
+                        busy <= 1;
+                        mdio_oe <= 1;
+                    end
+                end
+                PREAMBLE: begin
+                    mdio_out <= 1;
+                    if (bit_cnt >= 31) begin
+                        state <= START;
+                        bit_cnt <= 0;
+                    end else begin
+                        bit_cnt <= bit_cnt + 1;
+                    end
+                end
+                START: begin
+                    mdio_out <= shift_reg[63]; // bit 63 = start[1]
+                    shift_reg <= shift_reg << 1;
+                    state <= OP;
+                end
+                OP: begin
+                    mdio_out <= shift_reg[63];
+                    shift_reg <= shift_reg << 1;
+                    if (bit_cnt >= 1) begin
+                        state <= PHYAD;
+                        bit_cnt <= 0;
+                    end else begin
+                        bit_cnt <= bit_cnt + 1;
+                    end
+                end
+                PHYAD: begin
+                    mdio_out <= shift_reg[63];
+                    shift_reg <= shift_reg << 1;
+                    if (bit_cnt >= 4) begin
+                        state <= REGAD;
+                        bit_cnt <= 0;
+                    end else begin
+                        bit_cnt <= bit_cnt + 1;
+                    end
+                end
+                REGAD: begin
+                    mdio_out <= shift_reg[63];
+                    shift_reg <= shift_reg << 1;
+                    if (bit_cnt >= 4) begin
+                        state <= TA;
+                        bit_cnt <= 0;
+                    end else begin
+                        bit_cnt <= bit_cnt + 1;
+                    end
+                end
+                TA: begin
+                    if (op) begin // READ: Z0, release bus for PHY to drive
+                        if (bit_cnt == 0) begin
+                            mdio_oe <= 0; // Release bus (Z)
+                        end else begin
+                            mdio_oe <= 0;
+                        end
+                    end else begin // WRITE: 10
+                        mdio_out <= shift_reg[63];
+                        shift_reg <= shift_reg << 1;
+                    end
+                    if (bit_cnt >= 1) begin
+                        state <= DATA;
+                        bit_cnt <= 0;
+                    end else begin
+                        bit_cnt <= bit_cnt + 1;
+                    end
+                end
+                DATA: begin
+                    if (op) begin
+                        // READ: sample MDIO on rising edge
+                        shift_reg <= {shift_reg[62:0], mdio};
+                    end else begin
+                        // WRITE: drive data
+                        mdio_out <= shift_reg[63];
+                        shift_reg <= shift_reg << 1;
+                    end
+                    if (bit_cnt >= 15) begin
+                        state <= DONE;
+                        if (op) read_data <= {shift_reg[62:0], mdio};
+                    end else begin
+                        bit_cnt <= bit_cnt + 1;
+                    end
+                end
+                DONE: begin
+                    done <= 1;
+                    busy <= 0;
+                    mdio_oe <= 0;
+                    state <= IDLE;
+                end
+            endcase
+        end
+    end
+endmodule
+```
+
+---
+
 ### 2.2 IEEE 802.1AS-2020 gPTP - RTL-Coding Detail
 
 #### 2.2.1 gPTP Message Formats (Byte-by-Byte)
