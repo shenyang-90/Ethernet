@@ -3,7 +3,7 @@
 > **Source**: `sandbox/ethernet/Reference/8023-2022/8023-2022.pdf`  
 > **Method**: PyMuPDF text extraction, headers/footers stripped.  
 > **Scope**: Digital/hardware-relevant content only. Electrical, optical, cable, MDI, and PICS sections excluded.  
-> **Date**: 2026-05-11  
+> **Date**: 2026-05-11 (updated 2026-05-18)  
 
 ## Table of Contents
 
@@ -11,8 +11,10 @@
 - [Clause 96: 100BASE-T1](#clause-96)
 - [Clause 97: 1000BASE-T1](#clause-97)
 - [Clause 98: Auto-Negotiation for single differential-pair media](#clause-98)
-- [Clause 147: 10BASE-T1S](#clause-147)
+- [Clause 104: Power over Data Lines (PoDL)](#clause-104)
 - [Clause 126: 2.5GBASE-T and 5GBASE-T](#clause-126)
+- [Clause 127: 2.5GBASE-X PCS/PMA](#clause-127)
+- [Clause 147: 10BASE-T1S](#clause-147)
 
 ---
 
@@ -705,26 +707,36 @@ EEE Fast Wake TLV unless both the local device and link partner advertise deep s
 Auto-Negotiation for the resolved PHY type.
 	
 	
-
+
+
 
-
+
+
  	
 
 
-
-
-
+
+
+
+
+
+
 
 
 	
 	
-
-
-
+
+
+
+
+
+
 
 
-
-
+
+
+
+
 
 
 
@@ -14084,3 +14096,54 @@ lpi_refresh_detect
 
 ---
 
+
+
+---
+
+<a id='clause-104'></a>
+# Clause 104: Power over Data Lines (PoDL) of Single-Pair Ethernet
+
+**Focus**: PoDL PSE/PD operation, power classification, serial communication classification protocols  
+**Pages extracted**: 4371 – 4409  
+**Excluded from**: Page 4410 (electrical/PICS section)
+
+(完整提取内容见 `extracted_clause_104.md`，以下为 RTL 相关要点摘要)
+
+## 104.1 概述
+PoDL 允许通过单对双绞线同时传输数据和电力。PSE (Power Sourcing Equipment) 和 PD (Powered Device) 是两种可选的电源实体。PoDL 系统类型包括：
+- Type A/C: 兼容 10BASE-T1S, 100BASE-T1
+- Type B/C: 兼容 1000BASE-T1
+- Type E: 兼容 10BASE-T1L
+- Type F: 兼容 10BASE-T1L
+
+## 104.4 PSE 功能
+PSE 类型：Type A, B, C, D, E, F。通过 PI (Power Interface) 引脚供电。
+
+## 104.7 Serial Communication Classification Protocol (SCCP)
+用于在施加全工作电压之前和移除之后，通过 MDI 在 PSE 和 PD 之间传输带外数据。
+
+---
+
+<a id='clause-127'></a>
+# Clause 127: Physical Coding Sublayer (PCS) and Physical Medium Attachment (PMA) sublayer for 2.5 Gb/s 8B/10B 2.5GBASE-X
+
+**Focus**: 2.5GBASE-X PCS, PMA, 8B/10B coding, XGMII mapping, synchronization state machine, EEE LPI support  
+**Pages extracted**: 5135 – 5171  
+**Excluded from**: Page 5172 (electrical/PICS section)
+
+(完整提取内容见 `extracted_clause_127.md`)
+
+## 127.1 概述
+2.5GBASE-X 使用 XGMII 服务接口（Clause 46 定义）。PCS 采用 8B/10B 编码（与 Clause 36 相同）。
+
+## 127.2 PCS 功能
+- Word Encode: XGMII 4 lane -> 4 个 2.5GPII symbol
+- Word-to-Octets: 串行化为 byte 流
+- 8B/10B 编解码（与 Clause 36  identical）
+- Synchronization 状态机（与 Clause 36 类似）
+- 支持可选 EEE LPI
+
+## 127.3 PMA 功能
+- PMA_UNITDATA 原语传递 10-bit code-group
+- 串行化/反串行化
+- 可选 PRBS9 测试码型

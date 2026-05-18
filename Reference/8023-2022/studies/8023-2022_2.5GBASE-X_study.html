@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>IEEE 802.3-2022 2.5GBASE-X PCS/PMA RTL Design Reference</title>
+<style>
+:root { --bg:#f8f9fa; --fg:#212529; --accent:#0056b3; --code:#e9ecef; --warn:#fff3cd; --crit:#f8d7da; --ok:#d4edda; }
+body { font-family: "Segoe UI", system-ui, sans-serif; line-height:1.7; max-width:1100px; margin:0 auto; padding:20px; background:var(--bg); color:var(--fg); }
+h1 { color:var(--accent); border-bottom:3px solid var(--accent); padding-bottom:8px; }
+h2 { color:var(--accent); margin-top:36px; border-left:6px solid var(--accent); padding-left:12px; }
+h3 { margin-top:28px; color:#004494; }
+h4 { margin-top:20px; color:#333; }
+table { border-collapse:collapse; width:100%; margin:12px 0; font-size:0.95em; }
+th,td { border:1px solid #bbb; padding:8px 10px; text-align:left; }
+th { background:#e2e6ea; }
+code,pre { font-family: "Consolas", "Courier New", monospace; background:var(--code); padding:2px 6px; border-radius:4px; font-size:0.92em; }
+pre { padding:14px; overflow-x:auto; line-height:1.5; }
+.note { background:#e7f3ff; border-left:4px solid var(--accent); padding:10px 14px; margin:12px 0; }
+.warn { background:var(--warn); border-left:4px solid #856404; padding:10px 14px; margin:12px 0; }
+.crit { background:var(--crit); border-left:4px solid #721c24; padding:10px 14px; margin:12px 0; }
+.ok { background:var(--ok); border-left:4px solid #155724; padding:10px 14px; margin:12px 0; }
+.toc { background:#fff; border:1px solid #ccc; padding:16px 20px; border-radius:8px; }
+.toc ul { list-style:none; padding-left:0; }
+.toc li { margin:6px 0; }
+.toc a { text-decoration:none; color:var(--accent); }
+.toc a:hover { text-decoration:underline; }
+.rtl-box { background:#fff; border:2px dashed var(--accent); padding:14px 18px; border-radius:8px; margin:14px 0; }
+.rtl-box h4 { margin-top:0; color:var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>IEEE 802.3-2022 2.5GBASE-X PCS/PMA<br><small>RTL 设计参考 (Clause 127)</small></h1>
+<p style="color:#666;font-size:0.9em;">本文档基于 IEEE Std 802.3-2022 Clause 127 整理，聚焦 2.5GBASE-X PHY 的 RTL 可实现部分。生成日期: 2026-05-18</p>
+
+<div class="toc">
+<h3>目录</h3>
+<ul>
+<li><a href="#sec-overview">1. 协议概述</a></li>
+<li><a href="#sec-interface">2. 2.5GPII 编码与 XGMII 映射</a></li>
+<li><a href="#sec-8b10b">3. 8B/10B 传输码</a></li>
+<li><a href="#sec-sync">4. PCS 同步状态机</a></li>
+<li><a href="#sec-eee">5. EEE LPI 支持</a></li>
+<li><a href="#sec-pma">6. PMA 功能</a></li>
+<li><a href="#sec-rtl">7. RTL 设计要点</a></li>
+<li><a href="#sec-checklist">8. 实现检查清单</a></li>
+</ul>
+</div>
+
+<!-- ===================== 1. Overview ===================== -->
+<h2 id="sec-overview">1. 协议概述</h2>
+<p>2.5GBASE-X 是 2.5 Gb/s BASE-X PHY 的 PCS 与 PMA 子层规范，采用与 <strong>Clause 36 (1000BASE-X)</strong> 完全相同的 <strong>8B/10B 编码</strong>。服务接口为 <strong>XGMII</strong>（Clause 46 定义），名义速率为 78.125 Msymbols/s ± 100 ppm。</p>
+
+<div class="ok">
+<strong>核心特性</strong>：XGMII 32-bit 接口 → Word Encode → 2.5GPII → 8B/10B Encode → PMA 串行化；接收方向逆序处理。
+</div>
+
+<h3>1.1 子层结构</h3>
+<table>
+<tr><th>子层</th><th>功能</th><th>接口</th><th>时钟/速率</th></tr>
+<tr><td>RS (Reconciliation)</td><td>MAC 与 XGMII 适配</td><td>XGMII</td><td>78.125 MHz DDR (32-bit)</td></tr>
+<tr><td>PCS</td><td>8B/10B 编解码、同步、LPI</td><td>XGMII / 2.5GPII</td><td>78.125 MHz (byte)</td></tr>
+<tr><td>PMA</td><td>串行化、码组对齐</td><td>PMD</td><td>312.5 MHz (10-bit) / 3.125 GHz serial</td></tr>
+<tr><td>PMD</td><td>光电转换、线缆驱动</td><td>MDI</td><td>—</td></tr>
+</table>
+
+<div class="note">
+<strong>2.5GPII</strong> 是 PCS 内部接口，不可见、无外部意义。每符号 1 byte + 1-bit enable + 1-bit error，速率 78.125 Msymbols/s。
+</div>
+
+<!-- ===================== 2. Interface Mapping ===================== -->
+<h2 id="sec-interface">2. 2.5GPII 编码与 XGMII 映射</h2>
+
+<h3>2.1 2.5GPII 发送端编码 (Table 127-1)</h3>
+<table>
+<tr><th>tp_en</th><th>tp_er</th><th>tpd&lt;7:0&gt;</th><th>描述</th><th>助记符</th></tr>
+<tr><td>0</td><td>0</td><td>0x00</td><td>Normal Inter-frame</td><td>Idle</td></tr>
+<tr><td>0</td><td>0</td><td>0x01</td><td>Assert LPI</td><td>LPI</td></tr>
+<tr><td>0</td><td>0</td><td>0x9C</td><td>Sequence Ordered Set</td><td>Seq</td></tr>
+<tr><td>1</td><td>0</td><td>0x00–0xFF</td><td>Data</td><td>Data X</td></tr>
+<tr><td>1</td><td>1</td><td>0x00–0xFF</td><td>Transmit Error</td><td>Err</td></tr>
+</table>
+
+<h3>2.2 2.5GPII 接收端编码 (Table 127-2)</h3>
+<table>
+<tr><th>rp_dv</th><th>rp_er</th><th>rpd&lt;7:0&gt;</th><th>描述</th><th>助记符</th></tr>
+<tr><td>0</td><td>0</td><td>0x00</td><td>Normal Inter-frame</td><td>Idle</td></tr>
+<tr><td>0</td><td>0</td><td>0x01</td><td>Assert LPI</td><td>LPI</td></tr>
+<tr><td>0</td><td>0</td><td>0x0E</td><td>False Carrier Indication</td><td>FCI</td></tr>
+<tr><td>0</td><td>0</td><td>0x0F</td><td>Carrier Extend (odd byte packets)</td><td>CE</td></tr>
+<tr><td>0</td><td>0</td><td>0x9C</td><td>Sequence</td><td>Seq</td></tr>
+<tr><td>1</td><td>0</td><td>0x00–0xFF</td><td>Data</td><td>Data</td></tr>
+<tr><td>1</td><td>1</td><td>0x00–0xFF</td><td>Receive Error</td><td>Err</td></tr>
+</table>
+
+<div class="warn">
+<strong>注意</strong>：0x02–0x9B (tx) 和 0x02–0x9B (rx) 为保留值，收到时应视为无效并报告错误。
+</div>
+
+<h3>2.3 Word Encode 映射 (XGMII → 2.5GPII)</h3>
+<p>PCS 将 4-lane XGMII 并行数据映射为 4 个 2.5GPII symbol，由 <code>wencode_state</code> 状态机控制：</p>
+<table>
+<tr><th>XGMII Lane 0–3</th><th>wencode_state(n)</th><th>2.5GPII 输出</th><th>wencode_state(n+1)</th></tr>
+<tr><td>Data / Err</td><td>任意</td><td>4× Data/Err</td><td>DATA</td></tr>
+<tr><td>Idle ×4</td><td>任意</td><td>4× Idle</td><td>IDLE</td></tr>
+<tr><td>||Q|| (Sequence)</td><td>SEQ1</td><td>Seq, Data S0, Seq, Data S1</td><td>SEQ2</td></tr>
+<tr><td>||Q|| (Sequence)</td><td>SEQ2</td><td>Seq, Data S2, Seq, Data S3</td><td>SEQ1</td></tr>
+<tr><td>||Q|| (首周期)</td><td>非 SEQ</td><td>Seq, Data S0, Seq, Data S1</td><td>SEQ2</td></tr>
+<tr><td>LPI ×4</td><td>任意</td><td>4× LPI</td><td>LPI</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL 提示：Word Encode 实现</h4>
+<ul>
+<li>每个 XGMII 时钟周期处理 4 lane × 1 byte = 32 bit</li>
+<li>Sequence ordered set ||Q|| 需要两个 XGMII 周期完成：周期1输出 S0/S1，周期2输出 S2/S3</li>
+<li>用 1-bit 状态寄存器 <code>wencode_state</code> 区分 SEQ1/SEQ2</li>
+<li>LPI 由四个 lane 同时发送 /L/ 控制字符触发</li>
+</ul>
+</div>
+
+<h3>2.4 Word Decode 映射 (2.5GPII → XGMII)</h3>
+<p>接收方向将 4 个连续的 2.5GPII symbol 重组为 XGMII 4-lane 输出，由 <code>wdecode_state</code> 和 <code>next_seq_s2_s3</code> 控制：</p>
+<table>
+<tr><th>2.5GPII 输入 (4 symbols)</th><th>wdecode_state</th><th>next_seq</th><th>XGMII 输出</th><th>wdecode_state(n+1)</th></tr>
+<tr><td>4× Data/Err</td><td>任意</td><td>任意</td><td>4× Data/Err</td><td>DATA</td></tr>
+<tr><td>4× Idle</td><td>任意</td><td>任意</td><td>4× Idle</td><td>IDLE</td></tr>
+<tr><td>Seq, Data, Seq, Data</td><td>非 SEQ</td><td>1</td><td>||Q|| (S0/S1)</td><td>SEQ</td></tr>
+<tr><td>Seq, Data, Seq, Data</td><td>SEQ</td><td>0</td><td>||Q|| (S2/S3)</td><td>IDLE</td></tr>
+<tr><td>4× LPI</td><td>任意</td><td>任意</td><td>4× /L/</td><td>LPI</td></tr>
+</table>
+
+<div class="note">
+<strong>Sequence Ordered Set 重组</strong>：Data X&lt;7:0&gt; = S1&lt;1:0&gt;, S0&lt;5:0&gt;；Data Y&lt;7:0&gt; = S1&lt;7:2&gt;；Data Z&lt;7:0&gt; = S3&lt;1:0&gt;, S2&lt;5:0&gt;。
+</div>
+
+<!-- ===================== 3. 8B/10B ===================== -->
+<h2 id="sec-8b10b">3. 8B/10B 传输码</h2>
+<p>2.5GBASE-X 采用与 1000BASE-X (Clause 36) 完全相同的 8B/10B 编码。PCS 将 2.5GPII byte 映射为 10-bit code-group， Running Disparity (RD) 跟踪机制也完全一致。</p>
+
+<h3>3.1 核心规则</h3>
+<ul>
+<li>RD 初始为负 (RD-)</li>
+<li>每个 code-group 根据当前 RD 选择编码（正/负码）</li>
+<li>数据码-group (/Dx.y/) 和特殊码-group (/Kx.y/) 均来自标准 8B/10B 表</li>
+<li>Comma (/K28.5/) 用于码组边界对齐：bit pattern <code>0011111</code> 或 <code>1100000</code> (bits a–f)</li>
+</ul>
+
+<h3>3.2 常用 Ordered Sets</h3>
+<table>
+<tr><th>Ordered Set</th><th>Code-Group 序列</th><th>用途</th></tr>
+<tr><td>||I||</td><td>/K28.5/D16.2/ 或 /K28.5/D5.6/</td><td>Idle (维持同步)</td></tr>
+<tr><td>||S||</td><td>/K27.7/</td><td>Start-of-Frame</td></tr>
+<tr><td>||T||</td><td>/K29.7/</td><td>End-of-Frame</td></tr>
+<tr><td>||R||</td><td>/K23.7/</td><td>End-of-Frame Carrier Extend</td></tr>
+<tr><td>||V||</td><td>无效码</td><td>接收错误指示</td></tr>
+<tr><td>||Q||</td><td>/K28.5/W/K28.5/W/K28.5/W/K28.5/W/</td><td>Sequence (XGMII 映射)</td></tr>
+<tr><td>||LI||</td><td>/K28.5/D0.0/ (tx) /K28.5/D1.0/ (tx)</td><td>LPI 请求/唤醒 (EEE)</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL 提示：8B/10B 编解码器复用</h4>
+<ul>
+<li>可直接复用现有 1000BASE-X (Clause 36) 或 Fibre Channel 的 8B/10B 编解码模块</li>
+<li>只需确保 RD 状态在每个 code-group 后正确更新</li>
+<li>解码器需检测无效码-group (not_in_table) 并上报</li>
+</ul>
+</div>
+
+<!-- ===================== 4. Sync ===================== -->
+<h2 id="sec-sync">4. PCS 同步状态机</h2>
+<p>PCS Synchronization process 负责建立 code-group 边界，并监测通道可靠性。状态机与 Clause 36 的同步机制相同，使用 <code>sync_status</code> 标志指示同步状态。</p>
+
+<h3>4.1 同步建立流程</h3>
+<ol>
+<li><strong>Comma 检测</strong>：在串行比特流中搜索 /K28.5/ 的 comma 模式 (0011111 或 1100000)</li>
+<li><strong>码组对齐</strong>：一旦检测到 comma，即确定 10-bit 边界</li>
+<li><strong>有效码验证</strong>：连续接收有效 code-group（包括 Idle ordered sets）</li>
+<li><strong>sync_status = OK</strong>：当通道稳定后，PCS 开始正常接收数据</li>
+</ol>
+
+<h3>4.2 失步处理</h3>
+<table>
+<tr><th>条件</th><th>行为</th></tr>
+<tr><td>检测到无效 code-group 或 comma 丢失</td><td>增加错误计数器</td></tr>
+<tr><td>连续错误超过阈值</td><td>sync_status = FAIL，重新启动 comma 搜索</td></tr>
+<tr><td>失步期间</td><td>PCS 向 XGMII 输出 Carrier Extend (/R/) 或 Idle</td></tr>
+</table>
+
+<div class="warn">
+<strong>注意</strong>：2.5GBASE-X 没有 10GBASE-R 的 block sync 机制，而是依赖 8B/10B 的 comma 对齐。comma 密度足够高（Idle 中每 2 个 code-group 有一个 /K28.5/），锁定速度快。
+</div>
+
+<!-- ===================== 5. EEE ===================== -->
+<h2 id="sec-eee">5. EEE LPI 支持 (可选)</h2>
+<p>2.5GBASE-X 可选支持 Energy-Efficient Ethernet (Clause 78)。LPI 请求/指示通过 2.5GPII 的 <code>LPI</code> 编码传递，PCS 负责在 XGMII 和 PMA 之间转换 LPI 信号。</p>
+
+<h3>5.1 LPI 编码</h3>
+<table>
+<tr><th>方向</th><th>信号</th><th>编码</th></tr>
+<tr><td>TX</td><td>tx_lpi_active</td><td>XGMII 四 lane 发 /L/ → 2.5GPII 四 symbol 发 LPI (0x01)</td></tr>
+<tr><td>RX</td><td>rx_lpi_active</td><td>收到连续 LPI code-groups → 2.5GPII LPI → XGMII /L/</td></tr>
+</table>
+
+<h3>5.2 LPI 状态机要点</h3>
+<ul>
+<li><strong>TX LPI</strong>：收到 LPI 请求后，PCS 完成当前帧发送，然后发送 Sleep 序列进入 Quiet 状态</li>
+<li><strong>RX LPI</strong>：检测到 LPI 后，PCS 向 RS 声明 rx_lpi_active，并监测 Wake 序列以退出 LPI</li>
+<li><strong>Refresh</strong>：在 LPI 期间，定期发送 Refresh 序列以维持通道对齐和时钟恢复</li>
+</ul>
+
+<div class="rtl-box">
+<h4>RTL 提示：EEE 实现</h4>
+<ul>
+<li>如果不支持 EEE，可忽略 LPI 编码，将 /L/ 视为普通 Idle 处理</li>
+<li>支持 EEE 时，需要额外的 LPI TX/RX 状态机，处理 sleep、quiet、refresh、wake 时序</li>
+<li>LPI 状态机与 Clause 36 的 EEE 扩展相同，可参考 1000BASE-X EEE 实现</li>
+</ul>
+</div>
+
+<!-- ===================== 6. PMA ===================== -->
+<h2 id="sec-pma">6. PMA 功能</h2>
+
+<h3>6.1 服务原语</h3>
+<table>
+<tr><th>原语</th><th>方向</th><th>数据</th><th>说明</th></tr>
+<tr><td>PMA_UNITDATA.request</td><td>PCS → PMA</td><td>tx_code-group&lt;9:0&gt;</td><td>发送 10-bit code-group</td></tr>
+<tr><td>PMA_UNITDATA.indication</td><td>PMA → PCS</td><td>rx_code-group&lt;9:0&gt;</td><td>接收 10-bit code-group</td></tr>
+<tr><td>PMA_TXQUIET.request</td><td>PCS → PMA</td><td>tx_quiet (bool)</td><td>EEE quiet 请求</td></tr>
+<tr><td>PMA_RXQUIET.request</td><td>PCS → PMA</td><td>rx_quiet (bool)</td><td>EEE quiet 请求</td></tr>
+</table>
+
+<h3>6.2 串行化与码组对齐</h3>
+<ul>
+<li><strong>Transmit</strong>：将 10-bit tx_code-group 串行化为比特流，LSB (bit 0) 先发送</li>
+<li><strong>Receive</strong>：将串行比特流反串行化为 10-bit rx_code-group</li>
+<li><strong>Code-group slipping</strong>：PMA 可在接收端进行 ±1 bit 的滑动调整，以帮助 PCS 的 comma 对齐</li>
+</ul>
+
+<h3>6.3 可选 PRBS9 测试码型</h3>
+<p>PMA 可选生成 PRBS9 测试码型（多项式 <code>1 + x⁵ + x⁹</code>）用于发送方向的测试。实现此功能需通过管理接口使能。</p>
+
+<!-- ===================== 7. RTL Tips ===================== -->
+<h2 id="sec-rtl">7. RTL 设计要点</h2>
+
+<h3>7.1 模块划分建议</h3>
+<table>
+<tr><th>模块</th><th>功能</th><th>接口</th></tr>
+<tr><td>pcs_tx</td><td>Word Encode + Word-to-Octets + 8B/10B Encode</td><td>XGMII → PMA_UNITDATA.request</td></tr>
+<tr><td>pcs_rx</td><td>8B/10B Decode + Octets-to-Word + Word Decode</td><td>PMA_UNITDATA.indication → XGMII</td></tr>
+<tr><td>pcs_sync</td><td>Comma 检测 + 码组对齐 + sync_status</td><td>内部状态输出到 pcs_rx</td></tr>
+<tr><td>pma_serdes</td><td>串行化 / 反串行化</td><td>PCS ↔ PMD</td></tr>
+<tr><td>eee_ctrl (可选)</td><td>LPI 状态机 + Sleep/Wake 序列生成/检测</td><td>PCS 内部</td></tr>
+</table>
+
+<h3>7.2 时钟域</h3>
+<table>
+<tr><th>时钟域</th><th>频率</th><th>用途</th></tr>
+<tr><td>xgmii_clk</td><td>78.125 MHz</td><td>XGMII 32-bit DDR 接口</td></tr>
+<tr><td>pcs_byte_clk</td><td>78.125 MHz</td><td>2.5GPII 8-bit 处理</td></tr>
+<tr><td>pma_ser_clk</td><td>312.5 MHz</td><td>10-bit code-group 串行化</td></tr>
+<tr><td>pmd_serial</td><td>3.125 GHz</td><td>PMD 串行线速率 (2.5 Gb/s × 10/8)</td></tr>
+</table>
+
+<div class="note">
+<strong>时钟关系</strong>：xgmii_clk 与 pcs_byte_clk 通常同源（由 PHY 的 RX_CLK 或内部 PLL 产生）。pma_ser_clk 是 pcs_byte_clk 的 4 倍频。所有时钟应来自同一 PLL 以保证相位关系。
+</div>
+
+<h3>7.3 关键设计注意事项</h3>
+<div class="rtl-box">
+<h4>跨时钟域</h4>
+<ul>
+<li>TX 方向：XGMII → PCS → PMA 是同步路径，无需 CDC</li>
+<li>RX 方向：PMA 从串行数据恢复时钟 (CDR)，通常使用弹性 FIFO (Elastic Buffer) 将 PMA 时钟域数据转到 PCS 时钟域</li>
+<li>弹性 FIFO 深度需考虑 ±100 ppm 频差</li>
+</ul>
+</div>
+
+<div class="rtl-box">
+<h4>8B/10B 编解码面积优化</h4>
+<ul>
+<li>8B/10B 编码可用纯组合逻辑查表实现（256 数据 + 12 特殊码 × 2 RD 状态 = 536 条目）</li>
+<li>解码器需要 RD 跟踪寄存器，面积较小</li>
+<li>如果同时实现 1000BASE-X 和 2.5GBASE-X，可复用同一 8B/10B 模块，仅需调整接口速率</li>
+</ul>
+</div>
+
+<!-- ===================== 8. Checklist ===================== -->
+<h2 id="sec-checklist">8. 实现检查清单</h2>
+<table>
+<tr><th>项目</th><th>要求</th><th>验证方法</th></tr>
+<tr><td>XGMII 接口</td><td>兼容 Clause 46，32-bit DDR @ 78.125 MHz</td><td>与 MAC/RS 对接测试</td></tr>
+<tr><td>Word Encode</td><td>正确映射 XGMII / Sequence / LPI → 2.5GPII</td><td>定向测试向量</td></tr>
+<tr><td>Word Decode</td><td>正确重组 2.5GPII → XGMII，Seq 顺序无误</td><td>定向测试向量</td></tr>
+<tr><td>8B/10B Encode</td><td>RD 初始负，每码组更新；无效输入报 error</td><td>覆盖所有 256 Data + 12 K-code</td></tr>
+<tr><td>8B/10B Decode</td><td>检测 not_in_table、Running Disparity error</td><td>注入误码测试</td></tr>
+<tr><td>Comma 对齐</td><td>锁定时间 &lt; 接收 10 个 Idle ordered sets</td><td>上电/失步恢复测试</td></tr>
+<tr><td>sync_status</td><td>连续错误时置 FAIL，恢复后重新锁定</td><td>误码率梯度测试</td></tr>
+<tr><td>PMA 串行化</td><td>LSB first，码组边界正确</td><td>环回测试</td></tr>
+<tr><td>EEE LPI (可选)</td><td>Sleep/Wake 序列符合 Clause 78 时序</td><td>LPI 激活/退出测试</td></tr>
+<tr><td>PRBS9 (可选)</td><td>多项式 1+x⁵+x⁹，可自环检测</td><td>BERT 测试</td></tr>
+</table>
+
+<div class="ok">
+<strong>状态</strong>：Clause 127 提取与专题整理已完成。详细原始文本见 <code>extracted_clause_127.md</code>。
+</div>
+
+</body>
+</html>
