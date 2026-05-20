@@ -1,0 +1,569 @@
+# PICS — IEEE Std 802.3-2022 — Ethernet (车载PHY + MAC)
+
+> **Protocol Implementation Conformance Statement (PICS)**
+> **标准**: IEEE Std 802.3-2022 — Ethernet (车载PHY + MAC)
+> **PICS来源**: 协议原生PICS提取 + 基于标准创建的MAC层PICS
+> **应用场景**: 车载MCU区域控制器（Zonal Controller）含Switch功能
+> **生成日期**: 2025年
+
+---
+
+## 2. PICS提取与创建
+
+### 2.1 PICS来源说明
+
+本报告中的PICS表格来源于IEEE Std 802.3-2022标准原文中的PICS proforma附录：
+
+| 物理层 | Clause | PICS章节 | PDF页码 |
+|--------|--------|----------|---------|
+| 100BASE-T1 | 96 | 96.11 | 3932-3980 |
+| 1000BASE-T1 | 97 | 97.11 | 4034-4055 |
+| 10BASE-T1S | 147 | 147.12 | 5924-5950 |
+| PLCA | 148 | 148.5 | 5951-5960 |
+| 2.5G/5G/10GBASE-T1 | 149 | 149.11 | 6052-6087 |
+| 2.5G/5G/10GBASE-T1 MDI | 150 | 150.11 | 6088-6100 |
+
+对于MAC层（Clause 3）、MAC Control（Clause 31）和PFC（Annex 31D）部分，原标准中的PICS proforma主要面向通用以太网，本报告根据车载应用场景进行了重新组织和简化。
+
+---
+
+## 3. PICS表格
+
+### 3.1 100BASE-T1 PICS（Clause 96）
+
+#### 3.1.1 Major Capabilities/Options
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| MII | PHY associated with MII | 96.1 | O | Yes/No | 媒体独立接口 |
+| PCS | 100BASE-T1 PCS | 96.3 | M | Yes | 物理编码子层 |
+| PMA | 100BASE-T1 PMA | 96.4 | M | Yes | 物理媒介连接子层 |
+| *CHNL | Channel | 96.7 | O | Yes/No | 信道规范，不适用于PHY制造商 |
+| *MDIO | MDIO Capability | 96.1 | O | Yes/No | 寄存器和接口支持 |
+| *AUTO | Automotive environment installation | - | O | Yes/No | 汽车环境安装 |
+| *POWER | PHY implemented with Clause 104 power | Clause 104 | O | Yes/No | Clause 104供电 |
+| AN | Auto-negotiation | 96.1.1 | O | Yes/No | 如实现需满足Clause 98要求 |
+
+#### 3.1.2 PCS Transmit
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PCT1 | PCS Transmit state diagram | 96.3.3.2 | M | Yes | 见图96-7 |
+| PCT2 | PCS data transmission enabling state diagram | 96.3.2 | M | Yes | 见图96-5 |
+| PCT3 | tx_data<2:0>, tx_enable and tx_error | 96.3.3.1.1 | M | Yes | 与pcs_txclk同步 |
+| PCT4 | TX_TCLK in MASTER mode | 96.3.3.1.1 | M | Yes | MASTER模式本地时钟源 |
+| PCT5 | TX_TCLK in SLAVE mode | 96.3.3.1.1 | M | Yes | SLAVE模式从恢复时钟派生 |
+| PCT6 | Transmit data conversion | 96.3.3.1.2 | M | Yes | 转换为3-bit (tx_data<2:0>) |
+| PCT7 | Stuff bits | 96.3.3.1.2 | M | Yes | 数据包bit数非3的倍数时填充 |
+| PCT8 | symb_pair_timer | 96.3.3.2.3 | M | Yes | 与pcs_txclk同步生成 |
+| PCT9 | symb_timer | 96.3.3.2.3 | M | Yes | 与TX_TCLK同步生成 |
+| PCT10 | Scrambler function | 96.3.3.3.1 | M | Yes | 符合40.3.1.3.1 |
+| PCT11 | Syn[2:0] generation | 96.3.3.3.2 | M | Yes | 符合40.3.1.3.2/3.3编码规则 |
+| PCT12 | Scn[2:0] generation | 96.3.3.3.2 | M | Yes | 符合40.3.1.3.2/3.3编码规则 |
+| PCT13 | Sdn[2:0] generation | 96.3.3.3.4 | M | Yes | 按96.3.3.3.4定义生成 |
+| PCT14 | Sxn generation | 96.3.3.3.8 | M | Yes | 按96.3.3.3.8定义生成 |
+
+#### 3.1.3 PCS Receive
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PCR1 | PCS Receive state diagram | 96.3.4.1 | M | Yes | 见图96-10a/10b |
+| PCR2 | rcv_max_timer | 96.3.4.1.3 | M | Yes | 超时时间1.08ms +/- 54us |
+| PCR3 | 3B/4B conversion in PCS Receive | 96.3.4.2 | M | Yes | 接收bit数非3倍数时丢弃残余 |
+| PCR4 | PCS Receive error handling | 96.3.4.2 | M | Yes | 坏ESD/ERR_ESD/坏SSD时pcs_rx_er=TRUE |
+| PCR5 | PCS receive descrambler polynomial | 96.3.4.3 | M | Yes | 符合40.3.1.4.2，应用于rx_data<2:0> |
+| PCR6 | PCS receive automatic polarity detection | 96.3.4.4 | O | Yes/No | 信号极性自动检测与反转 |
+| PCR7 | rx_data<2:0>, rx_enable and rx_error | 96.3.4.5 | M | Yes | 与pcs_rxclk同步 |
+| PCR8 | Residual bits handling | 96.3.4.5 | M | Yes | 非4倍数bit丢弃 |
+| PCR9 | RX_DV timing | 96.3.4.5 | M | Yes | 最后一个nibble转换后deassert |
+| PCR10 | False carrier error | 96.3.4.5 | M | Yes | MII上指示 |
+
+#### 3.1.4 PCS Loopback
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PCL1 | PCS Loopback mode | 96.3.5 | M | Yes | loopback bit(MDIO reg 3.0.14)=1 |
+| PCL2 | PCS Loopback function | 96.3.5 | M | Yes | 发送路径数据返回到接收路径 |
+| PCL3 | PHY receive circuitry isolation | 96.3.5 | M | Yes | 接收电路与网络介质隔离 |
+| PCL4 | PHY transmit circuitry isolation | 96.3.5 | M | Yes | TX_EN不导致介质数据传输 |
+
+#### 3.1.5 PMA Function
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PMF1 | PMA reset function | 96.4.1 | M | Yes | 符合40.4.2.1 |
+| PMF2 | PMA transmit fault function | 96.4.2 | MDIO:M | Yes/N/A | 映射到transmit fault bit |
+| PMF3 | PMA receive function | 96.4.3 | MDIO:M | Yes/N/A | 映射到receive fault bit |
+| PMF4 | PHY Control function | 96.4.4 | M | Yes | 见图96-18 |
+| PMF5 | Link Monitor function | 96.4.5 | M | Yes | 见图96-19 |
+| PMF6 | Link-up time from power_on | 96.4.5 | M | Yes | < 100ms |
+| PMF7 | maxwait_timer | 96.4.7.2 | M | Yes | 超时200ms +/- 2ms |
+| PMF8 | minwait_timer | 96.4.7.2 | M | Yes | 超时1.8us +/- 0.18us |
+| PMF9 | stabilize_timer | 96.4.7.2 | M | Yes | 超时1.8us +/- 0.18us |
+
+#### 3.1.6 PMA Electrical Specifications
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PME1 | Test modes | 96.5.2 | M | Yes | 支持发射机波形/失真/抖动/下垂测试 |
+| PME2 | Test mode isolation | 96.5.2 | M | Yes | 测试模式不改变电气和抖动特性 |
+| PME3 | Test mode 1 | 96.5.2 | M | Yes | N个"+1"符号+N个"-1"符号 |
+| PME4 | Test mode 2 | 96.5.2 | M | Yes | {+1,-1}重复序列，66.666MHz时钟 |
+| PME5 | Test mode 4 | 96.5.2 | M | Yes | 扰码器生成序列 |
+| PME6 | Shift register update rate | 96.5.2 | M | Yes | 每符号间隔(15ns)更新一次 |
+| PME7 | MASTER timing clock | 96.5.2 | M | Yes | 66.666MHz +/- 100ppm |
+| PME8 | Test mode 5 | 96.5.2 | M | Yes | 伪随机PAM3序列 |
+| PME9 | Resistor tolerance | 96.5.3 | M | Yes | +/- 0.1% |
+| PME10 | TX_TCLK access | 96.5.3 | M | Yes | 66.666MHz符号率时钟 |
+| PME11 | TX_TCLK enable means | 96.5.3 | M | Yes | 提供启用TX_TCLK输出的方法 |
+| PME12 | Disturbing signal Vd | 96.5.3 | M | Yes | 正弦波，符号率1/6，5.4Vpp差分 |
+| PME13 | AC coupling at MDI | 96.5.4 | M | Yes | MDI交流耦合 |
+| PME14 | Droop without Clause 104 power | 96.5.4.1 | !POWER:M | Yes/N/A | < 45% (500ns后) |
+| PME15 | Droop with Clause 104 power | 96.5.4.1 | POWER:M | Yes/N/A | < 60% (500ns后) |
+
+### 3.2 1000BASE-T1 PICS（Clause 97）
+
+#### 3.2.1 Major Capabilities/Options
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| - | PHY associated with GMII | 97.1 | O | Yes/No | 千兆媒体独立接口 |
+| PCS | 1000BASE-T1 PCS | 97.3 | M | Yes | 物理编码子层 |
+| PMA | 1000BASE-T1 PMA | 97.4 | M | Yes | 物理媒介连接子层 |
+| AN | Auto-negotiation | 97.1, 98 | O | Yes/No | 如实现需满足Clause 98 |
+| *CHNL | Channel | 97.6 | O | Yes/No | 信道规范，不适用于PHY制造商 |
+| *MDIO | MDIO Capability | 45.1 | O | Yes/No | 寄存器和接口支持 |
+| *AUTO | Automotive environment installation | 97.9 | O | Yes/No | 汽车环境安装 |
+| *LSTB | Operation on link segment type B | 97.5.4.1 | O | Yes/No | B型链路段支持 |
+| *OAM | PCS-level OAM channel capability | 97.3.8 | O | Yes/No | OAM管理通道 |
+| *EEE | EEE capability | 97.1.2.3 | O | Yes/No | 节能以太网 |
+
+#### 3.2.2 General
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| G1 | MASTER-SLAVE relationship without AN | 97.1.2 | M | Yes | 由管理或硬件配置建立 |
+| G2 | Test circuit accuracy | 97.1.5 | M | Yes | 精度在+/-1%以内 |
+| G3 | Sum of transmit and receive data delays | 97.10 | M | Yes | 不超过7168 bit times (7168ns) |
+| G4 | Auto-negotiation support | 97.8.1 | O | Yes/No | 如支持需符合Clause 98 |
+
+#### 3.2.3 PCS Transmit
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PCT1 | PCS Transmit state diagram | 97.3.2.2 | M | Yes | 见图97-14 |
+| PCT2 | PCS Transmit bit ordering | 97.3.2.2 | M | Yes | 见图97-5/7 |
+| PCT3 | PCS data transmission aggregation | 97.3.2.2 | M | Yes | 45个80B/81B块聚合+PHY帧编码+扰码 |
+| PCT4 | PCS data encoding | 97.3.2.2 | M | Yes | 帧编码为PAM3符号序列 |
+| PCT5 | Transmitted Control codes | 97.3.2.2.6 | M | Yes | 不传输Table 97-1之外的值 |
+| PCT5a | Received Control codes | 97.3.2.2.6 | M | Yes | 接收到Table 97-1之外的值视为错误 |
+| PCT6 | Idle characters | 97.3.2.2.7 | M | Yes | 不在数据帧内添加Idle字符 |
+| PCT7 | LP_IDLE characters | 97.3.2.2.8 | M | Yes | 不在数据帧内添加LP_IDLE |
+| PCT8 | EEE IDLE conversion | 97.3.2.2.8 | EEE:M | Yes/N/A | EEE不支持时LP_IDLE转IDLE |
+| PCT9 | FEC (RS code) | 97.3.2.2.11 | M | Yes | Reed-Solomon (450,406) |
+| PCT10 | RS-FEC encoder | 97.3.2.2.11 | M | Yes | 遵循97.3.2.2.3描述的bit顺序 |
+| PCT11 | Parity calculation | 97.3.2.2.11 | M | Yes | 与图97-8移位寄存器实现结果一致 |
+| PCT12 | RS-FEC encoder shift register init | 97.3.2.2.11 | M | Yes | 校验计算前初始化为零 |
+| PCT13 | PCS MASTER scrambler | 97.3.2.2.12 | M | Yes | 见图97-9 |
+| PCT14 | PCS SLAVE scrambler | 97.3.2.2.12 | M | Yes | 见图97-9 |
+| PCT15 | PCS scrambler seed values | 97.3.2.2.12 | M | Yes | 非零，InfoField交换期间传输 |
+| PCT16 | EEE compliant PHYs state diagram | 97.3.2.2.15 | EEE:M | Yes/N/A | 实现图97-14 |
+| PCT17 | EEE RS partial IDLE | 97.3.2.2.15 | EEE:M | Yes/N/A | 不传输部分填充LP_IDLES的PHY帧 |
+| PCT18 | EEE without SEND_N | 97.3.2.2.15 | EEE:M | Yes/N/A | lp_tx_mode在PMA非SEND_N时被忽略 |
+| PCT19 | EEE NORMAL mode | 97.3.2.2.15 | EEE:M | Yes/N/A | lpi_tx_mode=NORMAL且SEND_N时传递编码数据 |
+| PCT20 | EEE QUIET mode | 97.3.2.2.15 | EEE:M | Yes/N/A | lpi_tx_mode=QUIET时传递零 |
+| PCT21 | EEE REFRESH mode | 97.3.2.2.15 | EEE:M | Yes/N/A | lpi_tx_mode=REFRESH时传递零数据编码 |
+| PCT22 | Wake frame | 97.3.2.2.15 | EEE:M | Yes/N/A | 仅在交替PHY帧计数期间发送 |
+| PCT23 | PCS reset execution | 97.3.2.1 | M | Yes | 按97.3.2.1描述执行 |
+
+#### 3.2.4 PCS Receive
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PCR1 | PCS receive state diagram | 97.3.2.3 | M | Yes | 见图97-12 |
+| PCR2 | PCS Receive bit ordering | 97.3.2.3 | M | Yes | 见图97-6 |
+| PCR3 | PAM3 stream formation | 97.3.2.3.1 | M | Yes | rx_data<0>到rx_data<2699>级联 |
+| PCR4 | PCS descrambler | 97.3.2.3 | M | Yes | 解扰数据流生成RXD<7:0>到GMII |
+| PCR5 | MASTER side-stream descrambler | 97.3.2.3.2 | M | Yes | 公式(97-4) |
+| PCR6 | SLAVE side-stream descrambler | 97.3.2.3.2 | M | Yes | 公式(97-3) |
+| PCR7 | Transmit PCS test pattern mode | 97.3.3 | M | Yes | 连续传输见图97-5 |
+| PCR8 | Receive PCS test pattern mode | 97.3.3 | M | Yes | - |
+| PCR9 | MASTER side-stream scrambler | 97.3.2.3 | M | Yes | - |
+| PCR10 | SLAVE side-stream scrambler | 97.3.2.3 | M | Yes | - |
+
+#### 3.2.5 PMA Electrical Specifications
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PME1 | Test modes | 97.5.2 | M | Yes | 支持发射机测试 |
+| PME2 | Test mode enable | 97.5.2 | MDIO:M | Yes/N/A | MDIO reg 1.2304.15:13设置 |
+| PME3 | Test mode isolation | 97.5.2 | M | Yes | 不改变电气/抖动特性 |
+| PME4 | Test mode 1 | 97.5.2 | M | Yes | 重复传输{+1,-1}序列 |
+| PME5 | Test mode 2 | 97.5.2 | M | Yes | 125MHz MASTER模式时钟 |
+| PME6 | Test mode 4 | 97.5.2 | M | Yes | 扰码器序列 |
+| PME7 | Test mode 5 | 97.5.2 | M | Yes | 连续+1符号 |
+| PME8 | Test mode 6 | 97.5.2 | M | Yes | 连续-1符号 |
+| PME9 | Transmitter output voltage | 97.5.4.1 | M | Yes | 1.0V +/- 20% pp差分 (test mode 1) |
+| PME10 | Transmitter output droop | 97.5.4.2 | M | Yes | < 25% (test mode 2) |
+| PME11 | Transmitter timing jitter | 97.5.4.3 | M | Yes | < 60ps rms (test mode 1) |
+| PME12 | Transmitter power spectral density | 97.5.4.4 | M | Yes | 满足上下模板约束 |
+| PME13 | Receiver differential input signals | 97.5.5.1 | M | Yes | BER < 1e-7 (125 octet frames) |
+| PME14 | Alien crosstalk noise rejection | 97.5.5.2 | M | Yes | BER < 1e-10 with -100dBm/Hz噪声 |
+| PME15 | Return loss | 97.5.5.3 | M | Yes | 满足Equation (97-14) |
+
+---
+
+### 3.3 10BASE-T1S PICS（Clause 147）
+
+#### 3.3.1 Major Capabilities/Options
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| *MDIO | MDIO Capability | 45.1 | O | Yes/No | 寄存器和接口支持 |
+| *HALF | Half-duplex mode | - | M | Yes | 半双工模式 |
+| *INSP2P | Installation / Point-to-point cabling | 147.7 | O | Yes/No | 不适用于PHY制造商 |
+| *INSMIX | Installation / Mixing segment | 147.8 | O | Yes/No | 不适用于PHY制造商 |
+| *MULT | Multidrop mode | - | O | Yes/No | 多点总线模式 |
+| MII | PHY associated with MII | 147.1.1 | O | Yes/No | 媒体独立接口 |
+| PCS | 10BASE-T1S PCS | 147.3 | M | Yes | 物理编码子层 |
+| PMA | 10BASE-T1S PMA | 147.4 | M | Yes | 物理媒介连接子层 |
+| AN | Auto-Negotiation | 98 | O | Yes/No | 自动协商 |
+| FULL | Full-duplex mode | - | O | Yes/No | 全双工模式(点对点) |
+
+#### 3.3.2 PCS Transmit
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PCST1 | PCS Reset | 147.3.1 | M | Yes | 见147.3.1 |
+| PCST2 | PCS Data Transmission Enable function | 147.3.2.1 | M | Yes | 符合PCS Transmit状态图 |
+| PCST3 | Values of tx_cmd variable | 147.3.2.2 | M | Yes | 见147.3.2.2 |
+| PCST4 | PCS Transmit function scrambler polynomial | 147.3.2.8 | M | Yes | g(x) = x^7 + x^4 + 1 |
+| PCST5 | PCS scrambler seed values | 147.3.2.8 | M | Yes | 永不为零初始化 |
+| PCST6 | xmit_max_timer | 147.3.2.6 | M | Yes | 超时后发送的nibble数为偶数 |
+
+#### 3.3.3 PCS Receive
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PCSR1 | PCS Receive function | 147.3.3.1 | M | Yes | 符合PCS Receive状态图 |
+| PCSR2 | Generation of RXD<3:0> to MII | 147.3.3.8 | M | Yes | 解扰5B/4B解码数据流 |
+| PCSR3 | Self-synchronizing descrambler | 147.3.3.8 | M | Yes | 见147.3.2.8 |
+| PCSR4 | False Carrier supported | 147.3.3.7 | O | Yes/No | 见图147-7 |
+
+#### 3.3.4 PCS Loopback
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PCSL1 | PCS loopback | 147.3.4 | MDIO:M | Yes/N/A | loopback bit(MDIO 3.0.14)=1 |
+| PCSL2 | PCS loopback function | 147.3.4 | M | Yes | MII发送路径数据返回到接收路径 |
+| PCSL3 | PHY receive circuitry isolation | 147.3.4 | M | Yes | 接收电路与介质隔离 |
+| PCSL4 | PHY transmit circuitry isolation | 147.3.4 | M | Yes | TX_EN不导致介质数据传输 |
+
+#### 3.3.5 Collision Detection (Half-duplex)
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| CD1 | Detect collisions during transmission | 147.3.5 | HALF:M | Yes/N/A | 本地传输导致MDI信号损坏时检测碰撞 |
+| CD2 | COL assertion on collision | 147.3.5 | HALF:M | Yes/N/A | 碰撞期间MII上COL信号保持 asserted |
+| CD3 | CRS asserted during other station collision | 147.3.5 | HALF:M | Yes/N/A | 见147.3.5 |
+| CD4 | CRS when media busy | 147.3.6 | HALF:M | Yes/N/A | 按22.2.2.11规定assert CRS |
+
+#### 3.3.6 PMA Function
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PMA1 | PMA reset function | 147.4.1 | M | Yes | 见147.4.1 |
+| PMA2 | tx_sym = 'I' (special 5B symbol) | 147.4.2 | M | Yes | 见147.4.2 |
+| PMA3 | receive SILENCE | 147.4.3 | M | Yes | 无活动时在MII传递'I'符号 |
+| PMA4 | Link Monitor Function | 147.4.4 | M | Yes | 见图147-14 |
+
+#### 3.3.7 PMA Electrical Specifications
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PMAE1 | Test modes | 147.5.2 | M | Yes | 支持发射机电气测试 |
+| PMAE2 | Enable test modes via MDIO | 147.5.2 | MDIO:M | Yes/N/A | bits 1.2299.15:13 |
+| PMAE3 | Test mode isolation | 147.5.2 | M | Yes | 不改变电气/抖动特性 |
+| PMAE4 | Test mode 1 | 147.5.2 | M | Yes | 重复传输DME编码1 |
+| PMAE5 | Test mode 2 | 147.5.2 | M | Yes | +/-差分电压各1.6us |
+| PMAE6 | Test mode 3 | 147.5.2 | M | Yes | 伪随机序列+DME编码 |
+| PMAE7 | Test mode 4 | 147.5.2 | M | Yes | 高阻抗终止 |
+| PMAE8 | TX_CLK access | 147.5.3 | M | Yes | PHY提供TX_CLK访问 |
+| PMAE9 | AC coupling at MDI | 147.5.4 | M | Yes | MDI交流耦合 |
+| PMAE10 | Transmitter 100 ohm load | 147.5.4 | M | Yes | 100 ohm +/- 0.1%差分负载 |
+| PMAE11 | Transmitter 50 ohm load (multidrop) | 147.5.4 | MULT:M | Yes/N/A | 50 ohm +/- 0.1% (多点模式) |
+| PMAE12 | Transmitter output voltage | 147.5.4.1 | M | Yes | 1.0V +/- 20% pp差分 |
+| PMAE13 | Transmitter output droop | 147.5.4.2 | M | Yes | < 30% (test mode 2) |
+| PMAE14 | Transmitter timing jitter | 147.5.4.3 | M | Yes | < 5ns symbol-to-symbol |
+| PMAE15 | Transmit power spectral density | 147.5.4.4 | M | Yes | 满足Equation (147-1/2)模板 |
+| PMAE16 | Multidrop mode high impedance | 147.5.4.5 | M | Yes | test mode 4时最小并联阻抗 |
+| PMAE17 | Receiver differential input | 147.5.5.1 | M | Yes | BER < 1e-7 (125 octet frames) |
+| PMAE18 | Alien crosstalk noise rejection | 147.5.5.2 | M | Yes | BER < 1e-10 with -101dBm/Hz噪声 |
+| PMAE19 | PMA local loopback | 147.5.6 | MDIO:O | Yes/No/N/A | MDIO reg 1.0.0或1.2297.13 |
+
+#### 3.3.8 MDI Specification
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| MDI1 | MDI return loss (non-multidrop) | 147.9.2 | M | Yes | 满足Equation (96-12) |
+| MDI2 | MDI parallel impedance (multidrop) | 147.9.2 | MULT:M | Yes/N/A | 满足Equation (147-8) |
+| MDI3 | MDI line powering voltage tolerance | 147.9.3 | M | Yes | 最高60V DC，限流2000mA |
+| MDI4 | MDI fault tolerance | 147.9.4 | M | Yes | 短路任何线对或地不损坏 |
+
+### 3.4 PLCA PICS（Clause 148）
+
+#### 3.4.1 Reconciliation Sublayer
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| RS1 | PLCA not supported or disabled | 148.4.1 | M | Yes | 符合Clause 22的MII RS定义 |
+
+#### 3.4.2 Mapping of MII Signals to PLS Service Primitives and PLCA Functions
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| MAP1 | PLS_DATA.request when PLCA disabled | 148.4.2.1 | M | Yes | 按22.2.1.1规定 |
+| MAP2 | PLS_DATA.indication | 148.4.2.2 | M | Yes | 按22.2.1.2规定 |
+| MAP3 | PLS_CARRIER.indication when PLCA disabled | 148.4.2.3 | M | Yes | 按22.2.1.3规定 |
+| MAP4 | PLS_CARRIER.indication when PLCA enabled | 148.4.2.3.1 | M | Yes | 映射到PLCA Data状态图 |
+| MAP5 | PLS_SIGNAL.indication when PLCA disabled | 148.4.2.4 | M | Yes | 按22.2.1.4规定 |
+| MAP6 | PLS_SIGNAL.indication when PLCA enabled | 148.4.2.4.1 | M | Yes | 映射到PLCA Data状态图 |
+| MAP7 | PLS_DATA_VALID.indication | 148.4.2.5 | M | Yes | 按22.2.1.7规定 |
+| MAP8 | Generation of TX_ER | 148.4.2.6 | M | Yes | 按148.4.5.1规定 |
+| MAP9 | Response to RX_ER indication | 148.4.2.7 | M | Yes | 按22.2.1.5规定 |
+
+#### 3.4.3 Specific RS and PHY Specification
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PLCA1 | RS reaction to BEACON indication | 148.4.3.2.1 | M | Yes | rx_cmd = BEACON |
+| PLCA2 | RS reaction when BEACON ceases | 148.4.3.2.1 | M | Yes | rx_cmd = NONE (除非COMMIT) |
+| PLCA3 | RS reaction to COMMIT indication | 148.4.3.2.2 | M | Yes | rx_cmd = COMMIT |
+| PLCA4 | RS reaction when COMMIT ceases | 148.4.3.2.2 | M | Yes | rx_cmd = NONE (除非BEACON) |
+
+#### 3.4.4 PLCA Control
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| CON1 | PLCA Control function | 148.4.4.1 | M | Yes | 符合图148-3/148-4 |
+
+#### 3.4.5 PLCA Data
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| DAT1 | PLCA Data function | 148.4.5.1 | M | Yes | 符合图148-5/148-6 |
+
+#### 3.4.6 PLCA Status
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| STS1 | PLCA Status function | 148.4.6.1 | M | Yes | 符合图148-7 |
+
+---
+
+### 3.5 2.5G/5G/10GBASE-T1 PICS（Clause 149）
+
+#### 3.5.1 Major Capabilities/Options
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| *AN | Auto-Negotiation | 98 | O | Yes/No | 如实现需满足Clause 98 |
+| *EEE | Support of EEE capability | 149.1.3.3 | O | Yes/No | 节能以太网 |
+| *INS | Installation/cabling | 149.7 | O | Yes/No | 平衡对布线(非背板)适用 |
+| *OAM | PCS-level OAM support | 149.3.9 | O | Yes/No | 运维管理通道 |
+| *MDIO | MDIO capability | 45.1 | O | Yes/No | 寄存器和接口支持 |
+| PCS | Physical Coding Sublayer | 149.3 | M | Yes | 物理编码子层 |
+| PMA | Physical Medium Attachment | 149.4 | M | Yes | 物理媒介连接子层 |
+
+#### 3.5.2 General
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| G1 | Auto-Negotiation requirements | 98 | AN:M | Yes/N/A | 如实现需符合Clause 98 |
+| G2 | MASTER/SLAVE runtime config | 149.1.3 | M | Yes | 运行时配置MASTER或SLAVE |
+| G3 | MASTER-SLAVE without AN | 149.1.3 | AN:M | Yes/N/A | 管理或硬件配置建立关系 |
+
+#### 3.5.3 PCS Transmit
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PCT1 | PCS Reset | 149.3.2.1 | M | Yes | 按149.3.2.1描述 |
+| PCT2 | Management interface restore | 149.3.2.1 | M | Yes | bit 1.2309.15设置后10ms内 |
+| PCT3 | PCS 64B/65B Transmit state diagram | 149.3.2.2 | M | Yes | 图149-16/17 |
+| PCT4 | PCS Transmit bit ordering | 149.3.2.2 | M | Yes | 图149-6 |
+| PCT5 | SEND_Z handling | 149.3.2.2 | M | Yes | PMA_TXMODE=SEND_Z时传递零向量 |
+| PCT6 | SEND_T handling | 149.3.2.2 | M | Yes | PMA_TXMODE=SEND_T时生成Tn序列 |
+| PCT7 | SEND_N normal mode (65B coding) | 149.3.2.2 | M | Yes | 正常模式65B编码 |
+| PCT8 | Reserved control codes | 149.3.2.2.5 | M | Yes | Table 149-2之外的值不传输/视为错误 |
+| PCT9 | Idle control characters (/I/) | 149.3.2.2.7 | M | Yes | /I/以4个为一组插入/删除 |
+| PCT10 | Adding Idle characters | 149.3.2.2.7 | M | Yes | 接收数据期间不添加/I/ |
+| PCT11 | Deleting Idle characters | 149.3.2.2.7 | M | Yes | /T/后前4个字符不删除 |
+| PCT12 | LPI control characters (/LI/) | 149.3.2.2.8 | M | Yes | /LI/以4个为一组插入/删除 |
+| PCT13 | Adding LPI characters | 149.3.2.2.8 | EEE:M | Yes/N/A | 接收数据期间不添加/LI/ |
+
+#### 3.5.4 PCS Receive
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PCR1 | PCS Receive state diagram | 149.3.3.2 | M | Yes | 符合图149-27/28 |
+| PCR2 | PCS Receive bit ordering | 149.3.3.2 | M | Yes | 图149-12 |
+| PCR3 | PAM4 symbol stream | 149.3.3.2.1 | M | Yes | 按顺序级联形成符号流 |
+| PCR4 | PCS descrambler | 149.3.3.2 | M | Yes | 解扰生成RXD到XGMII |
+| PCR5 | MASTER side-stream descrambler | 149.3.3.2.2 | M | Yes | 公式(149-13) |
+| PCR6 | SLAVE side-stream descrambler | 149.3.3.2.2 | M | Yes | 公式(149-12) |
+| PCR7 | Receive 64B/65B block decode | 149.3.3.2.5 | M | Yes | 正确解码数据和控制块 |
+| PCR8 | RS-FEC decoder | 149.3.3.2.8 | M | Yes | Reed-Solomon解码 |
+
+#### 3.5.5 PMA Electrical Specifications
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PME1 | Test modes | 149.4.2 | M | Yes | 支持发射机测试 |
+| PME2 | Test mode enable (MDIO) | 149.4.2 | MDIO:M | Yes/N/A | MDIO reg 1.2304.15:13 |
+| PME3 | Test mode 1 | 149.4.2 | M | Yes | 重复传输符号{+3,+1} |
+| PME4 | Test mode 2 | 149.4.2 | M | Yes | PRBS生成序列 |
+| PME5 | Test mode 4 (PAM4 gray coding) | 149.4.2 | M | Yes | PAM4 Gray编码序列 |
+| PME6 | Transmitter output voltage | 149.4.4.1 | M | Yes | 2.0V +/- 10% pp差分 |
+| PME7 | Transmitter output droop | 149.4.4.2 | M | Yes | < 15% (test mode 1) |
+| PME8 | Transmitter timing jitter | 149.4.4.3 | M | Yes | 满足Table 149-18/19 |
+| PME9 | Transmitter power spectral density | 149.4.4.4 | M | Yes | 满足模板约束 |
+| PME10 | Receiver differential input | 149.4.5.1 | M | Yes | BER < 1e-7 |
+| PME11 | Alien crosstalk noise rejection | 149.4.5.2 | M | Yes | BER < 1e-10 |
+
+---
+
+### 3.6 MAC层通用PICS（Clause 3 / Clause 4）
+
+以下PICS基于IEEE 802.3-2022 Clause 3（MAC帧格式）和Clause 4（MAC操作）创建，适用于所有车载PHY实现。
+
+#### 3.6.1 MAC Frame Format
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| MAC-F1 | Preamble transmission | 3.2.1 | M | Yes | 7字节0x55前导码 |
+| MAC-F2 | SFD transmission | 3.2.2 | M | Yes | 1字节0xD5起始帧定界符 |
+| MAC-F3 | Destination Address field | 3.2.3 | M | Yes | 6字节目的MAC地址 |
+| MAC-F4 | Source Address field | 3.2.4 | M | Yes | 6字节源MAC地址 |
+| MAC-F5 | Length/Type field | 3.2.6 | M | Yes | 2字节，长度或类型解释 |
+| MAC-F6 | MAC Client Data field | 3.2.7 | M | Yes | 最小46字节，最大1500字节 |
+| MAC-F7 | FCS (CRC-32) generation | 3.2.9 | M | Yes | 按3.2.9计算并附加 |
+| MAC-F8 | Minimum frame size (64 bytes) | 4.4.2 | M | Yes | 从DA到FCS共64字节最小 |
+| MAC-F9 | Maximum frame size (1518 bytes) | 4.4.2 | M | Yes | 从DA到FCS共1518字节最大 |
+| MAC-F10 | InterPacket Gap (IPG) | 4.4.2 | M | Yes | 96 bit times (0.96us@100M) |
+| MAC-F11 | Q-tagged frame (VLAN) support | 3.2.7 | O | Yes/No | 支持802.1Q tag，最大1522字节 |
+| MAC-F12 | Envelope frame support | 3.2.7 | O | Yes/No | 支持2000字节巨型帧(非标准) |
+| MAC-F13 | Extension field (carrier extension) | 4.2.4.2 | O | Yes/No | 千兆以上速率slotTime扩展 |
+
+#### 3.6.2 MAC Address Handling
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| MAC-A1 | Individual address support | 3.2.3 | M | Yes | 单播地址识别 |
+| MAC-A2 | Broadcast address support | 3.2.3 | M | Yes | FF:FF:FF:FF:FF:FF |
+| MAC-A3 | Multicast address support | 3.2.3 | M | Yes | 组播地址过滤 |
+| MAC-A4 | Locally administered address | 3.2.3 | M | Yes | L bit = 1 (本地管理地址) |
+| MAC-A5 | Globally administered address | 3.2.3 | M | Yes | U/L bit = 0 (全球唯一地址) |
+
+#### 3.6.3 Full-Duplex Operation
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| FD1 | Full-duplex operation | 4.2.4.2 | M | Yes | 100BASE-T1/1000BASE-T1/多Gig |
+| FD2 | Carrier Sense deasserted in full-duplex | 4.2.3.2.1 | M | Yes | 全双工模式下CS始终deasserted |
+| FD3 | No collision detection in full-duplex | 4.2.3.2.1 | M | Yes | 全双工模式下COL始终deasserted |
+| FD4 | MAC parameterization for full-duplex | 4.2.4.2 | M | Yes | slotTime = 512 bit times |
+
+---
+
+### 3.7 MAC Control / PAUSE / PFC PICS（Clause 31 / Annex 31B / Annex 31D）
+
+#### 3.7.1 MAC Control Sublayer
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| MC1 | MAC Control frame identification | 31.4 | O | Yes/No | Length/Type = 0x8808 |
+| MC2 | MAC Control frame format | 31.4.1 | MC1:M | Yes/N/A | DA + SA + Type + Opcode + Params + PAD + FCS |
+| MC3 | Unique Length/Type field identifier | 31.4.1 | MC1:M | Yes/N/A | 0x8808唯一标识MAC Control帧 |
+| MC4 | MAC Control opcodes | 31.4.1.2 | MC1:M | Yes/N/A | 按Annex 31A定义 |
+| MC5 | Minimum MAC Control frame size | 31.4.1.4 | MC1:M | Yes/N/A | 最小64字节(含PAD) |
+| MC6 | MA_CONTROL.request primitive | 31.3.1 | MC1:M | Yes/N/A | MAC client到MAC Control |
+| MC7 | MA_CONTROL.indication primitive | 31.3.2 | MC1:M | Yes/N/A | MAC Control到MAC client |
+
+#### 3.7.2 PAUSE Operation (802.3x Flow Control)
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PAUSE1 | PAUSE frame Opcode | 31B.2 | MC1:M | Yes/N/A | Opcode = 0x0001 |
+| PAUSE2 | PAUSE frame parameters | 31B.2 | MC1:M | Yes/N/A | 2字节pause_time (0-65535 quanta) |
+| PAUSE3 | PAUSE frame destination address | 31B.2 | MC1:M | Yes/N/A | 01-80-C2-00-00-01 (全球暂停地址) |
+| PAUSE4 | PAUSE frame transmission | 31B.3 | MC1:M | Yes/N/A | 符合发送状态图 |
+| PAUSE5 | PAUSE frame reception | 31B.3 | MC1:M | Yes/N/A | 符合接收状态图 |
+| PAUSE6 | PAUSE timer (pause_timer) | 31B.3.7 | MC1:M | Yes/N/A | 每512 bit times递减 |
+| PAUSE7 | PAUSE quanta timing | 31B.3.7 | MC1:M | Yes/N/A | 1 pause_quantum = 512 bit times |
+| PAUSE8 | XOFF (pause_time > 0) | 31B.3.3 | MC1:M | Yes/N/A | 暂停传输指定时间 |
+| PAUSE9 | XON (pause_time = 0) | 31B.3.3 | MC1:M | Yes/N/A | 立即恢复传输 |
+| PAUSE10 | Maximum PAUSE duration | 31B.3.7 | MC1:M | Yes/N/A | 最大65535 * 512 bit times |
+
+#### 3.7.3 Priority-based Flow Control (PFC) - 802.1Qbb
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| PFC1 | PFC frame Opcode | 31D.2 | O | Yes/No | Opcode = 0x0101 |
+| PFC2 | PFC frame destination address | 31D.2 | PFC1:M | Yes/N/A | 01-80-C2-00-00-01 |
+| PFC3 | PFC frame parameters | 31D.2 | PFC1:M | Yes/N/A | 8个优先级的pause_time |
+| PFC4 | PFC priority_enable_vector | 31D.2 | PFC1:M | Yes/N/A | 指示哪些优先级有效 |
+| PFC5 | PFC priority_based_vector | 31D.2 | PFC1:M | Yes/N/A | 每优先级class_enable + pause_time |
+| PFC6 | PFC transmit state diagram | 31D.4 | PFC1:M | Yes/N/A | 符合图31D-3/4 |
+| PFC7 | PFC receive state diagram | 31D.6 | PFC1:M | Yes/N/A | 符合图31D-5 |
+| PFC8 | Per-priority PAUSE timer | 31D.6.3 | PFC1:M | Yes/N/A | 每优先级独立pause_timer |
+| PFC9 | PFC operation on full-duplex link | 31D.1 | PFC1:M | Yes/N/A | 仅全双工链路 |
+| PFC10 | Maximum number of PFC priorities | 31D.2 | PFC1:M | Yes/N/A | 8个优先级(0-7) |
+
+### 3.8 物理层接口PICS（Reconciliation Sublayer）
+
+#### 3.8.1 MII (Clause 22) - for 100BASE-T1
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| MII1 | TX_CLK frequency | 22.2.2.1 | MII:M | Yes/N/A | 25 MHz +/- 100 ppm |
+| MII2 | TX_EN assertion | 22.2.2.3 | MII:M | Yes/N/A | TX_EN=1时nibble传输 |
+| MII3 | TX_ER assertion | 22.2.2.5 | MII:M | Yes/N/A | 传输错误指示 |
+| MII4 | RX_CLK frequency | 22.2.2.6 | MII:M | Yes/N/A | 25 MHz (10M模式下2.5MHz) |
+| MII5 | CRS assertion | 22.2.2.11 | MII:M | Yes/N/A | 半双工载波侦听 |
+| MII6 | COL assertion | 22.2.2.12 | MII:M | Yes/N/A | 半双工碰撞检测 |
+| MII7 | RX_DV assertion | 22.2.2.7 | MII:M | Yes/N/A | 接收数据有效 |
+| MII8 | RX_ER assertion | 22.2.2.8 | MII:M | Yes/N/A | 接收错误指示 |
+| MII9 | TXD<3:0> nibble transfer | 22.2.2.4 | MII:M | Yes/N/A | 4-bit并行数据发送 |
+| MII10 | RXD<3:0> nibble transfer | 22.2.2.9 | MII:M | Yes/N/A | 4-bit并行数据接收 |
+| MII11 | Management interface (MDC/MDIO) | 22.2.4 | MDIO:M | Yes/N/A | PHY寄存器访问 |
+| MII12 | MII electrical characteristics | 22.4 | MII:M | Yes/N/A | Vdd=3.3V/2.5V/1.8V |
+
+#### 3.8.2 GMII (Clause 35) - for 1000BASE-T1
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| GMII1 | GTX_CLK frequency | 35.2.2.1 | GMII:M | Yes/N/A | 125 MHz +/- 100 ppm |
+| GMII2 | TX_CLK frequency | 35.2.2.1 | GMII:M | Yes/N/A | 125 MHz (自协商期间25MHz) |
+| GMII3 | TX_EN assertion | 35.2.2.3 | GMII:M | Yes/N/A | TX_EN=1时octet传输 |
+| GMII4 | TX_ER assertion | 35.2.2.5 | GMII:M | Yes/N/A | 传输错误指示 |
+| GMII5 | RX_CLK frequency | 35.2.2.7 | GMII:M | Yes/N/A | 125 MHz (自协商期间25MHz) |
+| GMII6 | RX_DV assertion | 35.2.2.9 | GMII:M | Yes/N/A | 接收数据有效 |
+| GMII7 | RX_ER assertion | 35.2.2.10 | GMII:M | Yes/N/A | 接收错误指示 |
+| GMII8 | TXD<7:0> octet transfer | 35.2.2.4 | GMII:M | Yes/N/A | 8-bit并行数据发送 |
+| GMII9 | RXD<7:0> octet transfer | 35.2.2.8 | GMII:M | Yes/N/A | 8-bit并行数据接收 |
+| GMII10 | COL assertion | 35.2.2.11 | GMII:M | Yes/N/A | 半双工碰撞检测(千兆通常不用) |
+| GMII11 | CRS assertion | 35.2.2.12 | GMII:M | Yes/N/A | 载波侦听 |
+| GMII12 | GMII electrical characteristics | 35.4 | GMII:M | Yes/N/A | 通常1.5V HSTL |
+
+#### 3.8.3 SGMII (Serial GMII)
+
+| 项目编号 | 功能名称 | 引用条款 | 状态 | 支持值 | 备注 |
+|----------|---------|----------|------|--------|------|
+| SGMII1 | Serial data rate | - | O | Yes/No | 1.25 Gbps |
+| SGMII2 | 8B/10B encoding | - | SGMII1:M | Yes/N/A | 线路8B/10B编码 |
+| SGMII3 | Clock recovery | - | SGMII1:M | Yes/N/A | CDR时钟恢复 |
+| SGMII4 | Auto-negotiation in-band | - | SGMII1:M | Yes/N/A | 带内自协商 |
+| SGMII5 | SerDes interface | - | SGMII1:M | Yes/N/A | 串行器/解串器 |
+
+---
+
