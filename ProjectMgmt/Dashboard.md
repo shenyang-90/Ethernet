@@ -26,9 +26,21 @@
 | TASK-004 | 微架构设计与模块划分 | Arch_Agent | ✅ COMPLETED | P1 |
 | TASK-006 | 功能安全概念文档 (Safety Concept) | FuSa_Agent | ✅ COMPLETED | P1 |
 
+## 下游阶段: EDR (已解阻塞)
+
+| 任务ID | 任务 | 负责人 | 状态 | 优先级 |
+|--------|------|--------|------|--------|
+| TASK-005 | Design Specification | Design_Agent | 🟢 READY_TO_START | P0 |
+| TASK-006 | Verification Plan | Verification_Agent | 🟢 READY_TO_START | P0 |
+| TASK-008 | Safety Analysis | FuSa_Agent | 🟢 READY_TO_START | P1 |
+| TASK-EDR-002 | LCB2SRI地址映射 | Design_Agent | 🟢 READY_TO_START | P1 |
+| TASK-007 | DFT Specification | DFT_Agent | ⏳ PENDING (等TASK-005) | P1 |
+
 ## 下一步行动
 
-- 所有依赖满足的任务已完成或已分配
+- 所有PAD任务已完成，EDR阶段任务已解阻塞
+- orchestrator状态已提交并推送 (commit: 0dc526e)
+- 等待EDR阶段Agent自启动或PM Agent分配
 
 ---
 
