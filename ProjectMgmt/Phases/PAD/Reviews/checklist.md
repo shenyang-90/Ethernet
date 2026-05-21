@@ -16,9 +16,14 @@
 | 3 | Interface Spec | `Docs/Arch/ethernet_interface_spec.md` | v1.0 | ⚠️ 滞后 |
 | 4 | Clock/Reset Spec | `Docs/Arch/ethernet_clock_reset_spec.md` | v1.0 | ⚠️ 滞后 |
 | 5 | Gap Analysis (R-Car S4) | `Docs/Arch/gap_analysis_rcar_s4.md` | v1.0 | ✅ |
-| 6 | Safety Concept | `Docs/FuSa/safety_concept.md` | v1.0 | ⚠️ 需更新 |
+| 6 | Safety Concept | `Docs/FuSa/safety_concept.md` | **v1.1** | ✅ 已更新 |
 | 7 | PICS 分析 + 7协议PICS | `Docs/Arch/PICS/` | 8文件 | ✅ |
-| 8 | Design Spec (微架构) | `Docs/Design/ethernet/ethernet_design_spec.md` | v1.0 | ⚠️ 参数矛盾 |
+| 8 | Design Spec (微架构) | `Docs/Design/ethernet/ethernet_design_spec.md` | v1.0 | ⚠️ 参数矛盾 (TASK-PAD-REWORK-004 待处理) |
+| 9 | FDB 微架构 | `Docs/Design/ethernet/switch_fdb_microarch.md` | v1.0 | ✅ **新增** |
+| 10 | Egress 仲裁器设计 | `Docs/Design/ethernet/switch_arbiter_design.md` | v1.0 | ✅ **新增** |
+| 11 | vPHC 硬件接口 | `Docs/Design/ethernet/vphc_hw_interface.md` | v1.0 | ✅ **新增** |
+| 12 | 参数安全影响矩阵 | `Docs/FuSa/parameter_safety_impact_matrix.md` | v1.0 | ✅ **新增** |
+| 13 | Verification Plan | `Docs/Verification/verification_plan_v1.0.md` | v1.0 | ✅ **新增** |
 
 ---
 
@@ -111,9 +116,15 @@
 | 质量底线 | ❌ 8 Critical 阻塞 |
 | 规范性 | ⚠️ 版本混乱、风险登记册缺失 |
 
-### 最终推荐: **不通过 → 有条件通过 (需先关闭 8 个 Critical)**
+### 最终推荐: **不通过 → 有条件通过 (PAD 补完中, 6/7 Critical 已关闭)**
 
-> 与初始评审结论不同。多 Agent 交叉评审揭示了 8 个 Critical 问题，其中 **RTL-CRIT-001~004** (Switch 微架构缺失) 和 **FUSA-PAD-001** (新增参数安全影响未评估) 是阻塞性缺陷，必须在 EDR 启动前关闭。Verification 的 3 个 Critical 可在 EDR 初期同步处理。
+> 实体 Yang 决策: 全部问题关闭 + PAD 阶段补完 + 有 Hypervisor + Formal 不投入 + FuSa 立即启动。
+> 
+> **PAD 补完进度**: 5/10 Rework 任务已完成，P0 完成率 4/5 = 80%。
+> 
+> **已关闭 Critical (6/7)**: RTL-CRIT-001 ✅, RTL-CRIT-002 ✅, RTL-CRIT-003 ✅, FUSA-PAD-001 ✅, VERIF-CRIT-001 ✅, VERIF-CRIT-002 ✅
+> **待关闭 Critical (1/7)**: RTL-CRIT-004 (TASK-PAD-REWORK-004, `SWITCH_PORT_COUNT` 一致性)
+> **降级为 N/A (1/8)**: VERIF-CRIT-003 Formal 验证 → 项目决策不投入
 
 ---
 
@@ -131,16 +142,16 @@
 
 | # | Action | 负责人 | 优先级 | 截止时间 | 状态 |
 |---|--------|--------|:------:|:---------|:----:|
-| 1 | **关闭 RTL-CRIT-001**: Switch Core FDB 存储与查表微架构 | Design Agent | **P0** | EDR 启动前 | ⬜ |
-| 2 | **关闭 RTL-CRIT-002**: Switch Core Egress 仲裁算法 | Design Agent | **P0** | EDR 启动前 | ⬜ |
-| 3 | **关闭 RTL-CRIT-003**: vPHC 硬件接口重新定义 | Design Agent | **P0** | EDR 启动前 | ⬜ |
-| 4 | **关闭 RTL-CRIT-004**: 统一 `SWITCH_PORT_COUNT` 范围 | Arch Agent | **P0** | EDR 启动前 | ⬜ |
-| 5 | **关闭 FUSA-PAD-001**: 新增参数安全影响评估 | FuSa Agent | **P0** | EDR 启动前 | ⬜ |
-| 6 | **关闭 VERIF-CRIT-001~003**: 黄金配置/覆盖率/Formal 计划 | Verification Agent | **P0** | EDR 初期 | ⬜ |
-| 7 | 修复 Arch Major (M-1~3): 并集决策语义/需求追溯/erratum 遗漏 | Arch Agent | P1 | EDR 初期 | ⬜ |
-| 8 | 修复 RTL Major (M-1~7): 时序约束/AXI/PLCA 时钟域/μARCH | Design Agent | P1 | EDR 初期 | ⬜ |
-| 9 | 修复 FuSa Major (M-2~8): DC 量化/ASIL 分解/FHTI/Lockstep | FuSa Agent | P1 | EDR 初期 | ⬜ |
-| 10 | 修复 PM Minor: 版本对齐/风险登记册 | PM Agent | P2 | IDR 阶段 | ⬜ |
+| 1 | **关闭 RTL-CRIT-001**: Switch Core FDB 存储与查表微架构 | RTL_Coding_Agent | **P0** | PAD 补完 | ✅ **已关闭** (`switch_fdb_microarch.md`) |
+| 2 | **关闭 RTL-CRIT-002**: Switch Core Egress 仲裁算法 | RTL_Coding_Agent | **P0** | PAD 补完 | ✅ **已关闭** (`switch_arbiter_design.md`) |
+| 3 | **关闭 RTL-CRIT-003**: vPHC 硬件接口重新定义 | RTL_Coding_Agent | **P0** | PAD 补完 | ✅ **已关闭** (`vphc_hw_interface.md`) |
+| 4 | **关闭 RTL-CRIT-004**: 统一 `SWITCH_PORT_COUNT` 范围 | Arch Agent | **P0** | PAD 补完 | ⬜ **待处理** |
+| 5 | **关闭 FUSA-PAD-001**: 新增参数安全影响评估 | FuSa Agent | **P0** | PAD 补完 | ✅ **已关闭** (`safety_concept.md` v1.1) |
+| 6 | **关闭 VERIF-CRIT-001/002**: 黄金配置/覆盖率/Erratum回归 | Verification_Agent | **P0** | PAD 补完 | ✅ **已关闭** (`verification_plan_v1.0.md`) |
+| 7 | 修复 Arch Major (M-1~3): 并集决策语义/需求追溯/erratum 遗漏 | Arch Agent | P1 | PAD 补完 | ⬜ 待处理 |
+| 8 | 修复 RTL Major (M-1~7): 时序约束/AXI/PLCA 时钟域/μARCH | RTL Agent | P1 | PAD 补完 | ⬜ 待处理 |
+| 9 | 修复 FuSa Major (M-2~8): DC 量化/ASIL 分解/FHTI/Lockstep | FuSa Agent | P1 | PAD 补完 | ⬜ 待处理 |
+| 10 | 修复 PM Minor: 版本对齐/风险登记册 | PM Agent | P2 | PAD 补完 / IDR | ⬜ 待处理 |
 
 ---
 
