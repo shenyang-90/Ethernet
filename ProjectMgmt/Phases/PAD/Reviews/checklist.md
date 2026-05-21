@@ -1,4 +1,4 @@
-# PAD Gate Review — 多角色交叉评审综合报告
+# PAD Gate Review - 多角色交叉评审综合报告
 
 > **评审日期**: 2026-05-21
 > **评审对象**: Ethernet IP (IP_20260502_001) PAD 阶段全部交付物
@@ -35,7 +35,7 @@
 | **RTL_Coding_Agent** | 有条件通过 | **4** | **7** | 4 | `rtl_agent_review_20260521.md` |
 | **FuSa_Agent** | 有条件通过 | **1** | **8** | 3 | `fusa_agent_review_20260521.md` |
 | **PM_Agent** | 有条件通过 | 0 | 0 | 6 | `pm_agent_review_20260521.md` |
-| **Verification_Agent** | ❌ **不通过** | **3** | **5** | 0 | *(系统返回，未写入文件)* |
+| **Verification_Agent** | ❌ **不通过** | **3** | **5** | 0 | *(系统返回,未写入文件)* |
 
 **合计**: **8 Critical + 23 Major + 18 Minor**
 
@@ -45,12 +45,12 @@
 
 | # | 问题 ID | 问题描述 | 涉及 Agent | 影响 |
 |---|---------|----------|-----------|------|
-| 1 | **RTL-CRIT-001** | Switch Core FDB/L3 查表微架构完全缺失，无法 RTL 编码 | RTL | Switch Core 为空白模块 |
+| 1 | **RTL-CRIT-001** | Switch Core FDB/L3 查表微架构完全缺失,无法 RTL 编码 | RTL | Switch Core 为空白模块 |
 | 2 | **RTL-CRIT-002** | Switch Core Egress 仲裁算法缺失 | RTL | "Crossbar 全并发" 无法落地 |
 | 3 | **RTL-CRIT-003** | vPHC Xen IO Ring 无硬件接口定义 | RTL | vPHC 模块无法编码 |
 | 4 | **RTL-CRIT-004** | `SWITCH_PORT_COUNT` 2~8 与 Design Spec 固定 4 端口矛盾 | RTL + Arch | 参数化声明与实现不一致 |
-| 5 | **FUSA-PAD-001** | 新增参数 (`SUPPORT_EEE`/`IPSEC`/`SECOC`/`DUPLEX`) 安全影响完全未评估 | FuSa | 安全目标缺失，ISO 26262 不合规 |
-| 6 | **VERIF-CRIT-001** | 未定义"黄金配置"验证子集 — 35+ 参数组合爆炸，无回归收敛策略 | Verification | 验证无法收敛 |
+| 5 | **FUSA-PAD-001** | 新增参数 (`SUPPORT_EEE`/`IPSEC`/`SECOC`/`DUPLEX`) 安全影响完全未评估 | FuSa | 安全目标缺失,ISO 26262 不合规 |
+| 6 | **VERIF-CRIT-001** | 未定义"黄金配置"验证子集 - 35+ 参数组合爆炸,无回归收敛策略 | Verification | 验证无法收敛 |
 | 7 | **VERIF-CRIT-002** | 覆盖率目标完全未定义 (line/branch/FSM/assertion/functional/cross) | Verification | 验证质量无基准 |
 | 8 | **VERIF-CRIT-003** | Formal 验证范围完全未定义 (工具/模块/责任人/收敛标准) | Verification | 形式验证无法启动 |
 
@@ -61,9 +61,9 @@
 ### Arch 视角
 | # | 问题 | 说明 |
 |---|------|------|
-| M-1 | MACsec/EEE/AVTP "并集决策" 语义不一致 | "Yes" vs "Configurable" 定义混乱，参数默认值与平台覆盖策略矛盾 |
+| M-1 | MACsec/EEE/AVTP "并集决策" 语义不一致 | "Yes" vs "Configurable" 定义混乱,参数默认值与平台覆盖策略矛盾 |
 | M-2 | 802.1Qbu/Qci/Qcb 升级到 P0 缺少需求追溯 | 从 PICS Optional 升级到 P0 无 SoC 需求文档支撑 |
-| M-3 | §6 erratum 规避表遗漏 GETH_AI.028/030 | 可追溯性断裂，验证团队可能遗漏对应验证条目 |
+| M-3 | §6 erratum 规避表遗漏 GETH_AI.028/030 | 可追溯性断裂,验证团队可能遗漏对应验证条目 |
 
 ### RTL 视角
 | # | 问题 | 说明 |
@@ -101,7 +101,7 @@
 | Minor | 8 | 18 |
 | 推荐 | 有条件通过 | **有条件通过 → 需先关闭 Critical** |
 
-**结论**: 单人评审存在严重的"盲区效应"。RTL_Coding_Agent 和 FuSa_Agent 作为各自领域的专家，发现了 Architecture 和 Safety 视角完全未察觉的 **Critical** 问题。这验证了多角色交叉评审的必要性。
+**结论**: 单人评审存在严重的"盲区效应"。RTL_Coding_Agent 和 FuSa_Agent 作为各自领域的专家,发现了 Architecture 和 Safety 视角完全未察觉的 **Critical** 问题。这验证了多角色交叉评审的必要性。
 
 ---
 
@@ -116,25 +116,26 @@
 | 质量底线 | ❌ 8 Critical 阻塞 |
 | 规范性 | ⚠️ 版本混乱、风险登记册缺失 |
 
-### 最终推荐: **不通过 → 有条件通过 (PAD 补完中, 6/7 Critical 已关闭)**
+### 最终推荐: **有条件通过 (PAD 补完中 — 全部 P0 已完成, 7/7 Critical 已关闭)**
 
 > 实体 Yang 决策: 全部问题关闭 + PAD 阶段补完 + 有 Hypervisor + Formal 不投入 + FuSa 立即启动。
-> 
-> **PAD 补完进度**: 5/10 Rework 任务已完成，P0 完成率 4/5 = 80%。
-> 
-> **已关闭 Critical (6/7)**: RTL-CRIT-001 ✅, RTL-CRIT-002 ✅, RTL-CRIT-003 ✅, FUSA-PAD-001 ✅, VERIF-CRIT-001 ✅, VERIF-CRIT-002 ✅
-> **待关闭 Critical (1/7)**: RTL-CRIT-004 (TASK-PAD-REWORK-004, `SWITCH_PORT_COUNT` 一致性)
-> **降级为 N/A (1/8)**: VERIF-CRIT-003 Formal 验证 → 项目决策不投入
+>
+> **PAD 补完进度**: 6/10 Rework 任务已完成。
+>
+> **全部 Critical (7/7) 已关闭**: RTL-CRIT-001 ✅, RTL-CRIT-002 ✅, RTL-CRIT-003 ✅, RTL-CRIT-004 ✅, FUSA-PAD-001 ✅, VERIF-CRIT-001 ✅, VERIF-CRIT-002 ✅
+> **降级为 N/A**: VERIF-CRIT-003 Formal 验证 → 项目决策不投入
+>
+> **剩余工作**: 4 个 P1/P2 任务 (Interface/Clock-Reset Spec, 版本历史, 风险登记册, Major/Minor 修复)
 
 ---
 
 ## 七、待实体 Yang 决策
 
-1. **是否接受 "先关闭 8 Critical，再进入 EDR" 的结论？**
-2. **Switch Core 微架构 (FDB/仲裁/L3) 是 EDR 阶段产出，还是要求 Arch Agent 在 PAD 补完？**
-3. **vPHC 必要性再评估**: 若目标芯片无 Hypervisor，是否将 `SUPPORT_VPHC` 降为 P2 并延后？
-4. **Formal 验证资源**: 是否接受 EDR 阶段投入 JasperGold/VC Formal？
-5. **FuSa 修复优先级**: FUSA-PAD-001 (新增参数安全影响) 是否要求 FuSa Agent 立即补充？
+1. **是否接受 "先关闭 8 Critical,再进入 EDR" 的结论?**
+2. **Switch Core 微架构 (FDB/仲裁/L3) 是 EDR 阶段产出,还是要求 Arch Agent 在 PAD 补完?**
+3. **vPHC 必要性再评估**: 若目标芯片无 Hypervisor,是否将 `SUPPORT_VPHC` 降为 P2 并延后?
+4. **Formal 验证资源**: 是否接受 EDR 阶段投入 JasperGold/VC Formal?
+5. **FuSa 修复优先级**: FUSA-PAD-001 (新增参数安全影响) 是否要求 FuSa Agent 立即补充?
 
 ---
 
@@ -145,7 +146,7 @@
 | 1 | **关闭 RTL-CRIT-001**: Switch Core FDB 存储与查表微架构 | RTL_Coding_Agent | **P0** | PAD 补完 | ✅ **已关闭** (`switch_fdb_microarch.md`) |
 | 2 | **关闭 RTL-CRIT-002**: Switch Core Egress 仲裁算法 | RTL_Coding_Agent | **P0** | PAD 补完 | ✅ **已关闭** (`switch_arbiter_design.md`) |
 | 3 | **关闭 RTL-CRIT-003**: vPHC 硬件接口重新定义 | RTL_Coding_Agent | **P0** | PAD 补完 | ✅ **已关闭** (`vphc_hw_interface.md`) |
-| 4 | **关闭 RTL-CRIT-004**: 统一 `SWITCH_PORT_COUNT` 范围 | Arch Agent | **P0** | PAD 补完 | ⬜ **待处理** |
+| 4 | **关闭 RTL-CRIT-004**: 统一 `SWITCH_PORT_COUNT` 范围 | Arch Agent | **P0** | PAD 补完 | ✅ **已关闭** (DEC-001: 混合策略 2~8, 默认 4) |
 | 5 | **关闭 FUSA-PAD-001**: 新增参数安全影响评估 | FuSa Agent | **P0** | PAD 补完 | ✅ **已关闭** (`safety_concept.md` v1.1) |
 | 6 | **关闭 VERIF-CRIT-001/002**: 黄金配置/覆盖率/Erratum回归 | Verification_Agent | **P0** | PAD 补完 | ✅ **已关闭** (`verification_plan_v1.0.md`) |
 | 7 | 修复 Arch Major (M-1~3): 并集决策语义/需求追溯/erratum 遗漏 | Arch Agent | P1 | PAD 补完 | ⬜ 待处理 |
@@ -163,7 +164,7 @@
 | RTL_Coding_Agent | `ProjectMgmt/Phases/PAD/Reviews/rtl_agent_review_20260521.md` | ~23KB |
 | FuSa_Agent | `ProjectMgmt/Phases/PAD/Reviews/fusa_agent_review_20260521.md` | ~29KB |
 | PM_Agent | `ProjectMgmt/Phases/PAD/Reviews/pm_agent_review_20260521.md` | ~16KB |
-| AI Yang (本文件) | `ProjectMgmt/Phases/PAD/Reviews/checklist.md` | — |
+| AI Yang (本文件) | `ProjectMgmt/Phases/PAD/Reviews/checklist.md` | - |
 | 会议纪要 | `ProjectMgmt/Phases/PAD/Reviews/meetingminutes/pad_gate_review_20260521.md` | ~4KB |
 
 ---
@@ -174,10 +175,10 @@
 
 | # | 决策项 | 实体 Yang 决策 | 影响 |
 |---|--------|---------------|------|
-| 1 | **问题关闭范围** | **全部问题（Minor + Major + Critical）必须关闭，不遗留** | 29 个问题全部需修复，PAD 补完工作量显著增加 |
-| 2 | **Switch Core / vPHC 微架构归属** | **PAD 阶段补完**，不推入 EDR | Arch Agent + RTL Agent 需在 PAD 内输出 FDB/仲裁/L3/vPHC 硬件接口设计 |
-| 3 | **vPHC 必要性** | **有 Hypervisor**，保持 P1 | `SUPPORT_VPHC` 不降级，需补充硬件接口信号清单 + VM 解码逻辑 |
-| 4 | **Formal 验证资源** | **不投入** | VERIF-CRIT-003 降级为 Info — 标记 "项目决策：不投入 Formal"，Verification Plan 中删除 Formal 章节 |
+| 1 | **问题关闭范围** | **全部问题(Minor + Major + Critical)必须关闭,不遗留** | 29 个问题全部需修复,PAD 补完工作量显著增加 |
+| 2 | **Switch Core / vPHC 微架构归属** | **PAD 阶段补完**,不推入 EDR | Arch Agent + RTL Agent 需在 PAD 内输出 FDB/仲裁/L3/vPHC 硬件接口设计 |
+| 3 | **vPHC 必要性** | **有 Hypervisor**,保持 P1 | `SUPPORT_VPHC` 不降级,需补充硬件接口信号清单 + VM 解码逻辑 |
+| 4 | **Formal 验证资源** | **不投入** | VERIF-CRIT-003 降级为 Info - 标记 "项目决策:不投入 Formal",Verification Plan 中删除 Formal 章节 |
 | 5 | **FuSa 修复优先级** | **立即启动** | FuSa Agent 立即开始新增参数安全影响评估 + DC 量化补充 |
 
 ### 决策后的状态更新
