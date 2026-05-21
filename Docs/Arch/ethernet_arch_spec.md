@@ -2,11 +2,126 @@
 
 > **项目**: Ethernet IP (IP_20260502_001)
 > **模块/系统**: Gigabit Ethernet MAC + PHY Subsystem
-> **版本**: v1.8
-> **日期**: 2026-05-12
+> **版本**: v1.8c
+> **日期**: 2026-05-21
 > **作者**: Arch Agent
 > **评审状态**: Draft → 待评审
-> **变更**: v1.1 新增可配置参数矩阵; v1.2 重构 MAC/PHY 参数; v1.3 分析 ISSUE-001/003/004/005; v1.4 基于 R-Car S4 Gap Analysis 升级: 4-port Switch + vPHC + AVTP 硬件感知; v1.5 基于 TC4x Errata 设计规避: 13 项已知 erratum 的 RTL/架构级修改方案; v1.6 DMA 全局通道池设计 + 带宽评估计算器; v1.7 补充 LETH/10BASE-T1S erratum: 10 项 PLCA/PMD/PMA 层 erratum 分析与规避方案; v1.8 每实例独立配置: MAC_x_TYPE/PHY_x_TYPE/PHY_x_SPEED 数组化; v1.8a 保守方向 + Switch 混合架构: 默认 2 MAC, 支持 Switch 连接 4 MAC + 独立 MAC 扩展; **v1.8b PICS分析: 基于 Reference/Kimi_Agent_MCU_Ethernet/ 7个协议PICS逐条确认Yes/No，建立协议实现优先级矩阵**
+*更新: 2026-05-21 — 基于 Reference/Kimi_Agent_MCU_Ethernet/ 中 TC4x/S32G/S32K3/R-Car S4/RH850 全部 feature 并集，修正部分 No → Yes/Configurable*
+
+## 10. PICS 协议实现一致性分析
+
+> **本节基于** `Reference/Kimi_Agent_MCU_Ethernet/PICS/` 中7个协议的PICS文件，通过Deep-Research-Cluster Route D方法逐条确认Yes/No。
+> **完整分析**: 见 `Docs/Arch/PICS/pics_analysis_summary.md`
+
+### 10.1 协议支持总览
+
+| 协议标准 | 版本 | PICS来源 | 实现优先级 | 关键Yes项 | 关键No项 |
+|---------|------|---------|:----------:|----------|----------|
+| **IEEE 802.1AS** | 2020 | Annex A原生 | **P0** | DOM0, MINTA, BMC, **BRDG**, MIMSTR, P2P延迟 | MIPERF, MDFDPP, UMM |
+| **IEEE 802.1Q** | 2022 | Annex A原生 | **P0** | FQTSS, ETS, **SCHED**, **PRE**, **PSFP** | **SRP**, **PFC**, ATS, CQF |
+| **IEEE 802.3** | 2022 | Annex A原生 | **P0** | 100BASE-T1, 1000BASE-T1, 10BASE-T1S, PLCA, 2.5G/5G/10G | — |
+| **IEEE 802.1CB** | 2017 | Annex A原生 | **P0** | IS, TE, LE, RS, Sequence Gen/Recovery | HSR/PRP兼容, IP Stream ID, Autoconfig |
+| **IEEE 802.1AE** | 2018 | Annex A原生 | **P1** | SAP, GEN, VER, FMT, CS, KAY | MSC(多SC), MSAK(多SAK), TC(多发送SC), SNMP |
+| **IEEE 802.1AB** | 2016 | Annex A原生 | **P1** | Chassis/Port/TTL, Tx/Rx模式, 状态机 | SNMP MIB, Organization TLV |
+| **IEEE 1588** | 2019 | Clause 20提取 | **P0** | PTPv2.1, P2P, Two-Step, 硬件时间戳, BC, 数据集 | E2E, IPv4/UDP映射, Management消息, L1Sync, AUTH TLV |
+| **IEEE 1722** | 2016 | DRE/AVB分析 | **P1** | AVTP/ACF封装, 流识别, ACF_CAN_BRIEF | Talker/Listener完整协议栈(软件实现) |
+| **IEEE 802.3az** | 2010 | 802.3 Annex | **P2** | EEE低功耗PHY模式 | — |
+| **IPsec/SecOC/D-TLS** | — | 安全加速器接口 | **P2** | ESP/AH封装接口, SecOC PDU认证, Chacha20-Poly1305 | 完整协议栈(软件/CSS/HSE实现) |
+
+### 10.2 TC4/RH850/R-Car/S32 Feature 并集驱动的更新
+
+> **依据**: `Reference/Kimi_Agent_MCU_Ethernet/` 交叉验证报告确认各平台支持情况。本IP需覆盖全部平台 feature 并集。
+
+| Feature | TC4x | S32G | S32K3 | R-Car S4 | RH850 | **并集决策** | 原决策 | 变更 |
+|---------|:----:|:----:|:-----:|:--------:|:-----:|:------------|:-------|:----:|
+| 802.1AS gPTP | ✅ | ✅ | ✅ | ✅ | ❌ | **Yes** | Yes | — |
+| 802.1Qbv TAS | ✅ | ✅(GMAC0) | ✅(端点) | ✅ | ❌ | **Yes** | Yes | — |
+| 802.1Qbu FP | ✅ | ✅(GMAC0) | ✅ | ✅ | ❌ | **Yes** | Yes | — |
+| 802.1Qav CBS | ✅ | — | — | ✅ | ❌ | **Yes** | Yes | — |
+| 802.1Qci PSFP | ✅(部分) | — | — | ✅ | ❌ | **Yes** | Yes | — |
+| 802.1CB FRER | ✅(SW) | — | — | ✅ | ❌ | **Yes** | Yes | — |
+| 802.1AE MACsec | ✅(CSS) | ✅(外部PHY) | — | ? | ❌ | **Yes** | Yes | — |
+| **802.3az EEE** | **✅** | — | — | — | ❌ | **Configurable** | **No** | **↑** |
+| **IEEE 1722 AVTP** | **✅(DRE)** | — | — | **✅(AVB感知)** | ❌ | **Yes** | **No** | **↑** |
+| **半双工 10/100M** | **✅** | ✅ | ✅ | ✅ | ✅ | **Yes** | 未定义 | **↑** |
+| **IPsec 卸载** | **✅(CSS)** | **✅(PFE+HSE)** | — | — | ❌ | **Configurable** | 未定义 | **↑** |
+| **SecOC** | **✅(CSS)** | **✅(HSE)** | **✅(HSE)** | — | ❌ | **Configurable** | 未定义 | **↑** |
+| **D-TLS** | **✅(CSS)** | — | — | — | ❌ | **Configurable** | 未定义 | **↑** |
+| 802.1AB LLDP | ✅ | ✅ | ✅ | ✅ | ✅ | **Yes** | Yes | — |
+| TCP/IP校验和卸载 | ✅ | ✅ | ✅ | ✅ | ❌ | **Yes** | Yes | — |
+| 10BASE-T1S/PLCA | ✅(LETH) | — | — | — | ❌ | **Yes** | Yes | — |
+| Bridge/Switch | ✅ | ✅(PFE) | ✅(外部) | ✅ | ❌ | **Yes** | Yes | — |
+
+**变更说明**:
+- **EEE**: TC4x GETH 原生支持 802.3az EEE。从 P3 No 升级为 P2 Configurable（默认关闭，PHY 配合时启用）。
+- **AVTP/IEEE 1722**: TC4x DRE 支持 AVTP/ACF 封装，R-Car S4 支持 AVB 硬件感知。`SUPPORT_AVTP` 从默认 0 改为 1。
+- **半双工**: 所有平台 10M/100M 均支持半双工。新增 `PHY_x_DUPLEX` 参数。
+- **IPsec/SecOC/D-TLS**: TC4x CSS 和 S32G HSE/PFE 均支持。作为 P2 Configurable，需外部安全加速器（CSS/HSE）配合，Ethernet IP 提供封装/卸载接口。
+
+### 10.3 关键No项影响分析
+
+| Feature | 协议 | 风险 | 影响 | 缓解措施 |
+|---------|------|:----:|------|---------|
+| **SRP (MSRP)** | 802.1Q | Major | 无动态带宽预留 | 使用静态TAS配置(SMD/SMC文件)替代 |
+| **PFC** | 802.1Q/802.3 | Major | 拥塞时可能丢帧 | CBS+TAS提供确定性替代 |
+| **ATS** | 802.1Q | Minor | 突发流量无平滑 | 静态CBS或门控调度替代 |
+| **CQF** | 802.1Q | Minor | 简单调度替代不可用 | TAS已覆盖 |
+| **多SC (MSC/TC)** | 802.1AE | Minor | 单SC限制多会话 | 车载点对点链路，单SC足够 |
+| **SNMP管理** | 802.1AE/802.1AB | Minor | 不支持SNMP | 车载使用寄存器/UDS诊断替代 |
+| **E2E延迟** | 1588 | Minor | 无E2E透明时钟 | 802.1AS不定义TC，P2P TC已满足 |
+| **Management消息** | 1588 | Minor | 无PTP管理 | 使用本地诊断/UDS替代 |
+| **IPv4/UDP映射** | 1588 | Minor | 不支持IP层PTP | 车载场景使用L2映射 |
+| **IEEE 1722 Talker/Listener** | 1722 | Minor | 无完整AVB栈 | DRE/软件实现Talker/Listener逻辑 |
+| **IPsec/SecOC/D-TLS 协议栈** | — | Minor | 需外部加速器 | CSS/HSE处理加解密，Ethernet IP提供报文封装接口 |
+
+### 10.4 新增/变更的 Arch Spec 参数
+
+| 参数 | 类型 | 默认值 | 范围 | 说明 | 对应平台 |
+|------|------|:------:|:----:|------|---------|
+| `SUPPORT_EEE` | bit | 0 | 0/1 | 802.3az EEE低功耗PHY模式 | TC4x |
+| `SUPPORT_AVTP` | bit | **1** | 0/1 | IEEE 1722 AVTP/ACF流识别与封装 | TC4x DRE, R-Car S4 |
+| `SUPPORT_AVTP_CTL` | bit | 0 | 0/1 | IEEE 1722.1 AVTP控制/路由表 | TC4x DRE |
+| `SUPPORT_IPSEC` | bit | 0 | 0/1 | IPsec ESP/AH硬件卸载接口 | TC4x CSS, S32G PFE |
+| `SUPPORT_SECOC` | bit | 0 | 0/1 | SecOC PDU级安全认证接口 | TC4x CSS, S32G/S32K3 HSE |
+| `SUPPORT_DTLS` | bit | 0 | 0/1 | D/TLS Chacha20-Poly1305接口 | TC4x CSS |
+| `PHY_x_DUPLEX` | bit | 1 | 0/1 | 0=半双工, 1=全双工 (10M/100M有效) | TC4x, S32K3, RH850 |
+
+### 10.5 PICS文件存储位置
+
+所有PICS原始文件已复制到:
+- `Docs/Arch/PICS/PICS_802.1AS-2020_gPTP.md`
+- `Docs/Arch/PICS/PICS_802.1Q-2022_TSN.md`
+- `Docs/Arch/PICS/PICS_802.3-2022_Ethernet.md`
+- `Docs/Arch/PICS/PICS_802.1CB-2017_FRER.md`
+- `Docs/Arch/PICS/PICS_802.1AE-2018_MACsec.md`
+- `Docs/Arch/PICS/PICS_802.1AB-2016_LLDP.md`
+- `Docs/Arch/PICS/PICS_IEEE-1588-2019_PTP.md`
+- `Docs/Arch/PICS/pics_analysis_summary.md` (本分析汇总)
+
+### 10.6 与Arch Spec参数映射验证
+
+| Arch Spec 参数 | 对应PICS | 一致性 |
+|---------------|---------|:------:|
+| `SUPPORT_GPTP=1` | 802.1AS DOM0/MINTA/BMC/BRDG | ✅ Yes |
+| `SUPPORT_1588=1` | 1588 PTP-BASE + P2P | ✅ Yes |
+| `SUPPORT_TSN=1` | 802.1Q FQTSS/ETS/SCHED/PRE/PSFP | ✅ Yes |
+| `SUPPORT_CBS=1` | 802.1Q ETS中的CBS | ✅ Yes |
+| `SUPPORT_TAS=1` | 802.1Q SCHED | ✅ Yes |
+| `SUPPORT_FP=1` | 802.1Q PRE | ✅ Yes |
+| `SUPPORT_FRER=1` | 802.1CB IS/TE/LE/RS | ✅ Yes |
+| `SUPPORT_SWITCH=1` | 802.1AS BRDG + 802.1CB BG/RS | ✅ Yes |
+| `SUPPORT_MACSEC=0` | 802.1AE (默认关闭，需外部CSS) | ✅ 默认No，可选启用 |
+| `SUPPORT_VLAN=1` | 802.1Q VLAN + 802.1AB addr | ✅ Yes |
+| `PHC_COUNT=2` | 802.1AS多域/DOMADD | ✅ Yes |
+| `SWITCH_TAS=1` | 802.1Q SCHED在Switch | ✅ Yes |
+| **`SUPPORT_EEE=0`** | **802.3az** | **✅ Configurable，TC4x支持** |
+| **`SUPPORT_AVTP=1`** | **IEEE 1722** | **✅ Yes，TC4x/R-Car支持** |
+| **`SUPPORT_IPSEC=0`** | **IPsec** | **✅ Configurable，TC4x/S32G支持** |
+| **`SUPPORT_SECOC=0`** | **SecOC** | **✅ Configurable，TC4x/S32G/S32K3支持** |
+| **`PHY_x_DUPLEX=1`** | **802.3半双工** | **✅ Yes，全部平台支持** |
+
+**验证结论**: Arch Spec 的可配置参数与 PICS 分析结果一致，所有 P0 必须功能均已覆盖，P1/P2 Configurable 功能通过外部加速器接口实现，满足 TC4/RH850/R-Car/S32 全平台 feature 并集要求。
+
 
 ---
 
@@ -81,8 +196,13 @@
 | **`SWITCH_CONNECTED_MAC_0` ~ `SWITCH_CONNECTED_MAC_7`** | bit[8] | **`{1,1,1,1,0,0,0,0}`** | **0 / 1** | **每 MAC 是否接入 Switch（`1`=接入 Switch, `0`=独立直连）** | **Switch Core, DMA 路由** |
 | `SUPPORT_VLAN` | bit | 1 | 0 / 1 | 是否支持 802.1Q VLAN 处理 | TBU, RX Filter, Switch |
 | `SUPPORT_MACSEC` | bit | 0 | 0 / 1 | 是否支持 802.1AE MACsec（需外部 CSS 加速器） | HSPHY IF (安全通道) |
-| `SUPPORT_AVTP` | bit | 0 | 0 / 1 | 是否支持 IEEE 1722 AVTP | RX Filter + DMA |
-| **`SUPPORT_AVTP_AWARE`** | bit | **0** | 0 / 1 | **是否支持 AVTP 流识别与 RX 分离（依赖 SUPPORT_AVTP=1）** | **RX Filter, Switch** |
+| **`SUPPORT_AVTP`** | bit | **1** | 0 / 1 | **是否支持 IEEE 1722 AVTP/ACF 流识别与封装（TC4x DRE/R-Car S4 AVB 感知兼容）** | **RX Filter + DMA** |
+| **`SUPPORT_AVTP_AWARE`** | bit | **1** | 0 / 1 | **是否支持 AVTP 流识别与 RX 分离（依赖 SUPPORT_AVTP=1）** | **RX Filter, Switch** |
+| **`SUPPORT_AVTP_CTL`** | bit | **0** | 0 / 1 | **是否支持 IEEE 1722.1 AVTP 控制/路由表（TC4x DRE 兼容）** | **DRE-like Engine** |
+| **`SUPPORT_EEE`** | bit | **0** | 0 / 1 | **是否支持 802.3az EEE 低功耗 PHY 模式（TC4x 兼容，需 PHY 配合）** | **HSPHY IF** |
+| **`SUPPORT_IPSEC`** | bit | **0** | 0 / 1 | **是否支持 IPsec ESP/AH 硬件卸载接口（需外部 CSS/HSE 加速器）** | **Security IF** |
+| **`SUPPORT_SECOC`** | bit | **0** | 0 / 1 | **是否支持 SecOC PDU 级安全认证接口（需外部 CSS/HSE 加速器）** | **Security IF** |
+| **`SUPPORT_DTLS`** | bit | **0** | 0 / 1 | **是否支持 D/TLS Chacha20-Poly1305 接口（需外部 CSS 加速器）** | **Security IF** |
 | **`PHC_COUNT`** | int | **2** | **1, 2** | **PTP Hardware Clock 数量** | **PTP/Timestamp** |
 | **`SUPPORT_VPHC`** | bit | **0** | 0 / 1 | **是否支持 vPHC 虚拟化（依赖 PHC_COUNT=2）** | **PTP/Timestamp, Xen IO Rings** |
 
@@ -109,6 +229,7 @@
 |--------|------|--------|------------|------|------|
 | `PHY_0_TYPE` ~ `PHY_7_TYPE` | int[8] | `{3,3,2,2,2,2,2,2}` | **0: 10BASE-T1S<br>1: 10/100BASE-T1<br>2: 1000BASE-T1<br>3: Multi-Gigabit** | 每 PHY 接口类型 | HSPHY IF, PCS/PMA |
 | `PHY_0_SPEED` ~ `PHY_7_SPEED` | int[8] | `{4,4,2,2,2,2,2,2}` | **0: 10M<br>1: 100M<br>2: 1G<br>3: 2.5G<br>4: 5G<br>5: 10G** | 每 PHY 最高速率，受限于 `PHY_x_TYPE` | HSPHY IF, PCS/PMA |
+| **`PHY_0_DUPLEX` ~ `PHY_7_DUPLEX`** | **bit[8]** | **`{1,1,1,1,1,1,1,1}`** | **0: 半双工<br>1: 全双工** | **每 PHY 双工模式 (10M/100M时有效，1G以上强制全双工)** | **HSPHY IF, MAC Core** |
 
 > **PHY 类型/速率约束**:
 > - `PHY_x_TYPE = 0` (10BASE-T1S): `PHY_x_SPEED` 仅支持 0 (10M)

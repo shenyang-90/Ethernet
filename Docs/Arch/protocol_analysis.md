@@ -1,12 +1,12 @@
 # Ethernet IP Protocol Analysis - RTL-Coding Detail Level
 
-> **Document Version**: v2.1 (PICS Updated)
+> **Document Version**: v2.2 (TC4/S32/R-Car/RH850 Feature Union)
 > **Date**: 2026-05-21
-> **Author**: Arch Agent + RTL Coding Agent + AI Yang (PICS Analysis)
+> **Author**: Arch Agent + RTL Coding Agent + AI Yang (PICS Analysis + Platform Union)
 > **Project**: Ethernet IP (IP_20260502_001)
 > **Stage**: PAD → IDR Transition
-> **Reference**: IEEE 802.3-2022, IEEE 802.1Q-2022, IEEE 802.1AS-2020, IEEE 802.1AE-2018, IEEE 802.1CB-2017, IEEE 802.1AB-2016, IEEE 1588-2019, Renesas R-Car S4 RSwitch2, Infineon TC4x GETH
-> **Change**: v2.0 Rewritten for RTL coding; **v2.1 PICS Analysis: 基于 Reference/Kimi_Agent_MCU_Ethernet/ 7协议PICS逐条Yes/No确认，更新协议优先级矩阵与No项影响分析**
+> **Reference**: IEEE 802.3-2022, IEEE 802.1Q-2022, IEEE 802.1AS-2020, IEEE 802.1AE-2018, IEEE 802.1CB-2017, IEEE 802.1AB-2016, IEEE 1588-2019, IEEE 1722-2016, Renesas R-Car S4 RSwitch2, Infineon TC4x GETH, NXP S32G/S32K3
+> **Change**: v2.0 Rewritten for RTL coding; v2.1 PICS Analysis; **v2.2 TC4/S32/R-Car/RH850 全平台 feature 并集：EEE/AVTP/IPsec/SecOC/D-TLS/半双工 从 No/未定义 → Yes/Configurable**
 
 ---
 
@@ -28,14 +28,19 @@
 | | ~~802.1Qcr (ATS)~~ | — | **P2 (No)** | — |
 | | ~~802.1Qch (CQF)~~ | — | **P3 (No)** | — |
 | **Network Security** | 802.1AE (MACsec) | 2018 | **P1** | High |
+| | **IPsec (ESP/AH)** | **—** | **P2** | **High** |
+| | **SecOC (PDU Security)** | **AUTOSAR** | **P2** | **Medium** |
+| | **D/TLS** | **—** | **P2** | **Medium** |
 | **Link Layer Discovery** | **802.1AB (LLDP)** | **2016** | **P1** | **Medium** |
+| **AVB/AVTP** | **IEEE 1722 (AVTP/ACF)** | **2016** | **P1** | **Medium** |
+| | **IEEE 1722.1 (Control)** | **—** | **P2** | **Low** |
 | **VLAN/QoS** | 802.1Q | 2022 | **P0** | Medium |
 | **Time Sync** | IEEE 1588 (PTP) | 2019 | **P0** | Medium |
 | **Time Sync Profile** | **802.1AS (gPTP)** | **2020** | **P0** | **High** |
 | **PHY Interface** | MII / RMII / RGMII / SGMII / USXGMII | — | **P0** | Low |
 | | **10BASE-T1S / PLCA** | **802.3cg** | **P1** | **Medium** |
 | | **MultiGBASE-T1 (2.5G/5G/10G)** | **802.3ch/cu/cv** | **P1** | **Medium** |
-| **Power Saving** | ~~802.3az (EEE)~~ | 2010 | **P3 (No)** | Low |
+| **Power Saving** | **802.3az (EEE)** | 2010 | **P2 (Configurable)** | Low |
 | **Safety** | ECC / FSM parity / Timeout | — | **P0** | Medium |
 
 ---
@@ -2703,13 +2708,18 @@ ethernet_top
 | 802.1CB FRER | 2017 | P1 | **P0** | 冗余可靠性，车载安全关键，升级P0 |
 | 802.1AE MACsec | 2018 | P1 | **P1** | GEN/VER/CS必须，MSC/TC/MSAK为No(单SC设计) |
 | **802.1AB LLDP** | **2016** | **—** | **P1** | **新增：拓扑发现协议，Chassis/Port/TTL必须** |
+| **IEEE 1722 AVTP** | **2016** | **—** | **P1** | **新增：TC4x DRE/R-Car S4 AVB感知，AVTP/ACF封装** |
+| **IEEE 1722.1 Control** | **—** | **—** | **P2** | **新增：AVTP控制/路由表(TC4x DRE兼容)** |
 | IEEE 1588-2019 | 2019 | P0 | **P0** | PTPv2.1基础+P2P+Two-Step；E2E/IPv4映射/Management/L1Sync为No |
-| 802.3 PHY | 2022 | P0 | **P0** | 100BASE-T1/1000BASE-T1/10BASE-T1S/PLCA/MultiG Yes；EEE为No |
+| 802.3 PHY | 2022 | P0 | **P0** | 100BASE-T1/1000BASE-T1/10BASE-T1S/PLCA/MultiG Yes；EEE为Configurable |
 | ~~802.1Q SRP~~ | — | — | **P3 (明确No)** | 车载使用静态配置，动态SRP不符合确定性要求 |
 | ~~802.3bd PFC~~ | — | — | **P3 (明确No)** | Head-of-Line Blocking风险；CBS+TAS替代 |
 | ~~802.1Qcr ATS~~ | — | — | **P2 (No)** | 资源受限；如需突发平滑用CBS替代 |
 | ~~802.1Qch CQF~~ | — | — | **P3 (明确No)** | TAS已覆盖确定性调度 |
-| ~~802.3az EEE~~ | 2010 | P2 | **P3 (明确No)** | 车载PHY休眠替代 |
+| **802.3az EEE** | **2010** | **P2** | **P2 (Configurable)** | **TC4x GETH原生支持；默认关闭，需PHY配合时启用** |
+| **IPsec (ESP/AH)** | **—** | **—** | **P2 (Configurable)** | **TC4x CSS/S32G PFE+HSE支持；Ethernet IP提供报文封装接口** |
+| **SecOC (PDU)** | **AUTOSAR** | **—** | **P2 (Configurable)** | **TC4x CSS/S32G/S32K3 HSE支持；需外部安全加速器** |
+| **D/TLS** | **—** | **—** | **P2 (Configurable)** | **TC4x CSS Chacha20-Poly1305支持；需外部安全加速器** |
 
 ### 8.2 PICS支持矩阵 (精简版)
 
@@ -2793,8 +2803,12 @@ ethernet_top
 | 802.1CB FRER | 802.1Q VLAN | R-TAG与VLAN tag共存/顺序 |
 | 802.1CB FRER | 802.1AS gPTP | 冗余流的时间同步一致性 |
 | 802.1AE MACsec | 802.3 Ethernet | MACsec在MAC层操作 |
-| 802.1AB LLDP | 802.3 Ethernet | LLDPDU通过Ethernet传输 |
+| **802.1AB LLDP** | **802.3 Ethernet** | **LLDPDU通过Ethernet传输** |
+| **IEEE 1722 AVTP** | **802.3 Ethernet + 802.1Q VLAN** | **AVTP帧通过Ethernet传输，可带VLAN标签** |
+| **IEEE 1722 AVTP** | **802.1AS gPTP** | **AVTP Presentation Time依赖gPTP全局时间** |
+| **IPsec/SecOC/D-TLS** | **802.3 Ethernet + 802.1Q VLAN** | **安全报文在L2上传输，安全处理由外部加速器完成** |
+| **802.3az EEE** | **802.3 Ethernet PHY** | **EEE低功耗模式由MAC与PHY协同控制** |
 | 1588-2019 PTP | 802.3 Ethernet | Annex F Ethernet映射 |
 
-**分析结论**: 本IP的协议栈层次结构为 **802.3(Ethernet) → 802.1AB(LLDP) + 802.1AE(MACsec) + 802.1Q(VLAN/TSN) → 802.1AS(gPTP) + 802.1CB(FRER)**，所有P0协议PICS Mandatory项均已覆盖，No项风险可控且有明确缓解措施。
+**分析结论**: 本IP的协议栈层次结构为 **802.3(Ethernet) → 802.1AB(LLDP) + 802.1AE(MACsec) + 802.1Q(VLAN/TSN) → 802.1AS(gPTP) + 802.1CB(FRER) + IEEE 1722(AVTP)**，并覆盖 **802.3az(EEE)** 及 **IPsec/SecOC/D-TLS 安全加速器接口**。所有P0协议PICS Mandatory项均已覆盖，P1/P2 Configurable项通过外部加速器接口实现，满足 TC4x/S32G/S32K3/R-Car S4/RH850 全平台 feature 并集要求。
 
