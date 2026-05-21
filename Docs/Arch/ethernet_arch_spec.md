@@ -6,7 +6,7 @@
 > **日期**: 2026-05-12
 > **作者**: Arch Agent
 > **评审状态**: Draft → 待评审
-> **变更**: v1.1 新增可配置参数矩阵; v1.2 重构 MAC/PHY 参数; v1.3 分析 ISSUE-001/003/004/005; v1.4 基于 R-Car S4 Gap Analysis 升级: 4-port Switch + vPHC + AVTP 硬件感知; v1.5 基于 TC4x Errata 设计规避: 13 项已知 erratum 的 RTL/架构级修改方案; v1.6 DMA 全局通道池设计 + 带宽评估计算器; v1.7 补充 LETH/10BASE-T1S erratum: 10 项 PLCA/PMD/PMA 层 erratum 分析与规避方案; v1.8 每实例独立配置: MAC_x_TYPE/PHY_x_TYPE/PHY_x_SPEED 数组化; **v1.8a 保守方向 + Switch 混合架构: 默认 2 MAC, 支持 Switch 连接 4 MAC + 独立 MAC 扩展**
+> **变更**: v1.1 新增可配置参数矩阵; v1.2 重构 MAC/PHY 参数; v1.3 分析 ISSUE-001/003/004/005; v1.4 基于 R-Car S4 Gap Analysis 升级: 4-port Switch + vPHC + AVTP 硬件感知; v1.5 基于 TC4x Errata 设计规避: 13 项已知 erratum 的 RTL/架构级修改方案; v1.6 DMA 全局通道池设计 + 带宽评估计算器; v1.7 补充 LETH/10BASE-T1S erratum: 10 项 PLCA/PMD/PMA 层 erratum 分析与规避方案; v1.8 每实例独立配置: MAC_x_TYPE/PHY_x_TYPE/PHY_x_SPEED 数组化; v1.8a 保守方向 + Switch 混合架构: 默认 2 MAC, 支持 Switch 连接 4 MAC + 独立 MAC 扩展; **v1.8b PICS分析: 基于 Reference/Kimi_Agent_MCU_Ethernet/ 7个协议PICS逐条确认Yes/No，建立协议实现优先级矩阵**
 
 ---
 
@@ -1532,3 +1532,69 @@ v
 ---
 
 *文档生成: 2026-05-11 | 状态: Draft | 下一步: Arch Review*
+
+---
+
+## 10. PICS 协议实现一致性分析
+
+> **本节基于** `Reference/Kimi_Agent_MCU_Ethernet/PICS/` 中7个协议的PICS文件，通过Deep-Research-Cluster Route D方法逐条确认Yes/No。
+> **完整分析**: 见 `Docs/Arch/PICS/pics_analysis_summary.md`
+
+### 10.1 协议支持总览
+
+| 协议标准 | 版本 | PICS来源 | 实现优先级 | 关键Yes项 | 关键No项 |
+|---------|------|---------|:----------:|----------|----------|
+| **IEEE 802.1AS** | 2020 | Annex A原生 | **P0** | DOM0, MINTA, BMC, **BRDG**, MIMSTR, P2P延迟 | MIPERF, MDFDPP, UMM |
+| **IEEE 802.1Q** | 2022 | Annex A原生 | **P0** | FQTSS, ETS, **SCHED**, **PRE**, **PSFP** | **SRP**, **PFC**, ATS, CQF |
+| **IEEE 802.3** | 2022 | Annex A原生 | **P0** | 100BASE-T1, 1000BASE-T1, 10BASE-T1S, PLCA, 2.5G/5G/10G | EEE |
+| **IEEE 802.1CB** | 2017 | Annex A原生 | **P0** | IS, TE, LE, RS, Sequence Gen/Recovery | HSR/PRP兼容, IP Stream ID, Autoconfig |
+| **IEEE 802.1AE** | 2018 | Annex A原生 | **P1** | SAP, GEN, VER, FMT, CS, KAY | MSC(多SC), MSAK(多SAK), TC(多发送SC), SNMP |
+| **IEEE 802.1AB** | 2016 | Annex A原生 | **P1** | Chassis/Port/TTL, Tx/Rx模式, 状态机 | SNMP MIB, Organization TLV |
+| **IEEE 1588** | 2019 | Clause 20提取 | **P0** | PTPv2.1, P2P, Two-Step, 硬件时间戳, BC, 数据集 | E2E, IPv4/UDP映射, Management消息, L1Sync, AUTH TLV |
+
+### 10.2 关键No项影响分析
+
+| Feature | 协议 | 风险 | 影响 | 缓解措施 |
+|---------|------|:----:|------|---------|
+| **SRP (MSRP)** | 802.1Q | Major | 无动态带宽预留 | 使用静态TAS配置(SMD/SMC文件)替代 |
+| **PFC** | 802.1Q/802.3 | Major | 拥塞时可能丢帧 | CBS+TAS提供确定性替代 |
+| **ATS** | 802.1Q | Minor | 突发流量无平滑 | 静态CBS或门控调度替代 |
+| **CQF** | 802.1Q | Minor | 简单调度替代不可用 | TAS已覆盖 |
+| **多SC (MSC/TC)** | 802.1AE | Minor | 单SC限制多会话 | 车载点对点链路，单SC足够 |
+| **SNMP管理** | 802.1AE/802.1AB | Minor | 不支持SNMP | 车载使用寄存器/UDS诊断替代 |
+| **E2E延迟** | 1588 | Minor | 无E2E透明时钟 | 802.1AS不定义TC，P2P TC已满足 |
+| **Management消息** | 1588 | Minor | 无PTP管理 | 使用本地诊断/UDS替代 |
+| **IPv4/UDP映射** | 1588 | Minor | 不支持IP层PTP | 车载场景使用L2映射 |
+| **EEE** | 802.3 | Low | 无节能以太网 | 车载功耗管理通过PHY休眠 |
+
+### 10.3 PICS文件存储位置
+
+所有PICS原始文件已复制到:
+- `Docs/Arch/PICS/PICS_802.1AS-2020_gPTP.md`
+- `Docs/Arch/PICS/PICS_802.1Q-2022_TSN.md`
+- `Docs/Arch/PICS/PICS_802.3-2022_Ethernet.md`
+- `Docs/Arch/PICS/PICS_802.1CB-2017_FRER.md`
+- `Docs/Arch/PICS/PICS_802.1AE-2018_MACsec.md`
+- `Docs/Arch/PICS/PICS_802.1AB-2016_LLDP.md`
+- `Docs/Arch/PICS/PICS_IEEE-1588-2019_PTP.md`
+- `Docs/Arch/PICS/pics_analysis_summary.md` (本分析汇总)
+
+### 10.4 与Arch Spec参数映射验证
+
+| Arch Spec 参数 | 对应PICS | 一致性 |
+|---------------|---------|:------:|
+| `SUPPORT_GPTP=1` | 802.1AS DOM0/MINTA/BMC/BRDG | ✅ Yes |
+| `SUPPORT_1588=1` | 1588 PTP-BASE + P2P | ✅ Yes |
+| `SUPPORT_TSN=1` | 802.1Q FQTSS/ETS/SCHED/PRE/PSFP | ✅ Yes |
+| `SUPPORT_CBS=1` | 802.1Q ETS中的CBS | ✅ Yes |
+| `SUPPORT_TAS=1` | 802.1Q SCHED | ✅ Yes |
+| `SUPPORT_FP=1` | 802.1Q PRE | ✅ Yes |
+| `SUPPORT_FRER=1` | 802.1CB IS/TE/LE/RS | ✅ Yes |
+| `SUPPORT_SWITCH=1` | 802.1AS BRDG + 802.1CB BG/RS | ✅ Yes |
+| `SUPPORT_MACSEC=0` | 802.1AE (默认关闭，需外部CSS) | ✅ 默认No，可选启用 |
+| `SUPPORT_VLAN=1` | 802.1Q VLAN + 802.1AB addr | ✅ Yes |
+| `PHC_COUNT=2` | 802.1AS多域/DOMADD | ✅ Yes |
+| `SWITCH_TAS=1` | 802.1Q SCHED在Switch | ✅ Yes |
+
+**验证结论**: Arch Spec 的可配置参数与 PICS 分析结果一致，所有 P0 必须功能均已覆盖。
+

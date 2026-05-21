@@ -1,12 +1,12 @@
 # Ethernet IP Protocol Analysis - RTL-Coding Detail Level
 
-> **Document Version**: v2.0 (RTL-Coding Detail)
-> **Date**: 2026-05-12
-> **Author**: Arch Agent + RTL Coding Agent
+> **Document Version**: v2.1 (PICS Updated)
+> **Date**: 2026-05-21
+> **Author**: Arch Agent + RTL Coding Agent + AI Yang (PICS Analysis)
 > **Project**: Ethernet IP (IP_20260502_001)
-> **Stage**: PAD → RTL Ready
-> **Reference**: IEEE 802.3-2022, IEEE 802.1Q-2022, IEEE 802.1AS-2020, IEEE 802.1AE-2018, IEEE 802.1CB-2017, Renesas R-Car S4 RSwitch2, Infineon TC4x GETH
-> **Change**: v2.0 Rewritten for RTL coding: exact state machines, bit fields, byte layouts, formulas, register definitions
+> **Stage**: PAD → IDR Transition
+> **Reference**: IEEE 802.3-2022, IEEE 802.1Q-2022, IEEE 802.1AS-2020, IEEE 802.1AE-2018, IEEE 802.1CB-2017, IEEE 802.1AB-2016, IEEE 1588-2019, Renesas R-Car S4 RSwitch2, Infineon TC4x GETH
+> **Change**: v2.0 Rewritten for RTL coding; **v2.1 PICS Analysis: 基于 Reference/Kimi_Agent_MCU_Ethernet/ 7协议PICS逐条Yes/No确认，更新协议优先级矩阵与No项影响分析**
 
 ---
 
@@ -17,18 +17,26 @@
 | Functional Domain | Protocol/Standard | Version | Priority | RTL Complexity |
 |-------------------|-------------------|---------|----------|----------------|
 | **Base MAC** | IEEE 802.3 | 2008/2022 | P0 | Medium |
-| **TSN Core** | 802.1AS (gPTP) | 2020 | P0 | High |
-| | 802.1Qbv (EST) | 2015 | P0 | High |
-| | 802.1Qbu (Frame Preemption) | 2016 | P1 | High |
-| | 802.1Qav (CBS) | 2009 | P0 | Medium |
-| | 802.1Qci (PSFP) | 2017 | P1 | High |
-| | 802.1CB (FRER) | 2017 | P1 | High |
-| **Network Security** | 802.1AE (MACsec) | 2018 | P1 | High |
-| **VLAN/QoS** | 802.1Q | 2022 | P0 | Medium |
-| **Time Sync** | IEEE 1588 (PTP) | 2008 | P0 | Medium |
-| **PHY Interface** | MII / RMII / RGMII / SGMII / USXGMII | - | P0 | Low |
-| **Power Saving** | 802.3az (EEE) | 2010 | P2 | Low |
-| **Safety** | ECC / FSM parity / Timeout | - | P0 | Medium |
+| **TSN Core** | 802.1AS (gPTP) | 2020 | **P0** | High |
+| | 802.1Qbv (TAS) | 2015 | **P0** | High |
+| | 802.1Qbu (Frame Preemption) | 2016 | **P0** | High |
+| | 802.1Qav (CBS) | 2009 | **P0** | Medium |
+| | 802.1Qci (PSFP) | 2017 | **P0** | High |
+| | 802.1CB (FRER) | 2017 | **P0** | High |
+| | ~~802.1Q (SRP/MSRP)~~ | — | **P3 (No)** | — |
+| | ~~802.3bd (PFC)~~ | — | **P3 (No)** | — |
+| | ~~802.1Qcr (ATS)~~ | — | **P2 (No)** | — |
+| | ~~802.1Qch (CQF)~~ | — | **P3 (No)** | — |
+| **Network Security** | 802.1AE (MACsec) | 2018 | **P1** | High |
+| **Link Layer Discovery** | **802.1AB (LLDP)** | **2016** | **P1** | **Medium** |
+| **VLAN/QoS** | 802.1Q | 2022 | **P0** | Medium |
+| **Time Sync** | IEEE 1588 (PTP) | 2019 | **P0** | Medium |
+| **Time Sync Profile** | **802.1AS (gPTP)** | **2020** | **P0** | **High** |
+| **PHY Interface** | MII / RMII / RGMII / SGMII / USXGMII | — | **P0** | Low |
+| | **10BASE-T1S / PLCA** | **802.3cg** | **P1** | **Medium** |
+| | **MultiGBASE-T1 (2.5G/5G/10G)** | **802.3ch/cu/cv** | **P1** | **Medium** |
+| **Power Saving** | ~~802.3az (EEE)~~ | 2010 | **P3 (No)** | Low |
+| **Safety** | ECC / FSM parity / Timeout | — | **P0** | Medium |
 
 ---
 
@@ -2671,7 +2679,122 @@ ethernet_top
 ---
 
 *Document Status: RTL-Coding Detail Complete*
-*Version: v2.0*
-*Date: 2026-05-12*
-*Author: Arch Agent + RTL Coding Agent*
+*Version: v2.1 (PICS Updated)*
+*Date: 2026-05-21*
+*Author: Arch Agent + RTL Coding Agent + AI Yang (PICS Analysis)*
 *Project: Ethernet IP (IP_20260502_001)*
+
+---
+
+## 8. PICS 协议实现一致性分析 (v2.1新增)
+
+> **本节基于** `Reference/Kimi_Agent_MCU_Ethernet/PICS/` 中7个协议的PICS文件，通过Deep-Research-Cluster Route D方法逐条确认Yes/No。
+> **完整分析**: 见 `Docs/Arch/PICS/pics_analysis_summary.md`
+
+### 8.1 PICS分析后的协议优先级更新
+
+| 协议 | 版本 | 原优先级 | **更新后** | PICS关键发现 |
+|------|------|:--------:|:----------:|-------------|
+| 802.1AS gPTP | 2020 | P0 | **P0** | BRDG(Bridge)为Zonal Controller场景M；MIPERF/MDFDPP/UMM为No |
+| 802.1Qbv TAS | 2015 | P0 | **P0** | SCHED必须 |
+| 802.1Qbu FP | 2016 | P1 | **P0** | PRE升级，帧抢占为低延迟关键 |
+| 802.1Qav CBS | 2009 | P0 | **P0** | ETS中的CBS必须 |
+| 802.1Qci PSFP | 2017 | P1 | **P0** | PSFP为网络安全流过滤，升级P0 |
+| 802.1CB FRER | 2017 | P1 | **P0** | 冗余可靠性，车载安全关键，升级P0 |
+| 802.1AE MACsec | 2018 | P1 | **P1** | GEN/VER/CS必须，MSC/TC/MSAK为No(单SC设计) |
+| **802.1AB LLDP** | **2016** | **—** | **P1** | **新增：拓扑发现协议，Chassis/Port/TTL必须** |
+| IEEE 1588-2019 | 2019 | P0 | **P0** | PTPv2.1基础+P2P+Two-Step；E2E/IPv4映射/Management/L1Sync为No |
+| 802.3 PHY | 2022 | P0 | **P0** | 100BASE-T1/1000BASE-T1/10BASE-T1S/PLCA/MultiG Yes；EEE为No |
+| ~~802.1Q SRP~~ | — | — | **P3 (明确No)** | 车载使用静态配置，动态SRP不符合确定性要求 |
+| ~~802.3bd PFC~~ | — | — | **P3 (明确No)** | Head-of-Line Blocking风险；CBS+TAS替代 |
+| ~~802.1Qcr ATS~~ | — | — | **P2 (No)** | 资源受限；如需突发平滑用CBS替代 |
+| ~~802.1Qch CQF~~ | — | — | **P3 (明确No)** | TAS已覆盖确定性调度 |
+| ~~802.3az EEE~~ | 2010 | P2 | **P3 (明确No)** | 车载PHY休眠替代 |
+
+### 8.2 PICS支持矩阵 (精简版)
+
+#### 802.1AS-2020 gPTP
+
+| Major Cap | 状态 | 支持 | 影响(若No) |
+|-----------|:----:|:----:|-----------|
+| DOM0 | M | **Yes** | 无法参与骨干网同步 |
+| DOMADD | O | **Yes** | 仅单域运行 |
+| MINTA | M | **Yes** | 必须 |
+| BMC | M | **Yes** | 无法自动选GM |
+| SIG | O | **Yes** | 无消息协商 |
+| GMCAP | O | **Yes** | 不能作为时间源 |
+| **BRDG** | **M** | **Yes** | Zonal Controller核心功能 |
+| MIMSTR | M | **Yes** | 必须 |
+| MIPERF | O | **No** | 无法声明精确性能等级 |
+| EXT | O | **Yes** | — |
+| MDFDPP | O | **No** | 多域延迟测量不完整 |
+
+#### 802.1Q-2022 TSN Major Capabilities
+
+| Cap | 状态 | 支持 | 影响(若No) |
+|-----|:----:|:----:|-----------|
+| FQTSS | O.1 | **Yes** | 无法TSN流转发 |
+| **SRP** | O.2 | **No** | 静态配置替代 |
+| **PFC** | O.2 | **No** | CBS+TAS替代 |
+| ETS | O.2 | **Yes** | — |
+| **SCHED** | O.2 | **Yes** | 确定性调度核心 |
+| **PRE** | O.2 | **Yes** | 低延迟关键帧 |
+| **PSFP** | O.2 | **Yes** | 网络安全过滤 |
+| ATS | O.2 | **No** | CBS替代 |
+| CQF | O.2 | **No** | TAS已覆盖 |
+| **PCR(FRER)** | O.2 | **Yes** | 冗余可靠性 |
+
+#### 802.1AE-2018 MACsec
+
+| Cap | 状态 | 支持 | 决策理由 |
+|-----|:----:|:----:|---------|
+| SAP/STAT/GEN/VER/FMT/SCI | M | **Yes** | 核心安全功能 |
+| KAY/MGT/CS/CSI/CSC | M | **Yes** | 密钥/管理/加密 |
+| CSO | O | **Yes** | partial encryption优化 |
+| MSC (多receive SC) | O | **No** | 车载点对点，单SC足够 |
+| MSAK (多receive SAK) | O | **No** | 2个SAK足够 |
+| TC (多transmit SC) | O | **No** | 单SC简化设计 |
+| MIB (SNMPv3) | O | **No** | 车载不用SNMP |
+| CSX (非标准Cipher) | X | **No** | 禁止 |
+
+#### IEEE 1588-2019 (vs 802.1AS策略)
+
+| Feature | 1588-2019 | 802.1AS | **本IP实现** |
+|---------|:---------:|:-------:|:------------:|
+| 延迟机制 | E2E + P2P | P2P only | **P2P only** |
+| 时钟类型 | OC/BC/TC | OC/BC | **OC + BC** |
+| BMCA | 完整 | 简化 | **简化** |
+| TC概念 | E2E TC / P2P TC | 无TC | **P2P TC** (Switch residence time) |
+| 传输映射 | IPv4/IPv6/802.3 | 802.3 only | **802.3 only** |
+| Profile | 多Profile | 单一 automotive | **802.1AS Profile** |
+| L1Sync | 可选 | 不支持 | **不支持** |
+| Management | 可选 | 不支持 | **不支持** (UDS替代) |
+
+### 8.3 PICS文件存储
+
+所有PICS原始文件已复制到 `Docs/Arch/PICS/`:
+- `PICS_802.1AS-2020_gPTP.md` (Annex A原生)
+- `PICS_802.1Q-2022_TSN.md` (Annex A原生)
+- `PICS_802.3-2022_Ethernet.md` (Annex A原生)
+- `PICS_802.1CB-2017_FRER.md` (Annex A原生)
+- `PICS_802.1AE-2018_MACsec.md` (Annex A原生)
+- `PICS_802.1AB-2016_LLDP.md` (Annex A原生)
+- `PICS_IEEE-1588-2019_PTP.md` (Clause 20提取)
+- `pics_analysis_summary.md` (汇总分析)
+
+### 8.4 跨协议依赖矩阵
+
+| 上层协议 | 依赖下层协议 | 依赖说明 |
+|---------|------------|---------|
+| 802.1AS gPTP | 802.3 Ethernet | PTP消息通过Ethernet传输 |
+| 802.1AS gPTP | 1588-2019 PTP | 802.1AS是1588的Profile，核心机制继承 |
+| 802.1Q TSN | 802.3 Ethernet | TSN调度基于MAC/PHY时隙 |
+| 802.1Q TSN | 802.1AS gPTP | TAS/ATS依赖gPTP全局时间基准 |
+| 802.1CB FRER | 802.1Q VLAN | R-TAG与VLAN tag共存/顺序 |
+| 802.1CB FRER | 802.1AS gPTP | 冗余流的时间同步一致性 |
+| 802.1AE MACsec | 802.3 Ethernet | MACsec在MAC层操作 |
+| 802.1AB LLDP | 802.3 Ethernet | LLDPDU通过Ethernet传输 |
+| 1588-2019 PTP | 802.3 Ethernet | Annex F Ethernet映射 |
+
+**分析结论**: 本IP的协议栈层次结构为 **802.3(Ethernet) → 802.1AB(LLDP) + 802.1AE(MACsec) + 802.1Q(VLAN/TSN) → 802.1AS(gPTP) + 802.1CB(FRER)**，所有P0协议PICS Mandatory项均已覆盖，No项风险可控且有明确缓解措施。
+
