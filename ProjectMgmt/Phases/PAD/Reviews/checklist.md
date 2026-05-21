@@ -157,4 +157,26 @@
 
 ---
 
-*综合评审完成: 2026-05-21 17:45 CST | 评审人: AI Yang + 5 Agent*
+---
+
+## 十、实体 Yang 决策 (2026-05-21 18:54)
+
+| # | 决策项 | 实体 Yang 决策 | 影响 |
+|---|--------|---------------|------|
+| 1 | **问题关闭范围** | **全部问题（Minor + Major + Critical）必须关闭，不遗留** | 29 个问题全部需修复，PAD 补完工作量显著增加 |
+| 2 | **Switch Core / vPHC 微架构归属** | **PAD 阶段补完**，不推入 EDR | Arch Agent + RTL Agent 需在 PAD 内输出 FDB/仲裁/L3/vPHC 硬件接口设计 |
+| 3 | **vPHC 必要性** | **有 Hypervisor**，保持 P1 | `SUPPORT_VPHC` 不降级，需补充硬件接口信号清单 + VM 解码逻辑 |
+| 4 | **Formal 验证资源** | **不投入** | VERIF-CRIT-003 降级为 Info — 标记 "项目决策：不投入 Formal"，Verification Plan 中删除 Formal 章节 |
+| 5 | **FuSa 修复优先级** | **立即启动** | FuSa Agent 立即开始新增参数安全影响评估 + DC 量化补充 |
+
+### 决策后的状态更新
+
+- **原 Critical 数量**: 8 → **调整为 7** (VERIF-CRIT-003 Formal 范围未定义 → 降级为 Info/不适用)
+- **PAD Gate 状态**: 有条件通过 → **不通过 (PAD 补完中)**
+- **EDR 启动条件**: 全部 29 个问题关闭 + PAD 补完交付物到位
+- **补完任务**: 新增 TASK-PAD-REWORK-001 ~ TASK-PAD-REWORK-010
+
+---
+
+*决策记录: 2026-05-21 18:54 CST | 记录人: AI Yang*
+

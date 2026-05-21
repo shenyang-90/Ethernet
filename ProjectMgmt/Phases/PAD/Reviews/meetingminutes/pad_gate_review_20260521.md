@@ -130,3 +130,37 @@ AI Yang 初始单人评审仅发现 **0 Critical + 0 Major + 8 Minor**。
 ---
 
 *会议结束: 2026-05-21 17:45 CST | 记录人: AI Yang*
+
+---
+
+## 附录 A: 实体 Yang 决策 (2026-05-21 18:54)
+
+| # | 决策项 | 实体 Yang 决策 |
+|---|--------|---------------|
+| 1 | 问题关闭范围 | **全部问题（Minor + Major + Critical）必须关闭，不遗留** |
+| 2 | Switch Core / vPHC 微架构归属 | **PAD 阶段补完**，不推入 EDR |
+| 3 | vPHC 必要性 | **有 Hypervisor**，保持 P1 |
+| 4 | Formal 验证资源 | **不投入** — VERIF-CRIT-003 降级为 Info/不适用 |
+| 5 | FuSa 修复优先级 | **立即启动** |
+
+### 决策影响
+- 原 8 Critical → **调整为 7 Critical** (Formal 不投入)
+- PAD Gate 状态: 有条件通过 → **不通过 (PAD 补完中)**
+- 新增 10 个 PAD Rework 任务: TASK-PAD-REWORK-001 ~ 010
+- EDR 启动条件: 全部 29 个问题关闭 + 10 个 PAD rework 任务完成
+
+### 新增 Action Items (PAD 补完阶段)
+| # | Action | 负责人 | 优先级 |
+|---|--------|--------|:------:|
+| 1 | Switch Core FDB 微架构 | RTL_Coding + Arch Agent | **P0** |
+| 2 | Switch Core Egress 仲裁算法 | RTL_Coding + Arch Agent | **P0** |
+| 3 | vPHC 硬件接口重新定义 | RTL_Coding + Arch Agent | **P0** |
+| 4 | 统一 SWITCH_PORT_COUNT 范围 | Arch Agent | **P0** |
+| 5 | 新增参数安全影响评估 | FuSa Agent | **P0** (立即启动) |
+| 6 | 黄金配置/覆盖率计划 (Formal 不投入) | Verification Agent | **P0** |
+| 7 | Interface Spec v1.1 | Arch Agent | P1 |
+| 8 | Clock-Reset Spec v1.1 | Arch Agent | P1 |
+| 9 | Arch Spec 版本历史修复 | Arch Agent | P1 |
+| 10 | 风险登记册 | PM Agent | P2 |
+
+*决策后更新: 2026-05-21 18:54 CST*
