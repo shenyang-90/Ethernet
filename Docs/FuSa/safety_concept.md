@@ -2,11 +2,12 @@
 
 > **项目**: Ethernet IP (IP_20260502_001)
 > **文档类型**: Safety Concept (ISO 26262-3:2018 Clause 7)
-> **版本**: v1.0
-> **日期**: 2026-05-11
+> **版本**: v1.1
+> **日期**: 2026-05-21
 > **作者**: FuSa Agent
 > **ASIL 目标**: B (基线) / 可升级至 C/D
 > **评审状态**: Draft → 待评审
+> **变更**: PAD-REWORK-005 — 新增可配置参数安全影响评估 (对应 Arch Spec v1.8c)
 
 ---
 
@@ -84,6 +85,29 @@ SG-ETH-10 (ASIL-B)
 ├── FSC-ETH-10.3: vPHC 上下文 RAM ECC
 └── FSC-ETH-10.4: vPHC 偏移量合理性检查 (超范围回退物理 PHC)
 ```
+
+### 4.1a 新增参数驱动的安全状态路径 (PAD-REWORK-005)
+
+基于 Arch Spec v1.8c 新增参数，安全状态机扩展以下降级/停机路径：
+
+| 故障源 | 参数 | 默认状态 | 触发路径 | 说明 |
+|--------|------|:--------:|----------|------|
+| EEE LPI 唤醒超时 | `SUPPORT_EEE` | 0 (关闭) | NORMAL → **DEGRADED** | LPI 唤醒时间 > 10 μs 触发通道降级 |
+| EEE∩TSN 配置冲突 | `SUPPORT_EEE` | 0 (关闭) | NORMAL → **SAFE_STATE** | 互锁检测触发，硬件拒绝非法配置并停机 |
+| 半双工 + TSN 冲突 | `PHY_x_DUPLEX` | 1 (全双工) | 配置阶段 **拒绝写入** | 配置互锁在写入阶段即拒绝，不进入运行态 |
+| PHC 漂移超阈值 | `PHC_COUNT=2` | 2 (开启) | NORMAL → **DEGRADED** | PHC0 vs PHC1 漂移 > ±4ns，累计 3 次 |
+| vPHC 隔离失效 | `SUPPORT_VPHC` | 0 (关闭) | NORMAL → **SAFE_STATE** | VM 时间域污染为关键故障，直接安全停机 |
+| 安全加速器接口超时 | `SUPPORT_IPSEC/SECOC/DTLS` | 0 (关闭) | NORMAL → **DEGRADED** | 单次超时降级；持续超时 → SAFE_STATE |
+| 安全加速器关键故障 | `SUPPORT_IPSEC/SECOC/DTLS` | 0 (关闭) | DEGRADED → **SAFE_STATE** | 安全 PDU 不可信传播风险 |
+| AVTP 流误路由 | `SUPPORT_AVTP` | 1 (开启) | NORMAL → **DEGRADED** | DMA 队列隔离校验失败，单 AVTP 通道降级 |
+| AVTP CTL 表损坏 | `SUPPORT_AVTP_CTL` | 0 (关闭) | NORMAL → **DEGRADED** | 路由表 ECC 双 bit 错误 |
+
+> **降级粒度说明**: 新增参数故障支持 **单通道/单 VM/单 PHY 级降级**，不影响其他正常通道：
+> - EEE 故障：仅关闭该 PHY 的 EEE 功能，PHY 继续全双工运行
+> - 加速器故障：仅关闭该安全通道，其他 DMA 通道继续运行
+> - vPHC 故障：仅隔离该 VM 的时间域，其他 VM 不受影响
+> - AVTP 故障：仅关闭该 AVTP 流的 DMA 队列，标准帧通道继续运行
+> - PHC 漂移：故障 PHC 隔离，端口自动迁移至健康 PHC
 
 ---
 
@@ -192,6 +216,10 @@ SG-ETH-10 (ASIL-B)
 | SG-ETH-04 (DMA 超时) | 10 μs | 100 μs | 硬件可配置 (1μs~10ms) | 1 μs (通道复位) | 可配置 |
 | SG-ETH-05 (FSM 错误) | 1 μs | 5 μs | <1 时钟周期 (Parity 检测) | 1 μs (安全状态切换) | <2 μs |
 | SG-ETH-06 (Bridge 表错误) | 1 μs | 10 μs | <1 时钟周期 (ECC) | 1 μs (表项刷新) | <2 μs |
+| **SG-ETH-07 (EEE LPI 错误)** | **10 μs** | **100 μs** | **<10 μs (LPI 唤醒 Timeout)** | **1 μs (EEE 关闭)** | **<11 μs** |
+| **SG-ETH-08 (安全加速器故障)** | **10 μs** | **100 μs** | **<10 μs (加速器接口 Timeout)** | **1 μs (通道隔离)** | **<11 μs** |
+| **SG-ETH-09 (AVTP 流错误)** | **1 μs** | **10 μs** | **<1 μs (RX Filter ECC)** | **1 μs (DMA 队列切换)** | **<2 μs** |
+| **SG-ETH-10 (vPHC 隔离失效)** | **10 μs** | **100 μs** | **<10 μs (漂移监控 / 边界检查)** | **1 μs (VM 隔离)** | **<11 μs** |
 
 ### 3.2 诊断覆盖等级 (Diagnostic Coverage, DC)
 
@@ -207,6 +235,11 @@ SG-ETH-10 (ASIL-B)
 | 时钟故障 (毛刺) | Clock Monitor + 滤波 | 90% | ≥90% | ≥60% (低) | ✅ |
 | 通信故障 (总线) | Timeout + Bus Parity (可选) | 90% | ≥90% | ≥60% (低) | ✅ |
 | 通信故障 (DMA) | DMA Timeout | 95% | ≥95% | ≥60% (低) | ✅ |
+| **配置错误 (EEE/Security/vPHC)** | **Write-Once Lock + 配置互锁检测** | **95%** | **≥95%** | **≥60% (低)** | **✅** |
+| **外部接口超时 (CSS/HSE)** | **加速器接口 Timeout + 握手校验** | **95%** | **≥95%** | **≥60% (低)** | **✅** |
+| **PHC 漂移故障** | **PHC 交叉比较 + Addend 范围检查** | **95%** | **≥95%** | **≥60% (低)** | **✅** |
+| **虚拟化隔离失效** | **VM ID Parity + IO Ring 边界检查** | **90%** | **≥90%** | **≥60% (低)** | **✅** |
+| **AVTP 流识别错误** | **RX Filter ECC + DMA 通道隔离** | **99%** | **≥99%** | **≥90% (中)** | **✅** |
 
 > [^1^]: Infineon TC4x SECDED ECC 覆盖率为 100% 单 bit 纠正 + 100% 双 bit 检测，数据来源：Infineon AURIX TC4x Safety Manual。
 
@@ -217,6 +250,10 @@ SG-ETH-10 (ASIL-B)
 | 单 bit ECC 错误 → 双 bit ECC 错误 | ECC 错误计数器趋势监控 | 1000 个时钟周期 |
 | 时钟漂移 → 时钟丢失 | 频率偏差累积检测 | 100 μs |
 | 多 DMA 通道超时 | 独立超时 + 汇总报警 | 各通道独立 |
+| **PHC 单漂移 → 双 PHC 同时漂移** | **PHC 交叉比较 + 漂移趋势计数** | **1 ms (1000 次比较周期)** |
+| **EEE LPI 反复唤醒失败** | **LPI 唤醒错误计数器 + 趋势监控** | **100 个 LPI 周期** |
+| **安全加速器间歇性超时** | **加速器接口错误计数器 + 降级策略** | **10 次超时** |
+| **vPHC 多 VM 级联污染** | **VM ID 校验 + IO Ring 边界突破检测** | **单次检测 (实时)** |
 
 ---
 
@@ -272,10 +309,10 @@ SG-ETH-10 (ASIL-B)
 
 | 转换路径 | 触发条件 | 延迟要求 | 恢复策略 |
 |----------|----------|----------|----------|
-| NORMAL → DEGRADED | ECC 单 bit 错误计数 ≥ 阈值 / 单通道超时 / 非关键时钟漂移 | <10 μs | 自动，无需软件干预 |
-| NORMAL → SAFE_STATE | ECC 双 bit 错误 / FSM Parity 错误 / 关键时钟丢失 / 多通道故障 | <2 μs | 硬件自动，软件确认后复位 |
+| NORMAL → DEGRADED | ECC 单 bit 错误计数 ≥ 阈值 / 单通道超时 / 非关键时钟漂移 / **EEE LPI 唤醒超时** / **PHC 漂移超阈值** / **AVTP 单流误路由** / **加速器接口超时** | <10 μs | 自动，无需软件干预 |
+| NORMAL → SAFE_STATE | ECC 双 bit 错误 / FSM Parity 错误 / 关键时钟丢失 / 多通道故障 / **EEE∩TSN 互锁触发** / **vPHC 隔离失效** / **安全加速器关键故障** | <2 μs | 硬件自动，软件确认后复位 |
 | DEGRADED → NORMAL | 故障通道修复 + 软件确认 + 错误计数器清零 | 软件控制 | 需 SMU/EcuM 确认 |
-| DEGRADED → SAFE_STATE | 降级模式超时 (可配置) / 新故障通道出现 / 关键模块故障 | <10 μs | 硬件自动 |
+| DEGRADED → SAFE_STATE | 降级模式超时 (可配置) / 新故障通道出现 / 关键模块故障 / **多 VM 时间域污染** / **安全加速器持续无响应** | <10 μs | 硬件自动 |
 | SAFE_STATE → NORMAL | 外部复位信号 + 初始化序列完成 + 自检通过 (BIST) | 软件控制 | 需完整初始化 |
 
 ### 4.3 安全状态寄存器映射
@@ -339,6 +376,72 @@ SG-ETH-10 (ASIL-B)
 
 > **设计决策**: 本 IP 不内嵌 Lockstep 或双冗余 SMU（面积 +35% 且与 SoC 重复），而是输出标准化 SMU_ALERT[3:0] 信号，由 SoC SMU 统一处理。这与 TC4x 的模块-系统分层策略一致。
 
+### 5.3a 参数化配置对 ASIL 分解的影响 (PAD-REWORK-005)
+
+Arch Spec v1.8c 引入的 9 项新增可配置参数对 ASIL 分解策略产生以下影响：
+
+#### 1. 默认关闭参数对 ASIL-B 基线的影响
+
+| 参数 | 默认值 | ASIL-B 基线是否必须覆盖 | 说明 |
+|------|:------:|:----------------------:|------|
+| `SUPPORT_EEE` | 0 | **否** (前提: Write-Once Lock) | 基线 ASIL-B 不包含 EEE 安全机制，仅在用户显式启用时激活 |
+| `SUPPORT_IPSEC` | 0 | **否** (前提: Write-Once Lock) | 安全卸载接口基线不激活 |
+| `SUPPORT_SECOC` | 0 | **否** (前提: Write-Once Lock) | 同上 |
+| `SUPPORT_DTLS` | 0 | **否** (前提: Write-Once Lock) | 同上 |
+| `SUPPORT_AVTP_CTL` | 0 | **否** (前提: Write-Once Lock) | AVTP 控制表基线不激活 |
+| `SUPPORT_VPHC` | 0 | **否** (前提: Write-Once Lock) | vPHC 虚拟化基线不激活 |
+
+**结论**: 默认关闭的参数在 "不启用时不影响安全" 原则下，不增加 ASIL-B 基线的面积/复杂度负担。但 **Write-Once Lock 和配置互锁检测是 ASIL-B 基线的必要组成部分**（归属 SG-ETH-03），用于防止运行时非法启用。
+
+#### 2. 默认开启参数对 ASIL-B 基线的强制覆盖
+
+| 参数 | 默认值 | ASIL-B 基线是否必须覆盖 | 说明 |
+|------|:------:|:----------------------:|------|
+| `SUPPORT_AVTP` | 1 | **是** | AVTP RX Filter ECC + DMA 通道隔离必须纳入基线 |
+| `PHC_COUNT` | 2 | **是** | 双 PHC 交叉漂移监控必须纳入基线 |
+| `PHY_x_DUPLEX` | 1 | **是** | Duplex 模式 Parity + 速率强制全双工 + TSN 互锁必须纳入基线 |
+
+**结论**: 这三个参数在默认配置下即激活相应硬件模块，其安全机制 **必须** 包含在 ASIL-B 基线实现中，不能作为可选 ASIL-C 扩展。
+
+#### 3. 参数化配置对 ASIL 分解策略的修正
+
+**原 ASIL 分解 (v1.0)**:  
+```
+SG-ETH-01~06 (ASIL-B) → 模块级
+  └── SoC 级 Lockstep + SMU → ASIL-D (系统级)
+```
+
+**修正后 ASIL 分解 (v1.0 + PAD-REWORK-005)**:  
+```
+基线 ASIL-B (默认配置: AVTP=1, PHC_COUNT=2, DUPLEX=1)
+├── SG-ETH-01~06: 原有安全目标
+├── SG-ETH-09 (AVTP): ASIL-B, 模块级必须实现
+├── SG-ETH-10 (vPHC): ASIL-B, 仅在 VPHC=1 时激活
+└── SG-ETH-07 (EEE): ASIL-B, 仅在 EEE=1 时激活
+    └── 依赖: 配置互锁检测 (ASIL-B 基线)
+
+可选 ASIL-B 扩展 (参数显式启用时)
+├── SG-ETH-08 (IPsec/SecOC/DTLS): ASIL-B, 仅在 SECURITY=1 时激活
+└── SG-ETH-10 (vPHC): ASIL-B, 仅在 VPHC=1 时激活
+
+系统级 ASIL-D (SoC 级叠加, 不变)
+└── Lockstep + SMU + PMIC + SafeTlib + E2E
+```
+
+#### 4. 参数化配置对 FMEDA 的影响
+
+| 配置场景 | 有效 SG 数量 | 预估 FIT 增量 | 面积增量 | 认证策略 |
+|----------|:------------:|:-------------:|:--------:|----------|
+| **最小配置** (QM, 所有安全机制关闭) | 0 | 0 | 基准 | QM 无需 FMEDA |
+| **ASIL-B 基线** (默认参数, 安全机制全开) | SG-ETH-01~09 + PHC 漂移 | ~+9 FIT | +17% | 模块级 ASIL-B |
+| **ASIL-B + EEE** | + SG-ETH-07 | ~+2 FIT | +1% | 同上 |
+| **ASIL-B + Security** | + SG-ETH-08 | ~+3 FIT | +2% | 同上 |
+| **ASIL-B + vPHC** | + SG-ETH-10 | ~+4 FIT | +3% | 同上 |
+| **ASIL-B 全功能** | SG-ETH-01~10 | ~+19 FIT | +23% | 模块级 ASIL-B |
+| **系统级 ASIL-D** | SG-ETH-01~10 + SoC 机制 | 系统级 FIT | 系统级面积 | 整芯片 ASIL-D |
+
+> **设计决策**: 本 IP 的 ASIL-B 基线认证以 **默认配置** (`SUPPORT_AVTP=1`, `PHC_COUNT=2`, `PHY_x_DUPLEX=1`, 其他新增参数=0) 为基准。可选参数的启用不提升模块级 ASIL 等级，但要求启用时相应安全机制必须存在且通过故障注入验证。
+
 ---
 
 ## 6. 竞品功能安全对标
@@ -384,6 +487,15 @@ SG-ETH-10 (ASIL-B)
 | DMA 死锁 | 屏蔽 AXI 响应 | Timeout 检测 + 通道复位 | 超时阈值准确，复位后恢复 |
 | CSR 意外写入 | 在安全锁存后尝试修改 | Write-Once 拒绝写入 | 寄存器值保持不变 |
 | Bridge 表损坏 | 强制表项数据错误 | ECC 检测 + 表项刷新 | 转发行为正确恢复 |
+| **EEE 非法启用 + TSN 运行** | **强制 CSR `SUPPORT_EEE=1` 且绕过 Lock** | **TSN∩EEE 互锁报警 → SAFE_STATE** | **状态切换正确，SMU 报警触发** |
+| **LPI 唤醒超时** | **强制 PHY LPI 响应信号拉低** | **LPI 唤醒 Timeout → DEGRADED** | **超时阈值准确，EEE 通道关闭** |
+| **半双工 + TAS 配置** | **强制 `PHY_x_DUPLEX=0` 且 `SUPPORT_TAS=1`** | **配置拒绝 / 报警** | **配置写入阶段即被拒绝** |
+| **AVTP 流表 SEU** | **强制 AVTP 匹配表 bit 翻转** | **ECC 纠正 / 双 bit 报警** | **数据正确，AVTP 通道降级** |
+| **AVTP DMA 错队列** | **强制 DMA 通道映射错误** | **通道隔离校验报警** | **非法映射被拒绝** |
+| **CSS/HSE 接口 Timeout** | **屏蔽 CSS/HSE 响应信号** | **接口 Timeout → DEGRADED/SAFE_STATE** | **超时阈值准确，安全停机** |
+| **SecOC Freshness 失败** | **强制 HSE Freshness Value 错误** | **PDU 认证失败 → 丢弃帧** | **不可信帧不传播** |
+| **PHC 漂移注入** | **强制 PHC0 Addend 偏移** | **PHC 交叉比较报警 → DEGRADED** | **漂移阈值准确，PHC 切换正确** |
+| **vPHC VM 隔离突破** | **强制 VM ID 篡改 + IO Ring 越界** | **VM ID Parity + 边界检查报警 → SAFE_STATE** | **隔离失效实时检测** |
 
 ### 7.2 自检 (BIST) 策略
 
@@ -449,8 +561,10 @@ SG-ETH-10 (ASIL-B)
 | 文档 | 路径 | 说明 |
 |------|------|------|
 | Architecture Spec (安全架构) | `Docs/Arch/ethernet_arch_spec.md` §7 | Arch Agent 定义的安全机制 |
+| Architecture Spec (新增参数) | `Docs/Arch/ethernet_arch_spec.md` §1.4.3 / §10.4 | Arch Spec v1.8c 新增可配置参数定义 |
 | Clock/Reset Spec | `Docs/Arch/ethernet_clock_reset_spec.md` | 时钟域与复位策略，影响安全状态切换 |
 | Interface Spec | `Docs/Arch/ethernet_interface_spec.md` | SMU 报警信号接口定义 |
+| **新增参数安全影响矩阵** | **`Docs/FuSa/parameter_safety_impact_matrix.md`** | **本变更配套矩阵文档，含 DC/FHTI/FIT 详细数据** |
 | TC4x 安全手册 | `Reference/Kimi_Agent_MCU_Ethernet/research/ethernet_mcu_cross_verification.md` | TC4x ECC/FSM/Timeout 机制验证 |
 | MCU Ethernet 研究 | `Reference/Kimi_Agent_MCU_Ethernet/ethernet_mcu.agent.final.md` | 竞品功能安全对比 |
 
@@ -458,8 +572,9 @@ SG-ETH-10 (ASIL-B)
 
 | 版本 | 日期 | 作者 | 变更内容 |
 |------|------|------|----------|
-| v1.0 | 2026-05-11 | FuSa Agent | 初始 Safety Concept：安全目标、诊断覆盖、FHTI、ASIL 分解、竞品对标 |
+| v1.0 | 2026-05-11 | FuSa Agent | 初始 Safety Concept：安全目标 SG-ETH-01~06、诊断覆盖、FHTI、ASIL 分解、竞品对标 |
+| **v1.1** | **2026-05-21** | **FuSa Agent** | **PAD-REWORK-005：新增参数安全影响评估 — 新增 SG-ETH-07~10、§1.3 新增参数安全影响、§2.2/§4.1/§4.2/§5.3 扩展新增参数降级路径、§3.1/§3.2/§3.3 新增 FHTI/DC/MPFDI、§7.1 新增故障注入测试项** |
 
 ---
 
-*文档生成: 2026-05-11 | 状态: Draft | 下一步: FuSa Review → EDR 阶段 FMEDA*
+*文档生成: 2026-05-21 | 版本: v1.1 | 变更: PAD-REWORK-005 | 状态: Draft | 下一步: FuSa Review → EDR 阶段 FMEDA*
