@@ -190,7 +190,7 @@
 | `SUPPORT_FP` | bit | 1 | 0 / 1 | 是否支持 802.1Qbu 帧抢占（依赖 SUPPORT_TSN） | MAC Merge Layer |
 | `SUPPORT_FRER` | bit | 1 | 0 / 1 | 是否支持 802.1CB FRER（依赖 SUPPORT_SWITCH=1） | Switch, SEQ/R-Tag |
 | `SUPPORT_SWITCH` | bit | 1 | 0 / 1 | 是否支持 **L2/L3 Switch**（替代 Bridge） | **Switch Core** |
-| **`SWITCH_PORT_COUNT`** | int | **4** | **2 ~ 8** | **Switch 端口数量** | **Switch Core** |
+| **`SWITCH_PORT_COUNT`** | int | **4** | **2 ~ 8** | **Switch 端口数量（默认 4，可扩展至 8）** | **Switch Core** |
 | **`SWITCH_TAS`** | bit | **1** | 0 / 1 | **是否支持 Switch 级 802.1Qbv TAS（依赖 SUPPORT_SWITCH=1）** | **Switch Core** |
 | **`SWITCH_L3`** | bit | **0** | 0 / 1 | **是否支持 Layer 3 IP 路由（依赖 SUPPORT_SWITCH=1）** | **Switch Core** |
 | **`SWITCH_CONNECTED_MAC_0` ~ `SWITCH_CONNECTED_MAC_7`** | bit[8] | **`{1,1,1,1,0,0,0,0}`** | **0 / 1** | **每 MAC 是否接入 Switch（`1`=接入 Switch, `0`=独立直连）** | **Switch Core, DMA 路由** |
@@ -423,9 +423,9 @@
 |             |                               |                                          |
 |             v                               v                                          |
 |  +================================================================================+  +
-|  |                     Switch Core (L2/L3, 2~8 ports, 可选)                        |  +
+|  |                     Switch Core (L2/L3, N=2~8 ports, 默认N=4)                    |  +
 |  |   MAC0 <───┐                                                                    |  +
-|  |   MAC1 <───┼── [Crossbar + Arbiter] ──► Port 0/1/2/3... (全并发转发)           |  +
+|  |   MAC1 <───┼── [Crossbar + Arbiter] ──► Port 0/1/2/3...N-1 (全并发转发)       |  +
 |  |   MAC2 <───┤   - FDB (Forwarding DB, 自学习/静态)                              |  +
 |  |   MAC3 <───┘   - VLAN Table (VID → 端口掩码)                                  |  +
 |  |   Host  ───►   - L3 Route Table (IP → MAC, 可选)                              |  +
@@ -1108,6 +1108,7 @@ announceReceiptTimeoutInterval = portDS.announceReceiptTimeout × announceInterv
 | 边缘节点 (1×10M) | Active | **~50 mW** | 单 MAC + 小 PHY |
 | 任意场景 | EEE 空闲 | **~25%** Active | PHY 侧主导节省 |
 | 任意场景 | Deep Sleep | **~10 mW** | 仅 CSR + 唤醒逻辑 |
+| **中央网关扩展 (8×1G + Switch)** | Active | **~1,100 mW** | 8-port Switch + 仲裁器面积增加 (~52kGE) |
 
 **关键机制**:
 - **EEE (802.3az)**: PHY 自动进入 Low Power Idle (LPI)，MAC 在 TX 前发送 Wake 序列，PHY 在 <10μs 内恢复
@@ -1122,6 +1123,7 @@ announceReceiptTimeoutInterval = portDS.announceReceiptTimeout × announceInterv
 ## 4.3 资源估算
 
 > **公式化估算**（按实际实例累加，非固定乘数）
+> **Switch Core 门数/SRAM 已按端口数参数化** (PAD-REWORK-004 修复 RTL-CRIT-004)
 
 | 模块 | 每实例门数 (kGE) | 每实例 SRAM (KB) | 累加公式 | 备注 |
 |------|-----------------|-----------------|----------|------|
@@ -1130,18 +1132,34 @@ announceReceiptTimeoutInterval = portDS.announceReceiptTimeout × announceInterv
 | MAC-CORE (10/100M) | ~15 | 1 | `15 × N_mac` | N_mac = count(MAC_x_TYPE==0) |
 | MTL | ~10 | 32 | `10 × MAC_COUNT` | TX/RX FIFO 各 32KB |
 | DMA | ~20 | 2 | `20 × MAC_COUNT` | 描述符缓存 |
-| Switch Core | **~80** | **16** | 固定（若 SUPPORT_SWITCH=1） | FDB + VLAN + L3 Route + TAS GCL |
+| **Switch Core** | **~14~52** | **~84~128** | **参数化: f(N)** | N=`SWITCH_PORT_COUNT`; 仲裁器 ~14kGE@N=4, ~52kGE@N=8; FDB ~84KB; VLAN ~8KB; L3 ~16KB; TAS GCL ~16KB |
 | PTP/Timestamp | ~10 | 2 | `10 + 10×(PHC_COUNT-1)` | 基础 + 每额外 PHC |
 | vPHC 虚拟化 | ~5 | 1 | `5 × SUPPORT_VPHC` | Xen IO Ring 逻辑 |
 | Safety/ECC | ~15 | 0 | 固定 | 校验逻辑 |
 | HSPHY IF | ~5 | 0 | `5 × PHY_COUNT` | 每 PHY 接口逻辑 |
-| **总计（典型）** | **~205** | **~82** | — | 4×GMAC + 4-port Switch + 双 PHC |
+| **总计（典型 N=4）** | **~205** | **~160** | — | 4×GMAC + 4-port Switch + 双 PHC |
+| **总计（扩展 N=8）** | **~280** | **~210** | — | 8×GMAC + 8-port Switch + 双 PHC |
+
+> **Switch Core 资源详细分解 (按端口数 N)**:
+> | 子模块 | N=2 | N=4 | N=8 | 来源 |
+> |--------|-----|-----|-----|------|
+> | FDB (2×4K×84-bit SRAM + 查表逻辑) | ~42KB + ~8kGE | ~84KB + ~12kGE | ~168KB + ~20kGE | `switch_fdb_microarch.md` |
+> | Egress 仲裁器 (Crossbar + RR + Priority) | ~7kGE | ~14kGE | ~52kGE | `switch_arbiter_design.md` |
+> | VLAN Table | ~4KB + ~2kGE | ~8KB + ~3kGE | ~16KB + ~5kGE | 估算 |
+> | L3 Route Table | ~8KB + ~3kGE | ~16KB + ~5kGE | ~32KB + ~8kGE | 估算 (SWITCH_L3=1) |
+> | TAS GCL | ~8KB + ~2kGE | ~16KB + ~3kGE | ~32KB + ~5kGE | 估算 (SWITCH_TAS=1) |
+> | Ingress FIFO (每端口) | ~1KB × N | ~2KB × N | ~4KB × N | 按端口累加 |
+> | Egress FIFO (每端口) | ~0.5KB × N | ~1KB × N | ~2KB × N | 按端口累加 |
+> | Crossbar XBAR FIFO | ~0.5KB × N² | ~1KB × N² | ~2KB × N² | N² 个交叉点 |
+> | **Switch Core 合计 (N=4)** | — | **~84KB SRAM + ~38kGE** | — | 实际 |
+> | **Switch Core 合计 (N=8)** | — | — | **~250KB SRAM + ~90kGE** | 实际 |
 
 > **典型场景快速估算**:
-> - **中央网关 (4 GMAC/1G + Switch + vPHC)**: ~205 kGE, ~82 KB SRAM
+> - **中央网关 (4 GMAC/1G + Switch + vPHC)**: ~205 kGE, ~160 KB SRAM
 > - **ADAS (2 XGMAC/5G)**: ~160 kGE, ~58 KB SRAM
 > - **混合 (1 XGMAC/5G + 1 GMAC/1G + Switch)**: ~175 kGE, ~64 KB SRAM
 > - **边缘节点 (1 MAC/10M)**: ~65 kGE, ~35 KB SRAM
+> - **中央网关扩展 (8 GMAC/1G + 8-port Switch)**: ~280 kGE, ~210 KB SRAM (Config-D 等扩展场景)
 
 ---
 

@@ -35,7 +35,7 @@
 |  +-----------|------------+     +-----------|------------+     +---------|----------+   |
 |              |                              |                           |               |
 |              |         +--------------------v--------------------+     |               |
-|              |         |   Switch Core (4-port L2/L3)            |<----|               |
+|              |         |   Switch Core (N-port L2/L3, N=SWITCH_PORT_COUNT) |<----|               |
 |              |         |   - FDB 8K + VLAN + L3 Route            |     |               |
 |              |         |   - TAS Gate Control List (Switch级)    |     |               |
 |              |         |   - FRER / Stream ID / AVTP Filter      |     |               |
@@ -70,7 +70,7 @@
 | DMA引擎 | `eth_dma` | **全局通道池 (8/16/32)**，所有MAC共享复用，描述符管理，AXI Master | `clk_sys` | 64b/128b AXI, 全局池, 描述符环 |
 | MTL传输层 | `eth_mtl` | FIFO缓冲，队列调度，QoS整形 | `clk_mac` | 32KB TX/RX, 8Q, CBS/TAS |
 | **GMAC/XGMAC核心** | `eth_mac[0..N-1]` | **每实例独立配置** (`MAC_x_TYPE`/`PHY_x_TYPE`/`PHY_x_SPEED`)，MAC协议引擎 | `clk_mac` | 10M~10G, 802.1Qav/bv/bu |
-| **Switch Core** | `eth_switch` | **4-port L2/L3 Switch**，FDB/VLAN/L3 Route/TAS GCL | `clk_mac` | 4-port, 8K FDB, Switch级TAS |
+| **Switch Core** | `eth_switch` | **N-port L2/L3 Switch** (N=2~8, default 4), FDB/VLAN/L3 Route/TAS GCL | `clk_mac` | N-port, 8K FDB, Switch级TAS |
 | HSPHY接口 | `eth_hsphy` | PHY接口适配，SerDes/并行，**温度自适应链路降速** | `clk_tx_phy` / `clk_rx_phy` | MII/RMII/RGMII/SGMII/USXGMII |
 | PTP时间戳 | `eth_ptp` | **双PHC + Crossbar**，gPTP/PTP硬件时间戳，PPS | `clk_ts` | **250MHz**, 64b NS, 4×PPS, ±10ns |
 | **vPHC虚拟化** | `eth_vphc` | **Xen IO Rings**，SDV/Hypervisor 每VM独立时间域 | `clk_sys` / `clk_ts` | `SUPPORT_VPHC` |
@@ -174,23 +174,23 @@
 | `ari_rx_chid` | 3 | MTL → DMA | 目标通道ID |
 | `ari_rx_status` | 32b | MTL → DMA | 接收状态+时间戳低32b |
 
-### 2.3 Switch Core 数据通路 (4-port L2/L3 Switch + 混合架构)
+### 2.3 Switch Core 数据通路 (N-port L2/L3 Switch + 混合架构)
 
 **混合架构**: 每 MAC 通过 `SWITCH_CONNECTED_MAC_x` 选择接入模式:
 
 ```
                     ┌─────────────────────────────────────────────────────────┐
-                    │              Switch Core (4-port + Host Port)           │
-                    │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐   │
-   [MAC0 RX] ───────►│Port 0   │  │Port 1   │  │Port 2   │  │Port 3   │   │
-   (1G, Switch)      │Ingress  │  │Ingress  │  │Ingress  │  │Ingress  │   │
-                    │  ↓      │  │  ↓      │  │  ↓      │  │  ↓      │   │
-                    │ FDB/VLAN│  │ FDB/VLAN│  │ FDB/VLAN│  │ FDB/VLAN│   │
-                    │ L3 Route│  │ L3 Route│  │ L3 Route│  │ L3 Route│   │
-                    │  ↓      │  │  ↓      │  │  ↓      │  │  ↓      │   │
-                    │Egress   │  │Egress   │  │Egress   │  │Egress   │   │
-   [MAC0 TX] ◄──────│Port 0   │  │Port 1   │  │Port 2   │  │Port 3   │   │
-   (1G, Switch)      └─────────┘  └─────────┘  └─────────┘  └─────────┘   │
+                    │              Switch Core (N-port + Host Port)           │
+                    │  ┌─────────┐  ┌─────────┐  ...  ┌─────────┐       │   │
+   [MAC0 RX] ───────►│Port 0   │  │Port 1   │  ...  │Port N-1 │           │   │
+   (1G, Switch)      │Ingress  │  │Ingress  │  ...  │Ingress  │           │   │
+                    │  ↓      │  │  ↓      │  ...  │  ↓      │           │   │
+                    │ FDB/VLAN│  │ FDB/VLAN│  ...  │ FDB/VLAN│           │   │
+                    │ L3 Route│  │ L3 Route│  ...  │ L3 Route│           │   │
+                    │  ↓      │  │  ↓      │  ...  │  ↓      │           │   │
+                    │Egress   │  │Egress   │  ...  │Egress   │           │   │
+   [MAC0 TX] ◄──────│Port 0   │  │Port 1   │  ...  │Port N-1 │           │   │
+   (1G, Switch)      └─────────┘  └─────────┘  ...  └─────────┘           │
                     │                  ↑                                   │
                     │              [Host Port] ──► CPU/DMA RX/TX            │
                     │                  (管理帧 + 独立MAC流量)                │
@@ -223,12 +223,12 @@
 |------|------|------|------|
 | `swi_ingress_data` | 64b | MAC → Switch | 入口帧数据 |
 | `swi_ingress_sof` | 1 | MAC → Switch | 帧起始 |
-| `swi_ingress_port` | 2 | MAC → Switch | 入口端口号 (0-3) |
+| `swi_ingress_port` | $clog2(SWITCH_PORT_COUNT) | MAC → Switch | 入口端口号 (0~N-1) |
 | `swi_ingress_valid` | 1 | MAC → Switch | 数据有效 |
 | `swi_egress_data` | 64b | Switch → MAC | 出口帧数据 |
-| `swi_egress_port` | 4 | Switch → MAC | 端口掩码 (bit[i]=1 → 发送到Port i) |
+| `swi_egress_port` | SWITCH_PORT_COUNT | Switch → MAC | 端口掩码 (bit[i]=1 → 发送到Port i) |
 | `swi_egress_valid` | 1 | Switch → MAC | 数据有效 |
-| `swi_backpressure` | 4 | MAC → Switch | 每端口背压请求 |
+| `swi_backpressure` | SWITCH_PORT_COUNT | MAC → Switch | 每端口背压请求 |
 
 #### 2.3.2 Switch ↔ Host 接口 (`swi_host_if`)
 
@@ -391,14 +391,14 @@ end
 | `mac_vlan` | 1 | VLAN处理: QinQ支持，哈希过滤，灵活标签操作 |
 | `mac_ts_insert` | 1 | 时间戳插入: 发送帧时间戳捕获，接收帧时间戳附加 |
 
-### 4.4 Switch Core (`eth_switch`)
+### 4.4 Switch Core (`eth_switch`) — 参数化 N=SWITCH_PORT_COUNT
 
 #### 4.4.1 内部子模块划分
 
 | 子模块 | 实例数 | 功能描述 |
 |--------|--------|---------|
-| `sw_ingress` | 4 | 入口处理: 每端口帧有效性检查，流ID提取 (IS-ID)，AVTP 识别 |
-| `sw_ingress_fifo` | 4 | 每端口独立 FIFO (2KB~8KB)，防 HOL 阻塞 |
+| `sw_ingress` | **N** | 入口处理: 每端口帧有效性检查，流ID提取 (IS-ID)，AVTP 识别 |
+| `sw_ingress_fifo` | **N** | 每端口独立 FIFO (2KB~8KB)，防 HOL 阻塞 |
 | `sw_fdb` | 1 | Forwarding Database: **8K 条目**，MAC+VID → 端口掩码，**静态/动态混合** |
 | `sw_vlan` | 1 | VLAN 处理: QinQ，灵活标签插入/替换/删除，VLAN 过滤 |
 | `sw_l3_route` | 1 | **L3 路由引擎** (若 `SWITCH_L3=1`): IP 前缀匹配，下一跳查找 |
@@ -406,9 +406,121 @@ end
 | `sw_frer` | 1 | FRER 引擎: 序列号生成/消除，**1:6 复制**，R-Tag 处理 |
 | `sw_avtp_filter` | 1 | **AVTP 硬件识别**: Stream ID → 队列映射，RX 分离 |
 | `sw_egress_sched` | 1 | 出口调度: **Crossbar 全并发**，按端口优先级仲裁，背压控制 |
-| `sw_egress_port` | 4 | 每出口端口: 帧组装，优先级标记，pause 帧生成 |
+| `sw_egress_port` | **N** | 每出口端口: 帧组装，优先级标记，pause 帧生成 |
 | `sw_host_port` | 1 | **独立 Host 端口**: CPU 管理帧收发，独立 MAC 流量透传 |
 | `sw_learning` | 1 | 自学习引擎: 源 MAC+VID → FDB 动态更新 (可关闭，静态绑定优先) |
+
+#### 4.4.1a 参数化实例化策略 (`generate` 块)
+
+基于 Arch Spec v1.8c `SWITCH_PORT_COUNT` 参数 (范围 2~8, 默认 4)，Switch Core 内部所有 **per-port** 子模块通过 `generate for` 循环实例化，而非硬编码固定数量。核心模块 (FDB, VLAN, L3 Route, TAS GCL, FRER, Host Port) 为单实例，与端口数无关。
+
+```verilog
+module eth_switch #(
+    parameter SWITCH_PORT_COUNT = 4,    // 2 ~ 8, default 4
+    parameter FDB_DEPTH         = 8192, // 1K/2K/4K/8K
+    parameter SWITCH_L3         = 0,    // 0/1
+    parameter SWITCH_TAS        = 1     // 0/1
+)(
+    // ... ports ...
+);
+
+    // -----------------------------------------------------------------
+    // Per-Port 模块: generate 循环实例化 (N = SWITCH_PORT_COUNT)
+    // -----------------------------------------------------------------
+    genvar i;
+
+    // Ingress 处理: 每端口一个实例
+    generate for (i = 0; i < SWITCH_PORT_COUNT; i++) begin : gen_sw_ingress
+        sw_ingress u_sw_ingress (
+            .clk          (clk_mac),
+            .rst_n        (rst_n),
+            .port_id      (i[$clog2(SWITCH_PORT_COUNT)-1:0]),
+            .ingress_data (swi_ingress_data[i]),
+            .ingress_sof  (swi_ingress_sof[i]),
+            .ingress_valid(swi_ingress_valid[i]),
+            // ... 其他接口
+        );
+    end endgenerate
+
+    // Ingress FIFO: 每端口一个实例
+    generate for (i = 0; i < SWITCH_PORT_COUNT; i++) begin : gen_sw_ingress_fifo
+        sw_ingress_fifo #(
+            .FIFO_DEPTH (2048),  // 2KB ~ 8KB configurable
+            .DATA_WIDTH (64)
+        ) u_fifo (
+            .clk    (clk_mac),
+            .rst_n  (rst_n),
+            .wr_data(sw_ingress_data[i]),
+            .rd_data(sw_fifo_rdata[i]),
+            // ...
+        );
+    end endgenerate
+
+    // Egress 端口: 每端口一个实例
+    generate for (i = 0; i < SWITCH_PORT_COUNT; i++) begin : gen_sw_egress_port
+        sw_egress_port u_egress (
+            .clk         (clk_mac),
+            .rst_n       (rst_n),
+            .port_id     (i[$clog2(SWITCH_PORT_COUNT)-1:0]),
+            .egress_data (swi_egress_data[i]),
+            .egress_valid(swi_egress_valid[i]),
+            .pause_frame_req(pause_frame_req[i]),
+            // ...
+        );
+    end endgenerate
+
+    // -----------------------------------------------------------------
+    // 单实例核心模块 (与端口数无关)
+    // -----------------------------------------------------------------
+    sw_fdb #(
+        .FDB_DEPTH      (FDB_DEPTH),
+        .SWITCH_PORT_COUNT(SWITCH_PORT_COUNT)
+    ) u_fdb ( ... );
+
+    sw_vlan #(
+        .SWITCH_PORT_COUNT(SWITCH_PORT_COUNT)
+    ) u_vlan ( ... );
+
+    sw_egress_arbiter #(
+        .SWITCH_PORT_COUNT(SWITCH_PORT_COUNT)
+    ) u_arbiter ( ... );
+
+    // L3 / TAS / FRER / AVTP Filter 为可选单实例
+    generate if (SWITCH_L3) begin : gen_l3
+        sw_l3_route u_l3 ( ... );
+    end endgenerate
+
+    generate if (SWITCH_TAS) begin : gen_tas
+        sw_tas_gcl u_tas ( ... );
+    end endgenerate
+
+    sw_host_port u_host_port ( ... );  // 独立 Host 端口, 不计入 N
+
+endmodule
+```
+
+**参数化原则**:
+| 模块类型 | 实例化方式 | 参数影响 | 备注 |
+|----------|-----------|----------|------|
+| `sw_ingress` | `generate for` × N | 每端口独立 | N = SWITCH_PORT_COUNT |
+| `sw_ingress_fifo` | `generate for` × N | 每端口深度可独立配置 | 防 HOL 阻塞 |
+| `sw_egress_port` | `generate for` × N | 每端口 pause/组装逻辑 | — |
+| `sw_fdb` | 单实例 | FDB_DEPTH, 查表端口数 | `switch_fdb_microarch.md` §4.3 |
+| `sw_egress_arbiter` | 单实例 | Crossbar N×N, 仲裁器 N-port | `switch_arbiter_design.md` §10 |
+| `sw_vlan` | 单实例 | VLAN 表端口掩码宽度 | — |
+| `sw_l3_route` | 单实例 (可选) | 路由表端口掩码宽度 | `SWITCH_L3=1` 时实例化 |
+| `sw_tas_gcl` | 单实例 (可选) | GCL 每端口独立列表 | `SWITCH_TAS=1` 时实例化 |
+| `sw_frer` | 单实例 (可选) | Stream ID → 端口掩码 | — |
+| `sw_host_port` | 单实例 | 与 N 无关 | CPU 管理/收发 |
+
+**与 Arch Spec 对齐检查**:
+- `SWITCH_PORT_COUNT` 范围: 2~8 ✅ (Arch Spec §1.4.1)
+- 默认端口数: 4 ✅ (Arch Spec 默认值)
+- `SWITCH_CONNECTED_MAC_x` 约束: N ≤ count(MAC_x 接入 Switch) ✅
+- FDB 查表: 2~4 端口 = 2-cycle; 5~8 端口 = 3~5 cycle (时间复用) ✅ (参考 `switch_fdb_microarch.md` §4.3)
+- 仲裁器面积: N=4 → ~14kGE; N=8 → ~52kGE ✅ (参考 `switch_arbiter_design.md` §9.1)
+
+---
 
 #### 4.4.2 Switch 级 TAS 与端点级 TAS 互斥
 
@@ -422,12 +534,12 @@ end
 | 机制 | 实现 |
 |------|------|
 | 独立 Ingress FIFO | 每端口 2KB~8KB，单端口拥塞不阻塞其他 |
-| Crossbar 全并发 | 4 端口同时线速转发，无仲裁冲突 |
+| Crossbar 全并发 | N 端口同时线速转发，无仲裁冲突 |
 | 背压 (Back-pressure) | Egress 忙时向 Ingress 发送 pause 帧 |
 | 优先级调度 | TSN 队列优先，普通队列在余量带宽中轮转 |
 | 静态 FDB | 关键帧 (gPTP SYNC) 静态绑定，零查表延迟 |
 
-**目标**: 4-port 线速单播 ≤0.001%，广播风暴 ≤0.01%
+**目标**: N-port 线速单播 ≤0.001%，广播风暴 ≤0.01% (验证基准 N=4)
 
 ### 4.5 HSPHY Interface (`eth_hsphy`)
 
@@ -452,23 +564,24 @@ end
 | `ptc_counter_1` | 1 | **PHC1**: 64-bit 纳秒计数器，**同源 clk_ts** (无时钟偏差) |
 | `ptc_addend_0` | 1 | **PHC0 Addend**: 32-bit fractional accumulator，`0x4000_0000` 基准 |
 | `ptc_addend_1` | 1 | **PHC1 Addend**: 32-bit fractional accumulator，独立精调 |
-| `ptc_crossbar` | 1 | **Crossbar**: 每端口 (0-3) 独立绑定 PHC0 或 PHC1 |
-| `ptc_timestamp` | 4 | **时间戳捕获**: 每端口 SFD 边沿检测，64-bit 锁存 |
-| `ptc_pps_gen` | 4 | **PPS 输出**: 可编程周期/脉宽/相位，每端口独立 |
+| `ptc_crossbar` | 1 | **Crossbar**: 每端口 (0~N-1) 独立绑定 PHC0 或 PHC1 |
+| `ptc_timestamp` | **N** | **时间戳捕获**: 每端口 SFD 边沿检测，64-bit 锁存 |
+| `ptc_pps_gen` | **N** | **PPS 输出**: 可编程周期/脉宽/相位，每端口独立 |
 | `ptc_8021as` | 1 | gPTP 状态机: Best Master Clock，Sync/Announce 处理 |
 | `ptc_peer_delay` | 1 | **P2P 透明时钟**: 硬件 residence time 测量，correctionField 修正 |
-| `ptc_tc_ctrl` | 1 | **TC 控制**: 4-port 并发 residence time 计算，无端口对限制 |
+| `ptc_tc_ctrl` | 1 | **TC 控制**: N-port 并发 residence time 计算，无端口对限制 |
 
 #### 4.6.2 PHC Crossbar 绑定
 
 ```verilog
-// 每端口独立绑定 (CSR 配置)
-ptc_crossbar.port_bind[0] = PHC0;  // Port 0 → PHC0
-ptc_crossbar.port_bind[1] = PHC0;  // Port 1 → PHC0
-ptc_crossbar.port_bind[2] = PHC1;  // Port 2 → PHC1
-ptc_crossbar.port_bind[3] = PHC1;  // Port 3 → PHC1
+// 每端口独立绑定 (CSR 配置), N = SWITCH_PORT_COUNT
+generate for (genvar p = 0; p < SWITCH_PORT_COUNT; p++) begin : ptc_bind
+  // 默认: 前半端口 → PHC0, 后半端口 → PHC1
+  ptc_crossbar.port_bind[p] = (p < SWITCH_PORT_COUNT/2) ? PHC0 : PHC1;
+end
+endgenerate
 
-// BC 模式: Port 0,1 → PHC0; Port 2,3 → PHC1 (或全端口 → PHC0)
+// BC 模式: 前半 → PHC0; 后半 → PHC1 (或全端口 → PHC0)
 // TC 模式: 各端口独立 residence time 测量，无需共享时间基
 ```
 
@@ -495,7 +608,7 @@ ptc_crossbar.port_bind[3] = PHC1;  // Port 3 → PHC1
 **硬件 TC** (可选, `SUPPORT_GPTP=1`):
 - Switch Core 自动测量 residence time（ingress→egress 时间）
 - residence time 直接修正到 Follow_Up 报文的 correctionField
-- **验证目标**: 4-port TC 模式下 residence time 误差 < ±20ns
+- **验证目标**: N-port TC 模式下 residence time 误差 < ±20ns (验证基准 N=4,8)
 
 ### 4.7 Safety Monitor (`eth_safety`)
 
@@ -577,7 +690,7 @@ ptc_crossbar.port_bind[3] = PHC1;  // Port 3 → PHC1
 
 | 场景 | 配置 | **估算功耗** | 说明 |
 |------|------|-------------|------|
-| 中央网关 (4×1G + Switch) | Active | **~800 mW** | 2×5G MAC + 4-port Switch + PHC |
+| 中央网关 (4×1G + Switch) | Active | **~800 mW** | 2×5G MAC + N-port Switch + PHC |
 | ADAS (2×5G) | Active | **~600 mW** | 2×XGMAC + DMA + PHC |
 | 边缘节点 (1×10M) | Active | **~50 mW** | 单 MAC + 小 PHY |
 | 任意场景 | EEE 空闲 | **~25%** Active | PHY 侧主导节省 |
@@ -647,7 +760,7 @@ rst_n (全局异步复位，低有效)
 | `MTL_RX_FIFO_DEPTH` | int | 32K | 4K/8K/16K/32K | RX FIFO 深度 (字节) |
 | `MTL_TXQ_COUNT` | int | 8 | 1-8 | 发送队列数 |
 | `MTL_RXQ_COUNT` | int | 8 | 1-8 | 接收队列数 |
-| **`SUPPORT_SWITCH`** | bit | **1** | 0/1 | **是否支持 4-port L2/L3 Switch** |
+| **`SUPPORT_SWITCH`** | bit | **1** | 0/1 | **是否支持 N-port L2/L3 Switch (N=SWITCH_PORT_COUNT)** |
 | **`SWITCH_PORT_COUNT`** | int | **4** | 2-8 | **Switch 端口数量** |
 | **`SWITCH_TAS`** | bit | **1** | 0/1 | **Switch 级 TAS 使能** (与端点级 TAS 互斥) |
 | **`SWITCH_L3`** | bit | **0** | 0/1 | **L3 路由使能** |
@@ -680,7 +793,7 @@ rst_n (全局异步复位，低有效)
 | ID | 描述 | 状态 | 决策 |
 |----|------|------|------|
 | μARCH-001 | MTL FIFO单端口/双端口选择 | Open | 建议双端口SRAM实现TX/RX独立读写，面积增加~15%但避免仲裁冲突 |
-| μARCH-002 | **Switch Core FDB查表时序: 8K条目@300MHz, 4-port全并发** | Open | **建议2-cycle流水线查表 + 4-way set-associative缓存** |
+| μARCH-002 | **Switch Core FDB查表时序: 8K条目@300MHz, N-port全并发 (N=2~8)** | **Closed** | **2-cycle流水线 + 2-way set-associative + 2×4K×84-bit SRAM** (PAD-REWORK-001完成, `switch_fdb_microarch.md` v1.0)。5~8端口可扩展为2组SRAM或接受3-cycle仲裁等待 |
 | μARCH-003 | DMA描述符环位置: SRAM vs 系统内存 | **Closed** | **默认系统内存 (灵活性)**，可选internal SRAM (低延迟)，Arch Spec §4.3 已定 |
 | μARCH-004 | TAS GCL存储: 寄存器文件 vs SRAM | **Closed** | **<64条目用寄存器，≥64条目用SRAM**，Arch Spec §1.4 已定 |
 | μARCH-005 | 帧抢占pMAC/eMAC: 共享FIFO或独立FIFO | Open | 建议独立FIFO避免express帧被阻塞 |

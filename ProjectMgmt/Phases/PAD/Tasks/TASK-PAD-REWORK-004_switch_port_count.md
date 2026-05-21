@@ -1,11 +1,11 @@
 # TASK-PAD-REWORK-004: SWITCH_PORT_COUNT 参数一致性修复
 
 **任务ID**: TASK-PAD-REWORK-004
-**负责人**: Arch_Agent
-**状态**: PENDING
+**负责人**: **Arch_Agent** (已分配)
+**状态**: **ASSIGNED**
 **优先级**: P0
 **所属阶段**: PAD (补完)
-**前置依赖**: TASK-PAD-REWORK-001 (FDB 方案影响端口数约束)
+**前置依赖**: 无 (TASK-PAD-REWORK-001 已完成)
 **下游阻塞**: TASK-004 (EDR)
 
 ---
