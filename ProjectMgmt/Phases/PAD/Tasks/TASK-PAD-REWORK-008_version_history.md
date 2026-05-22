@@ -1,8 +1,8 @@
 # TASK-PAD-REWORK-008: Arch Spec 版本历史修复 + Protocol Analysis 版本历史补充
 
 **任务ID**: TASK-PAD-REWORK-008
-**负责人**: Arch_Agent
-**状态**: PENDING
+**负责人**: **Arch_Agent** (已分配)
+**状态**: **ASSIGNED**
 **优先级**: P1
 **所属阶段**: PAD (补完)
 **前置依赖**: 无

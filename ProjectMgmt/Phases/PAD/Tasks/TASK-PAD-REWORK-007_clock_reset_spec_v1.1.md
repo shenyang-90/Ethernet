@@ -1,8 +1,8 @@
 # TASK-PAD-REWORK-007: Clock-Reset Spec v1.1 升级
 
 **任务ID**: TASK-PAD-REWORK-007
-**负责人**: Arch_Agent
-**状态**: PENDING
+**负责人**: **Arch_Agent** (已分配)
+**状态**: **ASSIGNED**
 **优先级**: P1
 **所属阶段**: PAD (补完)
 **前置依赖**: 无
