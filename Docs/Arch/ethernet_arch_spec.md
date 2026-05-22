@@ -2,8 +2,8 @@
 
 > **项目**: Ethernet IP (IP_20260502_001)
 > **模块/系统**: Gigabit Ethernet MAC + PHY Subsystem
-> **版本**: v1.8c
-> **日期**: 2026-05-21
+> **版本**: v1.8d
+> **日期**: 2026-05-22
 > **作者**: Arch Agent
 > **评审状态**: Draft → 待评审
 *更新: 2026-05-21 — 基于 Reference/Kimi_Agent_MCU_Ethernet/ 中 TC4x/S32G/S32K3/R-Car S4/RH850 全部 feature 并集，修正部分 No → Yes/Configurable*
@@ -1331,12 +1331,14 @@ CPU/Software
 
 > **来源**: `protocol_analysis.md` §8 — TC4x Errata 完整分析
 > **原则**: 凡硬件 root cause 导致的 erratum，本 IP 通过 RTL/架构级设计修改解决；非硬件缺陷通过软件 workaround 规避
-> **状态**: 全部 13 项关键 erratum 已有明确设计方案，纳入 EDR 阶段实现
+> **状态**: 全部 **15** 项关键 erratum 已有明确设计方案，纳入 EDR 阶段实现
 
 ### 6.1 设计规避总览
 
 | Errata ID | 标题 | 严重程度 | 设计修改点 | 验证方法 |
 |-----------|------|----------|-----------|---------|
+| GETH_AI.028 | Bridge 模块数据转发延迟不一致 | **高** | **Switch Core Crossbar 替代 Bridge**，消除 Bridge 路径差异导致的延迟抖动 | 多端口转发延迟一致性测试 |
+| GETH_AI.030 | Bridge 模块帧顺序/完整性异常 | **高** | **Switch Core Crossbar 替代 Bridge**，无 Bridge 内部缓冲重排序问题 | 帧顺序完整性压力测试 |
 | GETH_AI.029 | CBS credit 不在 IPG 期间递减 | **高** | MTL CBS credit_decrement 扩展至 IPG 全周期 | 带宽精度测试 |
 | GETH_AI.032 | TAS 背靠背传输额外 IPG | **高** | TAS Scheduler 与 MAC TX 同 clk_mac 域，消除 CDC 延迟 | IPG 精度测试 |
 | GETH_AI.036 | MAC 在 TX FIFO 达阈值前开始传输 | **高** | 增加 tx_threshold_ready 握手信号，阈值可配 | Underflow 压力测试 |
@@ -1450,7 +1452,7 @@ CPU/Software
 
 ```
 [架构决策]
-- 不实现 GETH/LETH "Bridge" 模块 (避免 GETH_AI.028/030/045/LETH_AI.024)
+- 不实现 GETH/LETH "Bridge" 模块 (避免 GETH_AI.028/030/045/LETH_AI.024)。**GETH_AI.028/030/045 与 LETH_AI.024 均通过 Switch Core Crossbar 替代 Bridge 统一规避，已在 §6.1 中独立列出以维持可追溯性。**
 - 采用 4-port Switch Core + Crossbar:
   - 每端口独立 ingress/egress FIFO (各 2KB~8KB)
   - Crossbar 全并发: 4 端口同时线速转发
@@ -1630,10 +1632,18 @@ v
 | v1.0 | 2026-05-11 | Arch Agent | 填充完整架构内容，基于 TC4x 研究和协议分析 |
 | v1.1 | 2026-05-11 | Arch Agent | 新增 1.4 可配置参数矩阵（协议/DMA/安全参数） |
 | v1.2 | 2026-05-11 | Arch Agent | 重构参数：MAC_COUNT 1-8, MAC_TYPE (MAC/GMAC/XGMAC), PHY_COUNT 独立 1-8, PHY_SPEED 解耦 |
+| v1.3 | 2026-05-11 | Arch Agent | 更新版本头与变更日志；新增 FuSa Agent 引用与安全概念文档链接 |
 | v1.4 | 2026-05-12 | Arch Agent | **基于 R-Car S4 Gap Analysis 升级**: 4-port L2/L3 Switch (替换 Bridge), 双 PHC + vPHC 虚拟化, AVTP 硬件感知, Switch 级 TAS/PSFP, 更新应用场景矩阵和资源估算 |
-| **v1.6** | **2026-05-12** | **Arch Agent** | **DMA 全局通道池设计**: 所有 MAC 共享 DMA 通道池 (8/16/32)，非每 MAC 专属；新增 §4.4 带宽评估计算器；参数矩阵 DMA_CH 列更新为全局池视角 |
-| **v1.7** | **2026-05-12** | **Arch Agent** | **TC4x LETH/10BASE-T1S erratum 补充**: 10 项 PLCA/PMD/PMA 层 erratum 分析与规避方案 (ERR-014~023)；新增 §6.2.9 PLCA 时序校准 + §6.2.10 外部 PHY 选型约束；protocol_analysis.md 更新至 v1.2 (23 项 erratum 全覆盖) |
 | v1.4.1 | 2026-05-12 | Arch Agent | ISSUE-006~009 参数化定义: TAS 互斥规则 (Switch 级优先), 双 PHC/vPHC 寄存器接口, L3 路由表/ARP 缓存, AVTP RX Filter/DMA 队列映射 |
+| v1.4.2 | 2026-05-12 | Arch Agent | **PAD 阶段零问题声明**: 全部 9 项 ISSUE 关闭/转移，无遗留问题 |
+| v1.5 | 2026-05-12 | Arch Agent | **TC4x 13项已知 erratum RTL/架构级设计规避方案**: §6.1 规避总表 + §6.2 关键 RTL 修改决策 + §6.3 对比优势 + §6.4 验证计划 |
+| v1.6 | 2026-05-12 | Arch Agent | **DMA 全局通道池设计**: 所有 MAC 共享 DMA 通道池 (8/16/32)，非每 MAC 专属；新增 §4.4 带宽评估计算器；参数矩阵 DMA_CH 列更新为全局池视角 |
+| v1.7 | 2026-05-12 | Arch Agent | **TC4x LETH/10BASE-T1S erratum 补充**: 10 项 PLCA/PMD/PMA 层 erratum 分析与规避方案 (ERR-014~023)；新增 §6.2.9 PLCA 时序校准 + §6.2.10 外部 PHY 选型约束；protocol_analysis.md 更新至 v1.2 (23 项 erratum 全覆盖) |
+| v1.8 | 2026-05-12 | Arch Agent | **架构基线冻结**: 整合 v1.5~v1.7 全部 erratum 规避方案；ASIL-D 澄清（IP 级 ASIL-B / 系统级 ASIL-D）；补充 §7 协议分析引用 + §8 安全架构概要 |
+| v1.8a | 2026-05-12 | Arch Agent | **保守默认方向 + 每实例独立参数**: MAC_COUNT=2 保守默认；MAC_x_TYPE/MAC_x_SPEED 每 MAC 独立；PHY_x_TYPE/PHY_x_SPEED/PHY_x_DUPLEX 每 PHY 独立；Switch/独立混合拓扑 (SWITCH_CONNECTED_MAC_x) |
+| v1.8b | 2026-05-12 | Arch Agent | **关键特性修正 + DMA 框图更新**: §1.3 关键特性表补全；§2.1 顶层框图更新为 Switch/独立混合拓扑 + DMA 全局池；SWITCH_PORT_COUNT 参数化说明 |
+| v1.8c | 2026-05-18 | Arch Agent | **PTP 时间子系统 + 性能指标完整定义**: §3.3 PHC 架构/Addend 精调/硬件时间戳/P2P 路径延迟；§3.3.8~3.3.14 IEEE 1588-2019 消息格式/BMCA/端口状态机/TC 操作/数据集/传输参数；§4.2.1 Switch 丢帧率 + §4.2.2 低功耗模式 |
+| **v1.8d** | **2026-05-22** | **Arch Agent** | **PICS 协议一致性分析 + 全平台 feature 并集对齐 + 版本历史修复**: §10 PICS 协议实现一致性分析 (7 协议)；TC4/S32G/S32K3/R-Car S4/RH850 feature 并集：EEE/AVTP/IPsec/SecOC/D-TLS/半双工 从 No→Configurable/Yes；修正版本历史时序；§6.1 补充 GETH_AI.028/030 独立条目 |
 
 ### 9.2 待解决问题
 
@@ -1674,66 +1684,5 @@ v
 
 ---
 
-## 10. PICS 协议实现一致性分析
 
-> **本节基于** `Reference/Kimi_Agent_MCU_Ethernet/PICS/` 中7个协议的PICS文件，通过Deep-Research-Cluster Route D方法逐条确认Yes/No。
-> **完整分析**: 见 `Docs/Arch/PICS/pics_analysis_summary.md`
-
-### 10.1 协议支持总览
-
-| 协议标准 | 版本 | PICS来源 | 实现优先级 | 关键Yes项 | 关键No项 |
-|---------|------|---------|:----------:|----------|----------|
-| **IEEE 802.1AS** | 2020 | Annex A原生 | **P0** | DOM0, MINTA, BMC, **BRDG**, MIMSTR, P2P延迟 | MIPERF, MDFDPP, UMM |
-| **IEEE 802.1Q** | 2022 | Annex A原生 | **P0** | FQTSS, ETS, **SCHED**, **PRE**, **PSFP** | **SRP**, **PFC**, ATS, CQF |
-| **IEEE 802.3** | 2022 | Annex A原生 | **P0** | 100BASE-T1, 1000BASE-T1, 10BASE-T1S, PLCA, 2.5G/5G/10G | EEE |
-| **IEEE 802.1CB** | 2017 | Annex A原生 | **P0** | IS, TE, LE, RS, Sequence Gen/Recovery | HSR/PRP兼容, IP Stream ID, Autoconfig |
-| **IEEE 802.1AE** | 2018 | Annex A原生 | **P1** | SAP, GEN, VER, FMT, CS, KAY | MSC(多SC), MSAK(多SAK), TC(多发送SC), SNMP |
-| **IEEE 802.1AB** | 2016 | Annex A原生 | **P1** | Chassis/Port/TTL, Tx/Rx模式, 状态机 | SNMP MIB, Organization TLV |
-| **IEEE 1588** | 2019 | Clause 20提取 | **P0** | PTPv2.1, P2P, Two-Step, 硬件时间戳, BC, 数据集 | E2E, IPv4/UDP映射, Management消息, L1Sync, AUTH TLV |
-
-### 10.2 关键No项影响分析
-
-| Feature | 协议 | 风险 | 影响 | 缓解措施 |
-|---------|------|:----:|------|---------|
-| **SRP (MSRP)** | 802.1Q | Major | 无动态带宽预留 | 使用静态TAS配置(SMD/SMC文件)替代 |
-| **PFC** | 802.1Q/802.3 | Major | 拥塞时可能丢帧 | CBS+TAS提供确定性替代 |
-| **ATS** | 802.1Q | Minor | 突发流量无平滑 | 静态CBS或门控调度替代 |
-| **CQF** | 802.1Q | Minor | 简单调度替代不可用 | TAS已覆盖 |
-| **多SC (MSC/TC)** | 802.1AE | Minor | 单SC限制多会话 | 车载点对点链路，单SC足够 |
-| **SNMP管理** | 802.1AE/802.1AB | Minor | 不支持SNMP | 车载使用寄存器/UDS诊断替代 |
-| **E2E延迟** | 1588 | Minor | 无E2E透明时钟 | 802.1AS不定义TC，P2P TC已满足 |
-| **Management消息** | 1588 | Minor | 无PTP管理 | 使用本地诊断/UDS替代 |
-| **IPv4/UDP映射** | 1588 | Minor | 不支持IP层PTP | 车载场景使用L2映射 |
-| **EEE** | 802.3 | Low | 无节能以太网 | 车载功耗管理通过PHY休眠 |
-
-### 10.3 PICS文件存储位置
-
-所有PICS原始文件已复制到:
-- `Docs/Arch/PICS/PICS_802.1AS-2020_gPTP.md`
-- `Docs/Arch/PICS/PICS_802.1Q-2022_TSN.md`
-- `Docs/Arch/PICS/PICS_802.3-2022_Ethernet.md`
-- `Docs/Arch/PICS/PICS_802.1CB-2017_FRER.md`
-- `Docs/Arch/PICS/PICS_802.1AE-2018_MACsec.md`
-- `Docs/Arch/PICS/PICS_802.1AB-2016_LLDP.md`
-- `Docs/Arch/PICS/PICS_IEEE-1588-2019_PTP.md`
-- `Docs/Arch/PICS/pics_analysis_summary.md` (本分析汇总)
-
-### 10.4 与Arch Spec参数映射验证
-
-| Arch Spec 参数 | 对应PICS | 一致性 |
-|---------------|---------|:------:|
-| `SUPPORT_GPTP=1` | 802.1AS DOM0/MINTA/BMC/BRDG | ✅ Yes |
-| `SUPPORT_1588=1` | 1588 PTP-BASE + P2P | ✅ Yes |
-| `SUPPORT_TSN=1` | 802.1Q FQTSS/ETS/SCHED/PRE/PSFP | ✅ Yes |
-| `SUPPORT_CBS=1` | 802.1Q ETS中的CBS | ✅ Yes |
-| `SUPPORT_TAS=1` | 802.1Q SCHED | ✅ Yes |
-| `SUPPORT_FP=1` | 802.1Q PRE | ✅ Yes |
-| `SUPPORT_FRER=1` | 802.1CB IS/TE/LE/RS | ✅ Yes |
-| `SUPPORT_SWITCH=1` | 802.1AS BRDG + 802.1CB BG/RS | ✅ Yes |
-| `SUPPORT_MACSEC=0` | 802.1AE (默认关闭，需外部CSS) | ✅ 默认No，可选启用 |
-| `SUPPORT_VLAN=1` | 802.1Q VLAN + 802.1AB addr | ✅ Yes |
-| `PHC_COUNT=2` | 802.1AS多域/DOMADD | ✅ Yes |
-| `SWITCH_TAS=1` | 802.1Q SCHED在Switch | ✅ Yes |
-
-**验证结论**: Arch Spec 的可配置参数与 PICS 分析结果一致，所有 P0 必须功能均已覆盖。
 

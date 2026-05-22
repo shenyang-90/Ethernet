@@ -2812,3 +2812,18 @@ ethernet_top
 
 **分析结论**: 本IP的协议栈层次结构为 **802.3(Ethernet) → 802.1AB(LLDP) + 802.1AE(MACsec) + 802.1Q(VLAN/TSN) → 802.1AS(gPTP) + 802.1CB(FRER) + IEEE 1722(AVTP)**，并覆盖 **802.3az(EEE)** 及 **IPsec/SecOC/D-TLS 安全加速器接口**。所有P0协议PICS Mandatory项均已覆盖，P1/P2 Configurable项通过外部加速器接口实现，满足 TC4x/S32G/S32K3/R-Car S4/RH850 全平台 feature 并集要求。
 
+---
+
+## 9. 版本历史
+
+| 版本 | 日期 | 作者 | 变更内容 |
+|------|------|------|----------|
+| v1.0 | 2026-05-11 | Arch Agent + RTL Coding Agent | 初始协议全景分析与架构设计输入 (§1~§6)，基于 TC4x/S32G/R-Car 协议对比 |
+| v2.0 | 2026-05-12 | Arch Agent + RTL Coding Agent | **RTL-Coding Detail 重写**: §3 RTL 模块划分汇总、§4 竞品对比细化、§5 RTL 实现优先级排序、§6 架构设计输入完整定义 |
+| v2.1 | 2026-05-18 | Arch Agent + AI Yang | **PICS 协议实现一致性分析**: §8 PICS 逐协议 Yes/No 确认 (802.1AS/802.1Q/802.3/802.1CB/802.1AE/802.1AB/1588)；跨协议依赖矩阵更新 |
+| **v2.2** | **2026-05-21** | **Arch Agent + RTL Coding Agent + AI Yang** | **TC4/S32/R-Car/RH850 全平台 feature 并集对齐**: EEE/AVTP/IPsec/SecOC/D-TLS/半双工 从 No/未定义 → Yes/Configurable；协议分类矩阵与依赖矩阵补全新增 feature；PICS 分析补全 802.3az EEE、IEEE 1722 AVTP、IPsec/SecOC/D-TLS 条目 |
+
+---
+
+*文档生成: 2026-05-11 | 状态: Draft | 下一步: IDR Transition*
+
