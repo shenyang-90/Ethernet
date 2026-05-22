@@ -2,7 +2,7 @@
 
 **任务ID**: TASK-PAD-REWORK-001
 **负责人**: RTL_Coding_Agent + Arch_Agent
-**状态**: PENDING → ASSIGNED
+**状态**: ✅ **COMPLETED**
 **优先级**: P0
 **所属阶段**: PAD (补完)
 **前置依赖**: 无
@@ -30,11 +30,13 @@ RTL_Coding_Agent 在 PAD Gate Review 中发现 Critical 问题 RTL-CRIT-001:
 
 ## 验收标准
 
-- [ ] FDB 存储方案明确 (SRAM 型号/端口数/位宽，或寄存器堆方案)
-- [ ] 查表延迟约束定义 (如: "查表需在 N 个 clk_mac 周期内完成")
-- [ ] 8K 条目 @ 300MHz 的时序闭合方案可验证
-- [ ] 与 Arch Spec v1.8c 参数 `SWITCH_PORT_COUNT` 范围一致
+- [x] FDB 存储方案明确 (SRAM 型号/端口数/位宽，或寄存器堆方案)
+- [x] 查表延迟约束定义 (如: "查表需在 N 个 clk_mac 周期内完成")
+- [x] 8K 条目 @ 300MHz 的时序闭合方案可验证
+- [x] 与 Arch Spec v1.8c 参数 `SWITCH_PORT_COUNT` 范围一致
+
+**交付物确认**: `Docs/Design/ethernet/switch_fdb_microarch.md` v1.0 已提交 (33KB)
 
 ---
 
-*创建时间: 2026-05-21 | 创建人: AI Yang (PAD Gate Review 决策驱动)*
+*创建时间: 2026-05-21 | 创建人: AI Yang (PAD Gate Review 决策驱动) | 完成时间: 2026-05-21 | 状态: COMPLETED*
