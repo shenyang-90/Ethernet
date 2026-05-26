@@ -26,9 +26,9 @@ PM-001/Arch-m1: Interface Spec v1.0 自 5-11 后未更新，Arch Spec 已迭代 
 
 ## 验收标准
 
-- [ ] 所有 Arch Spec v1.8c 中的接口信号在 Interface Spec 中有定义
-- [ ] 时序约束 (setup/hold, valid-ready 握手) 至少定义典型值
-- [ ] 版本历史更新，列出 v1.0→v1.1 的所有变更
+- [x] 所有 Arch Spec v1.8c 中的接口信号在 Interface Spec 中有定义
+- [x] 时序约束 (setup/hold, valid-ready 握手) 至少定义典型值
+- [x] 版本历史更新，列出 v1.0→v1.1 的所有变更
 
 ---
 

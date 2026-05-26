@@ -25,9 +25,9 @@ RTL-CRIT-004: Arch Spec 定义 `SWITCH_PORT_COUNT` 范围 2~8，但 Design Spec 
 
 ## 验收标准
 
-- [ ] Arch Spec 与 Design Spec 的 `SWITCH_PORT_COUNT` 范围完全一致
-- [ ] 子模块实例化策略明确 (generate / 固定 / 混合)
-- [ ] 门数估算按最终端口数范围更新
+- [x] Arch Spec 与 Design Spec 的 `SWITCH_PORT_COUNT` 范围完全一致
+- [x] 子模块实例化策略明确 (generate / 固定 / 混合)
+- [x] 门数估算按最终端口数范围更新
 
 ---
 
