@@ -29,9 +29,9 @@ Arch-M-3: §6 erratum 规避表遗漏 GETH_AI.028/030。
 
 ## 验收标准
 
-- [ ] Arch Spec 版本历史按时间顺序排列，无跳号/乱序
-- [ ] Protocol Analysis 有独立版本历史章节
-- [ ] GETH_AI.028/030 在 §6.1 中有独立条目
+- [x] Arch Spec 版本历史按时间顺序排列，无跳号/乱序
+- [x] Protocol Analysis 有独立版本历史章节
+- [x] GETH_AI.028/030 在 §6.1 中有独立条目
 
 ---
 
