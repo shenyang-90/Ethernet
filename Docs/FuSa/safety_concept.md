@@ -25,10 +25,17 @@
 | **SG-ETH-04** | 防止因 DMA 超时挂起导致的安全数据流中断 | B | DMA Engine 死锁、总线仲裁饥饿 | DMA Timeout + 独立通道复位 |
 | **SG-ETH-05** | 防止因 FSM 状态机跳转错误导致的非预期硬件行为 | B | 单粒子翻转 (SEU)、时钟域违规 | FSM Parity + 安全状态机 |
 | **SG-ETH-06** | 防止因 Bridge 转发表损坏导致的安全帧路由错误 | B | Bridge 表 bit 翻转、VLAN 配置错误 | Bridge 表 ECC + 源地址学习校验 |
-| **SG-ETH-07** | 防止因 EEE LPI 低功耗模式意外启用导致的 TSN 确定性被破坏 | B | CSR 配置错误、SEU 使能 EEE、LPI 唤醒超时 | EEE 使能互锁 + LPI 唤醒 Timeout + Write-Once Lock |
-| **SG-ETH-08** | 防止因外部安全加速器 (CSS/HSE) 接口故障导致的安全 PDU 处理失败或不可信数据传播 | B | 加速器接口超时、握手失败、安全描述符 SEU、错误回退明文 | 加速器接口 Timeout + 安全描述符 ECC + 安全停机策略 + Write-Once Lock |
-| **SG-ETH-09** | 防止因 AVTP 流识别/路由错误导致的 ADAS 安全数据丢失或延迟 | B | AVTP 使能位 SEU、RX Filter 表损坏、DMA 队列误路由、演示时间戳漂移 | AVTP 使能 Parity + RX Filter ECC + DMA 通道隔离 + 时间戳校验 |
-| **SG-ETH-10** | 防止因 vPHC 虚拟化隔离失效导致的多 VM 时间域污染 | B | VM ID 篡改、IO Ring 边界突破、vPHC 上下文损坏、偏移量翻转 | VM ID Parity + IO Ring 边界检查 + vPHC 上下文 ECC + 偏移量合理性检查 |
+| **SG-ETH-07** | 防止因 PHC 计数器或 Crossbar 错误绑定故障导致的时间同步精度退化或帧误路由 | B | PHC 64-bit 计数器 bit 翻转、Crossbar 端口错误绑定、SECDED 不可纠正错误 | PHC 计数器 8-bit SECDED/偶校验 + 溢出检测、Crossbar 错误绑定检测 |
+| **SG-ETH-11** | 防止因 EEE LPI 低功耗模式意外启用导致的 TSN 确定性被破坏 | B | CSR 配置错误、SEU 使能 EEE、LPI 唤醒超时 | EEE 使能互锁 + LPI 唤醒 Timeout + Write-Once Lock |
+| **SG-ETH-12** | 防止因外部安全加速器 (CSS/HSE) 接口故障导致的安全 PDU 处理失败或不可信数据传播 | B | 加速器接口超时、握手失败、安全描述符 SEU、错误回退明文 | 加速器接口 Timeout + 安全描述符 ECC + 安全停机策略 + Write-Once Lock |
+| **SG-ETH-13** | 防止因 AVTP 流识别/路由错误导致的 ADAS 安全数据丢失或延迟 | B | AVTP 使能位 SEU、RX Filter 表损坏、DMA 队列误路由、演示时间戳漂移 | AVTP 使能 Parity + RX Filter ECC + DMA 通道隔离 + 时间戳校验 |
+| **SG-ETH-14** | 防止因 vPHC 虚拟化隔离失效导致的多 VM 时间域污染 | B | VM ID 篡改、IO Ring 边界突破、vPHC 上下文损坏、偏移量翻转 | VM ID Parity + IO Ring 边界检查 + vPHC 上下文 ECC + 偏移量合理性检查 |
+
+> **半双工安全策略 (PAD-011)**:
+> - 当 `PHY_x_DUPLEX=0` (半双工) 时，CSMA/CD 随机回退机制完全破坏 TSN 确定性 (TAS/CBS 门控周期无法保证)
+> - 硬件互锁: `SUPPORT_TAS=1` 或 `SUPPORT_CBS=1` 时，拒绝写入 `PHY_x_DUPLEX=0`；已处于半双工模式时，TSN 使能请求被拒绝
+> - 安全关键应用建议: **禁用半双工** (保持 `PHY_x_DUPLEX=1`) 或 **降低 ASIL 等级至 QM** (若半双工必须用于 10M/100M 低速场景)
+> - 速率 >100M 时，硬件强制全双工，忽略 `PHY_x_DUPLEX` 配置
 
 ### 1.2 安全目标分解
 
@@ -62,28 +69,32 @@ SG-ETH-06 (ASIL-B)
 └── FSC-ETH-06.2: 静态路由配置校验和 (Checksum)
 
 SG-ETH-07 (ASIL-B)
-├── FSC-ETH-07.1: EEE 使能互锁 (TSN=1 ∧ EEE=1 → 报警/拒绝)
-├── FSC-ETH-07.2: EEE 使能位 Parity 保护
-├── FSC-ETH-07.3: LPI 唤醒 Timeout (硬件计数器)
-└── FSC-ETH-07.4: LPI 状态机独立 Parity
+├── FSC-ETH-07.1: PHC 计数器 ECC/Parity 保护 (64-bit → 8-bit SECDED 或偶校验+溢出检测)
+└── FSC-ETH-07.2: Crossbar 错误绑定故障检测 (端口-MAC 映射一致性校验)
 
-SG-ETH-08 (ASIL-B)
-├── FSC-ETH-08.1: CSS/HSE 加速器接口 Timeout
-├── FSC-ETH-08.2: 安全描述符/SA 表 ECC
-├── FSC-ETH-08.3: 安全停机策略 (故障后丢弃帧/进入 DEGRADED)
-└── FSC-ETH-08.4: 加速器就绪握手 (CSS_READY ∧ SECURITY_EN=1)
+SG-ETH-11 (ASIL-B)
+├── FSC-ETH-11.1: EEE 使能互锁 (TSN=1 ∧ EEE=1 → 报警/拒绝)
+├── FSC-ETH-11.2: EEE 使能位 Parity 保护
+├── FSC-ETH-11.3: LPI 唤醒 Timeout (硬件计数器)
+└── FSC-ETH-11.4: LPI 状态机独立 Parity
 
-SG-ETH-09 (ASIL-B)
-├── FSC-ETH-09.1: AVTP 使能位 Parity
-├── FSC-ETH-09.2: AVTP RX Filter 流匹配表 ECC
-├── FSC-ETH-09.3: AVTP 专用 DMA 通道隔离与校验
-└── FSC-ETH-09.4: AVTP 演示时间戳与 PHC 交叉校验
+SG-ETH-12 (ASIL-B)
+├── FSC-ETH-12.1: CSS/HSE 加速器接口 Timeout
+├── FSC-ETH-12.2: 安全描述符/SA 表 ECC
+├── FSC-ETH-12.3: 安全停机策略 (故障后丢弃帧/进入 DEGRADED)
+└── FSC-ETH-12.4: 加速器就绪握手 (CSS_READY ∧ SECURITY_EN=1)
 
-SG-ETH-10 (ASIL-B)
-├── FSC-ETH-10.1: VM ID 标签 Parity
-├── FSC-ETH-10.2: Xen IO Ring 边界检查
-├── FSC-ETH-10.3: vPHC 上下文 RAM ECC
-└── FSC-ETH-10.4: vPHC 偏移量合理性检查 (超范围回退物理 PHC)
+SG-ETH-13 (ASIL-B)
+├── FSC-ETH-13.1: AVTP 使能位 Parity
+├── FSC-ETH-13.2: AVTP RX Filter 流匹配表 ECC
+├── FSC-ETH-13.3: AVTP 专用 DMA 通道隔离与校验
+└── FSC-ETH-13.4: AVTP 演示时间戳与 PHC 交叉校验
+
+SG-ETH-14 (ASIL-B)
+├── FSC-ETH-14.1: VM ID 标签 Parity
+├── FSC-ETH-14.2: Xen IO Ring 边界检查
+├── FSC-ETH-14.3: vPHC 上下文 RAM ECC
+└── FSC-ETH-14.4: vPHC 偏移量合理性检查 (超范围回退物理 PHC)
 ```
 
 ### 4.1a 新增参数驱动的安全状态路径 (PAD-REWORK-005)
@@ -123,15 +134,15 @@ SG-ETH-10 (ASIL-B)
 
 | 类别 | 参数 | 默认值 | 对应安全目标 | 关键风险 |
 |------|------|:------:|:----------:|----------|
-| 节能/PHY 模式 | `SUPPORT_EEE` | 0 | **SG-ETH-07** | LPI 唤醒延迟破坏 TSN 确定性 |
+| 节能/PHY 模式 | `SUPPORT_EEE` | 0 | **SG-ETH-11** | LPI 唤醒延迟破坏 TSN 确定性 |
 | PHY 双工模式 | `PHY_x_DUPLEX` | 1 (全双工) | **SG-ETH-02, SG-ETH-03** | 半双工引入 CSMA/CD，与 TAS/CBS 冲突 |
-| AVTP/AVB 流 | `SUPPORT_AVTP` | 1 | **SG-ETH-09** | ADAS 数据 (摄像头/激光雷达) 丢失/误路由 |
-| AVTP 控制 | `SUPPORT_AVTP_CTL` | 0 | **SG-ETH-09** | 流路由表损坏导致 AVTP 错发 |
-| 网络安全卸载 | `SUPPORT_IPSEC` | 0 | **SG-ETH-08** | CSS 接口故障导致安全 PDU 失败 |
-| | `SUPPORT_SECOC` | 0 | **SG-ETH-08** | HSE 接口故障导致 PDU 认证失败 |
-| | `SUPPORT_DTLS` | 0 | **SG-ETH-08** | CSS 接口故障导致会话状态错误 |
+| AVTP/AVB 流 | `SUPPORT_AVTP` | 1 | **SG-ETH-13** | ADAS 数据 (摄像头/激光雷达) 丢失/误路由 |
+| AVTP 控制 | `SUPPORT_AVTP_CTL` | 0 | **SG-ETH-13** | 流路由表损坏导致 AVTP 错发 |
+| 网络安全卸载 | `SUPPORT_IPSEC` | 0 | **SG-ETH-12** | CSS 接口故障导致安全 PDU 失败 |
+| | `SUPPORT_SECOC` | 0 | **SG-ETH-12** | HSE 接口故障导致 PDU 认证失败 |
+| | `SUPPORT_DTLS` | 0 | **SG-ETH-12** | CSS 接口故障导致会话状态错误 |
 | PTP 虚拟化 | `PHC_COUNT` | 2 | **SG-ETH-02** | 双 PHC 漂移导致时间同步不一致 |
-| | `SUPPORT_VPHC` | 0 | **SG-ETH-10** | VM 隔离失效导致多 VM 时间域污染 |
+| | `SUPPORT_VPHC` | 0 | **SG-ETH-14** | VM 隔离失效导致多 VM 时间域污染 |
 
 ### 1.3.2 安全影响核心结论
 
@@ -176,16 +187,18 @@ SG-ETH-10 (ASIL-B)
 
 | 安全机制 | 覆盖 SG | 诊断覆盖 (DC) | 故障模式 | ASIL-B 合规 | ASIL-C 扩展 | ASIL-D 扩展 |
 |----------|---------|---------------|----------|-------------|-------------|-------------|
-| **ECC (SECDED)** | SG-ETH-01, SG-ETH-06, **SG-ETH-09 (AVTP 表), SG-ETH-10 (vPHC 上下文)** | 99% | 存储器单/双 bit 翻转 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
-| **FSM Parity** | SG-ETH-05, **SG-ETH-07 (LPI 状态机), SG-ETH-08 (DTLS 会话状态机)** | 90% | 状态机 SEU | ✅ 必须 | ✅ 必须 | ✅ 必须 |
-| **Timeout (DMA/CSR/Bus)** | SG-ETH-04, SG-ETH-02, **SG-ETH-07 (LPI 唤醒), SG-ETH-08 (加速器接口)** | 95% | 死锁、总线饥饿、时钟丢失、LPI 唤醒挂起、加速器无响应 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
-| **Clock Monitor** | SG-ETH-02, **SG-ETH-10 (vPHC 时间漂移监控)** | 99% | PLL 失锁、频率漂移、PHC 漂移 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
-| **CSR Write-Once Lock** | SG-ETH-03, **SG-ETH-07~10 (所有新增参数)** | 95% | 配置意外修改 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
-| **配置互锁检测** | **SG-ETH-07 (EEE∩TSN), SG-ETH-02/03 (TSN∩半双工), SG-ETH-10 (PHC_COUNT<2∩VPHC)** | 95% | 非法配置组合 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
-| **RX Filter ECC + DMA 隔离** | **SG-ETH-09 (AVTP 流识别)** | 99% | AVTP 表项损坏、DMA 误路由 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
+| **ECC (SECDED)** | SG-ETH-01, SG-ETH-06, **SG-ETH-13 (AVTP 表), SG-ETH-14 (vPHC 上下文)** | 99% | 存储器单/双 bit 翻转 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
+| **FSM Parity** | SG-ETH-05, **SG-ETH-11 (LPI 状态机), SG-ETH-12 (DTLS 会话状态机)** | 90% | 状态机 SEU | ✅ 必须 | ✅ 必须 | ✅ 必须 |
+| **Timeout (DMA/CSR/Bus)** | SG-ETH-04, SG-ETH-02, **SG-ETH-11 (LPI 唤醒), SG-ETH-12 (加速器接口)** | 95% | 死锁、总线饥饿、时钟丢失、LPI 唤醒挂起、加速器无响应 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
+| **Clock Monitor** | SG-ETH-02, **SG-ETH-07 (PHC 计数器), SG-ETH-14 (vPHC 时间漂移监控)** | 99% | PLL 失锁、频率漂移、PHC 漂移 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
+| **PHC 计数器 ECC/Parity** | **SG-ETH-07** | 99% | PHC 64-bit 计数器 bit 翻转、Addend 溢出 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
+| **Crossbar 错误绑定检测** | **SG-ETH-07** | 90% | Switch Crossbar 端口-MAC 映射错误 | ✅ 必须 | ✅ 推荐 | ✅ 必须 |
+| **CSR Write-Once Lock** | SG-ETH-03, **SG-ETH-11~14 (所有新增参数)** | 95% | 配置意外修改 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
+| **配置互锁检测** | **SG-ETH-11 (EEE∩TSN), SG-ETH-02/03 (TSN∩半双工), SG-ETH-14 (PHC_COUNT<2∩VPHC)** | 95% | 非法配置组合 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
+| **RX Filter ECC + DMA 隔离** | **SG-ETH-13 (AVTP 流识别)** | 99% | AVTP 表项损坏、DMA 误路由 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
 | **PHC 交叉漂移监控** | **SG-ETH-02 (双 PHC 漂移)** | 95% | PHC0/PHC1 频率/相位偏差 | ✅ 必须 | ✅ 必须 | ✅ 必须 |
-| **VM ID Parity + IO Ring 边界** | **SG-ETH-10 (vPHC 隔离)** | 90% | 虚拟化隔离失效 | ✅ 必须 | ✅ 推荐 | ✅ 必须 |
-| **Lockstep (可选)** | SG-ETH-01~10 | 99% | 系统性故障 | ❌ 可选 | ❌ 可选 | ✅ SoC 级 |
+| **VM ID Parity + IO Ring 边界** | **SG-ETH-14 (vPHC 隔离)** | 90% | 虚拟化隔离失效 | ✅ 必须 | ✅ 推荐 | ✅ 必须 |
+| **Lockstep (可选)** | SG-ETH-01~14 | 99% | 系统性故障 | ❌ 可选 | ❌ 可选 | ✅ SoC 级 |
 | **总线 Parity** | SG-ETH-01 | 90% | AXI 数据位翻转 | ❌ 可选 | ✅ 推荐 | ✅ 必须 |
 
 ### 2.3 硬件/软件安全划分
@@ -216,10 +229,11 @@ SG-ETH-10 (ASIL-B)
 | SG-ETH-04 (DMA 超时) | 10 μs | 100 μs | 硬件可配置 (1μs~10ms) | 1 μs (通道复位) | 可配置 |
 | SG-ETH-05 (FSM 错误) | 1 μs | 5 μs | <1 时钟周期 (Parity 检测) | 1 μs (安全状态切换) | <2 μs |
 | SG-ETH-06 (Bridge 表错误) | 1 μs | 10 μs | <1 时钟周期 (ECC) | 1 μs (表项刷新) | <2 μs |
-| **SG-ETH-07 (EEE LPI 错误)** | **10 μs** | **100 μs** | **<10 μs (LPI 唤醒 Timeout)** | **1 μs (EEE 关闭)** | **<11 μs** |
-| **SG-ETH-08 (安全加速器故障)** | **10 μs** | **100 μs** | **<10 μs (加速器接口 Timeout)** | **1 μs (通道隔离)** | **<11 μs** |
-| **SG-ETH-09 (AVTP 流错误)** | **1 μs** | **10 μs** | **<1 μs (RX Filter ECC)** | **1 μs (DMA 队列切换)** | **<2 μs** |
-| **SG-ETH-10 (vPHC 隔离失效)** | **10 μs** | **100 μs** | **<10 μs (漂移监控 / 边界检查)** | **1 μs (VM 隔离)** | **<11 μs** |
+| **SG-ETH-07 (PHC 计数器/Crossbar 错误)** | **1 μs** | **10 μs** | **<1 时钟周期 (PHC ECC/Parity)** | **1 μs (Crossbar 重映射)** | **<2 μs** |
+| **SG-ETH-11 (EEE LPI 错误)** | **10 μs** | **100 μs** | **<10 μs (LPI 唤醒 Timeout)** | **1 μs (EEE 关闭)** | **<11 μs** |
+| **SG-ETH-12 (安全加速器故障)** | **10 μs** | **100 μs** | **<10 μs (加速器接口 Timeout)** | **1 μs (通道隔离)** | **<11 μs** |
+| **SG-ETH-13 (AVTP 流错误)** | **1 μs** | **10 μs** | **<1 μs (RX Filter ECC)** | **1 μs (DMA 队列切换)** | **<2 μs** |
+| **SG-ETH-14 (vPHC 隔离失效)** | **10 μs** | **100 μs** | **<10 μs (漂移监控 / 边界检查)** | **1 μs (VM 隔离)** | **<11 μs** |
 
 ### 3.2 诊断覆盖等级 (Diagnostic Coverage, DC)
 
@@ -415,14 +429,14 @@ SG-ETH-01~06 (ASIL-B) → 模块级
 ```
 基线 ASIL-B (默认配置: AVTP=1, PHC_COUNT=2, DUPLEX=1)
 ├── SG-ETH-01~06: 原有安全目标
-├── SG-ETH-09 (AVTP): ASIL-B, 模块级必须实现
-├── SG-ETH-10 (vPHC): ASIL-B, 仅在 VPHC=1 时激活
-└── SG-ETH-07 (EEE): ASIL-B, 仅在 EEE=1 时激活
+├── SG-ETH-13 (AVTP): ASIL-B, 模块级必须实现
+├── SG-ETH-14 (vPHC): ASIL-B, 仅在 VPHC=1 时激活
+└── SG-ETH-11 (EEE): ASIL-B, 仅在 EEE=1 时激活
     └── 依赖: 配置互锁检测 (ASIL-B 基线)
 
 可选 ASIL-B 扩展 (参数显式启用时)
-├── SG-ETH-08 (IPsec/SecOC/DTLS): ASIL-B, 仅在 SECURITY=1 时激活
-└── SG-ETH-10 (vPHC): ASIL-B, 仅在 VPHC=1 时激活
+├── SG-ETH-12 (IPsec/SecOC/DTLS): ASIL-B, 仅在 SECURITY=1 时激活
+└── SG-ETH-14 (vPHC): ASIL-B, 仅在 VPHC=1 时激活
 
 系统级 ASIL-D (SoC 级叠加, 不变)
 └── Lockstep + SMU + PMIC + SafeTlib + E2E
@@ -433,12 +447,12 @@ SG-ETH-01~06 (ASIL-B) → 模块级
 | 配置场景 | 有效 SG 数量 | 预估 FIT 增量 | 面积增量 | 认证策略 |
 |----------|:------------:|:-------------:|:--------:|----------|
 | **最小配置** (QM, 所有安全机制关闭) | 0 | 0 | 基准 | QM 无需 FMEDA |
-| **ASIL-B 基线** (默认参数, 安全机制全开) | SG-ETH-01~09 + PHC 漂移 | ~+9 FIT | +17% | 模块级 ASIL-B |
-| **ASIL-B + EEE** | + SG-ETH-07 | ~+2 FIT | +1% | 同上 |
-| **ASIL-B + Security** | + SG-ETH-08 | ~+3 FIT | +2% | 同上 |
-| **ASIL-B + vPHC** | + SG-ETH-10 | ~+4 FIT | +3% | 同上 |
-| **ASIL-B 全功能** | SG-ETH-01~10 | ~+19 FIT | +23% | 模块级 ASIL-B |
-| **系统级 ASIL-D** | SG-ETH-01~10 + SoC 机制 | 系统级 FIT | 系统级面积 | 整芯片 ASIL-D |
+| **ASIL-B 基线** (默认参数, 安全机制全开) | SG-ETH-01~06, SG-ETH-07, SG-ETH-13 | ~+9 FIT | +17% | 模块级 ASIL-B |
+| **ASIL-B + EEE** | + SG-ETH-11 | ~+2 FIT | +1% | 同上 |
+| **ASIL-B + Security** | + SG-ETH-12 | ~+3 FIT | +2% | 同上 |
+| **ASIL-B + vPHC** | + SG-ETH-14 | ~+4 FIT | +3% | 同上 |
+| **ASIL-B 全功能** | SG-ETH-01~14 | ~+19 FIT | +23% | 模块级 ASIL-B |
+| **系统级 ASIL-D** | SG-ETH-01~14 + SoC 机制 | 系统级 FIT | 系统级面积 | 整芯片 ASIL-D |
 
 > **设计决策**: 本 IP 的 ASIL-B 基线认证以 **默认配置** (`SUPPORT_AVTP=1`, `PHC_COUNT=2`, `PHY_x_DUPLEX=1`, 其他新增参数=0) 为基准。可选参数的启用不提升模块级 ASIL 等级，但要求启用时相应安全机制必须存在且通过故障注入验证。
 
@@ -573,7 +587,7 @@ SG-ETH-01~06 (ASIL-B) → 模块级
 | 版本 | 日期 | 作者 | 变更内容 |
 |------|------|------|----------|
 | v1.0 | 2026-05-11 | FuSa Agent | 初始 Safety Concept：安全目标 SG-ETH-01~06、诊断覆盖、FHTI、ASIL 分解、竞品对标 |
-| **v1.1** | **2026-05-21** | **FuSa Agent** | **PAD-REWORK-005：新增参数安全影响评估 — 新增 SG-ETH-07~10、§1.3 新增参数安全影响、§2.2/§4.1/§4.2/§5.3 扩展新增参数降级路径、§3.1/§3.2/§3.3 新增 FHTI/DC/MPFDI、§7.1 新增故障注入测试项** |
+| **v1.1** | **2026-05-21** | **FuSa Agent** | **PAD-REWORK-005：新增参数安全影响评估 — 新增 SG-ETH-11~14、§1.3 新增参数安全影响、§2.2/§4.1/§4.2/§5.3 扩展新增参数降级路径、§3.1/§3.2/§3.3 新增 FHTI/DC/MPFDI、§7.1 新增故障注入测试项** |
 
 ---
 

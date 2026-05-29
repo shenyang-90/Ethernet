@@ -39,7 +39,7 @@
 | `SUPPORT_EEE` | 0 (关闭) | **STUCK-AT 1**: EEE 意外启用，LPI 状态非法进入 | SG-ETH-02 (TSN 确定性) | ① CSR Write-Once Lock ② EEE 使能位 Parity ③ LPI 状态机独立 Parity | 95% | < 10 μs | 默认关闭且无 PHY 配合时无功能影响；**启用后** LPI 唤醒延迟可能破坏 TAS 门控周期 |
 | `SUPPORT_EEE` | 0 (关闭) | **SEU**: 配置位翻转导致 EEE 意外使能 | SG-ETH-02 | 同上 + ECC Scrub (配置 SRAM 若适用) | 90% | < 10 μs | 需与 PHY 握手确认 LPI 进入，PHY 侧需配合安全时钟 |
 | `SUPPORT_EEE` | 0 (关闭) | **LPI 唤醒超时**: PHY 未能按时退出 LPI，TX 帧挂起 | SG-ETH-04 (DMA 超时) | ① LPI 唤醒 Timeout (硬件计数器) ② DMA CHx_TIMEOUT 兜底 | 95% | < 100 μs | 唤醒延迟预算: ≤ 10 μs (满足 TAS 125μs cycle 的 8% 裕量) |
-| `SUPPORT_EEE` | 0 (关闭) | **配置错误**: 软件在 TSN 使能时启用 EEE | SG-ETH-02, SG-ETH-03 | ① 互斥配置检测硬件 (TSN=1 ∧ EEE=1 → 报警) ② Write-Once Lock | 95% | < 1 ms | **新增 SG-ETH-07**: 防止 EEE LPI 意外启用导致 TSN 确定性 violation |
+| `SUPPORT_EEE` | 0 (关闭) | **配置错误**: 软件在 TSN 使能时启用 EEE | SG-ETH-02, SG-ETH-03 | ① 互斥配置检测硬件 (TSN=1 ∧ EEE=1 → 报警) ② Write-Once Lock | 95% | < 1 ms | **新增 SG-ETH-11**: 防止 EEE LPI 意外启用导致 TSN 确定性 violation |
 
 **`SUPPORT_EEE` 默认关闭安全声明**:  
 当 `SUPPORT_EEE=0` 且 CSR Write-Once Lock 生效时，EEE 模块处于逻辑删除状态，不产生时钟/功耗/延迟影响。**安全结论**: 默认关闭时无新增安全目标，但配置锁机制必须存在以防止运行时非法启用。
@@ -66,17 +66,17 @@
 
 | 参数名 | 默认值 | 故障模式 | 受影响安全目标 | 安全机制 | DC 目标 | FHTI | 备注 |
 |--------|:------:|----------|:------------:|----------|:-------:|:----:|------|
-| `SUPPORT_AVTP` | 1 (开启) | **STUCK-AT 0**: AVTP 流识别意外关闭 | SG-ETH-01 (帧丢失), SG-ETH-09 | ① AVTP 使能位 Parity ② RX Filter ECC ③ AVTP 流计数器 Timeout | 95% | < 10 μs | **默认开启**: 必须有主动安全机制保护，不能依赖 "默认关闭无影响" |
-| `SUPPORT_AVTP` | 1 (开启) | **SEU**: AVTP 识别表/流 ID 损坏 | SG-ETH-09 | ① AVTP 流匹配表 ECC ② 流 ID 范围检查 (非法 ID 拒绝) ③ DMA 队列隔离校验 | 99% | < 1 μs | AVTP 表项较小 (通常 ≤ 16 流)，适合全 ECC 保护 |
-| `SUPPORT_AVTP` | 1 (开启) | **DMA 误路由**: AVTP 帧被错发至非 AVTP 队列 | SG-ETH-01, SG-ETH-09 | ① DMA 队列绑定 Parity ② 描述符通道 ID 校验 ③ 独立的 AVTP DMA 通道隔离 | 95% | < 10 μs | 关键: 摄像头/激光雷达 AVTP 帧与标准帧必须 DMA 通道隔离 |
-| `SUPPORT_AVTP` | 1 (开启) | **时钟漂移**: AVTP 演示时间戳 (AVTP 时间戳) 与 PTP 时间基准偏差 | SG-ETH-02, SG-ETH-09 | ① AVTP 时间戳与 PHC 交叉校验 ② 演示时间窗口合法性检查 | 90% | < 10 μs | 演示时间 (Presentation Time) 超前/滞后超窗则丢弃 |
-| `SUPPORT_AVTP_CTL` | 0 (关闭) | **STUCK-AT 1**: AVTP 控制表意外启用 | SG-ETH-09 | ① Write-Once Lock ② CTL 表 ECC ③ 控制/数据路径隔离 | 95% | < 10 μs | 默认关闭，启用后增加路由表故障面 |
-| `SUPPORT_AVTP_CTL` | 0 (关闭) | **SEU**: 路由表项损坏导致 AVTP 流错发 | SG-ETH-09 | ① 路由表 ECC (SECDED) ② 源/目的 MAC 一致性检查 ③ 静态路由表校验和 | 99% | < 1 μs | 建议静态路由表 + Checksum，运行时只读 |
+| `SUPPORT_AVTP` | 1 (开启) | **STUCK-AT 0**: AVTP 流识别意外关闭 | SG-ETH-01 (帧丢失), SG-ETH-13 | ① AVTP 使能位 Parity ② RX Filter ECC ③ AVTP 流计数器 Timeout | 95% | < 10 μs | **默认开启**: 必须有主动安全机制保护，不能依赖 "默认关闭无影响" |
+| `SUPPORT_AVTP` | 1 (开启) | **SEU**: AVTP 识别表/流 ID 损坏 | SG-ETH-13 | ① AVTP 流匹配表 ECC ② 流 ID 范围检查 (非法 ID 拒绝) ③ DMA 队列隔离校验 | 99% | < 1 μs | AVTP 表项较小 (通常 ≤ 16 流)，适合全 ECC 保护 |
+| `SUPPORT_AVTP` | 1 (开启) | **DMA 误路由**: AVTP 帧被错发至非 AVTP 队列 | SG-ETH-01, SG-ETH-13 | ① DMA 队列绑定 Parity ② 描述符通道 ID 校验 ③ 独立的 AVTP DMA 通道隔离 | 95% | < 10 μs | 关键: 摄像头/激光雷达 AVTP 帧与标准帧必须 DMA 通道隔离 |
+| `SUPPORT_AVTP` | 1 (开启) | **时钟漂移**: AVTP 演示时间戳 (AVTP 时间戳) 与 PTP 时间基准偏差 | SG-ETH-02, SG-ETH-13 | ① AVTP 时间戳与 PHC 交叉校验 ② 演示时间窗口合法性检查 | 90% | < 10 μs | 演示时间 (Presentation Time) 超前/滞后超窗则丢弃 |
+| `SUPPORT_AVTP_CTL` | 0 (关闭) | **STUCK-AT 1**: AVTP 控制表意外启用 | SG-ETH-13 | ① Write-Once Lock ② CTL 表 ECC ③ 控制/数据路径隔离 | 95% | < 10 μs | 默认关闭，启用后增加路由表故障面 |
+| `SUPPORT_AVTP_CTL` | 0 (关闭) | **SEU**: 路由表项损坏导致 AVTP 流错发 | SG-ETH-13 | ① 路由表 ECC (SECDED) ② 源/目的 MAC 一致性检查 ③ 静态路由表校验和 | 99% | < 1 μs | 建议静态路由表 + Checksum，运行时只读 |
 
 **`SUPPORT_AVTP` 默认开启安全声明**:  
 与大多数新增参数不同，`SUPPORT_AVTP` 默认值为 **1** (开启)。这意味着 AVTP RX Filter + DMA 隔离机制在基线 ASIL-B 配置中即存在，其安全机制 (RX Filter ECC, DMA 通道隔离) 必须纳入基线安全架构，不能作为可选扩展。
 
-> **新增 SG-ETH-09**: 防止因 AVTP 流识别/路由错误导致的 ADAS 安全数据丢失或延迟。
+> **新增 SG-ETH-13**: 防止因 AVTP 流识别/路由错误导致的 ADAS 安全数据丢失或延迟。
 
 ---
 
@@ -84,16 +84,16 @@
 
 | 参数名 | 默认值 | 故障模式 | 受影响安全目标 | 安全机制 | DC 目标 | FHTI | 备注 |
 |--------|:------:|----------|:------------:|----------|:-------:|:----:|------|
-| `SUPPORT_IPSEC` | 0 (关闭) | **STUCK-AT 1**: IPsec 卸载意外启用，安全通道初始化失败 | SG-ETH-08 | ① Write-Once Lock ② CSS/HSE 握手 Timeout ③ 安全通道状态 Parity | 90% | < 10 μs | 默认关闭；意外启用会导致所有帧被 IPsec 处理但加速器未就绪 → 全帧丢弃 |
-| `SUPPORT_IPSEC` | 0 (关闭) | **CSS/HSE 接口超时**: 安全加速器无响应，安全 PDU 挂起 | SG-ETH-04, SG-ETH-08 | ① 加速器接口 Timeout (≤ 10μs) ② 回退明文传输 (可配置安全策略) ③ DMA 通道独立复位 | 95% | < 100 μs | **关键决策**: 超时后回退明文还是安全停机？→ 推荐可配置策略，默认安全停机 (SAFE_STATE) |
-| `SUPPORT_IPSEC` | 0 (关闭) | **SEU**: 安全描述符/SA (Security Association) 损坏 | SG-ETH-08 | ① SA 表 ECC ② SPI (Security Parameter Index) 范围检查 ③ 序列号窗口校验 | 99% | < 1 μs | SA 表条目关键，需全 ECC + 序列号防重放 |
-| `SUPPORT_SECOC` | 0 (关闭) | **HSE 接口超时**: SecOC Freshness Value 获取失败 | SG-ETH-08 | ① HSE 接口 Timeout ② Freshness Value 本地备份计数器 ③ PDU 认证失败回退 | 90% | < 100 μs | SecOC 依赖 AUTOSAR SecOC 栈 + HSE，超时后 PDU 认证失败 |
-| `SUPPORT_SECOC` | 0 (关闭) | **SEU**: SecOC 认证数据 (Authenticator) 损坏 | SG-ETH-01, SG-ETH-08 | ① 认证数据存储 ECC ② MAC/I-Tag 范围检查 ③ 失败后丢弃帧 (安全侧优先) | 95% | < 10 μs | 认证失败 → 丢弃帧 (不传播不可信数据) |
-| `SUPPORT_DTLS` | 0 (关闭) | **CSS 接口超时**: Chacha20-Poly1305 加速器无响应 | SG-ETH-08 | ① CSS 接口 Timeout ② DTLS 会话状态机 Parity ③ 重传计数器限制 | 90% | < 100 μs | DTLS 有状态，会话状态机需 Parity 保护 |
-| `SUPPORT_DTLS` | 0 (关闭) | **配置错误**: 软件为未初始化的 CSS 配置 DTLS | SG-ETH-03, SG-ETH-08 | ① CSS 就绪状态握手 ② Write-Once Lock ③ 配置一致性检查 (CSS_READY ∧ DTLS=1) | 95% | < 1 ms | 必须检测 CSS 硬件存在性再使能 DTLS |
+| `SUPPORT_IPSEC` | 0 (关闭) | **STUCK-AT 1**: IPsec 卸载意外启用，安全通道初始化失败 | SG-ETH-12 | ① Write-Once Lock ② CSS/HSE 握手 Timeout ③ 安全通道状态 Parity | 90% | < 10 μs | 默认关闭；意外启用会导致所有帧被 IPsec 处理但加速器未就绪 → 全帧丢弃 |
+| `SUPPORT_IPSEC` | 0 (关闭) | **CSS/HSE 接口超时**: 安全加速器无响应，安全 PDU 挂起 | SG-ETH-04, SG-ETH-12 | ① 加速器接口 Timeout (≤ 10μs) ② 回退明文传输 (可配置安全策略) ③ DMA 通道独立复位 | 95% | < 100 μs | **关键决策**: 超时后回退明文还是安全停机？→ 推荐可配置策略，默认安全停机 (SAFE_STATE) |
+| `SUPPORT_IPSEC` | 0 (关闭) | **SEU**: 安全描述符/SA (Security Association) 损坏 | SG-ETH-12 | ① SA 表 ECC ② SPI (Security Parameter Index) 范围检查 ③ 序列号窗口校验 | 99% | < 1 μs | SA 表条目关键，需全 ECC + 序列号防重放 |
+| `SUPPORT_SECOC` | 0 (关闭) | **HSE 接口超时**: SecOC Freshness Value 获取失败 | SG-ETH-12 | ① HSE 接口 Timeout ② Freshness Value 本地备份计数器 ③ PDU 认证失败回退 | 90% | < 100 μs | SecOC 依赖 AUTOSAR SecOC 栈 + HSE，超时后 PDU 认证失败 |
+| `SUPPORT_SECOC` | 0 (关闭) | **SEU**: SecOC 认证数据 (Authenticator) 损坏 | SG-ETH-01, SG-ETH-12 | ① 认证数据存储 ECC ② MAC/I-Tag 范围检查 ③ 失败后丢弃帧 (安全侧优先) | 95% | < 10 μs | 认证失败 → 丢弃帧 (不传播不可信数据) |
+| `SUPPORT_DTLS` | 0 (关闭) | **CSS 接口超时**: Chacha20-Poly1305 加速器无响应 | SG-ETH-12 | ① CSS 接口 Timeout ② DTLS 会话状态机 Parity ③ 重传计数器限制 | 90% | < 100 μs | DTLS 有状态，会话状态机需 Parity 保护 |
+| `SUPPORT_DTLS` | 0 (关闭) | **配置错误**: 软件为未初始化的 CSS 配置 DTLS | SG-ETH-03, SG-ETH-12 | ① CSS 就绪状态握手 ② Write-Once Lock ③ 配置一致性检查 (CSS_READY ∧ DTLS=1) | 95% | < 1 ms | 必须检测 CSS 硬件存在性再使能 DTLS |
 
 **IPsec/SecOC/D-TLS 统一安全目标**:  
-三者共享 **新增 SG-ETH-08**: 防止因外部安全加速器 (CSS/HSE) 接口故障或配置错误导致的安全 PDU 处理失败或不可信数据传播。
+三者共享 **新增 SG-ETH-12**: 防止因外部安全加速器 (CSS/HSE) 接口故障或配置错误导致的安全 PDU 处理失败或不可信数据传播。
 
 > **关键分析**: IPsec/SecOC/D-TLS 的安全机制不在 Ethernet IP 内部完成 (由外部 CSS/HSE 处理)，但 Ethernet IP 提供的 **封装/卸载接口** 本身是故障点。故障模式包括：
 > 1. 接口 Timeout: 加速器无响应导致帧挂起
@@ -112,9 +112,9 @@
 | `PHC_COUNT` | 2 | **双 PHC 漂移**: PHC0 与 PHC1 频率/相位偏差超过阈值 | SG-ETH-02 | ① PHC 交叉比较 (PHC0 vs PHC1, 阈值 ± 4ns) ② 漂移趋势计数器 ③ 自动同步校准 (Addend 补偿) | 95% | < 10 μs | 两 PHC 同源 `clk_ts`，漂移主要源于 Addend 差异 |
 | `PHC_COUNT` | 2 | **Crossbar 绑定错误**: 端口绑定至错误 PHC | SG-ETH-02 | ① PHC 选择寄存器 Parity ② 绑定配置 Shadow 回读 ③ 非法绑定检测 (vPHC 未使能时禁止绑定至 vPHC) | 95% | < 1 μs | 每端口独立 PHC 选择，配置错误影响该端口时间同步 |
 | `PHC_COUNT` | 2 | **SEU**: PHC 计数器/Addend 寄存器翻转 | SG-ETH-02 | ① PHC 计数器 ECC (64-bit 宽数据) ② Addend 寄存器 Parity ③ 纳秒字段范围检查 (0~999,999,999) | 99% | < 1 μs | PHC 为安全关键计数器，必须 ECC 保护 |
-| `SUPPORT_VPHC` | 0 (关闭) | **虚拟化隔离失效**: VM A 的时间错误污染 VM B | SG-ETH-10 | ① VM ID 标签 Parity ② Xen IO Ring 边界检查 ③ vPHC 上下文切换完整性校验 | 90% | < 10 μs | **新增 SG-ETH-10**: 防止 vPHC 虚拟化隔离失效 |
-| `SUPPORT_VPHC` | 0 (关闭) | **vPHC 上下文损坏**: VM 切换时 vPHC 状态未正确保存/恢复 | SG-ETH-10 | ① vPHC 上下文 RAM ECC ② 上下文切换原子性保证 (硬件序列) ③ VM ID 与 vPHC 绑定校验 | 95% | < 10 μs | 上下文切换需硬件原子序列，不能被中断 |
-| `SUPPORT_VPHC` | 0 (关闭) | **SEU**: vPHC 偏移量 (offset from physical PHC) 翻转 | SG-ETH-10 | ① vPHC offset ECC ② 偏移量合理性检查 (超范围 → 使用物理 PHC) ③ 虚拟机时间漂移监控 | 90% | < 10 μs | 偏移量异常时安全回退至物理 PHC |
+| `SUPPORT_VPHC` | 0 (关闭) | **虚拟化隔离失效**: VM A 的时间错误污染 VM B | SG-ETH-14 | ① VM ID 标签 Parity ② Xen IO Ring 边界检查 ③ vPHC 上下文切换完整性校验 | 90% | < 10 μs | **新增 SG-ETH-14**: 防止 vPHC 虚拟化隔离失效 |
+| `SUPPORT_VPHC` | 0 (关闭) | **vPHC 上下文损坏**: VM 切换时 vPHC 状态未正确保存/恢复 | SG-ETH-14 | ① vPHC 上下文 RAM ECC ② 上下文切换原子性保证 (硬件序列) ③ VM ID 与 vPHC 绑定校验 | 95% | < 10 μs | 上下文切换需硬件原子序列，不能被中断 |
+| `SUPPORT_VPHC` | 0 (关闭) | **SEU**: vPHC 偏移量 (offset from physical PHC) 翻转 | SG-ETH-14 | ① vPHC offset ECC ② 偏移量合理性检查 (超范围 → 使用物理 PHC) ③ 虚拟机时间漂移监控 | 90% | < 10 μs | 偏移量异常时安全回退至物理 PHC |
 | `SUPPORT_VPHC` | 0 (关闭) | **配置错误**: 为单 PHC 系统配置 vPHC (PHC_COUNT=1 ∧ VPHC=1) | SG-ETH-03 | ① 配置一致性检查 (PHC_COUNT&lt;2 ∧ VPHC=1 → 报警/拒绝) ② Write-Once Lock | 95% | < 1 ms | Arch Spec 已定义依赖约束 |
 
 **`PHC_COUNT=2` 默认开启说明**:  

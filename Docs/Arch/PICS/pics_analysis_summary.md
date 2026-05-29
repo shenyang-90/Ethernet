@@ -20,6 +20,7 @@
 | IEEE 802.1AE-2018 | `PICS_802.1AE-2018_MACsec.md` | Annex A (原生) | 9 Major Capabilities + SAP/STAT/GEN/VER/FMT |
 | IEEE 802.1AB-2016 | `PICS_802.1AB-2016_LLDP.md` | Annex A (原生) | 9 Sections |
 | IEEE 1588-2019 | `PICS_IEEE-1588-2019_PTP.md` | 自创 (Clause 20+条款提取) | 14 Categories |
+| **IEEE 1722-2016** | **`IEEE_1722_AVTP_PICS.md`** | **自创 (Clause 4~9 提取 + 车载扩展)** | **12 Major Capabilities + 子条目** |
 
 ---
 
@@ -234,6 +235,56 @@
 
 ---
 
+### 2.8 IEEE 1722-2016 AVTP — Zonal Controller AVTP Awareness
+
+| Major Capability | 状态 | 支持值 | 说明 | 影响分析 (若 No) |
+|-----------------|:----:|:------:|------|-----------------|
+| **TK** — Talker 端系统 (AVTP 流发送) | O.1 | **Yes** | 车载 ECU 作为 AVTP Talker | 无法发送 AVTP 流 (ADAS 视频/时钟) |
+| **LS** — Listener 端系统 (AVTP 流接收) | O.1 | **Yes** | 车载 ECU 作为 AVTP Listener | 无法接收 AVTP 流 |
+| **SW** — Switch AVTP 感知 | O.1 | **Yes** | **Zonal Controller 必须支持** | 无法识别和转发 AVTP 流 |
+| **SID** — Stream ID / DA 映射 | TK+LS+SW: M | **Yes** | Stream 识别与路由基础 | 无法按流识别转发 |
+| **TS** — 时间戳生成与解析 | TK+LS: M | **Yes** | gPTP 同步时间戳 | 无法时间同步播放 |
+| **PM** — TSN 优先级映射 | SW: M | **Yes** | AVTP 流 → QoS 队列 | 无法确定性调度 AVTP |
+| **ACF** — ACF (CAN/LIN 封装) | O | **Yes** | 车载控制数据隧道 | 无 CAN over Ethernet 能力 |
+| **ACM** — ACF CAN Multiple | ACF: O | **Yes** | 多 CAN 帧聚合 | 单帧效率低 |
+| **ACB** — ACF CAN Brief | ACF: O | **Yes** | 精简 CAN 封装 | 开销较大 |
+| **CTL** — IEEE 1722.1 AVDECC | O | **No** | 软件层控制协议 | 硬件不实现控制面 |
+| **SRF** — Stream Reservation 失败处理 | SW: M | **Yes** | 未预留流丢弃/转发 | 网络拥塞风险 |
+
+**AVTP 关键子条目分析**:
+
+| 子条目 | 状态 | 支持值 | 影响分析 |
+|-------|:----:|:------:|---------|
+| TK-1~16 — Talker 帧生成 | TK: M/O | Yes | RVF/CRF 硬件发送 |
+| LS-1~8 — Listener 帧解析 | LS: M/O | Yes | Stream ID 匹配、序列号检查 |
+| SID-1~8 — Stream ID 映射 | SW: M/O | Yes | 32+ 条目 SRAM 查表 |
+| TS-TK/LS — 时间戳格式 | TK+LS: M | Yes | 32-bit sec + 32-bit ns，gPTP 基准 |
+| PM-1~12 — TSN 优先级映射 | SW: M/O | Yes | SR Class A/B + CBS + TAS |
+| PM-TAS-1~6 — 门控协同 | PM-TAS: M/O | Yes | Switch 级 TAS GCL |
+| ACF-1~9 — ACF CAN 桥接 | ACF: M/O | Yes | CAN/CAN-Multiple/CAN-Brief |
+
+**AVTP 关键实现决策**:
+
+| 决策项 | 值 | 理由 |
+|---------|:--:|------|
+| AAF (Audio Format) | No | 硬件不直接处理音频，软件后处理 |
+| CVF (Compressed Video) | No | 压缩视频由软件编解码器处理 |
+| IIDC/VSF | No | 车载场景不使用 |
+| ACF LIN | No | LIN 场景较少，CAN 已覆盖 |
+| IEEE 1722.1 AVDECC 完整栈 | No | 软件层实现 (控制面) |
+| SRP 动态预留 | No | 静态配置替代 (与 802.1Q SRP=No 一致) |
+| IP 层 AVTP 传输 | No | 车载 L2 直接传输 |
+
+**AVTP 时间戳映射策略**:
+
+| 时间戳类型 | 格式 | 来源 | 支持状态 |
+|-----------|------|------|:--------:|
+| AVTP_timestamp | 32-bit sec + 32-bit ns | gPTP Grandmaster | **Yes** |
+| CRF_timestamp | 32-bit sec + 32-bit ns + 32-bit pull | CRF Talker | **Yes** |
+| DMA Timestamp | 32-bit ns (截断) | MTL 入口/出口 | **Yes** |
+
+---
+
 ## 3. No Feature 影响分析汇总
 
 ### 3.1 高风险/不可接受缺失
@@ -292,6 +343,7 @@
 | 802.1AE | SAP/STAT/GEN/VER/FMT/SCI/KAY/CS | MACsec安全 |
 | 802.1AB | Chassis/Port/TTL + Tx/Rx状态机 | LLDP拓扑发现 |
 | 1588 | PTPv2.1基础, P2P, Two-Step, 数据集 | PTP底层支持 |
+| **1722** | **TK/LS/SW/SID/TS/PM/ACF** | **AVTP流识别与TSN协同** |
 
 ### 4.2 P1 — 推荐实现 (高价值O)
 
@@ -305,6 +357,7 @@
 | 802.1AE | CSO (confidentiality offset) | 部分加密优化 |
 | 1588 | One-Step时间戳 | 高精度 |
 | 1588 | TC-P2P (residence time) | Switch透明时钟 |
+| **1722** | **RVF/CRF Talker/Listener, ACF CAN Bridge** | **ADAS视频/控制隧道** |
 
 ### 4.3 P2 — 可选实现 (特定场景)
 
@@ -326,6 +379,9 @@
 | 802.1AE | 非标准Cipher Suite | 安全合规要求 |
 | 802.1AB | SNMP MIB访问 | 使用寄存器替代 |
 | 802.1AB | Organization Specific TLV | 标准功能足够 |
+| **1722** | **AAF/CVF/IIDC/VSF/ACF_LIN** | **硬件不直接处理音频/视频编解码/LIN** |
+| **1722** | **IEEE 1722.1 AVDECC 完整栈** | **软件层控制面实现** |
+| **1722** | **IP层AVTP传输** | **车载L2直接传输为主** |
 | 1588 | IPv4/UDP/IPv6映射 | 车载L2直接映射 |
 | 1588 | L1Sync | PHY不支持SyncE |
 | 1588 | HA Profile | 802.1AS已覆盖 |
@@ -347,6 +403,10 @@
 | 802.1AE MACsec | 802.1AS gPTP | PTP消息可能需要绕过MACsec或特殊处理 |
 | 802.1AB LLDP | 802.3 Ethernet | LLDPDU通过Ethernet传输 |
 | 1588-2019 PTP | 802.3 Ethernet | Annex F Ethernet映射 |
+| **1722 AVTP** | **802.1AS gPTP** | **AVTP时间戳依赖gPTP同步基准** |
+| **1722 AVTP** | **802.1Q TSN** | **AVTP流映射到TSN队列与整形器** |
+| **1722 AVTP** | **802.1CB FRER** | **冗余AVTP流依赖FRER序列号管理** |
+| **1722 AVTP** | **802.3 Ethernet** | **AVTPDU通过Ethernet传输 (EtherType=0x22F0)** |
 
 ---
 
@@ -364,7 +424,7 @@
 | `SUPPORT_SWITCH` | 802.1AS BRDG + 802.1CB BG/RS | Yes |
 | `SUPPORT_MACSEC` | 802.1AE SAP/GEN/VER/CS | Yes (外部CSS) |
 | `SUPPORT_VLAN` | 802.1Q VLAN + 802.1AB addr | Yes |
-| `SUPPORT_AVTP` | AVTP Awareness (非PICS) | Yes (软件) |
+| `SUPPORT_AVTP` | **IEEE 1722 TK/LS/SW/SID/TS/PM/ACF** | **Yes** | **新增 PICS 覆盖** |
 | `PHC_COUNT=2` | 802.1AS多域/DOMADD | Yes |
 | `SWITCH_TAS` | 802.1Q SCHED在Switch | Yes |
 | `SWITCH_L3` | 802.1Q无直接对应 | 扩展功能 |

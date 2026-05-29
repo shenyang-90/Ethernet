@@ -1,11 +1,11 @@
 # Ethernet IP Clock and Reset Specification
 
 > **文档名称**: Ethernet IP Clock and Reset Specification  
-> **版本**: v1.1  
-> **日期**: 2026-05-22  
-> **作者**: Arch Agent  
+> **版本**: v1.2  
+> **日期**: 2026-05-29  
+> **作者**: RTL Coding Agent  
 > **评审状态**: Draft  
-> **变更**: 新增典型频率、CRS/CD 时钟域、EEE 门控策略、PLCA 参考时钟、复位计数器参数化
+> **变更**: (PAD-REWORK-012) RTL-MAJ-003: §1.5 PLCA 参考时钟补充 CDC 策略 (时钟域归属、clk_sys↔plca_ref_clk/plca_ref_clk→clk_mac 跨域同步方案)
 
 ---
 
@@ -131,6 +131,8 @@
 | 周期 | **80 ns** | 1 / 12.5 MHz = 80 ns，对应 PLCA 时隙粒度 |
 | 来源 | `clk_sys` ÷ 16 (200 MHz → 12.5 MHz) | 整数分频，无抖动累积 |
 | 精度 | ±50 ppm | 由 `clk_sys` 精度继承 |
+| **时钟域归属** | **`plca_ref_clk` 域** (独立划分，见 §1.2 架构图) | 与 `clk_mac`/`clk_sys` 异步，但同源 |
+| **CDC 策略** | **→ CSR 配置**: `clk_sys` → `plca_ref_clk` 握手同步 (§3.2)，配置影子寄存器原子加载<br>**→ MAC 状态**: `plca_ref_clk` → `clk_mac` 2-flop 同步器 (§3.1)，TO 超时/BEACON 接收事件<br>**→ 系统中断**: `plca_ref_clk` → `clk_sys` 2-flop 同步器 (§3.1)，PLCA 错误/状态变化 | 见 §3 CDC 详细方案 |
 | 用途 | PLCA 状态机、TO 计时器、BEACON 发送对齐 | 802.3cg §148.4.3 |
 
 ---
@@ -289,6 +291,8 @@ assign rst_n_out = rst_release_done ? rst_n_in : 1'b0;
 | 链路状态 | clk_rx_phy | clk_mac | 2-flop 同步器 | 2-3 cycles |
 | LPI 状态 | clk_tx_phy | clk_mac | 2-flop 同步器 | 2-3 cycles |
 | CRS/CD | clk_crs_cd | clk_mac | 2-flop 同步器 | 2-3 cycles |
+| **PLCA 状态事件** | **plca_ref_clk** | **clk_mac** | **2-flop 同步器** | **2-3 cycles** |
+| **PLCA 配置加载完成** | **plca_ref_clk** | **clk_sys** | **2-flop 同步器** | **2-3 cycles** |
 
 **要求**: MTBF > 1000 年 (基于目标工艺和切换频率计算)
 
@@ -300,6 +304,8 @@ assign rst_n_out = rst_release_done ? rst_n_in : 1'b0;
 | 时间戳加载 | clk_sys | clk_ts | 握手同步 | 4-6 cycles |
 | GCL 切换 | clk_sys | clk_mac | 握手同步 + 双银行 | 1 cycle (原子) |
 | VM 偏移更新 | clk_sys | clk_ts | 握手同步 | 4-6 cycles |
+| **PLCA 参数配置 (TO/Burst/NodeID)** | **clk_sys** | **plca_ref_clk** | **握手同步 + 影子寄存器** | **4-6 cycles** |
+| **PLCA 周期状态 (cycle_time/偏差)** | **plca_ref_clk** | **clk_sys** | **握手同步** | **4-6 cycles** |
 
 ### 3.3 异步 FIFO
 
@@ -402,7 +408,11 @@ LPI 请求触发 (tx_lpi_req=1, rx_lpi_ind=1)
 |------|------|------|----------|
 | v0.1 | 2026-05-02 | Arch Agent | 初始模板创建 |
 | v1.0 | 2026-05-11 | Arch Agent | 填充完整时钟/复位/CDC/门控内容 |
-| **v1.1** | **2026-05-22** | **Arch Agent** | **(PAD-REWORK-007)**  
+| **v1.2** | **2026-05-29** | **RTL Coding Agent** | **(PAD-REWORK-012) RTL-MAJ-003**  
+| | | | 1. §1.5 PLCA 参考时钟补充 **时钟域归属** (`plca_ref_clk` 独立域，与 `clk_sys` 同源但异步处理)  
+| | | | 2. §1.5/§3 补充 **CDC 策略**: CSR→PLCA 握手同步、PLCA→MAC 2-flop 同步器、PLCA→SYS 中断同步  
+| | | | 3. §3.1/§3.2/§3.4 新增 PLCA 跨域同步条目 (单 bit/多 bit/总线桥接) |
+| v1.1 | 2026-05-22 | Arch Agent | (PAD-REWORK-007)  
 | | | | 1. 补充 6 个主时钟域 **典型频率值**: `clk_sys=200MHz`, `clk_mac=250MHz`, `clk_ts=250MHz` |
 | | | | 2. `clk_tx_phy`/`clk_rx_phy` 按速率分档 (10M/100M/1G/2.5G/5G/10G) |
 | | | | 3. 新增 §1.4 **CRS/CD 时钟域** (半双工模式，2.5/25 MHz，由 PHY 提供) |

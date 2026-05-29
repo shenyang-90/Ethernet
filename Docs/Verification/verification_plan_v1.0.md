@@ -775,6 +775,75 @@
 
 ---
 
+## 6.11 IEEE 1722-2016 AVTP 验证
+
+### 6.11.1 验证范围
+
+AVTP 验证覆盖 IEEE 1722 Talker、Listener 及 Switch AVTP Awareness 三个角色，重点验证：
+- **帧生成与解析**: AVTPDU Common Header、Stream ID、时间戳、subtype 格式正确性
+- **流识别与错误注入**: Stream ID 匹配/不匹配场景、非法帧处理
+- **TSN 门控协同**: AVTP 流映射到 TSN 队列、与 CBS/TAS 联合调度
+- **ACF 控制隧道**: CAN/CAN-Multiple/CAN-Brief 封装与桥接
+
+### 6.11.2 AVTP 帧生成/解析验证
+
+| 测试项 | Testcase ID | 验证方法 | 通过判据 | SVA 断言 |
+|--------|-------------|----------|----------|----------|
+| **Talker 帧生成** | `TC-AVTP-001-TX-FORMAT` | UVM directed: 配置 Talker 发送 RVF/CRF 帧 | AVTPDU 格式符合 Table 5-1，sequence_num 递增 | `ASSERT_AVTP_SEQ_INC: seq_num == prev_seq_num + 1` |
+| **Listener 帧解析** | `TC-AVTP-002-RX-PARSE` | UVM directed: 注入标准 AVTP 帧到 Listener | 正确解析 Stream ID、timestamp、subtype | `ASSERT_AVTP_STREAM_MATCH: sid_match == 1 -> dma_ch routed` |
+| **Common Header 字段** | `TC-AVTP-003-HDR-FIELDS` | UVM directed: 遍历 sv/tv/gv/mr 位组合 | 各标志位正确影响接收行为 | `ASSERT_AVTP_HDR_VALID: version==0 && ethertype==0x22F0` |
+| **时间戳精度** | `TC-AVTP-004-TS-ACC` | UVM + 参考模型: 比较 AVTP_timestamp 与 gPTP 时间 | 误差 ≤ 1μs | `ASSERT_AVTP_TS_BOUND: |avtp_ts - gptp_ts| <= 1000ns` |
+| **多 subtype 支持** | `TC-AVTP-005-SUBTYPE` | UVM directed: RVF/CRF/ACF 帧交替发送 | 根据 subtype 正确分发到对应处理路径 | `ASSERT_AVTP_SUBTYPE_ROUTE: subtype -> correct_path` |
+
+### 6.11.3 Stream 识别错误注入
+
+| 测试项 | Testcase ID | 验证方法 | 通过判据 | SVA 断言 |
+|--------|-------------|----------|----------|----------|
+| **Stream ID 匹配失败** | `TC-AVTP-006-SID-MISS` | UVM error injection: 注入未注册 Stream ID 的 AVTP 帧 | 帧被丢弃或转发到默认端口，触发 sid_miss 计数器 | `ASSERT_AVTP_SID_MISS: !sid_hit -> drop_or_default` |
+| **Stream ID 表满** | `TC-AVTP-007-SID-FULL` | UVM directed: 配置最大条目数 (32条) 后新增 Stream | 第 33 条 Stream 配置返回 ERROR，现有流不受影响 | `ASSERT_AVTP_SID_FULL: sid_table_count <= MAX_SID` |
+| **非法 EtherType** | `TC-AVTP-008-BAD-ETYPE` | UVM error injection: EtherType != 0x22F0 | 帧被识别为非 AVTP，走标准以太网转发路径 | `ASSERT_AVTP_ETYPE_CHK: ethertype!=0x22F0 -> non_avtp_path` |
+| **版本错误** | `TC-AVTP-009-BAD-VER` | UVM error injection: version != 0 | 版本错误帧丢弃，或按前向兼容处理 | `ASSERT_AVTP_VER_CHK: version!=0 -> drop` |
+| **时间戳过期** | `TC-AVTP-010-TS-EXPIRED` | UVM directed: 注入 presentation_time << current_time 的帧 | 过期帧被丢弃或标记为 LATE | `ASSERT_AVTP_TS_EXPIRED: pres_ts < (curr_ts - thresh) -> late_drop` |
+| **序列号跳跃** | `TC-AVTP-011-SEQ-GAP` | UVM error injection: 故意制造 sequence_num gap > 1 | 检测到丢帧，触发 seq_gap 中断/计数器 | `ASSERT_AVTP_SEQ_GAP: seq_gap > 1 -> gap_detected` |
+| **ACF CAN 格式错误** | `TC-AVTP-012-ACF-BAD` | UVM error injection: ACF 头中 acfhdrlen 与实际 payload 不符 | 格式错误帧丢弃，不传递给 CAN 桥接 | `ASSERT_ACF_LEN_CHK: acfhdrlen == actual_acf_len` |
+
+### 6.11.4 TSN 门控协同验证
+
+| 测试项 | Testcase ID | 验证方法 | 通过判据 | SVA 断言 |
+|--------|-------------|----------|----------|----------|
+| **SR Class A 映射** | `TC-AVTP-013-SR-A` | UVM directed: AVTP 流配置为 SR Class A (PCP=3) | 映射到 TC 0，启用 CBS，信用整形生效 | `ASSERT_AVTP_SR_A: pcp==3 -> tc==0 && cbs_en` |
+| **SR Class B 映射** | `TC-AVTP-014-SR-B` | UVM directed: AVTP 流配置为 SR Class B (PCP=2) | 映射到 TC 1，启用 CBS | `ASSERT_AVTP_SR_B: pcp==2 -> tc==1 && cbs_en` |
+| **Best Effort 控制流** | `TC-AVTP-015-BE-CTL` | UVM directed: ACF/AVDECC 流配置为 Best Effort | 映射到 TC 3，不占用 SR 带宽 | `ASSERT_AVTP_BE_CTL: acf_frame -> tc==3 && !sr_class` |
+| **TAS 门控窗口内 AVTP 传输** | `TC-AVTP-016-TAS-WINDOW` | UVM directed: TAS GCL 配置 AVTP 专用门控窗口 | 门控开启期间 AVTP 帧正常发送，关闭期间缓冲或丢弃 | `ASSERT_AVTP_TAS_GATE: tas_gate_open && avtp_ready -> tx_start` |
+| **TAS 门控边界保护** | `TC-AVTP-017-TAS-BOUNDARY` | UVM directed: 门控关闭前 1 cycle 启动长帧传输 | 帧不被截断，或截断后正确填充/FCS 重算 | `ASSERT_AVTP_TAS_BOUNDARY: !tas_gate_open -> !new_tx_start` |
+| **CBS + TAS 联合调度** | `TC-AVTP-018-CBS-TAS` | UVM performance: AVTP 突发流在 TAS 窗口内 CBS 整形 | 实际带宽与配置误差 < 0.1%，无帧丢失 | `ASSERT_AVTP_CBS_TAS: credit >= 0 && gate_open -> tx_scheduled` |
+| **FP 抢占 AVTP 窗口** | `TC-AVTP-019-FP-PREEMPT` | UVM directed: TAS AVTP 窗口内 Express 帧插入 | Express 帧抢占可抢占帧，AVTP 帧从断点恢复 | `ASSERT_AVTP_FP: express_req -> preempt_ok && resume_ok` |
+| **FRER 冗余 AVTP 流** | `TC-AVTP-020-FRER-AVTP` | UVM directed: AVTP 流启用 FRER 双路径发送 | R-TAG 序列号正确注入，双路径延迟差 < 100μs | `ASSERT_AVTP_FRER: rtag_seq == frer_seq_gen && path_delay < 100us` |
+| **gPTP 域与 AVTP 时间一致性** | `TC-AVTP-021-GPTP-ALIGN` | UVM directed: gPTP 时间跳变 (闰秒/域切换) | AVTP 时间戳正确跟随 gPTP，无时间漂移 | `ASSERT_AVTP_GPTP_ALIGN: |avtp_ts_base - gptp_gm_ts| < 1us` |
+
+### 6.11.5 ACF CAN 桥接验证
+
+| 测试项 | Testcase ID | 验证方法 | 通过判据 | SVA 断言 |
+|--------|-------------|----------|----------|----------|
+| **ACF CAN 单帧桥接** | `TC-AVTP-030-ACF-SINGLE` | UVM directed: 单 CAN 帧封装为 ACF CAN 发送 | CAN ID/DLC/Data 正确提取，桥接到内部 CAN IF | `ASSERT_ACF_CAN_BRIDGE: acf_can_valid -> can_if_tx_en` |
+| **ACF CAN Multiple 聚合** | `TC-AVTP-031-ACF-MULTI` | UVM directed: 4 条 CAN 帧聚合为 ACM 发送 | 各子帧 CAN ID 独立解析，顺序保持 | `ASSERT_ACF_MULTI_SEQ: multi_frame[i].can_id == expected[i]` |
+| **ACF CAN Brief 精简** | `TC-AVTP-032-ACF-BRIEF` | UVM directed: Brief 格式 CAN 帧收发 | 精简字段 (无 timestamp) 正确解析 | `ASSERT_ACF_BRIEF_LEN: brief_payload_len == 8+dlc` |
+| **ACF CAN 时间戳** | `TC-AVTP-033-ACF-TS` | UVM directed: ACF CAN 帧时间戳与 gPTP 对齐 | ACF timestamp 与 AVTP timestamp 同基准 | `ASSERT_ACF_TS_ALIGN: |acf_ts - gptp_ts| < 1us` |
+
+### 6.11.6 AVTP 覆盖率目标
+
+| Covergroup | 覆盖点 | 目标 | 说明 |
+|-----------|--------|------|------|
+| `cg_avtp_header` | sv/tv/gv/mr × version × ethertype | 100% | 公共头所有合法组合 |
+| `cg_avtp_subtype` | RVF/CRF/ACF_CAN/ACF_CM/ACF_CB | 100% | 支持的所有 subtype |
+| `cg_avtp_stream_id` | 匹配/不匹配/表满/边界 | 100% | Stream ID 查表场景 |
+| `cg_avtp_ts` | 正常/过期/超前/闰秒边界 | 100% | 时间戳场景 |
+| `cg_avtp_qos_map` | SR_A/SR_B/BE × traffic class | 100% | 优先级映射 |
+| `cg_avtp_tas` | gate_open/closed × avtp_ready/not_ready | 100% | 门控协同 |
+| `cg_avtp_acf` | CAN/CM/CB × 单帧/多帧 | 100% | ACF 场景 |
+
+---
+
 ## 7. Formal 验证 (Formal Verification)
 
 ### 7.1 项目决策
@@ -912,6 +981,7 @@
 |------|------|------|----------|
 | v0.1 | 2026-05-02 | Verification Agent | 初始模板创建 |
 | v1.0 | 2026-05-21 | Verification Agent | PAD Rework: 新增 §3 黄金配置 (5个)、§4 覆盖率目标、§5 Erratum 回归套件 (13项)、§6 PICS 映射、§7 Formal N/A、§8/§9 环境/回归策略 |
+| v1.1 | 2026-05-29 | Verification Agent | PAD-REWORK-014: 新增 §6.11 AVTP 验证章节 (帧生成/解析、Stream 识别错误注入、TSN 门控协同、ACF CAN 桥接)，补充 IEEE 1722 AVTP PICS 文件 |
 
 ---
 
@@ -922,10 +992,12 @@
 - [x] 13 项 erratum 各有 testcase ID + SVA 断言 (TC4-ERR-001~013)
 - [x] PLCA 时序 erratum 补充 testcase (TC4-ERR-014~016) + 外部 PHY 约束 (TC4-ERR-017~020)
 - [x] PICS Yes/No/Configurable 映射到 testcase (802.1AS/802.1Q/802.1AE/1588/802.3/802.1CB/802.1AB/1722)
+- [x] **AVTP 验证章节完整** (§6.11: 帧生成/解析、Stream 识别错误注入、TSN 门控协同、ACF CAN 桥接)
 - [x] Formal 章节标记 "不投入" 并说明理由 (§7)
 - [x] 删除原 VERIF-CRIT-003 相关内容
 - [x] 验证环境定义 (UVM Agent + FPGA 平台)
 - [x] 回归策略定义 (Smoke/Nightly/Weekly/Release Gate)
+- [x] **AVTP PICS 文件**: `Docs/Arch/PICS/IEEE_1722_AVTP_PICS.md` (Talker/Listener/Stream ID/TSN 映射/ACF)
 
 ---
 

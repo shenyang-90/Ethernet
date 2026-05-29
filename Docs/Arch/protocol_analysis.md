@@ -19,7 +19,7 @@
 | **Base MAC** | IEEE 802.3 | 2008/2022 | P0 | Medium |
 | **TSN Core** | 802.1AS (gPTP) | 2020 | **P0** | High |
 | | 802.1Qbv (TAS) | 2015 | **P0** | High |
-| | 802.1Qbu (Frame Preemption) | 2016 | **P0** | High |
+| | 802.1Qbu (Frame Preemption) | 2016 | **P0** | Medium |
 | | 802.1Qav (CBS) | 2009 | **P0** | Medium |
 | | 802.1Qci (PSFP) | 2017 | **P0** | High |
 | | 802.1CB (FRER) | 2017 | **P0** | High |
@@ -2702,10 +2702,10 @@ ethernet_top
 |------|------|:--------:|:----------:|-------------|
 | 802.1AS gPTP | 2020 | P0 | **P0** | BRDG(Bridge)为Zonal Controller场景M；MIPERF/MDFDPP/UMM为No |
 | 802.1Qbv TAS | 2015 | P0 | **P0** | SCHED必须 |
-| 802.1Qbu FP | 2016 | P1 | **P0** | PRE升级，帧抢占为低延迟关键 |
+| 802.1Qbu FP | 2016 | P1 | **P1 (待需求确认)** | PRE升级，帧抢占为低延迟关键 → 追溯: 待补充 |
 | 802.1Qav CBS | 2009 | P0 | **P0** | ETS中的CBS必须 |
-| 802.1Qci PSFP | 2017 | P1 | **P0** | PSFP为网络安全流过滤，升级P0 |
-| 802.1CB FRER | 2017 | P1 | **P0** | 冗余可靠性，车载安全关键，升级P0 |
+| 802.1Qci PSFP | 2017 | P1 | **P1 (待需求确认)** | PSFP为网络安全流过滤，升级P0 → 追溯: 待补充 |
+| 802.1CB FRER | 2017 | P1 | **P1 (待需求确认)** | 冗余可靠性，车载安全关键，升级P0 → 追溯: 待补充 |
 | 802.1AE MACsec | 2018 | P1 | **P1** | GEN/VER/CS必须，MSC/TC/MSAK为No(单SC设计) |
 | **802.1AB LLDP** | **2016** | **—** | **P1** | **新增：拓扑发现协议，Chassis/Port/TTL必须** |
 | **IEEE 1722 AVTP** | **2016** | **—** | **P1** | **新增：TC4x DRE/R-Car S4 AVB感知，AVTP/ACF封装** |
