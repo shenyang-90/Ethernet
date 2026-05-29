@@ -406,6 +406,31 @@
 
 ---
 
+### 1.4.5 安全 CSR 地址空间 (PAD-009)
+
+安全相关寄存器纳入 CSR 映射，地址范围 **0x700 ~ 0x718**，定义如下：
+
+| 寄存器 | 地址偏移 | 位宽 | 说明 | 访问权限 | 安全属性 |
+|--------|----------|------|------|----------|----------|
+| `SAFETY_STATE` | 0x700 | 2-bit | 当前安全状态 (00=NORMAL, 01=DEGRADED, 10=SAFE_STATE, 11=Reserved) | RO | 安全关键 |
+| `SAFETY_ERR_CNT` | 0x704 | 32-bit | ECC 错误计数器 (每通道独立) | RO/Clear-on-Write | 安全关键 |
+| `SAFETY_DEGRADED_MASK` | 0x708 | 64-bit | 降级模式通道屏蔽 (DMA/MAC/PHY/Switch 分层) | RW (Write-Once) | 安全关键 |
+| `SAFETY_TIMEOUT_CFG` | 0x70C | 32-bit | 超时阈值配置 (DMA/CSR/Bus 独立) | RW (Write-Once) | 安全关键 |
+| `SAFETY_ERR_LOG` | 0x710 | 32-bit | 首次错误类型记录 (FIFO，深度 16) | RO | 安全关键 |
+| `SAFETY_BIST_CTRL` | 0x714 | 32-bit | 安全自检控制 (启动/状态/结果) | RW | 安全关键 |
+| `SAFETY_SMU_ALERT` | 0x718 | 32-bit | SMU 报警信号输出配置 | RW (Write-Once) | 安全关键 |
+| `SAFETY_UNLOCK` | 0x71C | 16-bit | 解锁序列寄存器 (写 0x5A5A 解锁 Write-Once) | WO | 安全关键 |
+
+> **访问权限说明**:
+> - **RO**: 只读，任何访问均可读
+> - **RW**: 可读可写，但 Write-Once 位仅首次写入有效
+> - **WO**: 仅写入，读取返回 0
+> - **Clear-on-Write**: 写 1 清零
+> - **Write-Once**: 首次写入后锁定，需通过 `SAFETY_UNLOCK` 解锁序列才能修改
+> - **安全关键寄存器**: 受 CSR Parity 保护，非法访问触发 `SAFETY_SMU_ALERT`
+
+---
+
 ## 2. System Block Diagram
 
 ### 2.1 顶层框图
@@ -1135,7 +1160,7 @@ announceReceiptTimeoutInterval = portDS.announceReceiptTimeout × announceInterv
 | **Switch Core** | **~14~52** | **~84~128** | **参数化: f(N)** | N=`SWITCH_PORT_COUNT`; 仲裁器 ~14kGE@N=4, ~52kGE@N=8; FDB ~84KB; VLAN ~8KB; L3 ~16KB; TAS GCL ~16KB |
 | PTP/Timestamp | ~10 | 2 | `10 + 10×(PHC_COUNT-1)` | 基础 + 每额外 PHC |
 | vPHC 虚拟化 | ~5 | 1 | `5 × SUPPORT_VPHC` | Xen IO Ring 逻辑 |
-| Safety/ECC | ~15 | 0 | 固定 | 校验逻辑 |
+| Safety/ECC | ~15 + 2×(MAC_COUNT−1) | 0 | 参数化: `15 kGE + 2 kGE × (MAC_COUNT − 1)` | 校验逻辑按 MAC 实例累加 |
 | HSPHY IF | ~5 | 0 | `5 × PHY_COUNT` | 每 PHY 接口逻辑 |
 | **总计（典型 N=4）** | **~205** | **~160** | — | 4×GMAC + 4-port Switch + 双 PHC |
 | **总计（扩展 N=8）** | **~280** | **~210** | — | 8×GMAC + 8-port Switch + 双 PHC |
@@ -1599,7 +1624,7 @@ CPU/Software
 | **FSM Parity** | 所有状态机 (MAC/DMA/MTL/PTP/**Switch**) | 奇偶校验错误 | 安全状态转换 + 报警 |
 | **Timeout** | CSR 访问、DMA 响应、**Switch 转发** | 响应超时检测 | 复位请求 + 状态上报 |
 | **Clock Monitor** | 各时钟域 | 时钟丢失/毛刺检测 | 安全复位 + 备用时钟 |
-| **Lockstep** | 关键控制信号 (可选) | 双核比较 | NMI 触发 |
+| **Lockstep** | 关键控制信号 (可选) | 双核比较 | **IP 内部不内嵌 Lockstep，SoC 级可选提供** | NMI 触发 |
 
 ### 8.2 安全状态机
 

@@ -107,6 +107,7 @@ SG-ETH-14 (ASIL-B)
 | EEE∩TSN 配置冲突 | `SUPPORT_EEE` | 0 (关闭) | NORMAL → **SAFE_STATE** | 互锁检测触发，硬件拒绝非法配置并停机 |
 | 半双工 + TSN 冲突 | `PHY_x_DUPLEX` | 1 (全双工) | 配置阶段 **拒绝写入** | 配置互锁在写入阶段即拒绝，不进入运行态 |
 | PHC 漂移超阈值 | `PHC_COUNT=2` | 2 (开启) | NORMAL → **DEGRADED** | PHC0 vs PHC1 漂移 > ±4ns，累计 3 次 |
+| PHC 计数器 ECC 双 bit / Crossbar 错误绑定 | `PHC_COUNT=2` | 2 (开启) | NORMAL → **DEGRADED** | PHC 计数器不可纠正错误或端口-MAC 映射不一致，触发端口降级 |
 | vPHC 隔离失效 | `SUPPORT_VPHC` | 0 (关闭) | NORMAL → **SAFE_STATE** | VM 时间域污染为关键故障，直接安全停机 |
 | 安全加速器接口超时 | `SUPPORT_IPSEC/SECOC/DTLS` | 0 (关闭) | NORMAL → **DEGRADED** | 单次超时降级；持续超时 → SAFE_STATE |
 | 安全加速器关键故障 | `SUPPORT_IPSEC/SECOC/DTLS` | 0 (关闭) | DEGRADED → **SAFE_STATE** | 安全 PDU 不可信传播风险 |
@@ -254,8 +255,33 @@ SG-ETH-14 (ASIL-B)
 | **PHC 漂移故障** | **PHC 交叉比较 + Addend 范围检查** | **95%** | **≥95%** | **≥60% (低)** | **✅** |
 | **虚拟化隔离失效** | **VM ID Parity + IO Ring 边界检查** | **90%** | **≥90%** | **≥60% (低)** | **✅** |
 | **AVTP 流识别错误** | **RX Filter ECC + DMA 通道隔离** | **99%** | **≥99%** | **≥90% (中)** | **✅** |
+| **PHC 计数器/Crossbar 故障** | **PHC 计数器 ECC/Parity + Crossbar 映射校验** | **95%** | **≥95%** | **≥60% (低)** | **✅** |
 
 > [^1^]: Infineon TC4x SECDED ECC 覆盖率为 100% 单 bit 纠正 + 100% 双 bit 检测，数据来源：Infineon AURIX TC4x Safety Manual。
+
+### 3.2a DC 量化计算方法 (PAD-003)
+
+根据 ISO 26262-5:2018 Table D，每种安全机制的 DC 通过以下方法计算：
+
+| 安全机制 | DC 计算方法 | 验证手段 | 工具/环境 | 覆盖率指标 |
+|----------|-------------|----------|-----------|------------|
+| **ECC (SECDED)** | 故障注入: 强制单/双 bit 翻转 → 统计纠正/检测率 | 存储器故障注入仿真 | UVM + VCS/Xcelium | 单 bit 100% 纠正 / 双 bit 100% 检测 |
+| **FSM Parity** | 形式验证: 遍历所有状态编码 → 统计非法编码检测率 | 形式属性检查 (SVA) | JasperGold/VC Formal | 所有非法状态编码 100% 检测 |
+| **Timeout** | 故障注入: 屏蔽响应信号 → 统计超时触发率 | 总线/DMA 故障注入 | UVM + 断言检查 | 100% 超时场景触发 |
+| **Clock Monitor** | 故障注入: 修改分频比/注入毛刺 → 统计频率偏移检测率 | 时钟故障注入 | UVM + 频率计数器模型 | 100% 超阈值漂移检测 |
+| **CSR Write-Once Lock** | 形式验证: 遍历所有 CSR 地址 → 统计锁存后写入拒绝率 | 寄存器访问属性检查 | JasperGold/VC Formal | 100% 锁存后写入拒绝 |
+| **配置互锁检测** | 形式验证: 遍历所有非法参数组合 → 统计拒绝率 | 参数组合属性检查 | JasperGold/VC Formal | 100% 非法组合拒绝 |
+| **PHC 计数器 ECC/Parity** | 故障注入: 强制 PHC 计数器 bit 翻转 → 统计检测/纠正率 | PHC 寄存器故障注入 | UVM + PTP 时间戳模型 | 单 bit 100% 纠正 / 溢出 100% 检测 |
+| **Crossbar 错误绑定检测** | 形式验证: 遍历所有端口-MAC 映射组合 → 统计非法绑定检测率 | Crossbar 映射属性检查 | JasperGold/VC Formal | 100% 非法绑定检测 |
+| **RX Filter ECC + DMA 隔离** | 故障注入: 强制 Filter 表/DMA 映射 bit 翻转 → 统计检测率 | AVTP 流故障注入 | UVM + 流识别模型 | 100% 非法流/映射检测 |
+| **PHC 交叉漂移监控** | 故障注入: 注入相位/频率偏移 → 统计漂移检测率 | 双 PHC 比较故障注入 | UVM + 时间基准模型 | 100% 超阈值漂移检测 |
+| **VM ID Parity + IO Ring 边界** | 故障注入: 篡改 VM ID / 越界访问 → 统计检测率 | 虚拟化故障注入 | UVM + Xen IO Ring 模型 | 100% 非法 VM ID / 越界检测 |
+
+> **DC 计算公式**: `DC = 检测到的故障数 / 注入的故障总数 × 100%`
+> 
+> **量化验证入口**: 每种安全机制需完成 ≥1000 次故障注入 (覆盖所有故障模式) 或形式验证覆盖所有状态空间。
+> 
+> **完整方法论**: 见 `Docs/FuSa/dc_quantification_method.md`。
 
 ### 3.3 多点故障检测间隔 (MPFDI)
 
@@ -265,9 +291,24 @@ SG-ETH-14 (ASIL-B)
 | 时钟漂移 → 时钟丢失 | 频率偏差累积检测 | 100 μs |
 | 多 DMA 通道超时 | 独立超时 + 汇总报警 | 各通道独立 |
 | **PHC 单漂移 → 双 PHC 同时漂移** | **PHC 交叉比较 + 漂移趋势计数** | **1 ms (1000 次比较周期)** |
+| **PHC 计数器累积错误 → Crossbar 绑定错误** | **PHC ECC 错误计数器 + Crossbar 映射校验** | **1000 个时钟周期** |
 | **EEE LPI 反复唤醒失败** | **LPI 唤醒错误计数器 + 趋势监控** | **100 个 LPI 周期** |
 | **安全加速器间歇性超时** | **加速器接口错误计数器 + 降级策略** | **10 次超时** |
 | **vPHC 多 VM 级联污染** | **VM ID 校验 + IO Ring 边界突破检测** | **单次检测 (实时)** |
+
+### 3.4 FHTI 最坏情况分析 (WCA) (PAD-005)
+
+| 模块 | FHTI 典型值 | FHTI WCA | 最坏情况场景 | 延迟构成 |
+|------|-------------|----------|--------------|----------|
+| **Switch** | 1 μs | 10 μs | 多端口同时拥塞 + Crossbar 仲裁冲突 | 5 μs (排队) + 3 μs (仲裁) + 2 μs (状态切换) |
+| **PTP/gPTP** | 10 μs | 100 μs | 双 PHC 同时漂移 + BMCA 重收敛 | 50 μs (漂移检测) + 30 μs (BMCA 计算) + 20 μs (状态切换) |
+| **MAC/DMA** | 1 μs | 5 μs | AXI 总线仲裁饥饿 + 多通道超时 | 3 μs (仲裁) + 1 μs (超时检测) + 1 μs (复位) |
+| **EEE LPI** | 10 μs | 100 μs | PHY 唤醒信号丢失 + 总线重仲裁 | 50 μs (LPI 唤醒 Timeout) + 30 μs (总线恢复) + 20 μs (状态切换) |
+| **安全加速器** | 10 μs | 100 μs | CSS/HSE 总线挂起 + 重传 | 50 μs (接口 Timeout) + 30 μs (握手重试) + 20 μs (安全停机) |
+| **AVTP** | 1 μs | 10 μs | 多流同时注入 + Filter 表满载 | 5 μs (Filter 查表) + 3 μs (DMA 队列切换) + 2 μs (状态切换) |
+| **vPHC** | 10 μs | 100 μs | 多 VM 同时切换 + IO Ring 越界 | 50 μs (边界检查) + 30 μs (上下文恢复) + 20 μs (VM 隔离) |
+
+> **WCA 计算原则**: 最坏情况 = 2×典型值 (单故障) + 串行处理延迟 (多故障级联)。所有 WCA 均满足 ASIL-B FHTI 预算 ≤ 100 μs。
 
 ---
 
@@ -323,7 +364,7 @@ SG-ETH-14 (ASIL-B)
 
 | 转换路径 | 触发条件 | 延迟要求 | 恢复策略 |
 |----------|----------|----------|----------|
-| NORMAL → DEGRADED | ECC 单 bit 错误计数 ≥ 阈值 / 单通道超时 / 非关键时钟漂移 / **EEE LPI 唤醒超时** / **PHC 漂移超阈值** / **AVTP 单流误路由** / **加速器接口超时** | <10 μs | 自动，无需软件干预 |
+| NORMAL → DEGRADED | ECC 单 bit 错误计数 ≥ 阈值 / 单通道超时 / 非关键时钟漂移 / **EEE LPI 唤醒超时** / **PHC 漂移超阈值** / **PHC 计数器 ECC 双 bit / Crossbar 错误绑定** / **AVTP 单流误路由** / **加速器接口超时** | <10 μs | 自动，无需软件干预 |
 | NORMAL → SAFE_STATE | ECC 双 bit 错误 / FSM Parity 错误 / 关键时钟丢失 / 多通道故障 / **EEE∩TSN 互锁触发** / **vPHC 隔离失效** / **安全加速器关键故障** | <2 μs | 硬件自动，软件确认后复位 |
 | DEGRADED → NORMAL | 故障通道修复 + 软件确认 + 错误计数器清零 | 软件控制 | 需 SMU/EcuM 确认 |
 | DEGRADED → SAFE_STATE | 降级模式超时 (可配置) / 新故障通道出现 / 关键模块故障 / **多 VM 时间域污染** / **安全加速器持续无响应** | <10 μs | 硬件自动 |
@@ -343,13 +384,51 @@ SG-ETH-14 (ASIL-B)
 
 ---
 
+### 4.4 Switch 降级策略 (PAD-006)
+
+#### 4.4.1 `SAFETY_DEGRADED_MASK` 位宽定义
+
+`SAFETY_DEGRADED_MASK` 采用分层位域设计，明确各模块降级粒度：
+
+| 位域 | 位宽 | 说明 | 降级对象 |
+|------|------|------|----------|
+| **DMA_CH_MASK** | 32-bit | 每 bit 对应一个 DMA 通道 (0~31) | 单通道级降级 |
+| **MAC_MASK** | 8-bit | 每 bit 对应一个 MAC 实例 (0~7) | 模块级降级 |
+| **PHY_MASK** | 8-bit | 每 bit 对应一个 PHY 实例 (0~7) | 端口级降级 |
+| **Switch_MASK** | 1-bit | Switch 整体降级 | 模块级降级 |
+| **保留** | 15-bit | 预留扩展 | — |
+| **合计** | **64-bit** | — | — |
+
+> **位宽公式**: `32 + 8 + 8 + 1 + 15 = 64-bit`
+
+#### 4.4.2 端口级 vs 模块级降级
+
+| 降级类型 | 触发条件 | 影响范围 | 恢复策略 |
+|----------|----------|----------|----------|
+| **端口级** (PHY_MASK) | 单 PHY 故障 (EEE LPI 超时、PHY 信号丢失) | 仅该 PHY 端口关闭，其他端口继续 | 软件确认 + PHY 复位 |
+| **模块级** (MAC_MASK) | 单 MAC 关键故障 (ECC 双 bit、FSM Parity) | 该 MAC 及关联 DMA 通道关闭 | 软件确认 + MAC 复位 + BIST |
+| **通道级** (DMA_CH_MASK) | 单 DMA 通道超时 | 仅该通道关闭，其他通道继续 | 自动 (计数器清零) |
+| **Switch 级** (Switch_MASK) | Switch 核心故障 (FDB 双 bit、Crossbar 死锁) | 所有 Switch 端口关闭，独立 MAC 不受影响 | 软件确认 + Switch 复位 |
+
+#### 4.4.3 DEGRADED → NORMAL 软件确认机制
+
+1. **硬件条件**: 故障通道错误计数器清零 + 故障源消失
+2. **软件确认**: 写 `SAFETY_DEGRADED_MASK` 对应 bit 为 0 (需解锁序列)
+3. **解锁序列**: 写 `0x5A5A` 到 `SAFETY_UNLOCK` (0x71C) → 写 Mask 清除 → 写 `0x0000` 到 `SAFETY_UNLOCK`
+4. **BIST 验证**: 进入 NORMAL 前，硬件自动执行 LBIST (≥100 μs)，失败则返回 DEGRADED
+5. **SMU 通知**: 状态切换完成后，通过 `SAFETY_SMU_ALERT` 上报 SMU
+
+> **安全约束**: 未通过解锁序列的 Mask 写操作被拒绝；LBIST 失败时禁止进入 NORMAL。
+
+---
+
 ## 5. ASIL 分解策略
 
 ### 5.1 基线 ASIL-B 实现
 
 | 安全机制 | 实现方式 | 面积代价 | 验证方法 |
 |----------|----------|----------|----------|
-| ECC (SECDED) | 每存储器实例独立 ECC 编解码器 | +8% SRAM 面积 | 故障注入测试 |
+| ECC (SECDED) | 每存储器实例独立 ECC 编解码器 | +8% SRAM 面积 (按 MAC_COUNT 参数化: 15 kGE + 2 kGE × (MAC_COUNT − 1)) | 故障注入测试 |
 | FSM Parity | 状态编码增加 1-bit parity | +5% 逻辑面积 | 形式验证 + 故障注入 |
 | Timeout | 独立计数器 + 比较器 | +2% 逻辑面积 | 定向测试 |
 | Clock Monitor | 频率计数器 + 阈值比较 | +1% 逻辑面积 | 定向测试 |
@@ -388,7 +467,7 @@ SG-ETH-14 (ASIL-B)
 - ASIL-B/C 增量在 IP 内部（~17-23% 面积）
 - ASIL-D 增量在 SoC 级（Lockstep/SMU/PMIC 不计入 IP 面积）
 
-> **设计决策**: 本 IP 不内嵌 Lockstep 或双冗余 SMU（面积 +35% 且与 SoC 重复），而是输出标准化 SMU_ALERT[3:0] 信号，由 SoC SMU 统一处理。这与 TC4x 的模块-系统分层策略一致。
+> **设计决策**: **IP 内部不内嵌 Lockstep，SoC 级可选提供。** 本 IP 不内嵌 Lockstep 或双冗余 SMU（面积 +35% 且与 SoC 重复），而是输出标准化 SMU_ALERT[3:0] 信号，由 SoC SMU 统一处理。这与 TC4x 的模块-系统分层策略一致。
 
 ### 5.3a 参数化配置对 ASIL 分解的影响 (PAD-REWORK-005)
 
@@ -456,6 +535,39 @@ SG-ETH-01~06 (ASIL-B) → 模块级
 
 > **设计决策**: 本 IP 的 ASIL-B 基线认证以 **默认配置** (`SUPPORT_AVTP=1`, `PHC_COUNT=2`, `PHY_x_DUPLEX=1`, 其他新增参数=0) 为基准。可选参数的启用不提升模块级 ASIL 等级，但要求启用时相应安全机制必须存在且通过故障注入验证。
 
+### 5.4 ASIL 分解依据 (PAD-004)
+
+本 IP 的 ASIL 分解策略基于 ISO 26262-9:2018 第 5 章，遵循以下原则：
+
+#### 1. 独立性等级 (Independence Level)
+
+| 分解层级 | 安全目标 | 独立性要求 | 实现方式 | 合规性 |
+|----------|----------|------------|----------|--------|
+| **Element Level** | SG-ETH-01~14 | 无额外要求 | 单一模块内安全机制 | ✅ ASIL-B 满足 |
+| **Component Level** | SG-ETH-01~14 → SoC SMU | 独立性等级 D (最高) | SMU 独立时钟/电源/复位 | ✅ SoC 级实现 |
+| **System Level** | IP + SMU + Lockstep + PMIC | 共存分析 + CCF 评估 | 物理隔离 + 异构冗余 | ✅ 系统级 ASIL-D |
+
+#### 2. 共存分析 (Coexistence Analysis)
+
+| 共存场景 | 不同 ASIL 模块 | 干扰风险 | 缓解措施 |
+|----------|----------------|----------|----------|
+| **ASIL-B IP + QM DMA** | 同一芯片 | QM DMA 错误影响安全通道 | DMA 通道隔离 + 独立超时 + 安全状态机 |
+| **ASIL-B IP + ASIL-D SMU** | 同一 SoC | SMU 故障导致安全报警丢失 | SMU 双冗余 (SAFE0/SAFE1) |
+| **ASIL-B IP + ASIL-B Switch** | 同一芯片 | Switch 故障影响 MAC 安全通道 | Switch 独立安全状态机 + 独立降级 |
+| **ASIL-B MAC + QM PHY** | 外部 PHY | PHY 故障不影响 MAC 安全机制 | PHY 独立降级 + 端口级屏蔽 |
+
+#### 3. 共因失效 (CCF) 评估
+
+| CCF 来源 | 影响范围 | 检测策略 | 缓解措施 | 残余风险 |
+|----------|----------|----------|----------|----------|
+| **电源失效** | 全模块 | 外部 PMIC (TLF4x) | 独立电源域 + 安全关断 | 极低 (PMIC 独立) |
+| **时钟失效** | 全模块 | Clock Monitor + 冗余时钟 | 备用 PLL 切换 | 低 (PLL 独立) |
+| **复位失效** | 全模块 | 外部看门狗 | 独立复位源 + 安全复位 | 极低 (WDT 独立) |
+| **SEU 同时命中** | 多模块 | ECC + Parity 独立检测 | 独立校验域 | 低 (校验域分离) |
+| **配置共因错误** | 多模块 | 配置互锁检测 | 硬件拒绝非法组合 | 极低 (互锁硬件) |
+
+> **CCF 评估结论**: 本 IP 的 CCF 风险通过 **SoC 级独立监控单元 (PMIC + WDT + SMU)** 覆盖。模块级安全机制 (ECC + Parity + Timeout) 假设 SoC 级基础设施正常，这一假设在共存分析中明确声明。
+
 ---
 
 ## 6. 竞品功能安全对标
@@ -509,6 +621,7 @@ SG-ETH-01~06 (ASIL-B) → 模块级
 | **CSS/HSE 接口 Timeout** | **屏蔽 CSS/HSE 响应信号** | **接口 Timeout → DEGRADED/SAFE_STATE** | **超时阈值准确，安全停机** |
 | **SecOC Freshness 失败** | **强制 HSE Freshness Value 错误** | **PDU 认证失败 → 丢弃帧** | **不可信帧不传播** |
 | **PHC 漂移注入** | **强制 PHC0 Addend 偏移** | **PHC 交叉比较报警 → DEGRADED** | **漂移阈值准确，PHC 切换正确** |
+| **PHC 计数器双 bit / Crossbar 绑定错误** | **强制 PHC 计数器双 bit 翻转 / Crossbar 端口映射篡改** | **PHC ECC 报警 → DEGRADED / Crossbar 映射校验 → 端口降级** | **计数器保护有效，绑定检测准确** |
 | **vPHC VM 隔离突破** | **强制 VM ID 篡改 + IO Ring 越界** | **VM ID Parity + 边界检查报警 → SAFE_STATE** | **隔离失效实时检测** |
 
 ### 7.2 自检 (BIST) 策略

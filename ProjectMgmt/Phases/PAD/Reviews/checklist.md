@@ -149,10 +149,10 @@
 | 4 | **关闭 RTL-CRIT-004**: 统一 `SWITCH_PORT_COUNT` 范围 | Arch Agent | **P0** | PAD 补完 | ✅ **已关闭** (DEC-001: 混合策略 2~8, 默认 4) |
 | 5 | **关闭 FUSA-PAD-001**: 新增参数安全影响评估 | FuSa Agent | **P0** | PAD 补完 | ✅ **已关闭** (`safety_concept.md` v1.1) |
 | 6 | **关闭 VERIF-CRIT-001/002**: 黄金配置/覆盖率/Erratum回归 | Verification_Agent | **P0** | PAD 补完 | ✅ **已关闭** (`verification_plan_v1.0.md`) |
-| 7 | 修复 Arch Major (M-1~3): 并集决策语义/需求追溯/erratum 遗漏 | Arch Agent | P1 | PAD 补完 | ⬜ 待处理 |
-| 8 | 修复 RTL Major (M-1~7): 时序约束/AXI/PLCA 时钟域/μARCH | RTL Agent | P1 | PAD 补完 | ⬜ 待处理 |
-| 9 | 修复 FuSa Major (M-2~8): DC 量化/ASIL 分解/FHTI/Lockstep | FuSa Agent | P1 | PAD 补完 | ⬜ 待处理 |
-| 10 | 修复 PM Minor: 版本对齐/风险登记册 | PM Agent | P2 | PAD 补完 / IDR | ⬜ 待处理 |
+| 7 | 修复 Arch Major (M-1~3): 并集决策语义/需求追溯/erratum 遗漏 | Arch Agent | P1 | PAD 补完 | ✅ **已关闭** (PAD-REWORK-011) |
+| 8 | 修复 RTL Major (M-1~7): 时序约束/AXI/PLCA 时钟域/μARCH | RTL Agent | P1 | PAD 补完 | ✅ **已关闭** (PAD-REWORK-012) |
+| 9 | 修复 FuSa Major (M-2~8): DC 量化/ASIL 分解/FHTI/Lockstep | FuSa Agent | P1 | PAD 补完 | ✅ **已关闭** (PAD-REWORK-013) |
+| 10 | 修复 PM Minor: 版本对齐/风险登记册 | PM Agent | P2 | PAD 补完 / IDR | ✅ **已关闭** (PAD-REWORK-006~010) |
 
 ---
 
