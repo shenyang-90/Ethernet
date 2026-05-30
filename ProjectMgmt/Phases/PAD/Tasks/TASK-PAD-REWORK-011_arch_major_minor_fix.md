@@ -2,7 +2,8 @@
 
 **任务ID**: TASK-PAD-REWORK-011
 **负责人**: **Arch_Agent** (已分配)
-**状态**: **ASSIGNED**
+**状态**: **IN_PROGRESS** (部分完成 — §10.2语义/GETH_AI.028/030/版本历史已修复；SUPPORT_SRP/PFC、DMA泛化待完成)
+**进度**: ~65%
 **优先级**: P1
 **所属阶段**: PAD 补完 / EDR 入口
 **前置依赖**: 无
