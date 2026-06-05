@@ -1,12 +1,37 @@
-# TASK-PAD-REWORK-007: Clock-Reset Spec v1.1 升级
-
-**任务ID**: TASK-PAD-REWORK-007
-**负责人**: Arch_Agent
-**状态**: ✅ **COMPLETED**
-**优先级**: P1
-**所属阶段**: PAD (补完)
-**前置依赖**: 无
-**下游阻塞**: TASK-004 (EDR)
+```json
+{
+  "task_id": "TASK-PAD-REWORK-007",
+  "owner": "Arch_Agent",
+  "status": "COMPLETED",
+  "priority": "P1",
+  "phase": "PAD (补完)",
+  "dependencies": [],
+  "blockers": [
+    "TASK-004 (EDR)"
+  ],
+  "progress": 100,
+  "acceptance_criteria": [
+    {
+      "item": "6 个时钟域均有典型频率值 (非仅范围)",
+      "completed": true
+    },
+    {
+      "item": "半双工 CRS/CD 时钟域独立定义",
+      "completed": true
+    },
+    {
+      "item": "EEE 时钟门控策略完整",
+      "completed": true
+    },
+    {
+      "item": "复位释放序列有参数化计数器方案",
+      "completed": true
+    }
+  ],
+  "deliverables": [],
+  "created_at": "2026-05-21"
+}
+```
 
 ---
 

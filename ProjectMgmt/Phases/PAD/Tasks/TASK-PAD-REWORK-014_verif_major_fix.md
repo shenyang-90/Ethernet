@@ -1,13 +1,33 @@
-# TASK-PAD-REWORK-014: Verification Major 修复 (VERIF-MAJ-003)
-
-**任务ID**: TASK-PAD-REWORK-014
-**负责人**: **Verification_Agent** (已分配)
-**状态**: **COMPLETED** (git: d61e790)
-**完成时间**: 2026-05-29
-**优先级**: P1
-**所属阶段**: PAD 补完 / EDR 入口
-**前置依赖**: 无
-**下游阻塞**: EDR 启动
+```json
+{
+  "task_id": "TASK-PAD-REWORK-014",
+  "owner": "**Verification_Agent** (已分配)",
+  "status": "COMPLETED",
+  "priority": "P1",
+  "phase": "PAD 补完 / EDR 入口",
+  "dependencies": [],
+  "blockers": [
+    "EDR 启动"
+  ],
+  "progress": 100,
+  "acceptance_criteria": [
+    {
+      "item": "IEEE_1722_AVTP_PICS.md 存在且非空",
+      "completed": false
+    },
+    {
+      "item": "Verification Plan 含 AVTP 验证策略",
+      "completed": false
+    },
+    {
+      "item": "PICS Summary 含 AVTP 条目",
+      "completed": false
+    }
+  ],
+  "deliverables": [],
+  "created_at": ""
+}
+```
 
 ---
 

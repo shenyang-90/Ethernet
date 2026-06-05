@@ -1,12 +1,38 @@
-# TASK-PAD-REWORK-005: 新增参数安全影响评估 (FuSa 补完)
-
-**任务ID**: TASK-PAD-REWORK-005
-**负责人**: FuSa_Agent
-**状态**: ✅ **COMPLETED**
-**优先级**: P0
-**所属阶段**: PAD (补完)
-**前置依赖**: 无
-**下游阻塞**: TASK-008 (EDR Safety Analysis)
+```json
+{
+  "task_id": "TASK-PAD-REWORK-005",
+  "owner": "FuSa_Agent",
+  "status": "COMPLETED",
+  "priority": "P0",
+  "phase": "PAD (补完)",
+  "dependencies": [],
+  "blockers": [
+    "TASK-008 (EDR Safety Analysis)"
+  ],
+  "progress": 100,
+  "acceptance_criteria": [
+    {
+      "item": "7 项新增参数每项都有安全目标映射或 \"默认关闭/无影响\" 声明",
+      "completed": true
+    },
+    {
+      "item": "故障模式定义完整 (STUCK-AT, SEU, 时钟漂移, 接口超时等)",
+      "completed": true
+    },
+    {
+      "item": "安全机制与 Arch Spec 参数可配置性一致 (如 `ASIL_LEVEL=0` 时关闭)",
+      "completed": true
+    },
+    {
+      "item": "DC 和 FHTI 数值有计算依据引用",
+      "completed": true
+    }
+  ],
+  "deliverables": [],
+  "created_at": "2026-05-21",
+  "completed_at": "2026-05-21"
+}
+```
 
 ---
 
@@ -45,5 +71,3 @@ FUSA-PAD-001 (Critical): Arch Spec v1.8c 新增 7 项参数的安全影响完全
 **交付物确认**: `Docs/FuSa/parameter_safety_impact_matrix.md` v1.0 已提交 (19KB)
 
 ---
-
-*创建时间: 2026-05-21 | 创建人: AI Yang | 完成时间: 2026-05-21 | 状态: COMPLETED*

@@ -1,13 +1,37 @@
-# TASK-PAD-REWORK-012: RTL Major/Minor 修复 (MAJ-003,4,5 + MIN-002)
-
-**任务ID**: TASK-PAD-REWORK-012
-**负责人**: **RTL_Coding_Agent** (已分配)
-**状态**: **COMPLETED** (git: d61e790)
-**完成时间**: 2026-05-29
-**优先级**: P1
-**所属阶段**: PAD 补完 / EDR 入口
-**前置依赖**: 无
-**下游阻塞**: EDR 启动
+```json
+{
+  "task_id": "TASK-PAD-REWORK-012",
+  "owner": "**RTL_Coding_Agent** (已分配)",
+  "status": "COMPLETED",
+  "priority": "P1",
+  "phase": "PAD 补完 / EDR 入口",
+  "dependencies": [],
+  "blockers": [
+    "EDR 启动"
+  ],
+  "progress": 100,
+  "acceptance_criteria": [
+    {
+      "item": "PLCA 时钟域在 Clock-Reset Spec 中定义（12.5MHz，clk_sys÷16）",
+      "completed": false
+    },
+    {
+      "item": "AXI outstanding/QoS/ID 在 Design Spec §4.1.4 中定义",
+      "completed": false
+    },
+    {
+      "item": "μARCH-001/005/007/008/009/010 全部关闭，有默认决策",
+      "completed": false
+    },
+    {
+      "item": "Design Spec 参数默认值与 Arch Spec 一致",
+      "completed": false
+    }
+  ],
+  "deliverables": [],
+  "created_at": ""
+}
+```
 
 ---
 

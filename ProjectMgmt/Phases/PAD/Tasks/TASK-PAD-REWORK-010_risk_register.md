@@ -1,12 +1,35 @@
-# TASK-PAD-REWORK-010: 风险登记册 (Risk Register) 创建
-
-**任务ID**: TASK-PAD-REWORK-010
-**负责人**: PM_Agent
-**状态**: ✅ **COMPLETED**
-**优先级**: P2
-**所属阶段**: PAD (补完) / IDR
-**前置依赖**: 无
-**下游阻塞**: 无
+```json
+{
+  "task_id": "TASK-PAD-REWORK-010",
+  "owner": "PM_Agent",
+  "status": "COMPLETED",
+  "priority": "P2",
+  "phase": "PAD (补完) / IDR",
+  "dependencies": [],
+  "blockers": [],
+  "progress": 100,
+  "acceptance_criteria": [
+    {
+      "item": "≥5 项风险登记 (实际: 53 项)",
+      "completed": true
+    },
+    {
+      "item": "每项有概率/影响评级 (高/中/低)",
+      "completed": true
+    },
+    {
+      "item": "每项有明确缓解措施和责任人",
+      "completed": true
+    },
+    {
+      "item": "与 Action Items 联动更新机制已建立",
+      "completed": true
+    }
+  ],
+  "deliverables": [],
+  "created_at": "2026-05-21"
+}
+```
 
 ---
 

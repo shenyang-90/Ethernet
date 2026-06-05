@@ -1,12 +1,40 @@
-# TASK-PAD-REWORK-009: Verification 黄金配置 + 覆盖率目标定义
-
-**任务ID**: TASK-PAD-REWORK-009
-**负责人**: Verification_Agent
-**状态**: ✅ **COMPLETED**
-**优先级**: P0
-**所属阶段**: PAD (补完)
-**前置依赖**: TASK-PAD-REWORK-004 (SWITCH_PORT_COUNT 范围确定)
-**下游阻塞**: TASK-006 (EDR Verification Plan)
+```json
+{
+  "task_id": "TASK-PAD-REWORK-009",
+  "owner": "Verification_Agent",
+  "status": "COMPLETED",
+  "priority": "P0",
+  "phase": "PAD (补完)",
+  "dependencies": [
+    "TASK-PAD-REWORK-004 (SWITCH_PORT_COUNT 范围确定)"
+  ],
+  "blockers": [
+    "TASK-006 (EDR Verification Plan)"
+  ],
+  "progress": 100,
+  "acceptance_criteria": [
+    {
+      "item": "5 个黄金配置参数值明确，覆盖出货主要场景",
+      "completed": true
+    },
+    {
+      "item": "覆盖率目标数值有依据 (对标行业/竞品/ISO 26262 要求)",
+      "completed": true
+    },
+    {
+      "item": "每个 TC4x erratum 有对应 testcase ID",
+      "completed": true
+    },
+    {
+      "item": "PICS 每个 Yes/No 项映射到 ≥1 个 test case",
+      "completed": true
+    }
+  ],
+  "deliverables": [],
+  "created_at": "2026-05-21",
+  "completed_at": "2026-05-21"
+}
+```
 
 ---
 
@@ -44,5 +72,3 @@ VERIF-CRIT-002: 覆盖率目标完全未定义 (line/branch/FSM/assertion/functi
 **交付物确认**: `Docs/Verification/verification_plan_v1.0.md` v1.0 已提交 (47KB)
 
 ---
-
-*创建时间: 2026-05-21 | 创建人: AI Yang | 完成时间: 2026-05-21 | 状态: COMPLETED*

@@ -1,12 +1,40 @@
-# TASK-PAD-REWORK-002: Switch Core Egress 仲裁算法补完
-
-**任务ID**: TASK-PAD-REWORK-002
-**负责人**: RTL_Coding_Agent + Arch_Agent
-**状态**: ✅ **COMPLETED**
-**优先级**: P0
-**所属阶段**: PAD (补完)
-**前置依赖**: TASK-PAD-REWORK-001 (FDB 存储方案确定后仲裁输入确定)
-**下游阻塞**: TASK-004 (EDR)
+```json
+{
+  "task_id": "TASK-PAD-REWORK-002",
+  "owner": "RTL_Coding_Agent + Arch_Agent",
+  "status": "COMPLETED",
+  "priority": "P0",
+  "phase": "PAD (补完)",
+  "dependencies": [
+    "TASK-PAD-REWORK-001 (FDB 存储方案确定后仲裁输入确定)"
+  ],
+  "blockers": [
+    "TASK-004 (EDR)"
+  ],
+  "progress": 100,
+  "acceptance_criteria": [
+    {
+      "item": "仲裁算法明确且可综合",
+      "completed": true
+    },
+    {
+      "item": "仲裁状态机图完整",
+      "completed": true
+    },
+    {
+      "item": "最坏情况仲裁延迟定量分析",
+      "completed": true
+    },
+    {
+      "item": "与 TAS/FRER/AVTP 流量的优先级策略定义",
+      "completed": true
+    }
+  ],
+  "deliverables": [],
+  "created_at": "2026-05-21",
+  "completed_at": "2026-05-21"
+}
+```
 
 ---
 
@@ -35,5 +63,3 @@ RTL-CRIT-002: Switch Core Egress 仲裁算法缺失 — "Crossbar 全并发" 是
 **交付物确认**: `Docs/Design/ethernet/switch_arbiter_design.md` v1.0 已提交 (45KB)
 
 ---
-
-*创建时间: 2026-05-21 | 创建人: AI Yang | 完成时间: 2026-05-21 | 状态: COMPLETED*

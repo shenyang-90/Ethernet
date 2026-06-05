@@ -1,12 +1,33 @@
-# TASK-PAD-REWORK-006: Interface Spec v1.1 升级
-
-**任务ID**: TASK-PAD-REWORK-006
-**负责人**: Arch_Agent
-**状态**: ✅ **COMPLETED**
-**优先级**: P1
-**所属阶段**: PAD (补完)
-**前置依赖**: 无
-**下游阻塞**: TASK-004 (EDR)
+```json
+{
+  "task_id": "TASK-PAD-REWORK-006",
+  "owner": "Arch_Agent",
+  "status": "COMPLETED",
+  "priority": "P1",
+  "phase": "PAD (补完)",
+  "dependencies": [],
+  "blockers": [
+    "TASK-004 (EDR)"
+  ],
+  "progress": 100,
+  "acceptance_criteria": [
+    {
+      "item": "所有 Arch Spec v1.8c 中的接口信号在 Interface Spec 中有定义",
+      "completed": true
+    },
+    {
+      "item": "时序约束 (setup/hold, valid-ready 握手) 至少定义典型值",
+      "completed": true
+    },
+    {
+      "item": "版本历史更新，列出 v1.0→v1.1 的所有变更",
+      "completed": true
+    }
+  ],
+  "deliverables": [],
+  "created_at": "2026-05-21"
+}
+```
 
 ---
 

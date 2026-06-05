@@ -1,12 +1,39 @@
-# TASK-PAD-REWORK-001: Switch Core FDB 存储与查表微架构补完
-
-**任务ID**: TASK-PAD-REWORK-001
-**负责人**: RTL_Coding_Agent + Arch_Agent
-**状态**: ✅ **COMPLETED**
-**优先级**: P0
-**所属阶段**: PAD (补完)
-**前置依赖**: 无
-**下游阻塞**: TASK-PAD-REWORK-002 (仲裁算法), TASK-004 (EDR 微架构设计)
+```json
+{
+  "task_id": "TASK-PAD-REWORK-001",
+  "owner": "RTL_Coding_Agent + Arch_Agent",
+  "status": "COMPLETED",
+  "priority": "P0",
+  "phase": "PAD (补完)",
+  "dependencies": [],
+  "blockers": [
+    "TASK-PAD-REWORK-002 (仲裁算法)",
+    "TASK-004 (EDR 微架构设计)"
+  ],
+  "progress": 100,
+  "acceptance_criteria": [
+    {
+      "item": "FDB 存储方案明确 (SRAM 型号/端口数/位宽，或寄存器堆方案)",
+      "completed": true
+    },
+    {
+      "item": "查表延迟约束定义 (如: \"查表需在 N 个 clk_mac 周期内完成\")",
+      "completed": true
+    },
+    {
+      "item": "8K 条目 @ 300MHz 的时序闭合方案可验证",
+      "completed": true
+    },
+    {
+      "item": "与 Arch Spec v1.8c 参数 `SWITCH_PORT_COUNT` 范围一致",
+      "completed": true
+    }
+  ],
+  "deliverables": [],
+  "created_at": "2026-05-21",
+  "completed_at": "2026-05-21"
+}
+```
 
 ---
 
@@ -38,5 +65,3 @@ RTL_Coding_Agent 在 PAD Gate Review 中发现 Critical 问题 RTL-CRIT-001:
 **交付物确认**: `Docs/Design/ethernet/switch_fdb_microarch.md` v1.0 已提交 (33KB)
 
 ---
-
-*创建时间: 2026-05-21 | 创建人: AI Yang (PAD Gate Review 决策驱动) | 完成时间: 2026-05-21 | 状态: COMPLETED*

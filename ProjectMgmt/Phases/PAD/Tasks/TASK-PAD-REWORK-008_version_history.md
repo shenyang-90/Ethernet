@@ -1,12 +1,31 @@
-# TASK-PAD-REWORK-008: Arch Spec 版本历史修复 + Protocol Analysis 版本历史补充
-
-**任务ID**: TASK-PAD-REWORK-008
-**负责人**: Arch_Agent
-**状态**: ✅ **COMPLETED**
-**优先级**: P1
-**所属阶段**: PAD (补完)
-**前置依赖**: 无
-**下游阻塞**: 无
+```json
+{
+  "task_id": "TASK-PAD-REWORK-008",
+  "owner": "Arch_Agent",
+  "status": "COMPLETED",
+  "priority": "P1",
+  "phase": "PAD (补完)",
+  "dependencies": [],
+  "blockers": [],
+  "progress": 100,
+  "acceptance_criteria": [
+    {
+      "item": "Arch Spec 版本历史按时间顺序排列，无跳号/乱序",
+      "completed": true
+    },
+    {
+      "item": "Protocol Analysis 有独立版本历史章节",
+      "completed": true
+    },
+    {
+      "item": "GETH_AI.028/030 在 §6.1 中有独立条目",
+      "completed": true
+    }
+  ],
+  "deliverables": [],
+  "created_at": "2026-05-21"
+}
+```
 
 ---
 

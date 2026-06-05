@@ -1,12 +1,38 @@
-# TASK-PAD-REWORK-003: vPHC 硬件接口定义补完
-
-**任务ID**: TASK-PAD-REWORK-003
-**负责人**: RTL_Coding_Agent + Arch_Agent
-**状态**: ✅ **COMPLETED**
-**优先级**: P0
-**所属阶段**: PAD (补完)
-**前置依赖**: 无
-**下游阻塞**: TASK-004 (EDR)
+```json
+{
+  "task_id": "TASK-PAD-REWORK-003",
+  "owner": "RTL_Coding_Agent + Arch_Agent",
+  "status": "COMPLETED",
+  "priority": "P0",
+  "phase": "PAD (补完)",
+  "dependencies": [],
+  "blockers": [
+    "TASK-004 (EDR)"
+  ],
+  "progress": 100,
+  "acceptance_criteria": [
+    {
+      "item": "硬件信号清单完整 (输入/输出/宽度/时钟域)",
+      "completed": true
+    },
+    {
+      "item": "VM → PHC 映射表可配置",
+      "completed": true
+    },
+    {
+      "item": "虚拟中断隔离机制明确",
+      "completed": true
+    },
+    {
+      "item": "与 Xen/KVM 等 Hypervisor 的对接方式说明 (若适用)",
+      "completed": true
+    }
+  ],
+  "deliverables": [],
+  "created_at": "2026-05-21",
+  "completed_at": "2026-05-22"
+}
+```
 
 ---
 
@@ -38,5 +64,3 @@ RTL-CRIT-003: vPHC Xen IO Ring 是软件/虚拟化概念，RTL 需要的是硬�
 **交付物确认**: `Docs/Design/ethernet/vphc_hw_interface.md` v1.0 已创建 (13KB)，基于 Arch Spec v1.8c ISSUE-007 决议，采用硬件虚拟化层替代 Xen IO Ring 方案。
 
 ---
-
-*创建时间: 2026-05-21 | 创建人: AI Yang | 完成时间: 2026-05-22 (PAD Orchestrator 自动补完) | 状态: COMPLETED*

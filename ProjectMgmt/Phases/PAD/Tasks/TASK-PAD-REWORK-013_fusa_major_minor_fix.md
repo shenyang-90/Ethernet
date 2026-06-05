@@ -1,13 +1,57 @@
-# TASK-PAD-REWORK-013: FuSa Major/Minor 修复 (PAD-002~009 + PAD-011)
-
-**任务ID**: TASK-PAD-REWORK-013
-**负责人**: **FuSa_Agent** (已分配)
-**状态**: **COMPLETED** (git: 0992bf4)
-**完成时间**: 2026-05-29
-**优先级**: P1
-**所属阶段**: PAD 补完 / EDR 入口
-**前置依赖**: 无
-**下游阻塞**: EDR 启动
+```json
+{
+  "task_id": "TASK-PAD-REWORK-013",
+  "owner": "**FuSa_Agent** (已分配)",
+  "status": "COMPLETED",
+  "priority": "P1",
+  "phase": "PAD 补完 / EDR 入口",
+  "dependencies": [],
+  "blockers": [
+    "EDR 启动"
+  ],
+  "progress": 100,
+  "acceptance_criteria": [
+    {
+      "item": "SG-ETH-07 定义，PHC 有 ECC/Parity 保护方案",
+      "completed": false
+    },
+    {
+      "item": "DC 计算方法文档化，每种机制有验证策略",
+      "completed": false
+    },
+    {
+      "item": "ASIL 分解有独立性分析和 CCF 评估",
+      "completed": false
+    },
+    {
+      "item": "FHTI 有 WCA 支撑，Switch/PTP FHTI 已定义",
+      "completed": false
+    },
+    {
+      "item": "降级模式位宽明确，Switch 有端口级降级策略",
+      "completed": false
+    },
+    {
+      "item": "Safety/ECC 面积参数化",
+      "completed": false
+    },
+    {
+      "item": "Lockstep 声明一致",
+      "completed": false
+    },
+    {
+      "item": "安全 CSR 在 Arch Spec 地址映射中",
+      "completed": false
+    },
+    {
+      "item": "半双工安全冲突有分析结论",
+      "completed": false
+    }
+  ],
+  "deliverables": [],
+  "created_at": ""
+}
+```
 
 ---
 

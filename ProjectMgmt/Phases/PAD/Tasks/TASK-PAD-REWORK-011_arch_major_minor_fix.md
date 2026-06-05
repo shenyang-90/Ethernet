@@ -1,13 +1,53 @@
-# TASK-PAD-REWORK-011: Arch Major/Minor 修复 (M-1,2,3 + m-1~5)
-
-**任务ID**: TASK-PAD-REWORK-011
-**负责人**: **Arch_Agent** (已分配)
-**状态**: **IN_PROGRESS** (部分完成 — §10.2语义/GETH_AI.028/030/版本历史已修复；SUPPORT_SRP/PFC、DMA泛化待完成)
-**进度**: ~65%
-**优先级**: P1
-**所属阶段**: PAD 补完 / EDR 入口
-**前置依赖**: 无
-**下游阻塞**: EDR 启动
+```json
+{
+  "task_id": "TASK-PAD-REWORK-011",
+  "owner": "**Arch_Agent** (已分配)",
+  "status": "IN_PROGRESS",
+  "priority": "P1",
+  "phase": "PAD 补完 / EDR 入口",
+  "dependencies": [],
+  "blockers": [
+    "EDR 启动"
+  ],
+  "progress": 65,
+  "acceptance_criteria": [
+    {
+      "item": "§10.2 语义三级定义清晰，MACsec/AVTP 已修正",
+      "completed": false
+    },
+    {
+      "item": "§8.1 P0 升级项有需求追溯或已降级",
+      "completed": false
+    },
+    {
+      "item": "§6.1 含 GETH_AI.028/030 独立条目，总数 15",
+      "completed": false
+    },
+    {
+      "item": "§2.1 DMA 通道标注泛化",
+      "completed": false
+    },
+    {
+      "item": "§6.2.6 BC 模式消除固定成对误解",
+      "completed": false
+    },
+    {
+      "item": "§1.4.4 门数估算有 §4.3 引用",
+      "completed": false
+    },
+    {
+      "item": "§1.4.1 含 SUPPORT_SRP/SUPPORT_PFC",
+      "completed": false
+    },
+    {
+      "item": "802.1Qbu RTL Complexity 有评估结论",
+      "completed": false
+    }
+  ],
+  "deliverables": [],
+  "created_at": ""
+}
+```
 
 ---
 

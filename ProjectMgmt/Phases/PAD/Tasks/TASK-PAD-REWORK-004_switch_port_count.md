@@ -1,12 +1,35 @@
-# TASK-PAD-REWORK-004: SWITCH_PORT_COUNT 参数一致性修复
-
-**任务ID**: TASK-PAD-REWORK-004
-**负责人**: Arch_Agent
-**状态**: ✅ **COMPLETED**
-**优先级**: P0
-**所属阶段**: PAD (补完)
-**前置依赖**: 无 (TASK-PAD-REWORK-001/002 已完成)
-**下游阻塞**: TASK-004 (EDR)
+```json
+{
+  "task_id": "TASK-PAD-REWORK-004",
+  "owner": "Arch_Agent",
+  "status": "COMPLETED",
+  "priority": "P0",
+  "phase": "PAD (补完)",
+  "dependencies": [
+    "无 (TASK-PAD-REWORK-001/002 已完成)"
+  ],
+  "blockers": [
+    "TASK-004 (EDR)"
+  ],
+  "progress": 100,
+  "acceptance_criteria": [
+    {
+      "item": "Arch Spec 与 Design Spec 的 `SWITCH_PORT_COUNT` 范围完全一致",
+      "completed": true
+    },
+    {
+      "item": "子模块实例化策略明确 (generate / 固定 / 混合)",
+      "completed": true
+    },
+    {
+      "item": "门数估算按最终端口数范围更新",
+      "completed": true
+    }
+  ],
+  "deliverables": [],
+  "created_at": "2026-05-21"
+}
+```
 
 ---
 
