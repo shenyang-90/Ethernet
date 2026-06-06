@@ -40,9 +40,9 @@
 | 802.1Qav CBS | ✅ | — | — | ✅ | ❌ | **Yes** | Yes | — |
 | 802.1Qci PSFP | ✅(部分) | — | — | ✅ | ❌ | **Yes** | Yes | — |
 | 802.1CB FRER | ✅(SW) | — | — | ✅ | ❌ | **Yes** | Yes | — |
-| 802.1AE MACsec | ✅(CSS) | ✅(外部PHY) | — | ? | ❌ | **Yes** | Yes | — |
+| 802.1AE MACsec | ✅(CSS) | ✅(外部PHY) | — | ? | ❌ | **Configurable** | Yes | ↑ |
 | **802.3az EEE** | **✅** | — | — | — | ❌ | **Configurable** | **No** | **↑** |
-| **IEEE 1722 AVTP** | **✅(DRE)** | — | — | **✅(AVB感知)** | ❌ | **Yes** | **No** | **↑** |
+| **IEEE 1722 AVTP** | **✅(DRE)** | — | — | **✅(AVB感知)** | ❌ | **Configurable (默认1，TC4x/R-Car 推荐开启)** | **No** | **↑** |
 | **半双工 10/100M** | **✅** | ✅ | ✅ | ✅ | ✅ | **Yes** | 未定义 | **↑** |
 | **IPsec 卸载** | **✅(CSS)** | **✅(PFE+HSE)** | — | — | ❌ | **Configurable** | 未定义 | **↑** |
 | **SecOC** | **✅(CSS)** | **✅(HSE)** | **✅(HSE)** | — | ❌ | **Configurable** | 未定义 | **↑** |
@@ -196,6 +196,8 @@
 | **`SWITCH_CONNECTED_MAC_0` ~ `SWITCH_CONNECTED_MAC_7`** | bit[8] | **`{1,1,1,1,0,0,0,0}`** | **0 / 1** | **每 MAC 是否接入 Switch（`1`=接入 Switch, `0`=独立直连）** | **Switch Core, DMA 路由** |
 | `SUPPORT_VLAN` | bit | 1 | 0 / 1 | 是否支持 802.1Q VLAN 处理 | TBU, RX Filter, Switch |
 | `SUPPORT_MACSEC` | bit | 0 | 0 / 1 | 是否支持 802.1AE MACsec（需外部 CSS 加速器） | HSPHY IF (安全通道) |
+| `SUPPORT_SRP` | bit | 0 | 0 / 1 | 是否支持 802.1Q SRP/MSRP（默认关闭，车载使用静态 TAS） | MTL Scheduler |
+| `SUPPORT_PFC` | bit | 0 | 0 / 1 | 是否支持 802.3bd PFC（默认关闭，CBS+TAS 替代） | MTL Scheduler |
 | **`SUPPORT_AVTP`** | bit | **1** | 0 / 1 | **是否支持 IEEE 1722 AVTP/ACF 流识别与封装（TC4x DRE/R-Car S4 AVB 感知兼容）** | **RX Filter + DMA** |
 | **`SUPPORT_AVTP_AWARE`** | bit | **1** | 0 / 1 | **是否支持 AVTP 流识别与 RX 分离（依赖 SUPPORT_AVTP=1）** | **RX Filter, Switch** |
 | **`SUPPORT_AVTP_CTL`** | bit | **0** | 0 / 1 | **是否支持 IEEE 1722.1 AVTP 控制/路由表（TC4x DRE 兼容）** | **DRE-like Engine** |
@@ -327,6 +329,7 @@
 | **中央网关+独立端口 (6MAC 混合)** | **6 MAC: GMAC/1G ×4 + GMAC/1G ×2 独立** | **6 PHY: 1000BASE-T1/1G ×6** | **24** | **✅** | **✅** | **✅ (4-port)** | **B** | **D¹** | **~560k** |
 
 > **¹ ASIL-D 为系统级认证**: 需 SoC 提供 Lockstep CPU + SMU 双冗余 + 外部 PMIC (如 TLF4x) + SafeTlib 运行时测试。本 IP 模块内部仅提供 ASIL-B 安全机制（ECC + Parity + Timeout + Clock Monitor），详见 `Docs/FuSa/safety_concept.md` §5.3。
+> **² 估算门数依据**: 门数估算基于 §4.3 资源估算与竞品对标分析，含 SRAM/TCAM 面积折算。
 
 > **详细参数展开示例**（中央网关）:
 > ```verilog
@@ -475,7 +478,7 @@
 |             v                    v              v              v                       |
 |  +================================================================================+  +
 |  |                         DMA Engine (全局通道池)                                |  +
-|  |   CH[0:7] 全局共享 — 所有 MAC 通过 MTL 动态分配通道                             |  +
+|  |   CH[0:N-1] (N = DMA_CH_COUNT，图示为 8 通道示例) 全局共享 — 所有 MAC 通过 MTL 动态分配通道                             |  +
 |  |   · 静态绑定: 复位时配置 CH_MAP[n] → MAC_x                                     |  +
 |  |   · 动态仲裁: Round-Robin / Weighted QoS (AXI AWQOS/ARQOS)                      |  +
 |  |   · AXI4 Master: 64/128-bit 数据面访问系统内存                                  |  +
@@ -1465,7 +1468,7 @@ CPU/Software
   port[0..3] → crossbar → PHC0 or PHC1 (per-port 绑定)
   
 - 无菊花链限制:
-  BC 模式: Port 0,1 → PHC0; Port 2,3 → PHC1 (或全端口 → PHC0)
+  BC 模式: Port 0,1 可绑定 PHC0（支持任意 per-port 组合）; Port 2,3 可绑定 PHC1 (或全端口 → PHC0)
   TC 模式: 各端口独立 residence time 测量，无需共享时间基
   
 - gPTP Relay 多端口并发:

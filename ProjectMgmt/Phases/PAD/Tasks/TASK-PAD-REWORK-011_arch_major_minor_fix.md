@@ -9,39 +9,39 @@
   "blockers": [
     "EDR 启动"
   ],
-  "progress": 65,
+  "progress": 100,
   "acceptance_criteria": [
     {
       "item": "§10.2 语义三级定义清晰，MACsec/AVTP 已修正",
-      "completed": false
+      "completed": true
     },
     {
       "item": "§8.1 P0 升级项有需求追溯或已降级",
-      "completed": false
+      "completed": true
     },
     {
       "item": "§6.1 含 GETH_AI.028/030 独立条目，总数 15",
-      "completed": false
+      "completed": true
     },
     {
       "item": "§2.1 DMA 通道标注泛化",
-      "completed": false
+      "completed": true
     },
     {
       "item": "§6.2.6 BC 模式消除固定成对误解",
-      "completed": false
+      "completed": true
     },
     {
       "item": "§1.4.4 门数估算有 §4.3 引用",
-      "completed": false
+      "completed": true
     },
     {
       "item": "§1.4.1 含 SUPPORT_SRP/SUPPORT_PFC",
-      "completed": false
+      "completed": true
     },
     {
       "item": "802.1Qbu RTL Complexity 有评估结论",
-      "completed": false
+      "completed": true
     }
   ],
   "deliverables": [],

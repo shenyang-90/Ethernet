@@ -1637,7 +1637,25 @@ RTL Implementation:
   end
 ```
 
+
 ---
+
+#### 2.5.4 RTL Complexity Assessment
+
+**结论**: 802.1Qbu 帧抢占实现复杂度为 **Medium**（低于 TAS High），主要开销来自:
+
+| 组件 | 复杂度 | 门数估算 | 说明 |
+|------|--------|----------|------|
+| MAC Merge Layer (TX) | Medium | ~3k GE | pMAC/eMAC 双虚拟 MAC + 帧切分状态机 |
+| MAC Merge Layer (RX) | Medium | ~2k GE | 碎片重组 + mCRC 验证 |
+| mCRC 计算 | Low | ~0.5k GE | 24-bit CRC 专用电路 |
+| 碎片缓冲区 | Low | ~1k GE | 2×FIFO (express + preemptable) |
+| **总计** | **Medium** | **~6.5k GE** | **远低于 TAS (~25k GE) 和 FRER (~15k GE)** |
+
+**与 TAS 对比**: 帧抢占无需门控调度表 (GCL) 和周期精确计数器，仅需双 FIFO + 简单状态机，RTL 实现复杂度显著低于 TAS。
+
+**评估依据**: 基于 TC4x GETH 实现参考和 802.3br 标准第 99 条 mPacket 规范，无需要自定义算法或复杂数据结构。
+
 
 ### 2.6 IEEE 802.1Q VLAN - RTL-Coding Detail
 
