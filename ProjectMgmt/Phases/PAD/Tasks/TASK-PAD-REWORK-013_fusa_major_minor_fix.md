@@ -13,39 +13,39 @@
   "acceptance_criteria": [
     {
       "item": "SG-ETH-07 定义，PHC 有 ECC/Parity 保护方案",
-      "completed": false
+      "completed": true
     },
     {
       "item": "DC 计算方法文档化，每种机制有验证策略",
-      "completed": false
+      "completed": true
     },
     {
       "item": "ASIL 分解有独立性分析和 CCF 评估",
-      "completed": false
+      "completed": true
     },
     {
       "item": "FHTI 有 WCA 支撑，Switch/PTP FHTI 已定义",
-      "completed": false
+      "completed": true
     },
     {
       "item": "降级模式位宽明确，Switch 有端口级降级策略",
-      "completed": false
+      "completed": true
     },
     {
       "item": "Safety/ECC 面积参数化",
-      "completed": false
+      "completed": true
     },
     {
       "item": "Lockstep 声明一致",
-      "completed": false
+      "completed": true
     },
     {
       "item": "安全 CSR 在 Arch Spec 地址映射中",
-      "completed": false
+      "completed": true
     },
     {
       "item": "半双工安全冲突有分析结论",
-      "completed": false
+      "completed": true
     }
   ],
   "deliverables": [],
@@ -120,14 +120,14 @@
 
 ## 验收标准
 
-- [ ] SG-ETH-07 定义，PHC 有 ECC/Parity 保护方案
-- [ ] DC 计算方法文档化，每种机制有验证策略
-- [ ] ASIL 分解有独立性分析和 CCF 评估
-- [ ] FHTI 有 WCA 支撑，Switch/PTP FHTI 已定义
-- [ ] 降级模式位宽明确，Switch 有端口级降级策略
-- [ ] Safety/ECC 面积参数化
-- [ ] Lockstep 声明一致
-- [ ] 安全 CSR 在 Arch Spec 地址映射中
-- [ ] 半双工安全冲突有分析结论
+- [x] SG-ETH-07 定义，PHC 有 ECC/Parity 保护方案
+- [x] DC 计算方法文档化，每种机制有验证策略
+- [x] ASIL 分解有独立性分析和 CCF 评估
+- [x] FHTI 有 WCA 支撑，Switch/PTP FHTI 已定义
+- [x] 降级模式位宽明确，Switch 有端口级降级策略
+- [x] Safety/ECC 面积参数化
+- [x] Lockstep 声明一致
+- [x] 安全 CSR 在 Arch Spec 地址映射中
+- [x] 半双工安全冲突有分析结论
 
 完成后执行 `git add -A && git commit -m "FuSa: PAD-002~009 + PAD-011 修复 (PAD-REWORK-013)"`

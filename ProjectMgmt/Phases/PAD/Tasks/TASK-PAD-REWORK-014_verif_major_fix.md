@@ -13,15 +13,15 @@
   "acceptance_criteria": [
     {
       "item": "IEEE_1722_AVTP_PICS.md 存在且非空",
-      "completed": false
+      "completed": true
     },
     {
       "item": "Verification Plan 含 AVTP 验证策略",
-      "completed": false
+      "completed": true
     },
     {
       "item": "PICS Summary 含 AVTP 条目",
-      "completed": false
+      "completed": true
     }
   ],
   "deliverables": [],
@@ -54,8 +54,8 @@
 
 ## 验收标准
 
-- [ ] IEEE_1722_AVTP_PICS.md 存在且非空
-- [ ] Verification Plan 含 AVTP 验证策略
-- [ ] PICS Summary 含 AVTP 条目
+- [x] IEEE_1722_AVTP_PICS.md 存在且非空
+- [x] Verification Plan 含 AVTP 验证策略
+- [x] PICS Summary 含 AVTP 条目
 
 完成后执行 `git add -A && git commit -m "Verification: AVTP PICS 补充 (PAD-REWORK-014)"`

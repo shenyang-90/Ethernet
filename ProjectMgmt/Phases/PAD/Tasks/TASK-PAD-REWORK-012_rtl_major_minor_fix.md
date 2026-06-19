@@ -13,19 +13,19 @@
   "acceptance_criteria": [
     {
       "item": "PLCA 时钟域在 Clock-Reset Spec 中定义（12.5MHz，clk_sys÷16）",
-      "completed": false
+      "completed": true
     },
     {
       "item": "AXI outstanding/QoS/ID 在 Design Spec §4.1.4 中定义",
-      "completed": false
+      "completed": true
     },
     {
       "item": "μARCH-001/005/007/008/009/010 全部关闭，有默认决策",
-      "completed": false
+      "completed": true
     },
     {
       "item": "Design Spec 参数默认值与 Arch Spec 一致",
-      "completed": false
+      "completed": true
     }
   ],
   "deliverables": [],
@@ -79,9 +79,9 @@
 
 ## 验收标准
 
-- [ ] PLCA 时钟域在 Clock-Reset Spec 中定义（12.5MHz，clk_sys÷16）
-- [ ] AXI outstanding/QoS/ID 在 Design Spec §4.1.4 中定义
-- [ ] μARCH-001/005/007/008/009/010 全部关闭，有默认决策
-- [ ] Design Spec 参数默认值与 Arch Spec 一致
+- [x] PLCA 时钟域在 Clock-Reset Spec 中定义（12.5MHz，clk_sys÷16）
+- [x] AXI outstanding/QoS/ID 在 Design Spec §4.1.4 中定义
+- [x] μARCH-001/005/007/008/009/010 全部关闭，有默认决策
+- [x] Design Spec 参数默认值与 Arch Spec 一致
 
 完成后执行 `git add -A && git commit -m "RTL: MAJ-003,4,5 + MIN-002 修复 (PAD-REWORK-012)"`
