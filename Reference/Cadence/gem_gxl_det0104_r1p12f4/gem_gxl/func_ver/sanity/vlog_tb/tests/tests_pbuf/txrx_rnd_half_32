@@ -1,0 +1,100 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : sched_rnd_queue
+--
+--   Author         : Ewan McCulloch
+--
+--   Date           : 25 Feb 2008
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Random TX and RX operating together - all RX packets accepted, to maximize
+-- AHB B/W - also operating at gigabit speeds
+--
+--
+-- 
+--------------------------------------------------------------------------------
+
+wait_states 0
+check_txlinerate
+bus_grant_delay 0 -- This sets hgrant to 1 always
+
+set_random_seed 0;
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      10 09040610
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      04 00080402  -- 32bit enable, gigabit mode, full duplex
+apbrd      04 00080402  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 11111100  -- write address of transmit buffer q0 descriptor in memory
+apbrd      1c 11111100  -- check transmit queue pointer
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      90 abababab  -- specific address register 2 bottom (multicast)
+apbwr      94 0000abab  -- specific address register 2 top
+apbwr      98 abcdef10  -- specific address register 3 bottom (unicast)
+apbwr      9C 0000a5a5  -- specific address register 3 top
+apbwr      a0 cccccccc  -- specific address register 3 bottom (unicast)
+apbwr      a4 00005a5a  -- specific address register 3 top
+apbwr      18 ffff0000  -- write receive queue pointer
+--apbwr     320 0000007f  -- threshold
+apbwr      00 0000020c  -- write tx_go and enable tx, enable rx
+-- delay for enable rx to propagate though design
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+rx_frame (apb)  1
+      preamble_size  1-14
+      auto_gen_int        0
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      data_size      16 
+      data           random
+      fcs            good
+
+rx_frame (gap)  300
+      preamble_size  1-14
+      auto_gen_int        0
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      data_size      128-512 
+      data           random
+      fcs            good
+
+tx_frame  200
+      number_of_bufs 3
+      auto_gen_int   0
+      buffer_size    64-256
+      data           random
+      fcs            YES
+
+dma_rd rx_q_ptr ddddd000 
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(300000)
+

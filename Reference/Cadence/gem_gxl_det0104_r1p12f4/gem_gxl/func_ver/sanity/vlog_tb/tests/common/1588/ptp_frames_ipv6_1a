@@ -1,0 +1,830 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : ptp_frames_ipv6_1a
+--
+--   Author         : Andreas Bode (abode@cadence.com)
+--
+--   Date           : 09 August 2007
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- PTP frames encapsulated in IPv6 with incorrect addresses, UDP dest
+-- port or messagetype will not be detected
+--
+-- Transmit frames:-
+-- TX Frame 1 : PTP sync frame, incorrect ethertype
+-- TX Frame 2 : PTP delay request frame, incorrect address
+-- TX Frame 3 : PTP pdelay_req frame, incorrect address
+-- TX Frame 4 : PTP pdelay_resp frame, incorrect UDP dest port
+-- TX Frame 5 : PTP sync frame event with incorrect address
+-- TX Frame 6 : PTP delay request frame with incorrect UDP destination port
+-- TX Frame 7 : PTP pdelay_req frame with incorrect UDP dest port
+-- TX Frame 8 : PTP pdelay_resp frame with incorrect messagetype
+-- TX Frame 9 : PTP delay_resp frame with incorrect messagetype
+--
+--------------------------------------------------------------------------------
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+-- Configuration Requirements ..
+requires ext_fifo_interface 0
+requires rx_pkt_buffer 1
+requires tx_pkt_buffer 1
+requires tsu 1
+requires tsu_clk 1
+
+-- The following ensures that whatever datawidth is selected for this test, the 
+-- translator will pass through correct multiples of 32bit words for data transfers
+-- (not descriptors). This relies on the test writer using the rx_descr and tx_descr to
+-- differentiate between the DMA accesses.
+enforce_data_width 1
+
+-- In 32b datapaths, the 64bit descriptors are accessed not in incrementing order
+-- The used bit is always read first, and written last.
+-- For TX since the used bit is bit 63, the 2nd 32bit word is always read first
+-- For RX since the used bit is bit 0, the 2nd 32bit word is always written first
+-- This ordering is only there for 32bit modes
+-- To simplify writing testcases and ensure the same test can operate on different datawidths
+-- we can automatically reverse the order ...
+auto_descriptor_swap 1
+
+wait_states 0
+bus_grant_delay 0
+
+
+--******************************************************************************
+--  check reset state of PTP output flags
+--******************************************************************************
+pinsc(50) sof_tx         0
+pinsc     sync_frame_tx  0
+pinsc     delay_req_tx   0
+pinsc     sof_rx         0
+pinsc     sync_frame_rx  0
+pinsc     delay_req_rx   0
+pinsc     loopback       0
+pinsc     half_duplex    1
+pinsc     extint         0 
+--******************************************************************************
+-- Transmit Frames
+--******************************************************************************
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+-- this is the event count that will initialize the scaler for event counts. it will cause any future scaling to only scale
+-- the counts after start_scale
+start_scale
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      08 00000006  -- check reset value of network status register
+
+-- # Initialize the network configuration register
+-- #   -eam      <1|0|random>, default = 0. This is external address matching
+-- #   -duplex   <full|half|random>, default = random
+-- #   -speed    <1g|100m|10m|random>, default = random
+-- #   -jumbo    <1|0|random>, default = random. This wont affect the RX transactor below, but will automatically cause jumbos to be dropped.
+-- #   -copy_all <1|0|random>, default = 0. If 0, ensure you initialize the dest_addr in the rx transactor to something that will match
+-- #   -databus  <32|64|128|take_from_cfg|random>, default = random, bus <= config.  The max value is the value set in dma_bus_width in gem_defs.v
+-- #   -rx_toe   <1|0|random>, default = 0. Enables RX TCP/IP checksum offload
+init_ncr -duplex full -speed 100m -jumbo 0 -databus random -copy_all 1 -eam random -rx_toe 0
+
+-- # Initialize the transmit and receive DMA queue pointers (random values but can add specifics if required)
+-- # use arg -rx_ptr_q<Q> and tx_ptr_q<Q> to set specific ptr values rather than the default random
+init_q_ptr  -num_tx_queues take_from_cfg   -num_rx_queues take_from_cfg -rx_ptr_q0 fffff000 -tx_ptr_q0 55555500
+
+
+-- # initialize the DMA specific options for random data xfers
+-- #   - RX DMA data buffer size
+-- #     If left without an argument, it will be completely random
+-- #     Set high to force single buffer descriptor testing eg 16320
+-- #     use -max_buf_size for max (multiple 64 bytes only)
+-- #     use -min_buf_size for min (multiple 64 bytes only)
+-- #
+-- #   - Burst Length (random by default)
+-- #     use -burst <num>, where num can be 1,2,4,8,16, random
+-- #        
+-- #   - address bus (random by default, or off if config doesnt allow)
+-- #     use -addr_bus <32|64|random|take_from_cfg>     
+-- #        
+-- #   - extended buffer descriptors (random by default, or off if config doesnt allow)
+-- #     use -ext_bd <1|0|random>     
+-- #        
+-- #   - force max burst mode (forces AXI to send max length bursts)
+-- #     use -force_max_burst_<tx|rx> <1|0|random>    default is 0 
+init_dma -ext_bd 0 -addr_bus 32  -burst random -min_buf_size 128 -max_buf_size 128 -tx_csum_offload 1
+
+apbwr      00 00000208  -- write tx_go and enable tx
+
+--******************************************************************************
+-- TX Frame 1 : PTP sync frame, incorrect ethertype
+--******************************************************************************
+
+dma_rd tx_descr 55555500   98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555504   00008062 -- end of frame, 
+
+
+dma_rd 98765000   00003333
+dma_rd 98765004   00080900
+dma_rd 98765008   a8a7b52b
+dma_rd 9876500c   0067de86
+dma_rd 98765010   20000000
+dma_rd 98765014   80feff11
+dma_rd 98765018   00000000
+dma_rd 9876501c   00000000
+dma_rd 98765020   b52b0008
+dma_rd 98765024   02ffa8a7
+dma_rd 98765028   00000000
+dma_rd 9876502c   00000000
+dma_rd 98765030   00000000
+dma_rd 98765034   09028101
+dma_rd 98765038   12003f01
+dma_rd 9876503c   6f6092ae
+dma_rd 98765040   686f6568
+dma_rd 98765044   686f6c65
+dma_rd 98765048   686f6c65
+dma_rd 9876504c   686f6c65
+dma_rd 98765050   abab6c65
+dma_rd 98765054   abababab
+dma_rd 98765058   abababab
+dma_rd 9876505c   0000abab
+dma_rd 98765060   00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002bb5a7a8     -- MAC SA
+txd        86de             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0020             -- Payload length  (==32)                
+txd        11ff             -- Next Header=UDP, Hop Limit
+txd        fe800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2bb5a7a8         -- Source Address (4th 32) 
+txd        ff020000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        00000181         -- Dest Address (4th 32)
+txd        0209013f         -- UDP: Source and Destination Port
+txd        0012ae92         -- UDP: Length, CheckSum
+txd        60               -- transport specific, messageType
+txd        6f6865           -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        abababab         -- other stuff
+txd        abababab         -- other stuff
+txd        abababab         -- UUID, sequenceID
+txd        00000000         -- sync frame control field, flags, reserved
+txd        41104633         -- CRC
+
+
+dma_wr tx_descr 55555504 80408062 -- write used bit
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Frame 1 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- check TX status register - transmit complete
+apbwr      14 00000020  -- clear TX status register
+
+
+--******************************************************************************
+-- TX Frame 2 : PTP del_req, incorrect address
+--******************************************************************************
+
+dma_rd tx_descr 55555508   98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 5555550c   00008062 -- end of frame, 
+
+
+dma_rd 98765000   00003333
+dma_rd 98765004   00080900
+dma_rd 98765008   a8a7b52b
+dma_rd 9876500c   0067dd86
+dma_rd 98765010   20000000
+dma_rd 98765014   80feff11
+dma_rd 98765018   00000000
+dma_rd 9876501c   00000000
+dma_rd 98765020   b52b0008
+dma_rd 98765024   05faa8a7
+dma_rd 98765028   00000000
+dma_rd 9876502c   00000000
+dma_rd 98765030   00000000
+dma_rd 98765034   09028101
+dma_rd 98765038   12003f01
+dma_rd 9876503c   6f618fb2
+dma_rd 98765040   686f6568
+dma_rd 98765044   686f6c65
+dma_rd 98765048   686f6c65
+dma_rd 9876504c   686f6c65
+dma_rd 98765050   abab6c65
+dma_rd 98765054   abababab
+dma_rd 98765058   abababab
+dma_rd 9876505c   0000abab
+dma_rd 98765060   00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002bb5a7a8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label
+txd        0020             -- Payload length  (==32)
+txd        11ff             -- Next Header=UDP, Hop Limit
+txd        fe800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2bb5a7a8         -- Source Address (4th 32) 
+txd        fa050000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        00000181         -- Dest Address (4th 32)
+txd        0209013f         -- UDP: Source and Destination Port
+txd        0012b28f         -- UDP: Length, CheckSum
+txd        61               -- transport specific, messageType
+txd        6f6865           -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        abababab         -- other stuff
+txd        abababab         -- other stuff
+txd        abababab         -- UUID, sequenceID
+txd        00000000         -- sync frame control field, flags, reserved
+txd        23420421         -- CRC
+
+
+dma_wr tx_descr 5555550c 80008062 -- write used bit
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Frame 2 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- check TX status register - transmit complete
+apbwr      14 00000020  -- clear TX status register
+
+--******************************************************************************
+-- TX Frame 3 : PTP pdelay_req, incorrect address
+--******************************************************************************
+
+dma_rd tx_descr 55555510   98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555514   00008062 -- end of frame, 
+
+
+
+dma_rd 98765000   00003333
+dma_rd 98765004   00080900
+dma_rd 98765008   a8a7b52b
+dma_rd 9876500c   0067dd86
+dma_rd 98765010   20000000
+dma_rd 98765014   80feff11
+dma_rd 98765018   00000000
+dma_rd 9876501c   00000000
+dma_rd 98765020   b52b0008
+dma_rd 98765024   02ffa8a7
+dma_rd 98765028   00000000
+dma_rd 9876502c   00000000
+dma_rd 98765030   00000000
+dma_rd 98765034   09026b02
+dma_rd 98765038   12003f01
+dma_rd 9876503c   6f62a8ab
+dma_rd 98765040   686f6568
+dma_rd 98765044   686f6c65
+dma_rd 98765048   686f6c65
+dma_rd 9876504c   686f6c65
+dma_rd 98765050   abab6c65
+dma_rd 98765054   abababab
+dma_rd 98765058   abababab
+dma_rd 9876505c   0000abab
+dma_rd 98765060   00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002bb5a7a8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0020             -- Payload length  (==32)                
+txd        11ff             -- Next Header=UDP, Hop Limit                        
+txd        fe800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2bb5a7a8         -- Source Address (4th 32) 
+txd        ff020000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        0000026b         -- Dest Address (4th 32)
+txd        0209013f         -- UDP: Source and Destination Port
+txd        0012aba8         -- UDP: Length, CheckSum
+txd        62               -- transport specific, messageType
+txd        6f6865           -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        abababab         -- other stuff
+txd        abababab         -- other stuff
+txd        abababab         -- UUID, sequenceID
+txd        00000000         -- sync frame control field, flags, reserved
+txd        98c64129         -- CRC
+
+
+dma_wr tx_descr 55555514 80008062 -- write used bit
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Frame 3 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- check TX status register - transmit complete
+apbwr      14 00000020  -- clear TX status register
+
+
+--******************************************************************************
+-- TX Frame 4 : PTP pdel_resp, incorrect UDP dest port
+--******************************************************************************
+
+dma_rd tx_descr 55555518   98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 5555551c   00008062 -- end of frame, 
+
+
+dma_rd 98765000   00003333
+dma_rd 98765004   00080900
+dma_rd 98765008   a8a7b52b
+dma_rd 9876500c   0067dd86
+dma_rd 98765010   20000000
+dma_rd 98765014   80feff11
+dma_rd 98765018   00000000
+dma_rd 9876501c   00000000
+dma_rd 98765020   b52b0008
+dma_rd 98765024   02ffa8a7
+dma_rd 98765028   00000000
+dma_rd 9876502c   00000000
+dma_rd 98765030   00000000
+dma_rd 98765034   09026b00
+dma_rd 98765038   12003f3f
+dma_rd 9876503c   6f63a86e
+dma_rd 98765040   686f6568
+dma_rd 98765044   686f6c65
+dma_rd 98765048   686f6c65
+dma_rd 9876504c   686f6c65
+dma_rd 98765050   abab6c65
+dma_rd 98765054   abababab
+dma_rd 98765058   abababab
+dma_rd 9876505c   0000abab
+dma_rd 98765060   00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002bb5a7a8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0020             -- Payload length  (==32)                
+txd        11ff             -- Next Header=UDP, Hop Limit
+txd        fe800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2bb5a7a8         -- Source Address (4th 32) 
+txd        ff020000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        0000006b         -- Dest Address (4th 32)
+txd        02093f3f         -- UDP: Source and Destination Port
+txd        00126ea8         -- UDP: Length, CheckSum
+txd        63               -- transport specific, messageType
+txd        6f6865           -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        abababab         -- other stuff
+txd        abababab         -- other stuff
+txd        abababab         -- UUID, sequenceID
+txd        00000000         -- sync frame control field, flags, reserved
+txd        b9f3b4cf         -- CRC
+
+
+dma_wr tx_descr 5555551c 80008062 -- write used bit
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Frame 4 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- check TX status register - transmit complete
+apbwr      14 00000020  -- clear TX status register
+
+
+--******************************************************************************
+-- TX Frame 5 : PTP sync frame with incorrect address
+--******************************************************************************
+
+dma_rd tx_descr 55555520   98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555524   00008062 -- end of frame, 
+
+
+dma_rd 98765000   00003333
+dma_rd 98765004   00080900
+dma_rd 98765008   a8a7b52b
+dma_rd 9876500c   0067dd86
+dma_rd 98765010   20000000
+dma_rd 98765014   80feff11
+dma_rd 98765018   00000000
+dma_rd 9876501c   00000000
+dma_rd 98765020   b52b0008
+dma_rd 98765024   05ffa8a7
+dma_rd 98765028   00000000
+dma_rd 9876502c   00000000
+dma_rd 98765030   00000011
+dma_rd 98765034   09028101
+dma_rd 98765038   12003f01
+dma_rd 9876503c   6f608f9d
+dma_rd 98765040   686f6568
+dma_rd 98765044   686f6c65
+dma_rd 98765048   686f6c65
+dma_rd 9876504c   686f6c65
+dma_rd 98765050   abab6c65
+dma_rd 98765054   abababab
+dma_rd 98765058   abababab
+dma_rd 9876505c   0000abab
+dma_rd 98765060   00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002bb5a7a8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0020             -- Payload length  (==32)                
+txd        11ff             -- Next Header=UDP, Hop Limit
+txd        fe800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2bb5a7a8         -- Source Address (4th 32) 
+txd        ff050000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00001100         -- Dest Address (3rd 32)
+txd        00000181         -- Dest Address (4th 32)
+txd        0209013f         -- UDP: Source and Destination Port
+txd        00129d8f         -- UDP: Length, CheckSum
+txd        60               -- transport specific, messageType
+txd        6f6865           -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        abababab         -- other stuff
+txd        abababab         -- other stuff
+txd        abababab         -- UUID, sequenceID
+txd        00000000         -- sync frame control field, flags, reserved
+txd        0a623b58         -- CRC
+
+
+dma_wr tx_descr 55555524 80008062 -- write used bit,
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Frame 5 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- check TX status register - transmit complete
+apbwr      14 00000020  -- clear TX status register
+
+
+--******************************************************************************
+-- TX Frame 6 : PTP del_req with incorrect UDP destination port
+--******************************************************************************
+
+dma_rd tx_descr 55555528   98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 5555552c   00008062 -- end of frame, 
+
+
+dma_rd 98765000   00003333
+dma_rd 98765004   00080900
+dma_rd 98765008   a8a7b52b
+dma_rd 9876500c   0067dd86
+dma_rd 98765010   20000000
+dma_rd 98765014   80feff11
+dma_rd 98765018   00000000
+dma_rd 9876501c   00000000
+dma_rd 98765020   b52b0008
+dma_rd 98765024   02ffa8a7
+dma_rd 98765028   00000000
+dma_rd 9876502c   00000000
+dma_rd 98765030   00000000
+dma_rd 98765034   09028101
+dma_rd 98765038   12003f10
+dma_rd 9876503c   6f61929e
+dma_rd 98765040   686f6568
+dma_rd 98765044   686f6c65
+dma_rd 98765048   686f6c65
+dma_rd 9876504c   686f6c65
+dma_rd 98765050   abab6c65
+dma_rd 98765054   abababab
+dma_rd 98765058   abababab
+dma_rd 9876505c   0000abab
+dma_rd 98765060   00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002bb5a7a8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label
+txd        0020             -- Payload length  (==32)
+txd        11ff             -- Next Header=UDP, Hop Limit
+txd        fe800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2bb5a7a8         -- Source Address (4th 32) 
+txd        ff020000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        00000181         -- Dest Address (4th 32)
+txd        0209103f         -- UDP: Source and Destination Port
+txd        00129e92         -- UDP: Length, CheckSum
+txd        61               -- transport specific, messageType
+txd        6f6865           -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        abababab         -- other stuff
+txd        abababab         -- other stuff
+txd        abababab         -- UUID, sequenceID
+txd        00000000         -- sync frame control field, flags, reserved
+txd        215f1d0d         -- CRC
+
+
+dma_wr tx_descr 5555552c 80008062 -- write used bit,
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Frame 6 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- check TX status register - transmit complete
+apbwr      14 00000020  -- clear TX status register
+
+
+--******************************************************************************
+-- TX Frame 7 : PTP pdelay_req with incorrect UDP dest port
+--******************************************************************************
+
+dma_rd tx_descr 55555530   98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555534   00008062 -- end of frame, 
+
+
+
+dma_rd 98765000   00003333
+dma_rd 98765004   00080900
+dma_rd 98765008   a8a7b52b
+dma_rd 9876500c   0067dd86
+dma_rd 98765010   20000000
+dma_rd 98765014   80feff11
+dma_rd 98765018   00000000
+dma_rd 9876501c   00000000
+dma_rd 98765020   b52b0008
+dma_rd 98765024   02ffa8a7
+dma_rd 98765028   00000000
+dma_rd 9876502c   00000000
+dma_rd 98765030   00000000
+dma_rd 98765034   09026b00
+dma_rd 98765038   12004f01
+dma_rd 9876503c   6f6298ad
+dma_rd 98765040   686f6568
+dma_rd 98765044   686f6c65
+dma_rd 98765048   686f6c65
+dma_rd 9876504c   686f6c65
+dma_rd 98765050   abab6c65
+dma_rd 98765054   abababab
+dma_rd 98765058   abababab
+dma_rd 9876505c   0000abab
+dma_rd 98765060   00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002bb5a7a8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0020             -- Payload length  (==32)                
+txd        11ff             -- Next Header=UDP, Hop Limit
+txd        fe800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2bb5a7a8         -- Source Address (4th 32) 
+txd        ff020000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        0000006b         -- Dest Address (4th 32)
+txd        0209014f         -- UDP: Source and Destination Port
+txd        0012ad98         -- UDP: Length, CheckSum
+txd        62               -- transport specific, messageType
+txd        6f6865           -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        abababab         -- other stuff
+txd        abababab         -- other stuff
+txd        abababab         -- UUID, sequenceID
+txd        00000000         -- sync frame control field, flags, reserved
+txd        bebae0b4         -- CRC
+
+
+dma_wr tx_descr 55555534 80008062 -- write used bit,
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Frame 7 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- check TX status register - transmit complete
+apbwr      14 00000020  -- clear TX status register
+
+
+--******************************************************************************
+-- TX Frame 8 : PTP pdel_resp with incorrect messagetype
+--******************************************************************************
+
+dma_rd tx_descr 55555538   98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 5555553c   00008062 -- end of frame, 
+
+
+dma_rd 98765000   00003333
+dma_rd 98765004   00080900
+dma_rd 98765008   a8a7b52b
+dma_rd 9876500c   0067dd86
+dma_rd 98765010   20000000
+dma_rd 98765014   80feff11
+dma_rd 98765018   00000000
+dma_rd 9876501c   00000000
+dma_rd 98765020   b52b0008
+dma_rd 98765024   02ffa9a7
+dma_rd 98765028   00000000
+dma_rd 9876502c   00000000
+dma_rd 98765030   00000000
+dma_rd 98765034   09026b00
+dma_rd 98765038   12003f01
+dma_rd 9876503c   6f69a7a6
+dma_rd 98765040   686f6568
+dma_rd 98765044   686f6c65
+dma_rd 98765048   686f6c65
+dma_rd 9876504c   686f6c65
+dma_rd 98765050   abab6c65
+dma_rd 98765054   abababab
+dma_rd 98765058   abababab
+dma_rd 9876505c   0000abab
+dma_rd 98765060   00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002bb5a7a8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0020             -- Payload length  (==32)                
+txd        11ff             -- Next Header=UDP, Hop Limit
+txd        fe800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2bb5a7a9         -- Source Address (4th 32) 
+txd        ff020000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        0000006b         -- Dest Address (4th 32)
+txd        0209013f         -- UDP: Source and Destination Port
+txd        0012a6a7         -- UDP: Length, CheckSum
+txd        69               -- transport specific, messageType
+txd        6f6865           -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        abababab         -- other stuff
+txd        abababab         -- other stuff
+txd        abababab         -- UUID, sequenceID
+txd        00000000         -- sync frame control field, flags, reserved
+txd        cf489236         -- CRC
+
+
+dma_wr tx_descr 5555553c 80008062 -- write used bit,
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Frame 8 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- check TX status register - transmit complete
+apbwr      14 00000028  -- clear TX status register
+
+
+--******************************************************************************
+-- TX Frame 9 : PTP del_req, incorrect messagetype
+--******************************************************************************
+
+dma_rd tx_descr 55555540   98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555544   00008062 -- end of frame, 
+
+
+dma_rd 98765000   00003333
+dma_rd 98765004   00080900
+dma_rd 98765008   a8a7b52b
+dma_rd 9876500c   0067dd86
+dma_rd 98765010   20000000
+dma_rd 98765014   80feff11
+dma_rd 98765018   00000000
+dma_rd 9876501c   00000000
+dma_rd 98765020   b52b0008
+dma_rd 98765024   05ffa8a7
+dma_rd 98765028   00000000
+dma_rd 9876502c   00000000
+dma_rd 98765030   00000000
+dma_rd 98765034   09028101
+dma_rd 98765038   12003f01
+dma_rd 9876503c   6f638fab
+dma_rd 98765040   686f6568
+dma_rd 98765044   686f6c65
+dma_rd 98765048   686f6c65
+dma_rd 9876504c   686f6c65
+dma_rd 98765050   abab6c65
+dma_rd 98765054   abababab
+dma_rd 98765058   abababab
+dma_rd 9876505c   0000abab
+dma_rd 98765060   00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002bb5a7a8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label
+txd        0020             -- Payload length  (==32)
+txd        11ff             -- Next Header=UDP, Hop Limit
+txd        fe800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2bb5a7a8         -- Source Address (4th 32) 
+txd        ff050000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        00000181         -- Dest Address (4th 32)
+txd        0209013f         -- UDP: Source and Destination Port
+txd        0012ab8f         -- UDP: Length, CheckSum
+txd        63               -- transport specific, messageType
+txd        6f6865           -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        6f68656c         -- subdomain
+txd        abababab         -- other stuff
+txd        abababab         -- other stuff
+txd        abababab         -- UUID, sequenceID
+txd        00000000         -- sync frame control field, flags, reserved
+txd        60a1b008         -- CRC
+
+
+dma_wr tx_descr 55555544 80008062 -- write used bit
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000088  "Frame 9 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000088  -- clear interrupt status register
+apbrd      14 00000021  -- check TX status register - transmit complete
+apbwr      14 00000021  -- clear TX status register
+
+
+dma_rd tx_descr 55555548 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 5555554c 80008062 -- used bit set
+
+
+-- check transmit statistics
+apbrd(scale 20000)     100 00000396  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000009  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000009  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000009  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(100000)

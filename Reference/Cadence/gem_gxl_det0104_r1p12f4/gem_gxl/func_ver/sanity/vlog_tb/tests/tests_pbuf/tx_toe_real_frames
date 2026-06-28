@@ -1,0 +1,1158 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : toe_real_frames
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 6 April 2006
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- This test applies pre-defined real IP packets of different types.
+-- All frames in this test should be received successfully.
+-- 
+-- Functional Coverage
+--  * Independently checks the IP checksum algorithm
+--  * Independently checks the TCP checksum algorithm
+--  * Independently checks the UDP checksum algorithm
+-- 
+-- Detailed Test Description
+--  1. Initialise suitable wait states for the test.
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 32-bit DMA data bus.
+--  3. Send several real IP frames with ethernet encapsulation, which
+--     have good IP checksum and are valid UDP or TCP with good checksums.
+--
+-- Frame 1 : TCP connect request.
+--
+--
+--  4. Check statistics for correct values from above tests.
+--
+--------------------------------------------------------------------------------
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 0
+bus_grant_delay 0
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      10 00020c04  -- enable 4k ram and tcp offload
+apbwr      00 00000208  -- write tx_go and enable tx
+
+
+--******************************************************************************
+-- Frame 1 : TCP connect request.
+--******************************************************************************
+
+
+dma_rd 55555504 0000803c -- start of frame
+dma_rd 55555500 22222100 -- dma reads pointer of 98765000
+
+-- check the receive data as it is written out on the AHB interface
+dma_rd 22222100 26f7e000 -- store frame to memory
+dma_rd 22222104 0008e93f
+dma_rd 22222108 4b358620
+dma_rd 2222210c 00450008
+dma_rd 22222110 b8082c00
+dma_rd 22222114 06ff0040
+dma_rd 22222118 858b9799
+dma_rd 2222211c 858b6ed9
+dma_rd 22222120 059002e9
+dma_rd 22222124 14721700
+dma_rd 22222128 000014f1
+dma_rd 2222212c 02600000
+dma_rd 22222130 2ca93822
+dma_rd 22222134 04020000
+dma_rd 22222138 0000b405
+
+
+-- TCP connect request
+-- Decode of the Packet
+-- ETHER:  ----- Ether Header -----
+-- ETHER:
+-- ETHER:  Packet 3 arrived at 17:37:23.94
+-- ETHER:  Packet size = 58 bytes
+-- ETHER:  Destination = 0:e0:f7:26:3f:e9, Router
+-- ETHER:  Source      = 8:0:20:86:35:4b, Sun
+-- ETHER:  Ethertype = 0800 (IP)
+-- ETHER:
+-- IP:   ----- IP Header -----
+-- IP:
+-- IP:   Version = 4
+-- IP:   Header length = 20 bytes
+-- IP:   Type of service = 0x00 (normal)
+-- IP:   Total length = 44 bytes
+-- IP:   Identification = 2232
+-- IP:   Flags = 0x4
+-- IP:         .1.. .... = do not fragment
+-- IP:         ..0. .... = last fragment
+-- IP:   Fragment offset = 0 bytes
+-- IP:   Time to live = 255 seconds/hops
+-- IP:   Protocol = 6 (TCP)
+-- IP:   Header checksum = 9997
+-- IP:   Source address = 139.133.217.110, client
+-- IP:   Destination address = 139.133.233.2, server
+-- IP:   No options
+-- IP:
+-- TCP:  ----- TCP Header -----
+-- TCP:
+-- TCP:  Source port = 36869
+-- TCP:  Destination port = 23 (TELNET)
+-- TCP:  Sequence number = 1913975060
+-- TCP:  Acknowledgement number = 0
+-- TCP:  Data offset = 24 bytes
+-- TCP:  Flags = 0x02
+-- TCP:        ..0. .... = No urgent pointer
+-- TCP:        ...0 .... = No acknowledgement
+-- TCP:        .... 0... = No push
+-- TCP:        .... .0.. = No reset
+-- TCP:        .... ..1. = Syn
+-- TCP:        .... ...0 = No Fin
+-- TCP:  Window = 8760
+-- TCP:  Checksum = 0xa92c
+-- TCP:  Urgent pointer = 0
+-- TCP:  Options: (4 bytes)
+-- TCP:    - Maximum segment size = 1460 bytes
+-- TCP:
+
+txd        55555555555555d5 -- preamble & SDF
+txd        00e0f7263fe9 -- MAC DA
+txd        08002086354b -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        002c         -- total length = 55
+txd        08b8         -- ID
+txd        4000         -- flags & fragmentation
+txd        ff06         -- time to live and protocol
+txd        9997         -- IP Header checksum
+txd        8b85d96e     -- IP SA
+txd        8b85e902     -- IP DA
+txd        9005         -- TCP source port
+txd        0017         -- TCP destination port
+txd        7214f114     -- Sequence number
+txd        00000000     -- Acknowledgement Number
+txd        60022238     -- Flags and window
+txd        a92c         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        020405b4     -- Telnet data
+txd        0000         -- PAD
+txd        29c52e2b     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 8000803c -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+
+
+--******************************************************************************
+-- Frame 2 : TCP ACK.
+--******************************************************************************
+
+dma_rd 5555550c 0000803c
+dma_rd 55555508 22222200  
+
+-- check the receive data as it is written out on the AHB interface
+dma_rd 22222200 86200008 -- store frame to memory
+dma_rd 22222204 e0004b35
+dma_rd 22222208 e93f26f7
+dma_rd 2222220c 00450008
+dma_rd 22222210 fdaa2800
+dma_rd 22222214 06fc0000
+dma_rd 22222218 858b563a
+dma_rd 2222221c 858b02e9
+dma_rd 22222220 17006ed9
+dma_rd 22222224 31940590
+dma_rd 22222228 14722810
+dma_rd 2222222c 105030f1
+dma_rd 22222230 651c3822
+dma_rd 22222234 00000000
+dma_rd 22222238 00001000
+                        -- trigger reception of frame
+
+-- TCP ACK
+-- Decode of the Packet
+-- ETHER:  ----- Ether Header -----
+-- ETHER:
+-- ETHER:  Packet 4 arrived at 17:37:23.94
+-- ETHER:  Packet size = 60 bytes
+-- ETHER:  Destination = 8:0:20:86:35:4b, Sun
+-- ETHER:  Source      = 0:e0:f7:26:3f:e9, Router
+-- ETHER:  Ethertype = 0800 (IP)
+-- ETHER:
+-- IP:   ----- IP Header -----
+-- IP:
+-- IP:   Version = 4
+-- IP:   Header length = 20 bytes
+-- IP:   Type of service = 0x00 (normal)
+-- IP:   Total length = 40 bytes
+-- IP:   Identification = 43773
+-- IP:   Flags = 0x0
+-- IP:         .0.. .... = may fragment
+-- IP:         ..0. .... = last fragment
+-- IP:   Fragment offset = 0 bytes
+-- IP:   Time to live = 252 seconds/hops
+-- IP:   Protocol = 6 (TCP)
+-- IP:   Header checksum = 3a56
+-- IP:   Source address = 139.133.233.2, server
+-- IP:   Destination address = 139.133.217.110, client
+-- IP:   No options
+-- IP:
+-- TCP:  ----- TCP Header -----
+-- TCP:
+-- TCP:  Source port = 23
+-- TCP:  Destination port = 36869
+-- TCP:  Sequence number =
+-- TCP:  Acknowledgement number =
+-- TCP:  Data offset = 
+-- TCP:  Flags = 0x10
+-- TCP:        ..0. .... = No urgent pointer
+-- TCP:        ...1 .... = Acknowledgement
+-- TCP:        .... 0... = No push
+-- TCP:        .... .0.. = No reset
+-- TCP:        .... ..0. = No Syn 
+-- TCP:        .... ...0 = No Fin
+-- TCP:  Window = 8760 (0x2238)
+-- TCP:  Checksum = 0x1c65
+-- TCP:  Urgent pointer = 0
+-- TCP:  Options: (None)
+-- TCP:
+
+txd        55555555555555d5 -- preamble & SDF
+txd        08002086354b -- MAC DA
+txd        00e0f7263fe9 -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        0028         -- total length = 55
+txd        aafd         -- ID
+txd        0000         -- flags & fragmentation
+txd        fc06         -- time to live and protocol
+txd        3a56         -- IP Header checksum
+txd        8b85e902     -- IP SA
+txd        8b85d96e     -- IP DA
+txd        0017         -- TCP source port
+txd        9005         -- TCP destination port
+txd        94311028     -- Sequence number
+txd        7214f130     -- Acknowledgement Number
+txd        50102238     -- Flags and window
+txd        1c65         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        00000010     -- Telnet data
+txd        0000         -- Telnet data 
+txd        0e1acbb3     -- FCS
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555550c 8000803c -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+
+
+
+--******************************************************************************
+-- Frame 3 : TCP (Telnet) Established
+--******************************************************************************
+
+
+-- TCP (Telnet) Established
+-- Decode of the Packet
+-- ETHER:  ----- Ether Header -----
+-- ETHER:
+-- ETHER:  Packet 5 arrived at 17:37:23.94
+-- ETHER:  Packet size = 54 bytes
+-- ETHER:  Destination = 0:e0:f7:26:3f:e9, Router
+-- ETHER:  Source      = 8:0:20:86:35:4b, Sun
+-- ETHER:  Ethertype = 0800 (IP)
+-- ETHER:
+-- IP:   ----- IP Header -----
+-- IP:
+-- IP:   Version = 4
+-- IP:   Header length = 20 bytes
+-- IP:   Type of service = 0x00 (normal)
+-- IP:   Total length = 40 bytes
+-- IP:   Identification = 2233
+-- IP:   Flags = 0x4
+-- IP:         .1.. .... = do not fragment
+-- IP:         ..0. .... = last fragment
+-- IP:   Fragment offset = 0 bytes
+-- IP:   Time to live = 255 seconds/hops
+-- IP:   Protocol = 6 (TCP)
+-- IP:   Header checksum = 999a
+-- IP:   Source address = 139.133.217.110, client
+-- IP:   Destination address = 139.133.233.2, server
+-- IP:   No options
+-- IP:
+-- TCP:  ----- TCP Header -----
+-- TCP:
+-- TCP:  Source port = 36869
+-- TCP:  Destination port = 23 (TELNET)
+-- TCP:  Sequence number = 1913975061
+-- TCP:  Acknowledgement number = 2486243368
+-- TCP:  Data offset = 20 bytes
+-- TCP:  Flags = 0x10
+-- TCP:        ..0. .... = No urgent pointer
+-- TCP:        ...1 .... = Acknowledgement
+-- TCP:        .... 0... = No push
+-- TCP:        .... .0.. = No reset
+-- TCP:        .... ..0. = No Syn
+-- TCP:        .... ...0 = No Fin
+-- TCP:  Window = 8760
+-- TCP:  Checksum = 0x1c80
+-- TCP:  Urgent pointer = 0
+-- TCP:  No options
+
+dma_rd 55555514 0000803c
+dma_rd 55555510 22222300  
+
+-- check the receive data as it is written out on the AHB interface
+dma_rd 22222300 26f7e000 -- store frame to memory
+dma_rd 22222304 0008e93f
+dma_rd 22222308 4b358620
+dma_rd 2222230c 00450008
+dma_rd 22222310 b9082800
+dma_rd 22222314 06ff0040
+dma_rd 22222318 858b9a99
+dma_rd 2222231c 858b6ed9
+dma_rd 22222320 059002e9
+dma_rd 22222324 14721700
+dma_rd 22222328 319415f1
+dma_rd 2222232c 10502810
+dma_rd 22222330 801c3822
+dma_rd 22222334 00000000
+dma_rd 22222338 00000000
+
+txd        55555555555555d5 -- preamble & SDF
+txd        00e0f7263fe9 -- MAC DA
+txd        08002086354b -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        0028         -- total length = 55
+txd        08b9         -- ID
+txd        4000         -- flags & fragmentation
+txd        ff06         -- time to live and protocol
+txd        999a         -- IP Header checksum
+txd        8b85d96e     -- IP SA
+txd        8b85e902     -- IP DA
+txd        9005         -- TCP source port
+txd        0017         -- TCP destination port
+txd        7214f115     -- Sequence number
+txd        94311028     -- Acknowledgement Number
+txd        50102238     -- Flags and window
+txd        1c80         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        00000000     -- PAD
+txd        0000         -- PAD
+txd        5bebf892     -- FCS
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555514 8000803c -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+
+
+
+--******************************************************************************
+-- Frame 4 : TCP (Telnet) Established 2
+--******************************************************************************
+
+-- TCP (Telnet) Established
+-- Decode of the Packet
+-- ETHER:  ----- Ether Header -----
+-- ETHER:
+-- ETHER:  Packet 6 arrived at 17:37:23.95
+-- ETHER:  Packet size = 81 bytes
+-- ETHER:  Destination = 0:e0:f7:26:3f:e9, Router
+-- ETHER:  Source      = 8:0:20:86:35:4b, Sun
+-- ETHER:  Ethertype = 0800 (IP)
+-- ETHER:
+-- IP:   ----- IP Header -----
+-- IP:
+-- IP:   Version = 4
+-- IP:   Header length = 20 bytes
+-- IP:   Type of service = 0x00 (normal)
+-- IP:   Total length = 67 bytes
+-- IP:   Identification = 2234
+-- IP:   Flags = 0x4
+-- IP:         .1.. .... = do not fragment
+-- IP:         ..0. .... = last fragment
+-- IP:   Fragment offset = 0 bytes
+-- IP:   Time to live = 255 seconds/hops
+-- IP:   Protocol = 6 (TCP)
+-- IP:   Header checksum = 997e
+-- IP:   Source address = 139.133.217.110, client
+-- IP:   Destination address = 139.133.233.2, server
+-- IP:   No options
+-- IP:
+-- TCP:  ----- TCP Header -----
+-- TCP:
+-- TCP:  Source port = 36869
+-- TCP:  Destination port = 23 (TELNET)
+-- TCP:  Sequence number = 1913975061
+-- TCP:  Acknowledgement number = 2486243368
+-- TCP:  Data offset = 20 bytes
+-- TCP:  Flags = 0x18
+-- TCP:        ..0. .... = No urgent pointer
+-- TCP:        ...1 .... = Acknowledgement
+-- TCP:        .... 1... = Push
+-- TCP:        .... .0.. = No reset
+-- TCP:        .... ..0. = No Syn
+-- TCP:        .... ...0 = No Fin
+-- TCP:  Window = 8760
+-- TCP:  Checksum = 0x9d0f
+-- TCP:  Urgent pointer = 0
+-- TCP:  No options
+-- TCP:
+-- TELNET:  ----- TELNET:   -----
+-- TELNET:   Data
+
+dma_rd 5555551c 00008051
+dma_rd 55555518 22222400  
+
+dma_rd 22222400 26f7e000 -- store frame to memory
+dma_rd 22222404 0008e93f
+dma_rd 22222408 4b358620
+dma_rd 2222240c 00450008
+dma_rd 22222410 ba084300
+dma_rd 22222414 06ff0040
+dma_rd 22222418 858b7e99
+dma_rd 2222241c 858b6ed9
+dma_rd 22222420 059002e9
+dma_rd 22222424 14721700
+dma_rd 22222428 319415f1
+dma_rd 2222242c 18502810
+dma_rd 22222430 0f9d3822
+dma_rd 22222434 fdff0000
+dma_rd 22222438 18fbff03
+dma_rd 2222243c ff1ffbff
+dma_rd 22222440 fbff20fb
+dma_rd 22222444 22fbff21
+dma_rd 22222448 ff27fbff
+dma_rd 2222244c fbff05fd
+dma_rd 22222450 00000023
+
+txd        55555555555555d5 -- preamble & SDF
+txd        00e0f7263fe9 -- MAC DA
+txd        08002086354b -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        0043         -- total length = 55
+txd        08ba         -- ID
+txd        4000         -- flags & fragmentation
+txd        ff06         -- time to live and protocol
+txd        997e         -- IP Header checksum
+txd        8b85d96e     -- IP SA
+txd        8b85e902     -- IP DA
+txd        9005         -- TCP source port
+txd        0017         -- TCP destination port
+txd        7214f115     -- Sequence number
+txd        94311028     -- Acknowledgement Number
+txd        50182238     -- Flags and window
+txd        9d0f         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        fffd03ff     -- Telnet data
+txd        fb18fffb     -- Telnet data
+txd        1ffffb20     -- Telnet data
+txd        fffb21ff     -- Telnet data                    
+txd        fb22fffb     -- Telnet data
+txd        27fffd05     -- Telnet data
+txd        fffb23       -- Telnet data
+txd        598871bf     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555551c 80008051 -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Frame 5 : TCP (Telnet) ACK.
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 5 : TCP (Telnet) ACK"
+                        -- trigger reception of frame
+
+-- TCP (Telnet) ACK
+-- Decode of the Packet
+-- ETHER:  ----- Ether Header -----
+-- ETHER:
+-- ETHER:  Packet 7 arrived at 17:37:24.00
+-- ETHER:  Packet size = 60 bytes
+-- ETHER:  Destination = 8:0:20:86:35:4b, Sun
+-- ETHER:  Source      = 0:e0:f7:26:3f:e9, Router
+-- ETHER:  Ethertype = 0800 (IP)
+-- ETHER:
+-- IP:   ----- IP Header -----
+-- IP:
+-- IP:   Version = 4
+-- IP:   Header length = 20 bytes
+-- IP:   Type of service = 0x00 (normal)
+-- IP:   Total length = 40 bytes
+-- IP:   Identification = 43773
+-- IP:   Flags = 0x0
+-- IP:         .0.. .... = may fragment
+-- IP:         ..0. .... = last fragment
+-- IP:   Fragment offset = 0 bytes
+-- IP:   Time to live = 252 seconds/hops
+-- IP:   Protocol = 6 (TCP)
+-- IP:   Header checksum = 3a56
+-- IP:   Source address = 139.133.233.2, server
+-- IP:   Destination address = 139.133.217.110, client
+-- IP:   No options
+-- IP:
+-- TCP:  ----- TCP Header -----
+-- TCP:
+-- TCP:  Source port = 23
+-- TCP:  Destination port = 36869
+-- TCP:  Sequence number = 2486243368
+-- TCP:  Acknowledgement number = 1913975088
+-- TCP:  Data offset = 20 bytes
+-- TCP:  Flags = 0x10
+-- TCP:        ..0. .... = No urgent pointer
+-- TCP:        ...1 .... = Acknowledgement
+-- TCP:        .... 0... = No push
+-- TCP:        .... .0.. = No reset
+-- TCP:        .... ..0. = No Syn
+-- TCP:        .... ...0 = No Fin
+-- TCP:  Window = 8760
+-- TCP:  Checksum = 0x1c65
+-- TCP:  Urgent pointer = 0
+-- TCP:  No options
+-- TCP:
+
+dma_rd 55555524 0000803c
+dma_rd 55555520 22222500  
+
+dma_rd 22222500 86200008 -- store frame to memory
+dma_rd 22222504 e0004b35
+dma_rd 22222508 e93f26f7
+dma_rd 2222250c 00450008
+dma_rd 22222510 fdaa2800
+dma_rd 22222514 06fc0000
+dma_rd 22222518 858b563a
+dma_rd 2222251c 858b02e9
+dma_rd 22222520 17006ed9
+dma_rd 22222524 31940590
+dma_rd 22222528 14722810
+dma_rd 2222252c 105030f1
+dma_rd 22222530 651c3822
+dma_rd 22222534 00000000
+dma_rd 22222538 00001000
+
+txd        55555555555555d5 -- preamble & SDF
+txd        08002086354b -- MAC DA
+txd        00e0f7263fe9 -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        0028         -- total length = 55
+txd        aafd         -- ID
+txd        0000         -- flags & fragmentation
+txd        fc06         -- time to live and protocol
+txd        3a56         -- IP Header checksum
+txd        8b85e902     -- IP SA
+txd        8b85d96e     -- IP DA
+txd        0017         -- TCP source port
+txd        9005         -- TCP destination port
+txd        94311028     -- Sequence number
+txd        7214f130     -- Acknowledgement Number
+txd        50102238     -- Flags and window
+txd        1c65         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        00000010     -- Telnet data
+txd        0000         -- Telnet data
+txd        0e1acbb3     -- good FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555524 8000803c -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+--******************************************************************************
+-- Frame 6 : TCP Disconnect Request.
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 6 : TCP Disconnect Request"
+                        -- trigger reception of frame
+
+
+-- TCP Disconnect Request
+-- Decode of the Packet
+-- ETHER:  ----- Ether Header -----
+-- ETHER:
+-- ETHER:  Packet 8 arrived at 17:37:31.08
+-- ETHER:  Packet size = 54 bytes
+-- ETHER:  Destination = 0:e0:f7:26:3f:e9,Router
+-- ETHER:  Source      = 8:0:20:86:35:4b, Sun
+-- ETHER:  Ethertype = 0800 (IP)
+-- ETHER:
+-- IP:   ----- IP Header -----
+-- IP:
+-- IP:   Version = 4
+-- IP:   Header length = 20 bytes
+-- IP:   Type of service = 0x00 (normal)
+-- IP:   Total length = 40 bytes
+-- IP:   Identification = 2235
+-- IP:   Flags = 0x4
+-- IP:         .1.. .... = do not fragment
+-- IP:         ..0. .... = last fragment
+-- IP:   Fragment offset = 0 bytes
+-- IP:   Time to live = 255 seconds/hops
+-- IP:   Protocol = 6 (TCP)
+-- IP:   Header checksum = 9998
+-- IP:   Source address = 139.133.217.110, client
+-- IP:   Destination address = 139.133.233.2, server
+-- IP:   No options
+-- IP:
+-- TCP:  ----- TCP Header -----
+-- TCP:
+-- TCP:  Source port = 36869
+-- TCP:  Destination port = 23 (TELNET)
+-- TCP:  Sequence number = 1913975088
+-- TCP:  Acknowledgement number = 2486243368
+-- TCP:  Data offset = 20 bytes
+-- TCP:  Flags = 0x11
+-- TCP:        ..0. .... = No urgent pointer
+-- TCP:        ...1 .... = Acknowledgement
+-- TCP:        .... 0... = No push
+-- TCP:        .... .0.. = No reset
+-- TCP:        .... ..0. = No Syn
+-- TCP:        .... ...1 = Fin
+-- TCP:  Window = 8760
+-- TCP:  Checksum = 0x1c64
+-- TCP:  Urgent pointer = 0
+-- TCP:  No options
+-- TCP:
+
+dma_rd 5555552c 0000803c
+dma_rd 55555528 22222600  
+
+-- check the receive data as it is written out on the AHB interface
+dma_rd 22222600 26f7e000 -- store frame to memory
+dma_rd 22222604 0008e93f
+dma_rd 22222608 4b358620
+dma_rd 2222260c 00450008
+dma_rd 22222610 bb082800
+dma_rd 22222614 06ff0040
+dma_rd 22222618 858b9899
+dma_rd 2222261c 858b6ed9
+dma_rd 22222620 059002e9
+dma_rd 22222624 14721700
+dma_rd 22222628 319430f1
+dma_rd 2222262c 11502810
+dma_rd 22222630 641c3822
+dma_rd 22222634 00000000
+dma_rd 22222638 00000000
+
+txd        55555555555555d5 -- preamble & SDF
+txd        00e0f7263fe9 -- MAC DA
+txd        08002086354b -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        0028         -- total length = 55
+txd        08bb         -- ID
+txd        4000         -- flags & fragmentation
+txd        ff06         -- time to live and protocol
+txd        9998         -- IP Header checksum
+txd        8b85d96e     -- IP SA
+txd        8b85e902     -- IP DA
+txd        9005         -- TCP source port
+txd        0017         -- TCP destination port
+txd        7214f130     -- Sequence number
+txd        94311028     -- Acknowledgement Number
+txd        50112238     -- Flags and window
+txd        1c64         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        00000000     -- PAD
+txd        0000         -- PAD
+txd        4517a97f     -- good FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555552c 8000803c -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Frame 7 : TCP ACK.
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 7 : TCP ACK"
+                        -- trigger reception of frame
+
+-- TCP ACK
+-- Decode of the Packet
+-- ETHER:  ----- Ether Header -----
+-- ETHER:
+-- ETHER:  Packet 9 arrived at 17:37:31.08
+-- ETHER:  Packet size = 60 bytes
+-- ETHER:  Destination = 8:0:20:86:35:4b, Sun
+-- ETHER:  Source      = 0:e0:f7:26:3f:e9, Router
+-- ETHER:  Ethertype = 0800 (IP)
+-- ETHER:
+-- IP:   ----- IP Header -----
+-- IP:
+-- IP:   Version = 4
+-- IP:   Header length = 20 bytes
+-- IP:   Type of service = 0x00 (normal)
+-- IP:   Total length = 40 bytes
+-- IP:   Identification = 43774
+-- IP:   Flags = 0x0
+-- IP:         .0.. .... = may fragment
+-- IP:         ..0. .... = last fragment
+-- IP:   Fragment offset = 0 bytes
+-- IP:   Time to live = 252 seconds/hops
+-- IP:   Protocol = 6 (TCP)
+-- IP:   Header checksum = 3a55
+-- IP:   Source address = 139.133.233.2, server
+-- IP:   Destination address = 139.133.217.110, client
+-- IP:   No options
+-- IP:
+-- TCP:  ----- TCP Header -----
+-- TCP:
+-- TCP:  Source port = 23
+-- TCP:  Destination port = 36869
+-- TCP:  Sequence number = 2486243368
+-- TCP:  Acknowledgement number = 1913975089
+-- TCP:  Data offset = 20 bytes
+-- TCP:  Flags = 0x10
+-- TCP:        ..0. .... = No urgent pointer
+-- TCP:        ...1 .... = Acknowledgement
+-- TCP:        .... 0... = No push
+-- TCP:        .... .0.. = No reset
+-- TCP:        .... ..0. = No Syn
+-- TCP:        .... ...0 = No Fin
+-- TCP:  Window = 8760
+-- TCP:  Checksum = 0x1c64
+-- TCP:  Urgent pointer = 0
+-- TCP:  No options
+-- TCP:
+
+dma_rd 55555534 0000803c
+dma_rd 55555530 22222700  
+
+dma_rd 22222700 86200008 -- store frame to memory
+dma_rd 22222704 e0004b35
+dma_rd 22222708 e93f26f7
+dma_rd 2222270c 00450008
+dma_rd 22222710 feaa2800
+dma_rd 22222714 06fc0000
+dma_rd 22222718 858b553a
+dma_rd 2222271c 858b02e9
+dma_rd 22222720 17006ed9
+dma_rd 22222724 31940590
+dma_rd 22222728 14722810
+dma_rd 2222272c 105031f1
+dma_rd 22222730 641c3822
+dma_rd 22222734 00000000
+dma_rd 22222738 00001000
+
+txd        55555555555555d5 -- preamble & SDF
+txd        08002086354b -- MAC DA
+txd        00e0f7263fe9 -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        0028         -- total length = 55
+txd        aafe         -- ID
+txd        0000         -- flags & fragmentation
+txd        fc06         -- time to live and protocol
+txd        3a55         -- IP Header checksum
+txd        8b85e902     -- IP SA
+txd        8b85d96e     -- IP DA
+txd        0017         -- TCP source port
+txd        9005         -- TCP destination port
+txd        94311028     -- Sequence number
+txd        7214f131     -- Acknowledgement Number
+txd        50102238     -- Flags and window
+txd        1c64         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        00000010     -- Telnet data
+txd        0000         -- Telnet data
+txd        1e5cd175     -- FCS
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555534 8000803c -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Frame 8 : TCP Reset Connection.
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 8 : TCP Reset Connection"
+                        -- trigger reception of frame
+
+
+-- TCP Reset Connection
+-- Decode of the Packet
+-- ETHER:  ----- Ether Header -----
+-- ETHER:
+-- ETHER:  Packet 11 arrived at 17:37:32.18
+-- ETHER:  Packet size = 54 bytes
+-- ETHER:  Destination = 0:e0:f7:26:3f:e9, Router
+-- ETHER:  Source      = 8:0:20:86:35:4b, Sun
+-- ETHER:  Ethertype = 0800 (IP)
+-- ETHER:
+-- IP:   ----- IP Header -----
+-- IP:
+-- IP:   Version = 4
+-- IP:   Header length = 20 bytes
+-- IP:   Type of service = 0x00
+-- IP:         xxx. .... = 0 (precedence)
+-- IP:         ...0 .... = normal delay
+-- IP:         .... 0... = normal throughput
+-- IP:         .... .0.. = normal reliability
+-- IP:   Total length = 40 bytes
+-- IP:   Identification = 2236
+-- IP:   Flags = 0x4
+-- IP:         .1.. .... = do not fragment
+-- IP:         ..0. .... = last fragment
+-- IP:   Fragment offset = 0 bytes
+-- IP:   Time to live = 255 seconds/hops
+-- IP:   Protocol = 6 (TCP)
+-- IP:   Header checksum = 9997
+-- IP:   Source address = 139.133.217.110, client
+-- IP:   Destination address = 139.133.233.2, server
+-- IP:   No options
+-- IP:
+-- TCP:  ----- TCP Header -----
+-- TCP:
+-- TCP:  Source port = 36869
+-- TCP:  Destination port = 23 (TELNET)
+-- TCP:  Sequence number = 1913975089
+-- TCP:  Acknowledgement number = 0
+-- TCP:  Data offset = 20 bytes
+-- TCP:  Flags = 0x04
+-- TCP:        ..0. .... = No urgent pointer
+-- TCP:        ...0 .... = No acknowledgement
+-- TCP:        .... 0... = No push
+-- TCP:        .... .1.. = Reset
+-- TCP:        .... ..0. = No Syn
+-- TCP:        .... ...0 = No Fin
+-- TCP:  Window = 8760
+-- TCP:  Checksum = 0xc0c9
+-- TCP:  Urgent pointer = 0
+-- TCP:  No options
+-- TCP:
+
+dma_rd 5555553c 0000803c
+dma_rd 55555538 22222800  
+
+-- check the receive data as it is written out on the AHB interface
+dma_rd 22222800 26f7e000 -- store frame to memory
+dma_rd 22222804 0008e93f
+dma_rd 22222808 4b358620
+dma_rd 2222280c 00450008
+dma_rd 22222810 bc082800
+dma_rd 22222814 06ff0040
+dma_rd 22222818 858b9799
+dma_rd 2222281c 858b6ed9
+dma_rd 22222820 059002e9
+dma_rd 22222824 14721700
+dma_rd 22222828 000031f1
+dma_rd 2222282c 04500000
+dma_rd 22222830 c9c03822
+dma_rd 22222834 27fd0000
+dma_rd 22222838 0024fdff
+
+txd        55555555555555d5 -- preamble & SDF
+txd        00e0f7263fe9 -- MAC DA
+txd        08002086354b -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        0028         -- total length = 55
+txd        08bc         -- ID
+txd        4000         -- flags & fragmentation
+txd        ff06         -- time to live and protocol
+txd        9997         -- IP Header checksum
+txd        8b85d96e     -- IP SA
+txd        8b85e902     -- IP DA
+txd        9005         -- TCP source port
+txd        0017         -- TCP destination port
+txd        7214f131     -- Sequence number
+txd        00000000     -- Acknowledgement Number
+txd        50042238     -- Flags and window
+txd        c0c9         -- TCP checksum
+txd        0000fd27     -- TCP urgent pointer
+txd        fffd24       -- Telnet data
+txd        00           -- PAD
+txd        69821fb1     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555553c 8000803c -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+--******************************************************************************
+-- Frame 9 : UDP Unit Data Transfer.
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 9 : UDP Unit Data Transfer"
+                        -- trigger reception of frame
+
+-- UDP Unit Data Transfer
+-- Decode of the Packet
+-- ETHER:  ----- Ether Header -----
+-- ETHER:
+-- ETHER:  Packet 12 arrived at 17:40:4.69
+-- ETHER:  Packet size = 52 bytes
+-- ETHER:  Destination = 0:e0:f7:26:3f:e9, Router
+-- ETHER:  Source      = 8:0:20:86:35:4b, Sun
+-- ETHER:  Ethertype = 0800 (IP)
+-- ETHER:
+-- IP:   ----- IP Header -----
+-- IP:
+-- IP:   Version = 4
+-- IP:   Header length = 20 bytes
+-- IP:   Type of service = 0x00 (normal)
+-- IP:   Total length = 38 bytes
+-- IP:   Identification = 43849
+-- IP:   Flags = 0x4
+-- IP:         .1.. .... = do not fragment
+-- IP:         ..0. .... = last fragment
+-- IP:   Fragment offset = 0 bytes
+-- IP:   Time to live = 255 seconds/hops
+-- IP:   Protocol = 17 (UDP)
+-- IP:   Header checksum = f700
+-- IP:   Source address = 139.133.217.110, client
+-- IP:   Destination address = 139.133.233.2, server
+-- IP:   No options
+-- IP:
+-- UDP:  ----- UDP Header -----
+-- UDP:
+-- UDP:  Source port = 39376
+-- UDP:  Destination port = 1087
+-- UDP:  Length = 18
+-- UDP:  Checksum = 7228
+-- UDP:
+-- UDP:  Data
+
+dma_rd 55555544 0000803c
+dma_rd 55555540 22222900  
+
+-- check the receive data as it is written out on the AHB interface
+dma_rd 22222900 26f7e000 -- store frame to memory
+dma_rd 22222904 0008e93f
+dma_rd 22222908 4b358620
+dma_rd 2222290c 00450008
+dma_rd 22222910 49ab2600
+dma_rd 22222914 11ff0040
+dma_rd 22222918 858b00f7
+dma_rd 2222291c 858b6ed9
+dma_rd 22222920 d09902e9
+dma_rd 22222924 12003f04
+dma_rd 22222928 65682872
+dma_rd 2222292c 686f6c6c
+dma_rd 22222930 6f6c6c65
+dma_rd 22222934 00000000
+dma_rd 22222938 00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        00e0f7263fe9 -- MAC DA
+txd        08002086354b -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        0026         -- total length
+txd        ab49         -- ID
+txd        4000         -- flags & fragmentation
+txd        ff11         -- time to live and protocol
+txd        f700         -- IP Header checksum
+txd        8b85d96e     -- IP SA
+txd        8b85e902     -- IP DA
+txd        99d0         -- UDP source port
+txd        043f         -- UDP destination port
+txd        0012         -- UDP length
+txd        7228         -- UDP checksum
+txd        68656c6c     -- UDP data
+txd        6f68656c     -- UDP data
+txd        6c6f         -- UDP data
+txd        00000000     -- PAD
+txd        00000000     -- PAD
+txd        34e0033e     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555544 8000803c -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+--******************************************************************************
+-- Frame 10 : TCP ACK + Data.
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 10 : TCP ACK + Data"
+                        -- trigger reception of frame
+
+-- TCP ACK + Data
+-- Decode of the Packet...
+-- ETHER:  ----- Ether Header -----
+-- ETHER:
+-- ETHER:  Packet 10 arrived at 17:37:32.18
+-- ETHER:  Packet size = 69 bytes
+-- ETHER:  Destination = 8:0:20:86:35:4b, Sun
+-- ETHER:  Source      = 0:e0:f7:26:3f:e9, Router
+-- ETHER:  Ethertype = 0800 (IP)
+-- ETHER:
+-- IP:   ----- IP Header -----
+-- IP:
+-- IP:   Version = 4
+-- IP:   Header length = 20 bytes
+-- IP:   Type of service = 0x00 (normal)
+-- IP:   Total length = 55 bytes
+-- IP:   Identification = 43775
+-- IP:   Flags = 0x0
+-- IP:         .0.. .... = may fragment
+-- IP:         ..0. .... = last fragment
+-- IP:   Fragment offset = 0 bytes
+-- IP:   Time to live = 252 seconds/hops
+-- IP:   Protocol = 6 (TCP)
+-- IP:   Header checksum = 3a45
+-- IP:   Source address = 139.133.233.2, server
+-- IP:   Destination address = 139.133.217.110, client
+-- IP:   No options
+-- IP:
+-- TCP:  ----- TCP Header -----
+-- TCP:
+-- TCP:  Source port = 23
+-- TCP:  Destination port = 36869
+-- TCP:  Sequence number = 2486243368
+-- TCP:  Acknowledgement number = 1913975089
+-- TCP:  Data offset = 20 bytes
+-- TCP:  Flags = 0x18
+-- TCP:        ..0. .... = No urgent pointer
+-- TCP:        ...1 .... = Acknowledgement
+-- TCP:        .... 1... = Push
+-- TCP:        .... .0.. = No reset
+-- TCP:        .... ..0. = No Syn
+-- TCP:        .... ...0 = No Fin
+-- TCP:  Window = 8760
+-- TCP:  Checksum = 0xc10c
+-- TCP:  Urgent pointer = 0
+-- TCP:  No options
+-- TCP:
+-- TELNET:  ----- TELNET:   -----
+-- TELNET: Data
+
+dma_rd 5555554c 00008045
+dma_rd 55555548 22222a00  
+
+-- check the receive data as it is written out on the AHB interface
+dma_rd 22222a00 86200008 -- store frame to memory
+dma_rd 22222a04 e0004b35
+dma_rd 22222a08 e93f26f7
+dma_rd 22222a0c 00450008
+dma_rd 22222a10 ffaa3700
+dma_rd 22222a14 06fc0000
+dma_rd 22222a18 858b453a
+dma_rd 22222a1c 858b02e9
+dma_rd 22222a20 17006ed9
+dma_rd 22222a24 31940590
+dma_rd 22222a28 14722810
+dma_rd 22222a2c 185031f1
+dma_rd 22222a30 0cc13822
+dma_rd 22222a34 fdff0000
+dma_rd 22222a38 1ffdff18
+dma_rd 22222a3c ff23fdff
+dma_rd 22222a40 fdff27fd
+dma_rd 22222a44 8361b524
+
+txd        55555555555555d5 -- preamble & SDF
+txd        08002086354b -- MAC DA
+txd        00e0f7263fe9 -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        0037         -- total length = 55
+txd        aaff         -- ID
+txd        0000         -- flags & fragmentation
+txd        fc06         -- time to live and protocol
+txd        3a45         -- IP Header checksum
+txd        8b85e902     -- IP SA
+txd        8b85d96e     -- IP DA
+txd        0017         -- TCP source port
+txd        9005         -- TCP destination port
+txd        94311028     -- Sequence number
+txd        7214f131     -- Acknowledgement Number
+txd        50182238     -- Flags and window
+txd        c10c         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        fffd18ff     -- Telnet data
+txd        fd1ffffd     -- Telnet data
+txd        23fffd27     -- Telnet data
+txd        fffd24       -- Telnet data                     
+txd        b5618328     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555554c 80008045 -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete
+apbwr       24 00000088  -- check interrupt status - transmit complete
+
+apbrd	      14 00000021  -- tx status - frame transmitted,
+
+
+dma_rd 55555554 80008045  -- used bit read
+dma_rd 55555550 22222200  
+
+
+--******************************************************************************
+--  4. Check statistics for correct values from above tests.
+--******************************************************************************
+
+end(20000)
+
+

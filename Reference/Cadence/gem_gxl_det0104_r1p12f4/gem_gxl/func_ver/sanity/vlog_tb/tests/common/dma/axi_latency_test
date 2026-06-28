@@ -1,0 +1,140 @@
+-------------------------------------------------
+-- send/receive multiple frames before the AXI response channel responds with 
+-- anything ...
+
+requires ext_fifo_interface 0
+requires axi 1
+requires rx_pkt_buffer 1
+requires tx_pkt_buffer 1
+requires axi_access_pipeline_bits 4
+
+-- setup for a very high latency
+fixed_latency_mode
+set_rvalid_resp_latency -min 510 -max 511 
+set_bvalid_resp_latency -min 510 -max 511 
+
+-- Set AHB clock freq to 250MHz
+-- At 32bit, this means we have maximum bandwidth of 8Gbit/s shared between
+-- TX and RX. Randomize hready, keeping the maximum to 5 (averages around 2.5)
+-- to ensure no RX overflows occur, and max line rate is acheivable on TX
+sel_ahb_freq 3 
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+
+# Initialize the transmit and receive DMA queue pointers (random values but can add specifics if required)
+# use arg -rx_ptr_q<Q> and tx_ptr_q<Q> to set specific ptr values rather than the default random
+init_q_ptr  -num_tx_queues take_from_cfg   -num_rx_queues take_from_cfg
+
+# Initialize the screener type 1 registers (random values)
+# Note this will automatically force the transactor later on to
+# randomly create frames that match on these screeners, thus routing
+# frames to receive queues ..
+init_screener_type1 -num_type1_screeners take_from_cfg   -num_rx_queues take_from_cfg 
+
+# initialize the DMA specific options for random data xfers
+#   - RX DMA data buffer size
+#     If left without an argument, it will be completely random
+#     Set high to force single buffer descriptor testing eg 16320
+#     use -max_buf_size for max (multiple 64 bytes only)
+#     use -min_buf_size for min (multiple 64 bytes only)
+#
+#   - Burst Length (random by default)
+#     use -burst <num>, where num can be 1,2,4,8,16, random
+#        
+#   - address bus (random by default, or off if config doesnt allow)
+#     use -addr_bus <32|64|random|take_from_cfg>     
+#        
+#   - extended buffer descriptors (random by default, or off if config doesnt allow)
+#     use -ext_bd <1|0|random>     
+#        
+#   - force max burst mode (forces AXI to send max length bursts)
+#     use -force_max_burst_<tx|rx> <1|0|random>    default is 0 
+init_dma -ext_bd random -addr_bus random  -burst random -min_buf_size 16320
+
+
+# Initialize the network configuration register
+# Args are
+#   -eam      <1|0|random>, default = 0. This is external address matching
+#   -duplex   <full|half|random>, default = random
+#   -speed    <1g|100m|10m|random>, default = random
+#   -jumbo    <1|0|random>, default = random. This wont affect the RX transactor below, but will automatically cause jumbos to be dropped.
+#   -copy_all <1|0|random>, default = 0. If 0, ensure you initialize the dest_addr in the rx transactor to something that will match
+#   -databus  <32|64|128|take_from_cfg|random>, default = random, bus <= config.  The max value is the value set in dma_bus_width in gem_defs.v
+init_ncr -duplex full -speed 1g -jumbo random -databus take_from_cfg
+
+# Enable the interrupts
+# This is per queue, 
+# Valid args are ..
+#    -num_queues <1-16|take_from_cfg>
+#    -vector <the actual interrupt vector as per userguide>
+ # enable TX used only
+enable_ints -num_queues take_from_cfg -vector 00000008 
+
+
+-- check and initialise the relevant registers
+apbwr      54 00000f0f  -- allow max length AXI pipelines
+apbwr      10 000207c1  -- Use burst_sizes of just 1 to get func coverage up
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      90 abababab  -- specific address register 2 bottom (multicast)
+apbwr      94 0000abab  -- specific address register 2 top
+apbwr      98 abcdef10  -- specific address register 3 bottom (unicast)
+apbwr      9C 0000a5a5  -- specific address register 3 top
+apbwr      a0 cccccccc  -- specific address register 3 bottom (unicast)
+apbwr      a4 00005a5a  -- specific address register 3 top
+apbwr     000 0000020c  -- write tx_go and enable tx, enable rx
+apbrd      20 00000000 num=20 -- simple delay to allow enables to propagate through the IP ..
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+
+-- rx_frame and tx_frame are the random frame transactors
+-- by default, frames will be generated across the number of queues defined in the design config
+-- if there are screeners configured in this design configuration, and priority queues
+-- enabled, the rx_frame transactor will automatically generate IPv4/v6 UDP frames so
+-- that the screeners can match
+rx_frame (apb)  1
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      num_dma_queues take_from_cfg
+      data_size      16 
+      data           random
+      resource_err   0
+      auto_gen_int   0
+      fcs            good
+
+
+rx_frame (gap)  5
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      num_dma_queues take_from_cfg
+      data_size      64-150
+      data           random
+      resource_err   0
+      auto_gen_int   0
+      fcs            good
+
+tx_frame  10
+      number_of_bufs 2
+      auto_gen_int   0
+      num_dma_queues take_from_cfg
+      buffer_size    16-take_from_cfg
+      data           random
+      fcs            YES
+
+apbrd      08 00000106 num=200 -- make sure the xaction bit 9 is set throughout the test ..
+
+-- since there is so much latency in this test, the AXI transaction monitor
+-- should be showing busy until the very last descriptor write is completed .. 
+apbrd(int) 24 00000008 -- Used bit read
+apbwr      24 00000008 -- Clearing Interrupt
+-- Now we just have to wait some time for the xactions to complete
+apbrd(poll) 08 00000006 max=70000 -- make sure the xaction is now clear ..
+

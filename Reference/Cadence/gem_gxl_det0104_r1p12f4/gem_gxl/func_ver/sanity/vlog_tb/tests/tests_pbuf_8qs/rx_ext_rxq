@@ -1,0 +1,550 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2011
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_ext_rxq
+--
+--   Author         : Arthur Marris
+--
+--   Date           : 26 November 2014
+--
+-- 
+--------------------------------------------------------------------------------
+--
+-- Tests using the ext_match pins to direct matched frames to a particular receive quueu
+--
+-- this test receives 8 broadcast frames and directs them to queues 0 to 7.
+--
+-- for this to work the external receive queue selection bit 26 in the network
+-- control register needs to be set.
+--
+-- 
+--
+-- 
+--------------------------------------------------------------------------------
+
+
+-- check and initialise the relevant registers
+apbrd(100) 00  00000000  -- check reset value of network control register
+apbwr      28  ffffffff  -- enable all interrupts q0
+apbwr      600 ffffffff  -- enable all interrupts q1
+apbwr      604 ffffffff  -- enable all interrupts q2
+apbwr      608 ffffffff  -- enable all interrupts q3
+apbwr      60c ffffffff  -- enable all interrupts q4
+apbwr      610 ffffffff  -- enable all interrupts q5
+apbwr      614 ffffffff  -- enable all interrupts q6
+apbwr      618 ffffffff  -- enable all interrupts q7
+apbwr       18 fffff000  -- write receive queue pointer
+apbwr      480 ffffff10  -- write receive queue pointer 1
+apbwr      484 ffffff20  -- write receive queue pointer 2
+apbwr      488 ffffff30  -- write receive queue pointer 3
+apbwr      48c ffffff40  -- write receive queue pointer 4
+apbwr      490 ffffff50  -- write receive queue pointer 5
+apbwr      494 ffffff60  -- write receive queue pointer 6
+apbwr      498 ffffff70  -- write receive queue pointer 7
+apbwr       00 04000004  -- enable receive and external receive queue selection
+apbrd      04  00080000  -- check reset value of network config register
+apbwr      04  00080001  -- 
+apbrd      08  00000006  -- check reset value of network status register
+apbrdf      24 00000000  -- check interrupt status
+
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002A         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81E1         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        080089A2     -- Data
+rxd        00010001     -- Data
+rxd        01234567     -- Data
+rxd        89ABCDEF     -- Data
+rxd        01234567     -- Data
+rxd        89AB         -- Data
+rxd        B7C16A32     -- FCS
+
+filterd(300)   ext_match1 0 ext_match2 0 ext_match3 0 ext_match4 0
+
+-- supply the receive buffer location
+dma_rd fffff000 55500000 -- dma reads pointer 
+dma_rd ffffff10 55510000 -- dma reads pointer 
+dma_rd ffffff20 55520000 -- dma reads pointer 
+dma_rd ffffff30 55530000 -- dma reads pointer 
+dma_rd ffffff40 55540000 -- dma reads pointer 
+dma_rd ffffff50 55550000 -- dma reads pointer 
+dma_rd ffffff60 55560000 -- dma reads pointer 
+dma_rd ffffff70 55570000 -- dma reads pointer 
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55500000 FFFFFFFF -- store frame to memory
+dma_wr 55500004 0008FFFF
+dma_wr 55500008 56341239
+dma_wr 5550000c 01000081
+dma_wr 55500010 00450008
+dma_wr 55500014 00002A00
+dma_wr 55500018 010A0000
+dma_wr 5550001c BF86E181
+dma_wr 55500020 BF86520B
+dma_wr 55500024 00082216
+dma_wr 55500028 0100A289
+dma_wr 5550002c 23010100
+dma_wr 55500030 AB896745
+dma_wr 55500034 2301EFCD
+dma_wr 55500038 AB896745
+dma_wr 5550003c 326AC1B7
+
+dma_wr fffff004 8020c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- VLAN tag detected, no priority or CFI
+                         -- 64 bytes received
+dma_wr fffff000 55500001 -- dma writes ownership bit
+
+
+apbrd(int) 24 00000002
+
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002A         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81E1         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        080089A2     -- Data
+rxd        00010001     -- Data
+rxd        01234567     -- Data
+rxd        89ABCDEF     -- Data
+rxd        01234567     -- Data
+rxd        89AB         -- Data
+rxd        B7C16A32     -- FCS
+
+filterd(700)   ext_match1 1 ext_match2 0 ext_match3 0 ext_match4 0
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55510000 FFFFFFFF -- store frame to memory
+dma_wr 55510004 0008FFFF
+dma_wr 55510008 56341239
+dma_wr 5551000c 01000081
+dma_wr 55510010 00450008
+dma_wr 55510014 00002A00
+dma_wr 55510018 010A0000
+dma_wr 5551001c BF86E181
+dma_wr 55510020 BF86520B
+dma_wr 55510024 00082216
+dma_wr 55510028 0100A289
+dma_wr 5551002c 23010100
+dma_wr 55510030 AB896745
+dma_wr 55510034 2301EFCD
+dma_wr 55510038 AB896745
+dma_wr 5551003c 326AC1B7
+
+dma_wr ffffff14 8020c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- VLAN tag detected, no priority or CFI
+                         -- 64 bytes received
+dma_wr ffffff10 55510001 -- dma writes ownership bit
+
+
+apbrd(int1) 400 00000002
+
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002A         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81E1         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        080089A2     -- Data
+rxd        00010001     -- Data
+rxd        01234567     -- Data
+rxd        89ABCDEF     -- Data
+rxd        01234567     -- Data
+rxd        89AB         -- Data
+rxd        B7C16A32     -- FCS
+
+filterd(950)   ext_match1 0 ext_match2 1 ext_match3 0 ext_match4 0
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55520000 FFFFFFFF -- store frame to memory
+dma_wr 55520004 0008FFFF
+dma_wr 55520008 56341239
+dma_wr 5552000c 01000081
+dma_wr 55520010 00450008
+dma_wr 55520014 00002A00
+dma_wr 55520018 010A0000
+dma_wr 5552001c BF86E181
+dma_wr 55520020 BF86520B
+dma_wr 55520024 00082216
+dma_wr 55520028 0100A289
+dma_wr 5552002c 23010100
+dma_wr 55520030 AB896745
+dma_wr 55520034 2301EFCD
+dma_wr 55520038 AB896745
+dma_wr 5552003c 326AC1B7
+
+dma_wr ffffff24 8020c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- VLAN tag detected, no priority or CFI
+                         -- 64 bytes received
+dma_wr ffffff20 55520001 -- dma writes ownership bit
+
+
+apbrd(int2) 404 00000002
+
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002A         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81E1         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        080089A2     -- Data
+rxd        00010001     -- Data
+rxd        01234567     -- Data
+rxd        89ABCDEF     -- Data
+rxd        01234567     -- Data
+rxd        89AB         -- Data
+rxd        B7C16A32     -- FCS
+
+filterd(1300)   ext_match1 1 ext_match2 1 ext_match3 0 ext_match4 0
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55530000 FFFFFFFF -- store frame to memory
+dma_wr 55530004 0008FFFF
+dma_wr 55530008 56341239
+dma_wr 5553000c 01000081
+dma_wr 55530010 00450008
+dma_wr 55530014 00002A00
+dma_wr 55530018 010A0000
+dma_wr 5553001c BF86E181
+dma_wr 55530020 BF86520B
+dma_wr 55530024 00082216
+dma_wr 55530028 0100A289
+dma_wr 5553002c 23010100
+dma_wr 55530030 AB896745
+dma_wr 55530034 2301EFCD
+dma_wr 55530038 AB896745
+dma_wr 5553003c 326AC1B7
+
+dma_wr ffffff34 8020c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- VLAN tag detected, no priority or CFI
+                         -- 64 bytes received
+dma_wr ffffff30 55530001 -- dma writes ownership bit
+
+
+apbrd(int3) 408 00000002
+
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002A         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81E1         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        080089A2     -- Data
+rxd        00010001     -- Data
+rxd        01234567     -- Data
+rxd        89ABCDEF     -- Data
+rxd        01234567     -- Data
+rxd        89AB         -- Data
+rxd        B7C16A32     -- FCS
+
+filterd(1600)   ext_match1 0 ext_match2 0 ext_match3 1 ext_match4 0
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55540000 FFFFFFFF -- store frame to memory
+dma_wr 55540004 0008FFFF
+dma_wr 55540008 56341239
+dma_wr 5554000c 01000081
+dma_wr 55540010 00450008
+dma_wr 55540014 00002A00
+dma_wr 55540018 010A0000
+dma_wr 5554001c BF86E181
+dma_wr 55540020 BF86520B
+dma_wr 55540024 00082216
+dma_wr 55540028 0100A289
+dma_wr 5554002c 23010100
+dma_wr 55540030 AB896745
+dma_wr 55540034 2301EFCD
+dma_wr 55540038 AB896745
+dma_wr 5554003c 326AC1B7
+
+dma_wr ffffff44 8020c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- VLAN tag detected, no priority or CFI
+                         -- 64 bytes received
+dma_wr ffffff40 55540001 -- dma writes ownership bit
+
+
+apbrd(int4) 40c 00000002
+
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002A         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81E1         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        080089A2     -- Data
+rxd        00010001     -- Data
+rxd        01234567     -- Data
+rxd        89ABCDEF     -- Data
+rxd        01234567     -- Data
+rxd        89AB         -- Data
+rxd        B7C16A32     -- FCS
+
+filterd(1900)   ext_match1 1 ext_match2 0 ext_match3 1 ext_match4 0
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55550000 FFFFFFFF -- store frame to memory
+dma_wr 55550004 0008FFFF
+dma_wr 55550008 56341239
+dma_wr 5555000c 01000081
+dma_wr 55550010 00450008
+dma_wr 55550014 00002A00
+dma_wr 55550018 010A0000
+dma_wr 5555001c BF86E181
+dma_wr 55550020 BF86520B
+dma_wr 55550024 00082216
+dma_wr 55550028 0100A289
+dma_wr 5555002c 23010100
+dma_wr 55550030 AB896745
+dma_wr 55550034 2301EFCD
+dma_wr 55550038 AB896745
+dma_wr 5555003c 326AC1B7
+
+dma_wr ffffff54 8020c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- VLAN tag detected, no priority or CFI
+                         -- 64 bytes received
+dma_wr ffffff50 55550001 -- dma writes ownership bit
+
+
+apbrd(int5) 410 00000002
+
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002A         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81E1         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        080089A2     -- Data
+rxd        00010001     -- Data
+rxd        01234567     -- Data
+rxd        89ABCDEF     -- Data
+rxd        01234567     -- Data
+rxd        89AB         -- Data
+rxd        B7C16A32     -- FCS
+
+filterd(2200)   ext_match1 0 ext_match2 1 ext_match3 1 ext_match4 0
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55560000 FFFFFFFF -- store frame to memory
+dma_wr 55560004 0008FFFF
+dma_wr 55560008 56341239
+dma_wr 5556000c 01000081
+dma_wr 55560010 00450008
+dma_wr 55560014 00002A00
+dma_wr 55560018 010A0000
+dma_wr 5556001c BF86E181
+dma_wr 55560020 BF86520B
+dma_wr 55560024 00082216
+dma_wr 55560028 0100A289
+dma_wr 5556002c 23010100
+dma_wr 55560030 AB896745
+dma_wr 55560034 2301EFCD
+dma_wr 55560038 AB896745
+dma_wr 5556003c 326AC1B7
+
+dma_wr ffffff64 8020c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- VLAN tag detected, no priority or CFI
+                         -- 64 bytes received
+dma_wr ffffff60 55560001 -- dma writes ownership bit
+
+
+apbrd(int6) 414 00000002
+
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002A         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81E1         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        080089A2     -- Data
+rxd        00010001     -- Data
+rxd        01234567     -- Data
+rxd        89ABCDEF     -- Data
+rxd        01234567     -- Data
+rxd        89AB         -- Data
+rxd        B7C16A32     -- FCS
+
+filterd(2600)   ext_match1 1 ext_match2 1 ext_match3 1 ext_match4 0
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55570000 FFFFFFFF -- store frame to memory
+dma_wr 55570004 0008FFFF
+dma_wr 55570008 56341239
+dma_wr 5557000c 01000081
+dma_wr 55570010 00450008
+dma_wr 55570014 00002A00
+dma_wr 55570018 010A0000
+dma_wr 5557001c BF86E181
+dma_wr 55570020 BF86520B
+dma_wr 55570024 00082216
+dma_wr 55570028 0100A289
+dma_wr 5557002c 23010100
+dma_wr 55570030 AB896745
+dma_wr 55570034 2301EFCD
+dma_wr 55570038 AB896745
+dma_wr 5557003c 326AC1B7
+
+dma_wr ffffff74 8020c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- VLAN tag detected, no priority or CFI
+                         -- 64 bytes received
+dma_wr ffffff70 55570001 -- dma writes ownership bit
+
+
+apbrd(int7) 418 00000002
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+apbrd      14 00000000  -- tx status - frame transmitted, used bit set
+
+-- check receive statistics
+apbrd     150 00000200  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000008  -- check frames received ok
+apbrd     15C 00000008  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000008  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(5000)
+
+

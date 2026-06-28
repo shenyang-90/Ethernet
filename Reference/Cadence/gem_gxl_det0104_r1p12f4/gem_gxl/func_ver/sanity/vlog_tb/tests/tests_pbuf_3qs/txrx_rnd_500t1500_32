@@ -1,0 +1,133 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : sched_rnd_queue
+--
+--   Author         : Ewan McCulloch
+--
+--   Date           : 25 Feb 2008
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Random Queues
+--
+--
+-- 
+--------------------------------------------------------------------------------
+
+sel_ahb_freq 3 -- sets ahb clock frequency to 250MHz
+randomize_hready -descr_min 0 -descr_max 5 -data_min 0 -data_max 3
+
+
+-- Automatically check that TX line rate is never dropped
+check_txlinerate
+
+-- Always set HGRANT to 1
+bus_grant_delay 0 
+
+-- Set the Random Seed for the test
+set_random_seed 3264;
+tog_cnt_en 1
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      10 01a00710
+apbwr      28 00000007  -- enable all interrupts
+apbwr      04 00080402  -- 32bit enable, gigabit mode, full duplex
+apbwr      04 0108040a  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 11111100  -- write address of transmit buffer q0 descriptor in memory
+apbrd      1c 11111100  -- check transmit queue pointer
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      90 abababab  -- specific address register 2 bottom (multicast)
+apbwr      94 0000abab  -- specific address register 2 top
+apbwr      98 abcdef10  -- specific address register 3 bottom (unicast)
+apbwr      9C 0000a5a5  -- specific address register 3 top
+apbwr      a0 cccccccc  -- specific address register 3 bottom (unicast)
+apbwr      a4 00005a5a  -- specific address register 3 top
+apbwr      18 ffff0000  -- write receive queue pointer
+--apbwr     320 0000007f  -- threshold
+apbwr      440 88000000 -- write transmit queue pointer 1
+apbwr      444 99000000 -- write transmit queue pointer 2
+apbwr      480 f0010000 -- write receive queue pointer 1
+apbwr      484 f0020000 -- write receive queue pointer 2
+apbwr      4a0 00000001 -- Buffer size Q1
+apbwr      4a4 00000001 -- Buffer size Q1
+apbwr      500 12222660 -- screener 1
+apbwr      504 13333771 -- screener 2 
+apbwr      508 14444882 -- screener 3 
+apbwr      600 00000c06 -- enable q1 interrupts
+apbwr      604 00000c06 -- enable q2 interrupts
+apbwr      00 0000020c  -- write tx_go and enable tx, enable rx
+-- delay for enable rx to propagate though design
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+rx_frame (apb)  1
+      preamble_size  1-14
+      auto_gen_int        1
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      data_size      16 
+      data           random
+      num_dma_queues      3
+      ipv4_en             1
+        num_ipv4_options  random
+        ipv4_tos          66
+        ipv4_tos          77
+        ipv4_tos          88
+      fcs            good
+
+rx_frame (gap)  300
+      preamble_size  1-14
+      auto_gen_int        1
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      data_size      500-1500
+      data           random
+      num_dma_queues      3
+      ipv4_en             1
+        num_ipv4_options  random
+        ipv4_tos          66
+        ipv4_tos          77
+        ipv4_tos          88
+      fcs            good
+
+tx_frame  300
+      number_of_bufs 1
+      auto_gen_int   0
+      buffer_size    500-1500
+      data           random
+      num_dma_queues      3
+      fcs            YES
+
+ 
+apbrd 1b4 00000000 -- just a random check, not many tests do check this!
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(300000)
+

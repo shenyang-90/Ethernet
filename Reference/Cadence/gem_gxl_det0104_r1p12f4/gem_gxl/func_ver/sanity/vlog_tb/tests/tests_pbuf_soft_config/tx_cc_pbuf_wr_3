@@ -1,0 +1,111 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_1
+--
+--   Author         : Arthur Marris (arthurm@tality.com)
+--
+--   Date           : 3 March 2002
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- The purpose of this test is to reach a few state transitions that are
+-- missing on other tests and collect a 100% block coverage figure
+-- 
+
+wait_states 0
+bus_grant_delay 0
+sel_ahb_freq 3
+
+ten_meg_bit
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555510  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555510  -- check transmit queue pointer
+apbwr      00 00000208  -- write tx_go and enable tx
+
+
+
+
+-- ********************************************************************
+-- Test 1
+-- Get the AHB side of PBUF to set pkt_tx_xfer_req for a 2nd time
+-- before the MAC side has captured the first
+-- ********************************************************************
+apbwr       00 00000208  -- write tx_go and enable tx
+dma_rd 55555514 0000807e -- start of frame
+dma_rd 55555510 98765000 -- dma reads pointer of 98765000
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 0000fde0
+dma_rd 98765040 005e0001
+dma_rd 98765044 d0000200
+dma_rd 98765048 04e7ecbc
+dma_rd 9876504c c0450008
+dma_rd 98765050 00003000
+dma_rd 98765054 11020000
+dma_rd 98765058 8c9e7258
+dma_rd 9876505c 00e0fce0
+dma_rd 98765060 c1070200
+dma_rd 98765064 1c00c107
+dma_rd 98765068 0000e9b6
+dma_rd 9876506c 640a0308
+dma_rd 98765070 69630002
+dma_rd 98765074 006f6373
+dma_rd 98765078 8c9e0000
+dma_rd 9876507c 0000fde0
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fd0000
+txd          01005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fdb560d634
+
+
+-- write transmit complete status
+dma_wr 55555514 8000807e -- write used bit
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- write to clear
+
+dma_rd 5555551c 80008000
+dma_rd 55555518 98765000 -- used
+
+apbrd(int)  24 00000008  -- check interrupt status - transmit complete
+apbwr       24 00000008  -- write to clear
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(15000)
+

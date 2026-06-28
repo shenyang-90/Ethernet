@@ -1,0 +1,90 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_an_lnktim_sgm_fifo
+--
+--   Author         : Martin James (martinj@cadence.com)
+--
+--   Date           : Nov 08, 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--   The purpose of this test is to verify that the implemented link_timer
+--   is 1.6ms when runnign in SGMII configuration.
+--
+--NOTE: The gem_pcs_sgmii_mode `define in gem_defs.v must be defined to run
+--      this test.
+--
+-- Detailed Test Description
+----------------------------
+-- 1. Initialise the GEM for Gigabit Operation with PCS enabled. Furthermore, Auto-Negotiation is 
+--    enabled.
+-- 2. The GEM should transmit alternating /C/ codes with the Config_Reg field all zeros.  The GEM
+--    will continue to do this until the link timer counts up to 0x186A0 (this value will give 
+--    a link counter time of 1.6ms   0x186A0 (100000 dec.) times 16ns per clock cycle equalling
+--    1.6ms)
+-- 3. After the link timer in the GEM reaches 0x186A0, the GEM should then transmit alternating /C/
+--    codes with the Conf_Reg field incdicating the same values that are in the PCS auto-negotiation 
+--    advertisement register.
+-- 4. Terminate the simulation just after 1.6ms from when link_timer started
+--    If the link_timer is too long the test will fail with "PCS_TXD not done"
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- ********************************************************************************************* --
+-- 1. Initialise the GEM for Gigabit Operation with PCS enabled. Furthermore, Auto-Negotiation is 
+--    enabled.
+-- ********************************************************************************************* --
+
+apbwr(60)  4c 00000001  -- enable soft config fifo port bit when available
+apbrd      4c 00000001  -- check enable soft config bit when available
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd     200 00009040  -- check value of pcs control register
+apbwr      04 08080c00  -- Put MAC into sgmii, gigabit mode with TBI. 
+apbrd      04 08080c00  -- Check value of network config register
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 03020100  -- specific address register 1 bottom
+apbwr      8C 00000504  -- specific address register 1 top
+apbrd     200 00001040  -- check value of pcs control register
+apbrd     204 00000109  -- check pcs status register
+apbrdf     20 00000000  -- check receive status register and trigger reception
+
+
+-- ********************************************************************************************* --
+-- 2. The GEM should transmit alternating /C/ codes with the Config_Reg field all zeros.  The GEM
+--    will continue to do this until the link timer counts up to 0x186A0 (this value will give 
+--    a link counter time of 1.6ms   0x186A0 (100000 dec.) times 16ns per clock cycle equalling
+--    1.6ms)
+-- ********************************************************************************************* --
+
+pcs_an_tx             0000  
+
+-- ********************************************************************************************* --
+-- 3. After the link timer in the GEM reaches 0x186A0, the GEM should then transmit alternating /C/
+--    codes with the Conf_Reg field incdicating the same values that are in the PCS auto-negotiation 
+--    advertisement register.
+-- ********************************************************************************************* --
+
+pcs_an_tx             0100 
+
+
+-- ********************************************************************************************* --
+-- 4. Terminate the simulation just after 1.6ms from when link_timer started
+--    If the link_timer is too long the test will fail with "PCS_TXD not done"
+-- ********************************************************************************************* --
+end(90140)

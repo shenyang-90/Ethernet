@@ -1,0 +1,445 @@
+-------------------------------------------------
+-- basic_tx test scenario for the Ethernet MAC --
+-------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+-- Written by Steven Ho
+--
+-- 21st Mar 2002     Steven started it..
+--
+-- Inputs a TCP frame which is split into 2 frames by the TCP secmentation offload
+-- functionality, but does not have last bit set in payload descriptor and is
+-- therefore a multi buffer error
+-- Checjs that 2 frames are transmitted and header is read 3 times from memory
+-- before mid frame error interrupt is raised
+-- 2nd TCP frame with TSO is then output to verify that TSO logic was 
+-- initialised on error
+--
+-- ************************************************************************** --
+
+wait_states 2
+bus_grant_delay 1
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 10000000  -- write address of transmit buffer descriptor in memory
+apbrd      1c 10000000  -- check transmit queue pointer
+apbwr      10 00020c04  -- little endian, tx checksums enabled
+apbwr      00 00000208  -- write tx_go and enable tx
+
+
+---------------------------------------------------------------------------------
+
+-- Zero length descriptor
+-- So multi buffer does not start at descriptor base
+-- and we can verify that error results in reture of pointer to base
+dma_rd tx_descr 10000004 00008000 -- zero length, last bit set
+dma_rd tx_descr 10000000 00000000
+
+
+-- FRAME 1
+-- TSO
+-- Header and payload in separate buffers with separate descriptors
+-- Used bit error in second payload descriptor 
+-- Two frames will be tramsmitted from 1st payload descriptor
+
+-- Header Descriptor
+dma_rd tx_descr 1000000c 00040036 -- hardware CRC, TSO enable, seq num from header, stream 0, 54 bytes
+dma_rd tx_descr 10000008 20000000 -- header buffer base address
+-- Payload Descriptor
+dma_rd tx_descr 10000014 0032005a -- MSS of 50 bytes, last bit clear, length 90 bytes
+dma_rd tx_descr 10000010 30000000 -- payload buffer base address
+-- Used Descriptor
+dma_rd tx_descr 1000001c 80000000 -- Used Bit
+dma_rd tx_descr 10000018 00000000
+
+
+-- Header buffer read
+dma_rd 20000000 11111111
+dma_rd 20000004 22221111
+dma_rd 20000008 22222222
+dma_rd 2000000c 00450008
+dma_rd 20000010 00000000 
+dma_rd 20000014 06000000 
+dma_rd 20000018 66660000 
+dma_rd 2000001c 55556666 
+dma_rd 20000020 33335555 
+dma_rd 20000024 34124444 
+dma_rd 20000028 88887856 
+dma_rd 2000002c 00008888 
+dma_rd 20000030 00000000 
+dma_rd 20000034 00000000 
+
+-- Data buffer read - 50 bytes
+dma_rd 30000000 11111111
+dma_rd 30000004 11111111
+dma_rd 30000008 11111111
+dma_rd 3000000c 11111111
+dma_rd 30000010 11111111 
+dma_rd 30000014 11111111 
+dma_rd 30000018 11111111 
+dma_rd 3000001c 11111111 
+dma_rd 30000020 11111111 
+dma_rd 30000024 11111111
+dma_rd 30000028 11111111 
+dma_rd 3000002c 11111111 
+dma_rd 30000030 22221111 
+
+-- Header buffer read
+dma_rd 20000000 11111111
+dma_rd 20000004 22221111
+dma_rd 20000008 22222222
+dma_rd 2000000c 00450008
+dma_rd 20000010 00000000 
+dma_rd 20000014 06000000 
+dma_rd 20000018 66660000 
+dma_rd 2000001c 55556666 
+dma_rd 20000020 33335555 
+dma_rd 20000024 34124444 
+dma_rd 20000028 88887856 
+dma_rd 2000002c 00008888 
+dma_rd 20000030 00000000 
+dma_rd 20000034 00000000 
+
+-- Data buffer read - 40 bytes - starting from end of first small frame
+dma_rd 30000030 22221111
+dma_rd 30000034 22222222
+dma_rd 30000038 22222222
+dma_rd 3000003c 22222222
+dma_rd 30000040 22222222 
+dma_rd 30000044 22222222 
+dma_rd 30000048 22222222 
+dma_rd 3000004c 22222222 
+dma_rd 30000050 22222222 
+dma_rd 30000054 22222222
+dma_rd 30000058 33332222 
+
+-- Header buffer read - will not be transmitted - used bit error in payload buffer
+dma_rd 20000000 11111111
+dma_rd 20000004 22221111
+dma_rd 20000008 22222222
+dma_rd 2000000c 00450008
+dma_rd 20000010 00000000 
+dma_rd 20000014 06000000 
+dma_rd 20000018 66660000 
+dma_rd 2000001c 55556666 
+dma_rd 20000020 33335555 
+dma_rd 20000024 34124444 
+dma_rd 20000028 88887856 
+dma_rd 2000002c 00008888 
+dma_rd 20000030 00000000 
+dma_rd 20000034 00000000 
+
+
+
+-- Segmented frame 1.1
+
+txd    55555555555555d5   -- preamble
+txd    111111111111       -- ethernet header - destination address
+txd    222222222222       -- ethernet header - source address
+txd    0800               -- ethernet header - ethertype
+
+txd    45                 -- IPv4 header - version, IHL 
+txd    00                 -- IPv4 header - DSCP, ECN
+txd    005a               -- IPv4 header - Total Length
+txd    0000               -- IPv4 header - Identification
+txd    0000               -- IPv4 header - Flags, Fragment Offset
+txd    00                 -- IPv4 header - Time to live
+txd    06                 -- IPv4 header - Protocol
+txd    4328               -- IPv4 header - Header Checksum
+txd    66666666           -- IPv4 header - Source Address
+txd    55555555           -- IPv4 header - Destination Address
+
+txd    3333               -- TCP header  - Source Port
+txd    4444               -- TCP header  - Destination Port
+txd    12345678           -- TCP header  - Sequence Number
+txd    88888888           -- TCP header  - Acknowledgement Number
+txd    0000               -- TCP header  - Data Offset, Flags
+txd    0000               -- TCP header  - Window Size
+txd    ec5c               -- TCP header  - Checksum
+txd    0000               -- TCP header  - Urgent Pointer
+
+txd    11111111111111111111
+txd    11111111111111111111
+txd    11111111111111111111
+txd    11111111111111111111
+txd    11111111111111111111
+txd    cf41b4b3
+
+
+
+-- Segmented frame 1.2
+
+txd    55555555555555d5   -- preamble
+txd    111111111111       -- ethernet header - destination address
+txd    222222222222       -- ethernet header - source address
+txd    0800               -- ethernet header - ethertype
+
+txd    45                 -- IPv4 header - version, IHL 
+txd    00                 -- IPv4 header - DSCP, ECN
+txd    0050               -- IPv4 header - Total Length
+txd    0000               -- IPv4 header - Identification
+txd    0000               -- IPv4 header - Flags, Fragment Offset
+txd    00                 -- IPv4 header - Time to live
+txd    06                 -- IPv4 header - Protocol
+txd    4332               -- IPv4 header - Header Checksum
+txd    66666666           -- IPv4 header - Source Address
+txd    55555555           -- IPv4 header - Destination Address
+
+txd    3333               -- TCP header  - Source Port
+txd    4444               -- TCP header  - Destination Port
+txd    123456aa           -- TCP header  - Sequence Number
+txd    88888888           -- TCP header  - Acknowledgement Number
+txd    0000               -- TCP header  - Data Offset, Flags
+txd    0000               -- TCP header  - Window Size
+txd    ec34               -- TCP header  - Checksum
+txd    0000               -- TCP header  - Urgent Pointer
+
+txd    22222222222222222222
+txd    22222222222222222222
+txd    22222222222222222222
+txd    22222222222222222222
+txd    2d9b210e
+
+-- write transmit complete and tx error status for frame
+dma_wr 1000000c 88040036 -- write used bit
+
+-- check frame completion interrupts
+
+apbrd(int)  24 00000048  -- check interrupt status - buffers exhausted & mid frame
+apbwr       24 00000048  -- clear interrupt status
+apbrd	    14 00000011  -- tx status - buffers exhausted & mid frame
+apbwr       14 00000011  -- clear the tx status register
+apbrd       14 00000000  -- check the tx status register is now cleared
+
+
+---------------------------------------------------------------------------------
+
+
+-- Send good multi buffer TSO frame
+-- 2 frames will be transmitted
+
+apbwr      10 00020c04  -- little endian, tx checksums enabled
+apbwr      00 00000208  -- write tx_go and enable tx
+
+
+-- FRAME 2
+-- TSO
+-- Header and payload in separate buffers with separate descriptors
+
+-- Header Descriptor
+dma_rd tx_descr 10000004 00040036 -- hardware CRC, TSO enable, seq num from header, stream 0, 54 bytes
+dma_rd tx_descr 10000000 20000000 -- header buffer base address
+-- Payload Descriptor
+dma_rd tx_descr 1000000c 0032805a -- MSS of 50 bytes, last bit set, length 90 bytes
+dma_rd tx_descr 10000008 30000000 -- payload buffer base address
+-- Used Descriptor
+dma_rd tx_descr 10000014 80000000 -- Used Bit
+dma_rd tx_descr 10000010 00000000
+
+
+-- Header buffer read
+dma_rd 20000000 11111111
+dma_rd 20000004 22221111
+dma_rd 20000008 22222222
+dma_rd 2000000c 00450008
+dma_rd 20000010 00000000 
+dma_rd 20000014 06000000 
+dma_rd 20000018 66660000 
+dma_rd 2000001c 55556666 
+dma_rd 20000020 33335555 
+dma_rd 20000024 34124444 
+dma_rd 20000028 88887856 
+dma_rd 2000002c 00008888 
+dma_rd 20000030 00000000 
+dma_rd 20000034 00000000 
+
+-- Data buffer read - 50 bytes
+dma_rd 30000000 33333333
+dma_rd 30000004 33333333
+dma_rd 30000008 33333333
+dma_rd 3000000c 33333333
+dma_rd 30000010 33333333 
+dma_rd 30000014 33333333 
+dma_rd 30000018 33333333 
+dma_rd 3000001c 33333333 
+dma_rd 30000020 33333333 
+dma_rd 30000024 33333333
+dma_rd 30000028 33333333 
+dma_rd 3000002c 33333333 
+dma_rd 30000030 44443333 
+
+-- Header buffer read
+dma_rd 20000000 11111111
+dma_rd 20000004 22221111
+dma_rd 20000008 22222222
+dma_rd 2000000c 00450008
+dma_rd 20000010 00000000 
+dma_rd 20000014 06000000 
+dma_rd 20000018 66660000 
+dma_rd 2000001c 55556666 
+dma_rd 20000020 33335555 
+dma_rd 20000024 34124444 
+dma_rd 20000028 88887856 
+dma_rd 2000002c 00008888 
+dma_rd 20000030 00000000 
+dma_rd 20000034 00000000 
+
+-- Data buffer read - 40 bytes - starting from end of first small frame
+dma_rd 30000030 44443333
+dma_rd 30000034 44444444
+dma_rd 30000038 44444444
+dma_rd 3000003c 44444444
+dma_rd 30000040 44444444 
+dma_rd 30000044 44444444 
+dma_rd 30000048 44444444 
+dma_rd 3000004c 44444444 
+dma_rd 30000050 44444444 
+dma_rd 30000054 44444444
+dma_rd 30000058 55554444 
+
+
+-- Segmented frame 2.1
+
+txd    55555555555555d5   -- preamble
+txd    111111111111       -- ethernet header - destination address
+txd    222222222222       -- ethernet header - source address
+txd    0800               -- ethernet header - ethertype
+
+txd    45                 -- IPv4 header - version, IHL 
+txd    00                 -- IPv4 header - DSCP, ECN
+txd    005a               -- IPv4 header - Total Length
+txd    0000               -- IPv4 header - Identification
+txd    0000               -- IPv4 header - Flags, Fragment Offset
+txd    00                 -- IPv4 header - Time to live
+txd    06                 -- IPv4 header - Protocol
+txd    4328               -- IPv4 header - Header Checksum
+txd    66666666           -- IPv4 header - Source Address
+txd    55555555           -- IPv4 header - Destination Address
+
+txd    3333               -- TCP header  - Source Port
+txd    4444               -- TCP header  - Destination Port
+txd    12345678           -- TCP header  - Sequence Number
+txd    88888888           -- TCP header  - Acknowledgement Number
+txd    0000               -- TCP header  - Data Offset, Flags
+txd    0000               -- TCP header  - Window Size
+txd    9707               -- TCP header  - Checksum
+txd    0000               -- TCP header  - Urgent Pointer
+
+txd    33333333333333333333
+txd    33333333333333333333
+txd    33333333333333333333
+txd    33333333333333333333
+txd    33333333333333333333
+txd    724f333a
+
+
+
+-- Segmented frame 2.2
+
+txd    55555555555555d5   -- preamble
+txd    111111111111       -- ethernet header - destination address
+txd    222222222222       -- ethernet header - source address
+txd    0800               -- ethernet header - ethertype
+
+txd    45                 -- IPv4 header - version, IHL 
+txd    00                 -- IPv4 header - DSCP, ECN
+txd    0050               -- IPv4 header - Total Length
+txd    0000               -- IPv4 header - Identification
+txd    0000               -- IPv4 header - Flags, Fragment Offset
+txd    00                 -- IPv4 header - Time to live
+txd    06                 -- IPv4 header - Protocol
+txd    4332               -- IPv4 header - Header Checksum
+txd    66666666           -- IPv4 header - Source Address
+txd    55555555           -- IPv4 header - Destination Address
+
+txd    3333               -- TCP header  - Source Port
+txd    4444               -- TCP header  - Destination Port
+txd    123456aa           -- TCP header  - Sequence Number
+txd    88888888           -- TCP header  - Acknowledgement Number
+txd    0000               -- TCP header  - Data Offset, Flags
+txd    0000               -- TCP header  - Window Size
+txd    418a               -- TCP header  - Checksum
+txd    0000               -- TCP header  - Urgent Pointer
+
+txd    44444444444444444444
+txd    44444444444444444444
+txd    44444444444444444444
+txd    44444444444444444444
+txd    a1b97cb4
+
+-- write transmit complete status for frame
+dma_wr 10000004 80040036 -- write used bit
+
+-- check frame completion interrupts
+
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete, stop bit
+apbwr       24 00000088  -- clear interrupt status
+apbrd	    14 00000021  -- tx status - transmit complete, stop bit
+apbwr       14 00000021  -- clear the tx status register
+apbrd       14 00000000  -- check the tx status register is now cleared
+
+
+
+---------------------------------------------------------------------------------
+
+apbwr      00 00000208  -- write tx_go and enable tx
+
+
+-- FRAME 3
+-- TSO
+-- Header and payload in separate buffers with separate descriptors
+-- Used bit error in 1st payload descriptor 
+-- No frames will be transmitted
+-- Header data will be read from memory once
+
+-- Header Descriptor
+dma_rd tx_descr 10000014 00040036 -- hardware CRC, TSO enable, seq num from header, stream 0, 54 bytes
+dma_rd tx_descr 10000010 20000000 -- header buffer base address
+-- Payload Descriptor
+dma_rd tx_descr 1000001c 8032805a -- MSS of 50 bytes, last bit set, length 90 bytes, used bit set
+dma_rd tx_descr 10000018 30000000 -- payload buffer base address
+
+
+-- Header buffer read
+dma_rd 20000000 11111111
+dma_rd 20000004 22221111
+dma_rd 20000008 22222222
+dma_rd 2000000c 00450008
+dma_rd 20000010 00000000 
+dma_rd 20000014 06000000 
+dma_rd 20000018 66660000 
+dma_rd 2000001c 55556666 
+dma_rd 20000020 33335555 
+dma_rd 20000024 34124444 
+dma_rd 20000028 88887856 
+dma_rd 2000002c 00008888 
+dma_rd 20000030 00000000 
+dma_rd 20000034 00000000 
+
+-- write transmit complete and tx error status for frame
+dma_wr 10000014 88040036 -- write used bit
+
+-- check frame completion interrupts
+
+apbrd(int)  24 00000048  -- check interrupt status - buffers exhausted & mid frame
+apbwr       24 00000048  -- clear interrupt status
+apbrd	    14 00000011  -- tx status - buffers exhausted & mid frame
+apbwr       14 00000011  -- clear the tx status register
+apbrd       14 00000000  -- check the tx status register is now cleared
+
+
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(20000)
+

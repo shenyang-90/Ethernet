@@ -1,0 +1,958 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : defer_1gm
+--
+--   Author         : Stewart Penman (spenman@tality.com)
+--
+--   Date           : 07 February 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+-- 
+-- This test verifies that the deference functionality works properly 
+-- in the GEM in both normal gigabit mode and burst gigabit mode.
+-- 
+-- Functional Coverage
+-- -------------------
+-- · Ensures that the GEM defers to carrier sense when the medium 
+--     is busy and the GEM has a frame waiting to be sent. (both normal 
+--     gigabit mode and burst gigabit mode)
+-- · Ensures that carrier extension does not affect the deference process 
+--     in normal gigabit mode and burst gigabit mode.
+-- · Ensure that the deference statistic is not set when there is a 
+--     deference during transmission of a frame and a collision occurs 
+--     during transmission of a frame. (both normal gigabit mode and burst 
+--     gigabit mode)
+--     
+-- Detailed Test Description
+-- -------------------------
+-- 
+-- Normal Gigabit Mode:
+-- 1. Initialise the GEM for gigabit mode.
+-- 2. Medium becomes busy (crs is asserted high).
+-- 3. Try to transmit a minimum sized frame plus extension. 
+--     (Frame should not be transmitted)
+-- 4. Medium becomes free. (crs is asserted low).
+-- 5. Frame should now transmit completely.
+-- 6. Medium becomes busy. (crs is asserted high).
+-- 7. Try to transmit a minimum sized frame plus extension. 
+--     (Frame should not be transmitted)
+-- 8. Medium becomes free. (crs is asserted low).
+-- 9. Start to transmit the rest of the minimum sized frame 
+--     plus extension. However, collision occurs at the beginning of 
+--     carrier extension of the transmitted frame (65th byte).
+-- 10. Sometime after the back-off period the minimum sized frame plus 
+--      extension should be re-transmitted properly. (deference statistic 
+--      should not be set)
+-- 11. Medium becomes busy (crs is asserted high)
+-- 12. Try to transmit a minimum sized frame plus extension.
+--      (Frame should not be transmitted)
+-- 13. Medium becomes free (crs is asserted low)
+-- 14. Frame transmission starts, but a IFG (late) collision occurs (510th byte)
+--      (a late collision interrupt should be received.  A late collision 
+--       statistic should be recorded.  No deference statistic should 
+--       be recorded)
+-- 15. Check status and statistic registers and ensure above operations 
+--      were handled properly.
+-- 
+-- Burst Gigabit Mode:
+-- 16. Medium becomes busy (crs is asserted high).
+-- 17. In burst mode, try to transmit a minimum sized frame 
+--      plus extension. Then, a minimum sized frame. (Frames should 
+--      not be transmitted)
+-- 18. Medium becomes free. (crs is asserted low).
+-- 19. In burst mode, both frames should now transmit completely.
+-- 20. Medium becomes busy. (crs is asserted high).
+-- 21. In burst mode, try to transmit a minimum sized frame plus 
+--      extension. Then, a minimum sized frame. (Frames should not be 
+--      transmitted)
+-- 22. Medium becomes free. (crs is asserted low).
+-- 23. Start to transmit the rest of the minimum sized frame plus 
+--      extension. However, collision occurs at the beginning of carrier 
+--      extension of the transmitted frame (65th byte). 
+-- 24. Sometime after the back-off period the minimum sized frame plus 
+--      extension should be re-transmitted properly. Then, the minimum 
+--      sized frame should be transmitted properly. (deference statistic 
+--      should not be set)
+-- 25. Medium becomes busy. (crs is asserted high)
+-- 26. In burst mode transmit a minimum length frame with carrier 
+--      extension, follwed by a minimum length frame.
+-- 27. Medium becomes free. (crs is asserted low)
+-- 28. The deferred frames begin transmitting however a collision occurs
+--      in the IFG (510th byte).
+--      (a late collision interrupt should occur, the mac should drop
+--       out of burst mode and the second frame transmitted with 
+--       carrier extension - no deference statistic should be recorded)
+-- 29. Check status and statistic registers and ensure above operations 
+--      were handled properly.
+-- 
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+--******************************************************************************
+-- 1. Initialise the GEM for gigabit operation.
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00080400  -- network config register - 1gig mode
+apbwr      00 00000008  -- write enable tx
+apbrdf     00 00000008  -- confirm tx enable (apb trigger to trigger FIFO)
+
+--******************************************************************************
+-- 2. Medium becomes busy (crs is asserted high).
+
+pinsd(100) crs 1
+pinsd(apb) crs 1
+
+--******************************************************************************
+-- 3. Try to transmit a minimum sized frame plus extension. 
+--     (Frame should not be transmitted)
+-- & 
+-- 5. Frame should now transmit completely.
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x15b9335f62b0' unicast frame
+-- srcaddr:  '0xee228adf317f'
+-- typeid:   '0x2738'
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    335f62b0
+fifo_rd         00000000      0   00000000    317f15b9
+fifo_rd         00000000      0   00000000    ee228adf
+fifo_rd         00000000      0   00000000    5f1f3827
+fifo_rd         00000000      0   00000000    c1aa3832
+fifo_rd         00000000      0   00000000    82f2baee
+fifo_rd         00000000      0   00000000    8839419a
+fifo_rd         00000000      0   00000000    977dacb8
+fifo_rd         00000000      0   00000000    b5d9ff1c
+fifo_rd         00000000      0   00000000    28cfda5a
+fifo_rd         00000000      0   00000000    5163b16f
+fifo_rd         00000000      0   00000000    dad483d6
+fifo_rd         00000000      0   00000000    a161299b
+fifo_rd         00000000      0   00000000    dff125a8
+fifo_rd         00000001      0   00000000    164895bb
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x15b9335f62b0' unicast frame
+-- srcaddr:  '0xee228adf317f'
+-- typeid:   '0x2738'
+-- data:      46 bytes
+-- crc:      '0x982e2281'
+
+txd         55555555555555d5b0625f33b9157f31df8a22ee27381f5f
+txd                         3238aac1eebaf2829a413988b8ac7d97
+txd                         1cffd9b55adacf286fb16351d683d4da
+txd                         9b2961a1a825f1dfbb9548161822e289
+
+--******************************************************************************
+-- 4. Medium becomes free. (crs is asserted low).
+
+pinsd(200) crs 0
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 5. COMPLETE - frame transmitted"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 6. Medium becomes busy. (crs is asserted high).
+
+pinsd(int) crs 1
+pinsd(apb) crs 1
+
+--******************************************************************************
+-- 7. Try to transmit a minimum sized frame plus extension. 
+--     (Frame should not be transmitted)
+-- & 
+-- 9. Start to transmit the rest of the minimum sized frame 
+--      plus extension. However, collision occurs at the beginning of 
+--      carrier extension of the transmitted frame (65th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x1c4b68f14fbc' unicast frame
+-- srcaddr:  '0xc228bab1245f'
+-- typeid:   '0x3c18'
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    68f14fbc
+fifo_rd         00000000      0   00000000    245f1c4b
+fifo_rd         00000000      0   00000000    c228bab1
+fifo_rd         00000000      0   00000000    dd45183c
+fifo_rd         00000000      0   00000000    5e51b381
+fifo_rd         00000000      0   00000000    dd57b6f5
+fifo_rd         00000000      0   00000000    161ead67
+fifo_rd         00000000      0   00000000    4cf6b2ab
+fifo_rd         00000000      0   00000000    3e8834fa
+fifo_rd         00000000      0   00000000    b676a992
+fifo_rd         00000000      0   00000000    677925a6
+fifo_rd         00000000      0   00000000    19524287
+fifo_rd         00000000      0   00000000    d799928e
+fifo_rd         00000000      0   00000000    7fbbe47c
+fifo_rd         00001001      0   00000000    6f8d55d3
+
+-- Start a new dummy frame. This will eventually be flushed,
+-- but it allows us to check status
+fifo_rd         00001010      0   00000100    4c8fef54
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x1c4b68f14fbc' unicast frame
+-- srcaddr:  '0xc228bab1245f'
+-- typeid:   '0x3c18'
+-- data:      46 bytes
+-- crc:      '0x674d157b'
+
+txd(61x)    55555555555555d5bc4ff1684b1c5f24b1ba28c23c1845dd
+txd                         81b3515ef5b657dd67ad1e16abb2f64c
+txd                         fa34883e92a976b6a625796787425219
+txd                         8e9299d77ce4bb7fd3558d6fb751d476
+
+--******************************************************************************
+-- 8. Medium becomes free. (crs is asserted low).
+
+pinsd(500) crs 0
+
+--******************************************************************************
+-- 10. Sometime after the back-off period the minimum sized frame plus 
+--      extension should be re-transmitted properly. (deference statistic 
+--      should not be set)
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x9ea5fb349447' multicast
+-- srcaddr:  '0x2ed9b6678b17' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    fb349447
+fifo_rd         00000000      0   00000000    8b179ea5
+fifo_rd         00000000      0   00000000    2ed9b667
+fifo_rd         00000000      0   00000000    3f742e00
+fifo_rd         00000000      0   00000000    ffde23f8
+fifo_rd         00000000      0   00000000    494d5951
+fifo_rd         00000000      0   00000000    9641894c
+fifo_rd         00000000      0   00000000    afa92744
+fifo_rd         00000000      0   00000000    57481172
+fifo_rd         00000000      0   00000000    9a7d132c
+fifo_rd         00000000      0   00000000    9e13fcaa
+fifo_rd         00000000      0   00000000    c571497b
+fifo_rd         00000000      0   00000000    4de771fe
+fifo_rd         00000000      0   00000000    225f66e6
+fifo_rd         00000001      0   00000000    ce2f72b7
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x9ea5fb349447' multicast
+-- srcaddr:  '0x2ed9b6678b17' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x37305bd1'
+
+txd         55555555555555d5479434fba59e178b67b6d92e002e743f
+txd                         f823deff51594d494c8941964427a9af
+txd                         721148572c137d9aaafc139e7b4971c5
+txd                         fe71e74de6665f22b7722fce1db50373
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 10. COMPLETE - frame transmitted"
+                        -- check interrupt status - transmit complete
+apbrd      14 0000002a  -- tx status - frame transmitted, always enabled
+apbwr      14 0000002a  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 11. Medium becomes busy (crs is asserted high)
+
+pinsd(int) crs 1
+pinsd(apb) crs 1
+
+--******************************************************************************
+-- 12. Try to transmit a minimum sized frame plus extension.
+--      (Frame should not be transmitted)
+-- &
+-- 14. Frame transmission starts, but a late collision occurs (510th byte)
+--      (a late collision interrupt should be received.  A late collision 
+--       statistic should be recorded.  No deference statistic should 
+--       be recorded)
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x8b5c71e78822' unicast
+-- srcaddr:  '0x742cef6418a1' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    71e78822
+fifo_rd         00000000      0   00000000    18a18b5c
+fifo_rd         00000000      0   00000000    742cef64
+fifo_rd         00000000      0   00000000    b92c2e00
+fifo_rd         00000000      0   00000000    3d118413
+fifo_rd         00000000      0   00000000    7d9c2b15
+fifo_rd         00000000      0   00000000    7558752d
+fifo_rd         00000000      0   00000000    347bf5cf
+fifo_rd         00000000      0   00000000    d9f39721
+fifo_rd         00000000      0   00000000    6c1d8e46
+fifo_rd         00000000      0   00000000    9d629946
+fifo_rd         00000000      0   00000000    b84c192b
+fifo_rd         00000000      0   00000000    473bd836
+fifo_rd         00000000      0   00000000    3ed62196
+fifo_rd         00000001      0   00000010    878f1795
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x8b5c71e78822' unicast
+-- srcaddr:  '0x742cef6418a1' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xd06f44ad'
+
+txd(507x)   55555555555555d52288e7715c8ba11864ef2c74002e2cb9
+txd                         1384113d152b9c7d2d755875cff57b34
+txd                         2197f3d9468e1d6c4699629d2b194cb8
+txd                         36d83b479621d63e95178f87da44f60d
+
+--******************************************************************************
+-- 13. Medium becomes free (crs is asserted low)
+
+pinsd(1000) crs 0
+
+-- check status on detection of an interrupt
+apbrd(int) 24 00000020  "SCENARIO 14. COMPLETE - late collision detected"
+apbrd      14 00000088  -- tx status - frame transmitted, always enabled
+apbwr      14 00000088  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 15. Check status and statistic registers and ensure above operations 
+--      were handled properly.
+
+-- check transmit statistics
+apbrd     100 00000080  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000002  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000002  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000001  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000001  -- check late collisions frames
+apbrd     148 00000001  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrdf    1A4 00000000  -- check receive overrun errors
+
+--******************************************************************************
+-- BURST OPERATION
+--******************************************************************************
+
+--******************************************************************************
+-- 16. Medium becomes busy (crs is asserted high).
+
+pinsd(int) crs 1
+pinsd(apb) crs 1
+
+--******************************************************************************
+-- 17. In burst mode, try to transmit a minimum sized frame 
+--      plus extension. Then, a minimum sized frame. (Frames should 
+--      not be transmitted)
+-- &
+-- 19. In burst mode, both frames should now transmit completely.
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x53d164558dcc' unicast
+-- srcaddr:  '0xfb592f3db924' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    64558dcc
+fifo_rd         00000000      0   00000000    b92453d1
+fifo_rd         00000000      0   00000000    fb592f3d
+fifo_rd         00000000      0   00000000    667a2e00
+fifo_rd         00000000      0   00000000    e14cf16e
+fifo_rd         00000000      0   00000000    2765e371
+fifo_rd         00000000      0   00000000    d2932dd1
+fifo_rd         00000000      0   00000000    4e9d9a1e
+fifo_rd         00000000      0   00000000    ddc79b98
+fifo_rd         00000000      0   00000000    99be92f3
+fifo_rd         00000000      0   00000000    2ec3f6a6
+fifo_rd         00000000      0   00000000    8fc5873c
+fifo_rd         00000000      0   00000000    84ae8686
+fifo_rd         00000000      0   00000000    13714c6e
+fifo_rd         00001001      0   00000000    6c3d56f7
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x53d164558dcc' unicast
+-- srcaddr:  '0xfb592f3db924' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x0f86f816'
+
+txd(r)      55555555555555d5cc8d5564d15324b93d2f59fb002e7a66
+txd                         6ef14ce171e36527d12d93d21e9a9d4e
+txd                         989bc7ddf392be99a6f6c32e3c87c58f
+txd                         8686ae846e4c7113f7563d6c618f68f0
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xb123ade93d64' unicast
+-- srcaddr:  '0x641113a573c9' 
+-- idfield:  '0xebd6'  typeid field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    ade93d64
+fifo_rd         00000000      0   00000000    73c9b123
+fifo_rd         00000000      0   00000000    641113a5
+fifo_rd         00000000      0   00000000    5c4ad6eb
+fifo_rd         00000000      0   00000000    c29c7cee
+fifo_rd         00000000      0   00000000    1d683927
+fifo_rd         00000000      0   00000000    fda288ed
+fifo_rd         00000000      0   00000000    7f66a61b
+fifo_rd         00000000      0   00000000    7db76c13
+fifo_rd         00000000      0   00000000    c887931c
+fifo_rd         00000000      0   00000000    86a9dbfe
+fifo_rd         00000000      0   00000000    aad826d8
+fifo_rd         00000000      0   00000000    be18753f
+fifo_rd         00000000      0   00000000    6a4fdbd5
+fifo_rd         00000001      0   00000000    b2b47fd9
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xb123ade93d64' unicast
+-- srcaddr:  '0x641113a573c9' 
+-- idfield:  '0xebd6'  typeid field
+-- data:      46 bytes
+-- crc:      '0x9fca09f6'
+
+txd         55555555555555d5643de9ad23b1c973a5131164ebd64a5c
+txd                         ee7c9cc22739681ded88a2fd1ba6667f
+txd                         136cb77d1c9387c8fedba986d826d8aa
+txd                         3f7518bed5db4f6ad97fb4b26f90acf9
+
+--******************************************************************************
+-- 18. Medium becomes free. (crs is asserted low).
+
+pinsd(1500) crs 0
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 15. ONGOING - frame transmitted"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 15. COMPLETE - frame transmitted"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 20. Medium becomes busy. (crs is asserted high).
+
+pinsd(int) crs 0    -- first interrupt is from frame 1.
+                    -- medium must remain free
+pinsd(int) crs 1
+pinsd(apb) crs 1
+
+--******************************************************************************
+-- 21. In burst mode, try to transmit a minimum sized frame plus 
+--      extension. Then, a minimum sized frame. (Frames should not be 
+--      transmitted)
+-- &
+-- 23. Start to transmit the rest of the minimum sized frame plus 
+--      extension. However, collision occurs at the beginning of carrier 
+--      extension of the transmitted frame (65th byte). 
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x71dfade67a39' multicast
+-- srcaddr:  '0x91ab2cd7abcc' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    ade67a39
+fifo_rd         00000000      0   00000000    abcc71df
+fifo_rd         00000000      0   00000000    91ab2cd7
+fifo_rd         00000000      0   00000000    ab312e00
+fifo_rd         00000000      0   00000000    8484d51e
+fifo_rd         00000000      0   00000000    66e167ac
+fifo_rd         00000000      0   00000000    e288db5e
+fifo_rd         00000000      0   00000000    8ef9591f
+fifo_rd         00000000      0   00000000    21fd4388
+fifo_rd         00000000      0   00000000    c393cb83
+fifo_rd         00000000      0   00000000    d32ce488
+fifo_rd         00000000      0   00000000    fd9bc7b9
+fifo_rd         00000000      0   00000000    1a1d6ca9
+fifo_rd         00000000      0   00000000    941fbe4d
+fifo_rd         00001001      0   00000000    4265a728
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x71dfade67a39' multicast
+-- srcaddr:  '0x91ab2cd7abcc' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x87c47b50'
+
+txd(61x)    55555555555555d5397ae6addf71ccabd72cab91002e31ab
+txd                         1ed58484ac67e1665edb88e21f59f98e
+txd                         8843fd2183cb93c388e42cd3b9c79bfd
+txd                         a96c1d1a4dbe1f9428a7654205b74c78
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x7f12ed41634b' multicast
+-- srcaddr:  '0x453d92a1feca' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000100    ed41634b
+fifo_rd         00001000      0   00000000    feca7f12
+fifo_rd         00001000      0   00000000    453d92a1
+fifo_rd         00001000      0   00000000    23392e00
+fifo_rd         00001000      0   00000000    fc96ae57
+fifo_rd         00001000      0   00000000    5c7ed1af
+fifo_rd         00001000      0   00000000    57cd2144
+fifo_rd         00001000      0   00000000    c35a3d14
+fifo_rd         00001000      0   00000000    beb33675
+fifo_rd         00001000      0   00000000    e9b437c6
+fifo_rd         00001000      0   00000000    d5666699
+fifo_rd         00001000      0   00000000    53afeb5a
+fifo_rd         00001000      0   00000000    82aecaec
+fifo_rd         00001000      0   00000000    e4fd31bd
+fifo_rd         00001001      0   00000000    d97a6b8d
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x7f12ed41634b' multicast
+-- srcaddr:  '0x453d92a1feca' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x2e3e55c3'
+
+-- txd is blocked because of collision in previous frame
+--txd         55555555555555d54b6341ed127fcafea1923d45002e3923
+--txd                         57ae96fcafd17e5c4421cd57143d5ac3
+--txd                         7536b3bec637b4e9996666d55aebaf53
+--txd                         eccaae82bd31fde48d6b7ad93c55e3e2
+
+--******************************************************************************
+-- 22. Medium becomes free. (crs is asserted low).
+
+pinsd(2500) crs 0
+
+--******************************************************************************
+-- 24. Sometime after the back-off period the minimum sized frame plus 
+--      extension should be re-transmitted properly. Then, the minimum 
+--      sized frame should be transmitted properly. (deference statistic 
+--      should not be set)
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xc4e84394f1ff' multicast
+-- srcaddr:  '0xfca4da48fb63' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    4394f1ff
+fifo_rd         00000000      0   00000000    fb63c4e8
+fifo_rd         00000000      0   00000000    fca4da48
+fifo_rd         00000000      0   00000000    631e2e00
+fifo_rd         00000000      0   00000000    ca321f51
+fifo_rd         00000000      0   00000000    bf2ee1d7
+fifo_rd         00000000      0   00000000    c774b79d
+fifo_rd         00000000      0   00000000    f95af3a9
+fifo_rd         00000000      0   00000000    dfb66a2a
+fifo_rd         00000000      0   00000000    99589d37
+fifo_rd         00000000      0   00000000    4421f94a
+fifo_rd         00000000      0   00000000    f47d58b1
+fifo_rd         00000000      0   00000000    662fd238
+fifo_rd         00000000      0   00000000    ee8bab49
+fifo_rd         00001001      0   00000000    cfca367c
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xc4e84394f1ff' multicast
+-- srcaddr:  '0xfca4da48fb63' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xc602bca2'
+
+txd(r)      55555555555555d5fff19443e8c463fb48daa4fc002e1e63
+txd                         511f32cad7e12ebf9db774c7a9f35af9
+txd                         2a6ab6df379d58994af92144b1587df4
+txd                         38d22f6649ab8bee7c36cacf2acb206c
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xbd7ecb919deb' multicast
+-- srcaddr:  '0x787a1a659e46' 
+-- idfield:  '0x813f'  typeid field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    cb919deb
+fifo_rd         00000000      0   00000000    9e46bd7e
+fifo_rd         00000000      0   00000000    787a1a65
+fifo_rd         00000000      0   00000000    148d3f81
+fifo_rd         00000000      0   00000000    a9feb7fd
+fifo_rd         00000000      0   00000000    9ff8d7aa
+fifo_rd         00000000      0   00000000    3e13d39b
+fifo_rd         00000000      0   00000000    bcc1a56e
+fifo_rd         00000000      0   00000000    357e1e13
+fifo_rd         00000000      0   00000000    48376588
+fifo_rd         00000000      0   00000000    df1cdf24
+fifo_rd         00000000      0   00000000    63664266
+fifo_rd         00000000      0   00000000    7b4ca238
+fifo_rd         00000000      0   00000000    64e35e43
+fifo_rd         00000001      0   00000000    ab3a6aa6
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xbd7ecb919deb' multicast
+-- srcaddr:  '0x787a1a659e46' 
+-- idfield:  '0x813f'  typeid field
+-- data:      46 bytes
+-- crc:      '0x9ee80e18'
+
+txd         55555555555555d5eb9d91cb7ebd469e651a7a78813f8d14
+txd                         fdb7fea9aad7f89f9bd3133e6ea5c1bc
+txd                         131e7e358865374824df1cdf66426663
+txd                         38a24c7b435ee364a66a3aab81e08ee9
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 24. ONGOING - frame transmitted"
+                        -- check interrupt status - transmit complete
+apbrd      14 0000002a  -- tx status - frame transmitted, always enabled
+apbwr      14 0000002a  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 24. COMPLETE - frame transmitted"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 25. Medium becomes busy. (crs is asserted high)
+
+pinsd(int) crs 0    -- first interrupt is from frame 1.
+                    -- medium must remain free
+pinsd(int) crs 1
+pinsd(apb) crs 1
+
+--******************************************************************************
+-- 26. In burst mode transmit a minimum length frame with carrier 
+--      extension, follwed by a minimum length frame.
+-- &
+-- 28. The deferred frames begin transmitting however a collision occurs
+--      in the IFG (510th byte).
+--      (a late collision interrupt should occur, the mac should drop
+--       out of burst mode and the second frame transmitted with 
+--       carrier extension - no deference statistic should be recorded)
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x4b94d5a33a7c' unicast
+-- srcaddr:  '0xc1f9234c98ef' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    d5a33a7c
+fifo_rd         00000000      0   00000000    98ef4b94
+fifo_rd         00000000      0   00000000    c1f9234c
+fifo_rd         00000000      0   00000000    39792e00
+fifo_rd         00000000      0   00000000    a2366c74
+fifo_rd         00000000      0   00000000    97cb293f
+fifo_rd         00000000      0   00000000    edb45855
+fifo_rd         00000000      0   00000000    c7e849c5
+fifo_rd         00000000      0   00000000    dda25bae
+fifo_rd         00000000      0   00000000    92256251
+fifo_rd         00000000      0   00000000    fa79b4b8
+fifo_rd         00000000      0   00000000    73adf6cc
+fifo_rd         00000000      0   00000000    9bc93ef5
+fifo_rd         00000000      0   00000000    7b5acdca
+fifo_rd         00001001      0   00000000    fc1b76da
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x4b94d5a33a7c' unicast
+-- srcaddr:  '0xc1f9234c98ef' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x3e712720'
+
+txd(510x)   55555555555555d57c3aa3d5944bef984c23f9c1002e7939
+txd                         746c36a23f29cb975558b4edc549e8c7
+txd                         ae5ba2dd51622592b8b479faccf6ad73
+txd                         f53ec99bcacd5a7bda761bfc027217e3
+
+fifo_rd         00001010      0   00000000    a7d335ac
+fifo_rd(sta)    00001000      0   00000010    b99f48e4
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xeea5647efdc3' multicast
+-- srcaddr:  '0x3be17a1cd3b5' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    647efdc3
+fifo_rd         00000000      0   00000000    d3b5eea5
+fifo_rd         00000000      0   00000000    3be17a1c
+fifo_rd         00000000      0   00000000    82792e00
+fifo_rd         00000000      0   00000000    5c49bda6
+fifo_rd         00000000      0   00000000    ddb9a23d
+fifo_rd         00000000      0   00000000    9a3c1359
+fifo_rd         00000000      0   00000000    26dd12ad
+fifo_rd         00000000      0   00000000    4cb79f92
+fifo_rd         00000000      0   00000000    5546da68
+fifo_rd         00000000      0   00000000    413e6569
+fifo_rd         00000000      0   00000000    2bec423c
+fifo_rd         00000000      0   00000000    92c31a32
+fifo_rd         00000000      0   00000000    5bf8b3ba
+fifo_rd         00000001      0   00000000    c473b664
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xeea5647efdc3' multicast
+-- srcaddr:  '0x3be17a1cd3b5' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xcafe8df0'
+
+txd         55555555555555d5c3fd7e64a5eeb5d31c7ae13b002e7982
+txd                         a6bd495c3da2b9dd59133c9aad12dd26
+txd                         929fb74c68da465569653e413c42ec2b
+txd                         321ac392bab3f85b64b673c40fd8efac
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 28. ONGOING - frame transmitted"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+-- check status on detection of an interrupt
+apbrd(int) 24 00000020  "SCENARIO 28. ONGOING - late collision detected"
+apbrd      14 00000088  -- tx status - frame transmitted, always enabled
+apbwr      14 00000088  -- clear it
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 28. COMPLETE - frame transmitted"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 27. Medium becomes free. (crs is asserted low)
+
+pinsd(3500) crs 0
+
+--******************************************************************************
+-- 29. Check status and statistic registers and ensure above operations 
+--      were handled properly.
+
+-- check transmit statistics
+apbrd     100 00000180  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000006  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000003  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000006  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000001  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000001  -- check late collisions frames
+apbrd     148 00000002  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(6000)

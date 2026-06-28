@@ -1,0 +1,489 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : sched_rnd_queue
+--
+--   Author         : Ewan McCulloch
+--
+--   Date           : 25 Feb 2008
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Random TX and RX operating together - all RX packets accepted, to maximize
+-- AHB B/W - also operating at gigabit speeds
+--
+-- This is an 802.3br random test running with GMII interface
+-- Just receiving some precise sequences of frames in order to get some code coverage
+--------------------------------------------------------------------------------
+
+-- 64 bit,
+-- gigabit, 
+-- 250Mhz AHB
+
+sel_ahb_freq 2 
+
+randomize_hready -read_max 4 -write_max 4
+--check_txlinerate
+bus_grant_delay 0 -- This sets hgrant to 1 always
+
+set_random_seed 45;
+--tog_cnt_en 1
+
+-- Disable txd checking for this test
+set_tx_data_check   0;
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr     f00 000000ac  -- enable pre-empt, disable verify & route all frames to pMAC until negotiated, invert_mcrc set
+apbwr      10 01a00701
+apbwr    1010 01a00701
+apbwr    1018 f0020000  -- write receive queue pointer 2
+apbwr    101c 99000000  -- write transmit queue pointer 2
+apbrd    101c 99000000  -- check transmit queue pointer
+
+apbwr      1c 11111100  -- write address of transmit buffer q0 descriptor in memory
+apbwr     440 88000000  -- write transmit queue pointer 1
+apbwr     444 99000000  -- repeat transmit queue pointer 2, just need this for TB (pkt generator)
+apbwr      18 ffff0000  -- write receive queue pointer
+apbwr     480 f0010000  -- write receive queue pointer 1
+apbwr     484 f0020000  -- repeat receive queue pointer 2, just need this for TB (pkt generator)
+apbwr      04 0128041a  -- 64bit enable, gigabit mode, full duplex
+apbwr    1004 0128041a  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      1c 11111100  -- check transmit queue pointer
+
+apbwr     4a0 00000001  -- Buffer size Q1
+apbwr     4a4 000000a0  -- Buffer size Q2 -- just need this for TB (pkt generator)
+
+apbwr      540 00040000  -- Screener2 reg 0, comp reg = 0
+apbwr      544 00042011  -- Screener2 reg 1, comp reg = 1
+apbwr      548 00044022  -- Screener2 reg 2, comp reg = 2
+apbwr      54c 00046033  -- Screener2 reg 3, comp reg = 3
+
+apbwr      700 000000ff  -- Compare reg 0a
+apbwr      704 00000000  -- Compare reg 0b, offset is 0
+apbwr      708 000100ff  -- Compare reg 1a
+apbwr      70c 00000000  -- Compare reg 1b, offset is 0
+apbwr      710 000200ff  -- Compare reg 2a
+apbwr      714 00000000  -- Compare reg 2b, offset is 0
+apbwr      718 000300ff  -- Compare reg 3a
+apbwr      71c 00000000  -- Compare reg 3b, offset is 0
+
+apbwr      f1c 00000000  -- Writing 0 to the enable should have no effect
+apbwr      f1c ffffffff  -- Enabling all the interrupts for MMSL
+apbwr      f1c 00000000  -- Writing 0 to the enable should have no effect
+apbrd      f24 00000000  -- Reading the mask: they should be all unmasked
+
+apbwr      f20 ffffffff  -- Disabling all the interrupts for MMSL
+apbrd      f24 0000003f  -- Reading the mask: they should be all masked 
+apbwr      f20 00000000  -- Writing 0 to the disable mask should have no effect
+
+apbwr      f1c ffffffff  -- Enabling all the interrupts for MMSL again
+apbwr      f20 00000000  -- Writing 0 to the disable mask should have no effect
+
+
+apbwr      00 00000004  -- write tx_go and enable tx, enable rx
+apbwr    1000 00000004  -- write tx_go and enable tx, enable rx
+
+-- delay for enable rx to propagate though design
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd    284 6ef13fff  -- read design cfg reg to set axi test in trans.pl
+apbrdf    20 00000000  -- check contents of the receive status register 
+                       -- and trigger reception of frame
+
+-----------------------------------------------
+------------ Start of the sequence ------------
+-----------------------------------------------
+
+-- Receiving first a START preemptible packet. 
+rxd(apb)      555555555555555555e6
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           aa
+rxd           649e9cd1  
+
+-- Receiving now a bad continuation frame
+-- causing state of gem_mmsl_rx_proc to go to ASSEMBLY_ERROR
+rxd(gap)      5555555555555555614c -- should be 61e6 to be a good continuation
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           aa
+rxd           649e9cd1  
+
+--------------------------------------------
+-- reading the interrupt status registers --
+--------------------------------------------
+apbrd(mmsl_int) f18 00000010 -- mmsl_int_status: fr_count_error
+apbrd      f04 00000200 -- mmsl_status    : fr_count_error
+apbrd      f08 00000001 -- mmsl_err_stats : ass_err_count incremented to 1
+apbwr      f18 00000010 -- clearing mmsl_int
+
+-- After that it will go to IDLE_N_CHECK_FOR_START
+-- We will receive now an illegal SMD so the state will 
+-- go to BAD_FRAG 
+rxd(gap)      5555555555555555e707 -- should be e6 to be a good start packet
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           aa
+rxd           649e9cd1  
+
+--------------------------------------------
+-- reading the interrupt status registers --
+--------------------------------------------
+apbrd(mmsl_int) f18 00000020 -- mmsl_int_status: smd_error
+apbrd      f04 00000400 -- mmsl_status    : smd_error
+apbrd      f08 00010000 -- mmsl_err_stats : smd_error_count incremented to 1
+apbwr      f18 00000020 -- clearing mmsl_int
+
+-- Receiving now a good START preemptible packet. 
+rxd(gap)      555555555555555555e6
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           aa
+rxd           649e9cd1  
+
+-- Receiving another START preemptible packet. 
+-- Causing the erroring of the previous one
+rxd(gap)      5555555555555555554c
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           aa
+rxd           649e9cd1  
+
+--------------------------------------------
+-- reading the interrupt status registers --
+--------------------------------------------
+apbrd(mmsl_int) f18 00000004 -- mmsl_int_status: smds_error
+apbrd      f04 00000080 -- mmsl_status    : smds_error
+apbrd      f08 00000000 -- mmsl_err_stats : Nothing
+apbwr      f18 00000004 -- clearing mmsl_int
+
+-- Receiving another START preemptible packet. 
+-- Causing the erroring of the previous one
+rxd(gap)      555555555555555555e6
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb           
+rxd           f1950623  
+
+--------------------------------------------
+-- reading the interrupt status registers --
+--------------------------------------------
+apbrd(mmsl_int) f18 00000004 -- mmsl_int_status: smds_error
+apbrd      f04 00000080 -- mmsl_status    : smds_error
+apbrd      f08 00000000 -- mmsl_err_stats : Nothing
+apbwr      f18 00000004 -- clearing mmsl_int
+
+
+-- Receiving a START preemptible packet. 
+-- Note that the previous one was finished
+rxd(gap)      555555555555555555e6
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           aa
+rxd           649e9cd1  
+
+-- Receiving now an illegal SMD on a resume
+-- Causing the detection of the illegal_smd signal
+-- inside gem_mmsl_rx_proc.v 
+-- the state will go to WAIT_FOR_DV_FALSE
+rxd(gap)      555555555555555555dd
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb           
+rxd           f1950623  
+
+--------------------------------------------
+-- reading the interrupt status registers --
+--------------------------------------------
+apbrd(mmsl_int) f18 00000020 -- mmsl_int_status: smd_error
+apbrd      f04 00000400 -- mmsl_status    : smd_error
+apbrd      f08 00010000 -- mmsl_err_stats : smd_error_count incremented to 1
+apbwr      f18 00000020 -- clearing mmsl_int
+
+
+-- Receiving a start packet right now causing an smds_error
+rxd(gap)      5555555555555555554ce6
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           649e9cdd  
+
+--------------------------------------------
+-- reading the interrupt status registers --
+--------------------------------------------
+apbrd(mmsl_int) f18 00000004 -- mmsl_int_status: smds_error
+apbrd      f04 00000080 -- mmsl_status    : smds_error
+apbrd      f08 00000000 -- mmsl_err_stats : Nothing
+apbwr      f18 00000004 -- clearing mmsl_int
+
+-- Receiving a continuation packet rather than a Start one.
+-- This will cause the smdc_error detection
+
+rxd(gap)      55555555555555555561e6
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           649e9cdd  
+
+--------------------------------------------
+-- reading the interrupt status registers --
+--------------------------------------------
+apbrd(mmsl_int) f18 00000008 -- mmsl_int_status: smdc_error
+apbrd      f04 00000100 -- mmsl_status    : smdc_error
+apbrd      f08 00010000 -- mmsl_err_stats : smd_error_count incremented to 1
+apbwr      f18 00000008 -- clearing mmsl_int
+
+-- Receiving a Correct Start packet and then we will receive 2 Respond packets
+-- and then 2 Verify packets before the finish-continuation
+rxd(gap)      555555555555555555e6
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           aa
+rxd           649e9cd1  
+
+-- Respond packet1
+rxd(gap)      5555555555555519
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           0889edfb
+
+-- Respond packet2
+rxd(gap)      55555555555519
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           0889edfb
+
+-- Verify packet1
+rxd(gap)      5555555555555507
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           0889edfb
+
+-- Verify packet2
+rxd(gap)      55555555555507
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           00000000000000000000
+rxd           0889edfb
+
+-- Continuation and end
+rxd(gap)      555555555555555561e6
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           aa
+rxd           649e9cd2  
+
+-- New start packet
+rxd(gap)      5555555555555555e6
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           aa
+rxd           649e9cd1  
+
+-- a wrong SMDC as continuation will make the FSM go to ASSEMBLY_ERROR
+rxd(gap)      555555555555555552e6
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           aa
+rxd           649e9cd2  
+
+----------------------------------------------
+-- reading the final status/stats registers --
+----------------------------------------------
+apbrd(mmsl_int) f0c 00000001 -- mmsl_ass_ok_cout  : we have 1 frame reassembled okay
+apbrd      f10 00000001 -- mmsl_frag_count_rx: we have one fragment received
+apbrd      f14 00000000 -- mmsl_frag_count_tx: we haven't sent any fragment                    
+apbrd      f18 00000010 -- mmsl_int_status   : fr_count_error
+apbrd      f04 00000200 -- mmsl_status       : fr_count_error
+apbrd      f08 00000001 -- mmsl_err_stats    : ass_err_count incremented to 1
+apbwr      f18 00000010 -- clearing mmsl_int
+
+-- check the status registers are all clear now and read the control register
+apbrd      f00 000000ac -- mmsl control
+apbrd      f04 00000000 -- mmsl status
+apbrd      f08 00000000 -- mmsl err status
+apbrd      f0c 00000000 -- mmsl ass ok count
+apbrd      f10 00000000 -- mmsl frag count rx
+apbrd      f14 00000000 -- mmsl frag count tx
+apbrd      f18 00000000 -- mmsl int status
+apbrd      f1c 00000000 -- mmsl int enable
+apbrd      f20 00000000 -- mmsl int disable
+apbrd      f24 00000000 -- mmsl int mask
+apbrd      f28 00000000 perr -- reserved
+apbrd      f2c 00000000 perr -- reserved
+apbrd      f30 00000000 perr -- reserved
+apbrd      f34 00000000 perr -- reserved
+apbrd      f38 00000000 perr -- reserved
+apbrd      f3c 00000000 perr -- reserved
+apbrd      f40 00000000 perr -- reserved
+apbrd      f44 00000000 perr -- reserved
+apbrd      f48 00000000 perr -- reserved
+apbrd      f4c 00000000 perr -- reserved
+apbrd      f50 00000000 perr -- reserved
+apbrd      f54 00000000 perr -- reserved
+apbrd      f58 00000000 perr -- reserved
+apbrd      f5c 00000000 perr -- reserved
+apbrd      f60 00000000 perr -- reserved
+apbrd      f64 00000000 perr -- reserved
+apbrd      f68 00000000 perr -- reserved
+apbrd      f6c 00000000 perr -- reserved
+apbrd      f70 00000000 perr -- reserved
+apbrd      f74 00000000 perr -- reserved
+apbrd      f78 00000000 perr -- reserved
+apbrd      f7c 00000000 perr -- reserved
+apbrd      f80 00000000 perr -- reserved
+apbrd      f84 00000000 perr -- reserved
+apbrd      f88 00000000 perr -- reserved
+apbrd      f8c 00000000 perr -- reserved
+apbrd      f90 00000000 perr -- reserved
+apbrd      f94 00000000 perr -- reserved
+apbrd      f98 00000000 perr -- reserved
+apbrd      f9c 00000000 perr -- reserved
+apbrd      fa0 00000000 perr -- reserved
+apbrd      fa4 00000000 perr -- reserved
+apbrd      fa8 00000000 perr -- reserved
+apbrd      fac 00000000 perr -- reserved
+apbrd      fb0 00000000 perr -- reserved
+apbrd      fb4 00000000 perr -- reserved
+apbrd      fb8 00000000 perr -- reserved
+apbrd      fbc 00000000 perr -- reserved
+apbrd      fc0 00000000 perr -- reserved
+apbrd      fc4 00000000 perr -- reserved
+apbrd      fc8 00000000 perr -- reserved
+apbrd      fcc 00000000 perr -- reserved
+apbrd      fd0 00000000 perr -- reserved
+apbrd      fd4 00000000 perr -- reserved
+apbrd      fd8 00000000 perr -- reserved
+apbrd      fdc 00000000 perr -- reserved
+apbrd      fe0 00000000 perr -- reserved
+apbrd      fe4 00000000 perr -- reserved
+apbrd      fe8 00000000 perr -- reserved
+apbrd      fec 00000000 perr -- reserved
+apbrd      ff0 00000000 perr -- reserved
+apbrd      ff4 00000000 perr -- reserved
+apbrd      ff8 00000000 perr -- reserved
+apbrd      ffc 00000000 perr -- reserved
+apbrd      e80 00000000 perr -- reserved
+
+--------------------------------------------------------------------
+----------- NO DMA ACTIVITY AS WE ARE TESTING HERE ERROR CONDITIONS 
+--------------------------------------------------------------------
+
+-- force end of test in case it doesn't stop of its own accord
+end(40000)

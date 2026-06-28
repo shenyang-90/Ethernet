@@ -1,0 +1,318 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_overflow_d1_fifo
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 15 March 2002
+--
+--------------------------------------------------------------------------------
+--
+-- Description
+-- -----------
+-- This tests that the overflow detection of the RX path is working correctly
+-- in exposed fifo mode.
+-- This test uses a one cycle delay between rx_w_wr and the rx_w_overflow.
+-- 
+-- Functional Coverage
+-- -------------------
+-- · Checks operation of overflow detection in the RX FIFO
+-- · Checks operation of the rx overflow interrupt
+-- · Checks operation of the FIFO interface when an overflow occurs
+--
+-- Detailed Test Description
+-- -------------------------
+-- 1. Initialise the GEM for gigabit receive operation into a 32 bit FIFO bus.
+-- 2. Enable all interrupts.
+-- 3. Receive a minimum length frame. During reception force an rx_w_overflow
+--    indication from the FIFO testbench.
+--    Check that this causes the frame to be dropped.
+--    Also check that an rx overrun interrupt is raised, a receive overrun 
+--    status is reported in receive status register and that the receive 
+--    overrun statistics register is incremented.
+-- 4. Receive a minimum length frame. rx_w_overflow is still high from 
+--    the previous frame.
+--    Check that this causes the new frame to be dropped.
+--    Also check that an rx overrun interrupt is raised, a receive overrun 
+--    status is reported in receive status register and that the receive 
+--    overrun statistics register is incremented.
+-- 5. Receive a minimum length frame. Allow the frame to complete and begin
+--    updating status. Then force an rx_w_overflow indication from the FIFO 
+--    testbench (can delay from last write pulse)
+--    Check that this causes the frame to be dropped.
+--    Also check that an rx overrun interrupt is raised, a receive overrun 
+--    status is reported in receive status register and that the receive 
+--    overrun statistics register is incremented.
+-- 6. Receive a good frame and check that a good status is recorded.
+-- 7. Check the status and statistics registers and ensure that the above 
+--    operations were handled properly.
+--------------------------------------------------------------------------------
+
+--******************************************************************************
+-- Setup overflow to be delayed by one clock cycle from write.
+--******************************************************************************
+fifo_over_delay 1
+
+
+
+--******************************************************************************
+-- 1. Initialise the GEM for gigabit receive operation into a 32 bit FIFO bus.
+-- 2. Enable all interrupts.
+--******************************************************************************
+
+apbwr(60)  4c 00000001  -- enable soft config fifo port bit when available
+apbrd      4c 00000001  -- check enable soft config bit when available
+
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      18 01234000  -- write receive queue pointer
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      98 12345678  -- specific address register 1 bottom
+apbwr      9C 00001111  -- specific address register 1 top
+apbwr      04 00080400  -- setup for gigabit operation in 32 bit mode
+apbwr      00 00000004  -- enable receive
+apbrd      20 00000000  -- check contents of the receive status register 
+
+
+--******************************************************************************
+-- 3. Receive a minimum length frame. During reception force an rx_w_overflow
+--    indication from the FIFO testbench.
+--    Check that this causes the frame to be dropped.
+--    Also check that an rx overrun interrupt is raised, a receive overrun 
+--    status is reported in receive status register and that the receive 
+--    overrun statistics register is incremented.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 1: RX FIFO overflow"
+                        -- check contents of the receive status register 
+                        -- and trigger reception of frame
+
+-- drive in receive frame with carrier extension
+rxd(apb_x) 55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+-- check the receive data as it is written out on the FIFO interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr     01010    0    xxxxxxxxxx      12345678
+fifo_wr     01000    0    xxxxxxxxxx      11111111
+fifo_wr     01000    0    xxxxxxxxxx      22222222
+fifo_wr     01000    0    xxxxxxxxxx      33333333
+fifo_wr     01000    0    xxxxxxxxxx      44444444
+fifo_wr     01000    0    xxxxxxxxxx      55555555
+fifo_wr     01000    0    xxxxxxxxxx      66666666
+fifo_wr     01000    0    xxxxxxxxxx      77777777
+fifo_wr     01000    0    xxxxxxxxxx      88888888
+fifo_wr     01000    0    xxxxxxxxxx      99999999
+fifo_wr     01000    0    xxxxxxxxxx      aaaaaaaa
+fifo_wr     11000    0    xxxxxxxxxx      bbbbbbbb -- OVERFLOW SIGNALLED HERE
+fifo_wr     01000    0    xxxxxxxxxx      00000000
+fifo_wr     01000    0    xxxxxxxxxx      00000000
+fifo_wr     01000    0    xxxxxxxxxx      00000000
+fifo_wr     11101    0    0040004040      9b303826 -- ERROR
+
+
+apbrd(int) 24 00000400  "Scenario 1: Complete"
+                        -- check interrupt status - Receive overrun
+apbrd      20 00000004  -- check receive status register - Receive overrun
+apbwr      20 00000004  -- clear Receive overrun
+apbrd     1A4 00000001  -- check receive overrun statistic
+
+
+
+--******************************************************************************
+-- 4. Receive a minimum length frame. rx_w_overflow is still high from 
+--    the previous frame.
+--    Check that this causes the new frame to be dropped.
+--    Also check that an rx overrun interrupt is raised, a receive overrun 
+--    status is reported in receive status register and that the receive 
+--    overrun statistics register is incremented.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 2: RX FIFO overflow"
+                        -- check contents of the receive status register 
+                        -- and trigger reception of frame
+
+-- drive in receive frame with carrier extension
+rxd(apb_x) 55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- check the receive data as it is written out on the FIFO interface
+-- Note no FIFO writes actually occur as frame is dropped immediately
+-- with new PCLK timing interrupt last two rx_clk cycles so need
+-- to drive overflow for an extra rx_clk cycle
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--             CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr(int)   11010    0    xxxxxxxxxx      xxxxxxxx -- OVERFLOW ACTIVE AT SOP
+fifo_wr(int)   11000    0    xxxxxxxxxx      xxxxxxxx -- SWITCH OFF OVERFLOW
+fifo_wr(int)   11000    0    xxxxxxxxxx      xxxxxxxx -- AFTER 2nd INTERRUPT
+
+
+
+
+apbrd(int) 24 00000400  "Scenario 2: Complete"
+                        -- check interrupt status - Receive overrun
+apbrd      20 00000004  -- check receive status register - Receive overrun
+apbwr      20 00000004  -- clear Receive overrun
+apbrd     1A4 00000001  -- check receive overrun statistic
+
+
+
+--******************************************************************************
+-- 5. Receive a minimum length frame. Allow the frame to complete and begin
+--    updating status. Then force an rx_w_overflow indication from the FIFO 
+--    testbench (can delay from last write pulse)
+--    Check that this causes the frame to be dropped.
+--    Also check that an rx overrun interrupt is raised, a receive overrun 
+--    status is reported in receive status register and that the receive 
+--    overrun statistics register is incremented.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 3: Overflow during status update"
+                        -- check contents of the receive status register 
+                        -- and trigger reception of frame
+
+-- drive in receive frame
+rxd(apb_x)   55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              0000000000000000000000002638309b
+
+-- check the receive data as it is written out on the FIFO interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr     01010    0    xxxxxxxxxx      12345678
+fifo_wr     01000    0    xxxxxxxxxx      11111111
+fifo_wr     01000    0    xxxxxxxxxx      22222222
+fifo_wr     01000    0    xxxxxxxxxx      33333333
+fifo_wr     01000    0    xxxxxxxxxx      44444444
+fifo_wr     01000    0    xxxxxxxxxx      55555555
+fifo_wr     01000    0    xxxxxxxxxx      66666666
+fifo_wr     01000    0    xxxxxxxxxx      77777777
+fifo_wr     01000    0    xxxxxxxxxx      88888888
+fifo_wr     01000    0    xxxxxxxxxx      99999999
+fifo_wr     01000    0    xxxxxxxxxx      aaaaaaaa
+fifo_wr     01000    0    xxxxxxxxxx      bbbbbbbb
+fifo_wr     01000    0    xxxxxxxxxx      00000000
+fifo_wr     01000    0    xxxxxxxxxx      00000000
+fifo_wr     01000    0    xxxxxxxxxx      00000000
+fifo_wr     11001    0    0040000040      9b303826 -- OVERRUN HERE
+
+apbrd(int) 24 00000002  "Scenario 3: Receive complete interrupt ....."
+                        -- check interrupt status - Receive complete
+apbrd(int) 24 00000400  "Scenario 3: Complete (overrun)"
+                        -- check interrupt status - Receive overrun
+apbrd      20 00000006  -- check receive status register - Receive complete & overrun
+apbwr      20 00000006  -- clear Receive complete & overrun
+apbrd     1A4 00000001  -- check receive overrun statistic
+apbrd     184 00000001  -- check undersize frame errors
+
+
+
+
+--******************************************************************************
+-- 6. Receive a good frame and check that a good status is recorded.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 4: RX good frame"
+                        -- check contents of the receive status register 
+                        -- and trigger reception of frame
+
+-- drive in receive frame
+rxd(apb_x)   55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              0000000000000000000000002638309b
+
+-- check the receive data as it is written out on the FIFO interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr     01010    0    xxxxxxxxxx      12345678
+fifo_wr     01000    0    xxxxxxxxxx      11111111
+fifo_wr     01000    0    xxxxxxxxxx      22222222
+fifo_wr     01000    0    xxxxxxxxxx      33333333
+fifo_wr     01000    0    xxxxxxxxxx      44444444
+fifo_wr     01000    0    xxxxxxxxxx      55555555
+fifo_wr     01000    0    xxxxxxxxxx      66666666
+fifo_wr     01000    0    xxxxxxxxxx      77777777
+fifo_wr     01000    0    xxxxxxxxxx      88888888
+fifo_wr     01000    0    xxxxxxxxxx      99999999
+fifo_wr     01000    0    xxxxxxxxxx      aaaaaaaa
+fifo_wr     01000    0    xxxxxxxxxx      bbbbbbbb
+fifo_wr     01000    0    xxxxxxxxxx      00000000
+fifo_wr     01000    0    xxxxxxxxxx      00000000
+fifo_wr     01000    0    xxxxxxxxxx      00000000
+fifo_wr     01001    0    0040000040      9b303826 -- OK
+
+-- frame successfully stored
+apbrd(int) 24 00000002  "Scenario 4: Complete"
+                        -- check interrupt status - Receive complete
+apbrd      20 00000002  -- check receive status register - Receive complete
+apbwr      20 00000002  -- clear Receive complete
+
+
+
+--******************************************************************************
+-- 7. Check the status and statistics registers and ensure that the above 
+--    operations were handled properly.
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000080  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000002  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000002  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors (previously read)
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(2000)
+

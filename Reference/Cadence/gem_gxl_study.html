@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cadence GEM GXL (IP7014A) — Ethernet MAC IP 学习笔记</title>
+<style>
+:root { --bg:#f8f9fa; --fg:#212529; --accent:#0056b3; --code:#e9ecef; --warn:#fff3cd; --crit:#f8d7da; --ok:#d4edda; }
+body { font-family: "Segoe UI", system-ui, sans-serif; line-height:1.7; max-width:1100px; margin:0 auto; padding:20px; background:var(--bg); color:var(--fg); }
+h1 { color:var(--accent); border-bottom:3px solid var(--accent); padding-bottom:8px; }
+h2 { color:var(--accent); margin-top:36px; border-left:6px solid var(--accent); padding-left:12px; }
+h3 { margin-top:28px; color:#004494; }
+h4 { margin-top:20px; color:#333; }
+table { border-collapse:collapse; width:100%; margin:12px 0; font-size:0.95em; }
+th,td { border:1px solid #bbb; padding:8px 10px; text-align:left; vertical-align:top; }
+th { background:#e2e6ea; }
+code,pre { font-family: "Consolas", "Courier New", monospace; background:var(--code); padding:2px 6px; border-radius:4px; font-size:0.92em; }
+pre { padding:14px; overflow-x:auto; line-height:1.5; }
+.note { background:#e7f3ff; border-left:4px solid var(--accent); padding:10px 14px; margin:12px 0; }
+.warn { background:var(--warn); border-left:4px solid #856404; padding:10px 14px; margin:12px 0; }
+.crit { background:var(--crit); border-left:4px solid #721c24; padding:10px 14px; margin:12px 0; }
+.ok { background:var(--ok); border-left:4px solid #155724; padding:10px 14px; margin:12px 0; }
+.toc { background:#fff; border:1px solid #ccc; padding:16px 20px; border-radius:8px; }
+.toc ul { list-style:none; padding-left:0; }
+.toc li { margin:6px 0; }
+.toc a { text-decoration:none; color:var(--accent); }
+.toc a:hover { text-decoration:underline; }
+.rtl-box { background:#fff; border:2px dashed var(--accent); padding:14px 18px; border-radius:8px; margin:14px 0; }
+.rtl-box h4 { margin-top:0; color:var(--accent); }
+.must { color:#155724; font-weight:bold; }
+.opt { color:#856404; font-weight:bold; }
+</style>
+</head>
+<body>
+
+<h1>Cadence GEM GXL (IP7014A) — Ethernet MAC IP 学习笔记</h1>
+<p><strong>IP 名称:</strong> GEM Gigabit Ethernet MAC<br>
+<strong>Part Number:</strong> IP7014A (Automotive), r1p12f4<br>
+<strong>路径:</strong> <code>Reference/Cadence/gem_gxl_det0104_r1p12f4/gem_gxl/</code><br>
+<strong>研究深度:</strong> 基于 RTL + 软件驱动 + PDF（User Guide / Integration Guide / Safety Manual / RGMII App Note / Demo TB Guide）<br>
+<strong>目标:</strong> 识别 Ethernet IP 开发必须组件，对比当前项目文档提出优化建议。</p>
+
+<div class="toc">
+<h3>目录</h3>
+<ul>
+<li><a href="#sec-overview">1. 概述与 Part Number</a></li>
+<li><a href="#sec-hierarchy">2. 顶层层次结构与配置参数</a></li>
+<li><a href="#sec-must">3. Ethernet IP 开发必须组件</a></li>
+<li><a href="#sec-optional">4. 可选/增强组件</a></li>
+<li><a href="#sec-registers">5. 寄存器空间摘要</a></li>
+<li><a href="#sec-dma">6. DMA 描述符与数据流</a></li>
+<li><a href="#sec-mac">7. MAC TX/RX/过滤深入</a></li>
+<li><a href="#sec-tsn">8. TSN / 1588 / 车规特性</a></li>
+<li><a href="#sec-clocks">9. 时钟、复位、集成</a></li>
+<li><a href="#sec-safety">10. 功能安全 / DFT / 低功耗</a></li>
+<li><a href="#sec-verification">11. 验证资产</a></li>
+<li><a href="#sec-gap">12. 与当前项目的差距分析</a></li>
+<li><a href="#sec-optimize">13. 优化建议</a></li>
+</ul>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sec-overview">1. 概述与 Part Number</h2>
+<!-- ================================================================ -->
+
+<p>Cadence GEM GXL 是一个完整的千兆以太网 MAC IP，面向 automotive、TSN 和通用 SoC。其 RTL 位于 <code>hdl/hdl_src/</code>，共约 155 个 Verilog 源文件。主要交付物包括：</p>
+
+<table>
+<tr><th>交付物</th><th>路径</th><th>说明</th></tr>
+<tr><td>RTL 源码</td><td><code>hdl/hdl_src/</code></td><td>~155 个 .v 文件，含 MAC、DMA、PCS、TSU、MMSL、寄存器、安全机制</td></tr>
+<tr><td>用户指南</td><td><code>doc/cdn_eth_ip7014A_user_guide_v1.0.pdf</code></td><td>727 页主参考手册，含寄存器、DMA、TSN、汽车安全</td></tr>
+<tr><td>集成指南</td><td><code>doc/cdn_eth_IP701x_integration_guide_v1.0.pdf</code></td><td>SoC 集成、时钟复位、AXI/AHB、RGMII/RMII/PCS</td></tr>
+<tr><td>安全手册</td><td><code>doc/cdn_eth_IP701xA_r1p12_safety_manual_v1.1.pdf</code></td><td>ISO 26262 安全目标、ASIL 假设、安全机制</td></tr>
+<tr><td>软件驱动</td><td><code>software/core_driver/</code></td><td>C 驱动 + 寄存器头文件 <code>emac_regs.h</code></td></tr>
+<tr><td>验证环境</td><td><code>func_ver/</code></td><td>UVM demo TB +  legacy Verilog/SV TB + SVA + coverage</td></tr>
+<tr><td>DFT/STA/UPF</td><td><code>dft/</code>, <code>sta/</code>, <code>pwr_intent/</code></td><td>扫描、时序约束、CPF/UPF 低功耗意图</td></tr>
+</table>
+
+<div class="note">
+<strong>关键认知:</strong> Cadence GEM GXL 是“单端口千兆 MAC + 可选 DMA/PCS/TSU/TSN”的成熟参考。它不包含多端口 L2/L3 Switch，也没有 vPHC 虚拟化。当前项目若定义 4-port Switch + 8 MAC + vPHC，则范围远超此参考 IP。
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sec-hierarchy">2. 顶层层次结构与配置参数</h2>
+<!-- ================================================================ -->
+
+<h3>2.1 模块分层</h3>
+
+<pre>
+SoC 顶层: gem_gxl
+    └── gem_ss                    (802.3br 子系统层)
+        ├── gem_top               (eMAC / 默认 MAC)
+        │   ├── gem_mac           (MAC 数据通路)
+        │   │   ├── gem_tx        (发送引擎 + 状态机)
+        │   │   ├── gem_rx        (接收引擎 + 解码)
+        │   │   ├── gem_filter    (DA/SA/VLAN 过滤)
+        │   │   └── gem_loop      (环回)
+        │   ├── edma_pbuf_axi_top (AXI DMA + 包缓冲)
+        │   │   ├── edma_pbuf_axi_fe_*  (AXI 前端)
+        │   │   ├── edma_pbuf_rx_*      (RX 包缓冲)
+        │   │   ├── edma_pbuf_tx_*      (TX 包缓冲)
+        │   │   └── edma_tx_sched       (CBS/SP 调度)
+        │   ├── gem_reg_top       (APB 寄存器顶层)
+        │   │   ├── gem_registers (主要 CSR)
+        │   │   ├── gem_reg_dma   (DMA 相关 CSR)
+        │   │   ├── gem_reg_stats (统计寄存器)
+        │   │   ├── gem_reg_tsu   (1588 TSU 寄存器)
+        │   │   └── ...
+        │   └── gem_pcs           (千兆 PCS，可选)
+        │       ├── gem_pcs_tx/rx
+        │       ├── gem_pcs_enc8b10b / dec8b10b
+        │       └── gem_pcs_an    (自协商)
+        ├── gem_top               (pMAC / 802.3br 抢占 MAC)
+        ├── gem_mmsl              (MAC Merge Sublayer，802.3br 帧抢占)
+        ├── gem_mii_bridge        (MII/RGMII/RMII 桥接)
+        ├── gem_mmsl_apb_switch   (MMSL APB 切换)
+        └── edma_axi_arbiter      (双 MAC AXI 仲裁)
+</pre>
+
+<h3>2.2 顶层接口分类</h3>
+
+<table>
+<tr><th>接口类别</th><th>信号示例</th><th>说明</th></tr>
+<tr><td>系统/复位</td><td><code>n_txreset</code>, <code>n_rxreset</code>, <code>n_preset</code></td><td>按 tx/rx/apb 域独立复位</td></tr>
+<tr><td>PHY 数据面</td><td><code>txd</code>, <code>tx_en</code>, <code>rxd</code>, <code>rx_dv</code>, <code>rgmii_*</code>, <code>rmii_*</code></td><td>GMII/MII/RGMII/RMII 复用</td></tr>
+<tr><td>PCS 接口</td><td><code>tx_group</code>, <code>rx_group</code>, <code>gtx_clk</code>, <code>pcs_rx_clk</code></td><td>可选千兆 PCS (8b/10b)</td></tr>
+<tr><td>配置/CSR</td><td><code>pclk</code>, <code>paddr</code>, <code>pwdata</code>, <code>prdata</code></td><td>APB 寄存器接口</td></tr>
+<tr><td>DMA 主机</td><td><code>awid/awaddr</code>, <code>wdata</code>, <code>arid/araddr</code>, <code>rdata</code></td><td>AXI4 Master (或 AHB)</td></tr>
+<tr><td>PTP/1588</td><td><code>sof_tx/rx</code>, <code>sync_frame_tx/rx</code>, <code>tsu_timer_cnt</code></td><td>事件帧触发 + TSU 计数器</td></tr>
+<tr><td>外部过滤</td><td><code>ext_da</code>, <code>ext_sa</code>, <code>ext_type</code>, <code>ext_ip_*</code>, <code>ext_vlan_tag*</code></td><td>支持外部协处理器深度包解析</td></tr>
+</table>
+
+<h3>2.3 关键配置参数矩阵</h3>
+
+<table>
+<tr><th>参数 / `define`</th><th>默认值 / 示例</th><th>有效范围</th><th>作用</th></tr>
+<tr><td><code>gem_axi</code></td><td>undefined (AHB)</td><td>—</td><td>选择 AXI 主机接口替代 AHB</td></tr>
+<tr><td><code>gem_dma_bus_width</code></td><td>128</td><td>32, 64, 128</td><td>DMA AHB/AXI 数据宽度（AHB 不支持 128）</td></tr>
+<tr><td><code>gem_dma_addr_width</code></td><td>32</td><td>32, 64</td><td>DMA 地址总线宽度</td></tr>
+<tr><td><code>gem_emac_bus_width</code></td><td>64</td><td>32, 64, 128</td><td>MAC/FIFO 接口数据宽度</td></tr>
+<tr><td><code>gem_use_rgmii</code></td><td>undefined (GMII/MII)</td><td>—</td><td>选择 RGMII 顶层接口</td></tr>
+<tr><td><code>gem_include_rmii</code></td><td>undefined</td><td>—</td><td>增加独立 RMII 端口</td></tr>
+<tr><td><code>gem_no_pcs</code></td><td>undefined (含 PCS)</td><td>—</td><td>移除 PCS 模块</td></tr>
+<tr><td><code>dma_priority_queue1</code>…<code>queue15</code></td><td>undefined</td><td>queue1–queue15</td><td>使能最多 16 个 TX/RX 优先级队列</td></tr>
+<tr><td><code>gem_exclude_cbs</code></td><td>undefined (含 CBS)</td><td>—</td><td>排除 802.1Qav 信用整形器</td></tr>
+<tr><td><code>gem_exclude_qbv</code></td><td>undefined (含 EnST)</td><td>—</td><td>排除 802.1Qbv 门控调度</td></tr>
+<tr><td><code>gem_has_802p3br</code></td><td>undefined</td><td>—</td><td>使能 802.3br 帧抢占；强制 AXI，双 MAC/DMA</td></tr>
+<tr><td><code>gem_no_of_cb_streams</code></td><td>0</td><td>1–16</td><td>802.1CB FRER 流数量</td></tr>
+<tr><td><code>num_spec_add_filters</code></td><td>4</td><td>1–36</td><td>特定地址匹配寄存器数量</td></tr>
+<tr><td><code>num_type1_screeners</code> / <code>num_type2_screeners</code></td><td>16</td><td>0–16</td><td>RX 优先级队列 screeners</td></tr>
+<tr><td><code>gem_tsu</code></td><td>defined</td><td>—</td><td>包含 IEEE 1588 时间戳单元</td></tr>
+<tr><td><code>gem_asf_enable</code></td><td>undefined</td><td>—</td><td>汽车安全特性总开关</td></tr>
+<tr><td><code>gem_pbuf_cutthru</code></td><td>undefined</td><td>—</td><td>使能部分存储转发（cut-through）</td></tr>
+</table>
+
+<div class="note">
+<strong>参数依赖规则:</strong> PCS 接口类型（<code>gem_pcs_legacy_if</code> / <code>gem_pcs_10b_if</code> / <code>gem_pcs_20b_if</code>）互斥；FIFO 与 DMA 主机接口模式互斥；802.3br 强制 AXI 且不支持 AHB；ASF 子选项仅在 <code>gem_asf_enable</code> 定义时有效。
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sec-must">3. Ethernet IP 开发必须组件</h2>
+<!-- ================================================================ -->
+
+<p>基于 Cadence GEM GXL，一个<strong>最小可用</strong>的千兆 Ethernet MAC IP 至少应包含以下组件。缺少任何一项都无法完成基本帧收发：</p>
+
+<table>
+<tr><th>组件</th><th>代表文件</th><th>功能</th><th>必要性</th></tr>
+<tr><td>MAC TX 引擎</td><td><code>gem_tx.v</code>, <code>gem_tx_state.v</code></td><td>前导码/SFD 插入、FCS 生成、padding、IFG、半双工冲突处理</td><td><span class="must">必须</span></td></tr>
+<tr><td>MAC RX 引擎</td><td><code>gem_rx.v</code>, <code>gem_rx_decode.v</code></td><td>前导码/SFD 检测、FCS 校验、runts/giants 检测、错误报告</td><td><span class="must">必须</span></td></tr>
+<tr><td>地址/VLAN 过滤</td><td><code>gem_filter.v</code></td><td>DA/SA 过滤、hash 过滤、VLAN tag 识别、广播/多播控制</td><td><span class="must">必须</span></td></tr>
+<tr><td>PHY 接口适配</td><td><code>rgmii.v</code>, <code>rmii_interface.v</code>, <code>gem_mii_bridge.v</code></td><td>MII/RMII/RGMII/GMII 时序转换</td><td><span class="must">必须</span></td></tr>
+<tr><td>DMA 引擎</td><td><code>edma_pbuf_axi_top.v</code> 或 <code>edma_pbuf_ahb_top.v</code></td><td>描述符环管理、AXI/AHB 主控、TX/RX 数据搬移</td><td><span class="must">必须</span>（SoC 集成场景）</td></tr>
+<tr><td>寄存器块</td><td><code>gem_registers.v</code>, <code>gem_reg_top.v</code></td><td>APB CSR、中断聚合、MDIO、统计寄存器</td><td><span class="must">必须</span></td></tr>
+<tr><td>时钟/复位同步</td><td><code>gem_pclk_syncs.v</code>, <code>gem_bus_sync.v</code></td><td>跨 pclk/tx_clk/rx_clk/aclk 域同步</td><td><span class="must">必须</span></td></tr>
+<tr><td>Loopback</td><td><code>gem_loop.v</code></td><td>GMII/MII 本地环回，用于调试和自测试</td><td><span class="must">必须</span></td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL 设计提示 — 最小 MAC 起点</h4>
+<pre>// 最小千兆 MAC 应优先实现：
+// 1) gem_tx: preamble(0x55x7) + SFD(0xD5) + data + pad(to 46B) + FCS(CRC-32)
+// 2) gem_rx: strip preamble/SFD, verify FCS, detect runt(<64B)/giant(>jumbo)
+// 3) gem_filter: hash table + 4 specific address filters + broadcast/multicast control
+// 4) 寄存器: network_control, network_config, network_status, int_status, phy_management
+// 5) DMA: 描述符环 + AXI read/write + 每队列状态写回
+</pre>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sec-optional">4. 可选/增强组件</h2>
+<!-- ================================================================ -->
+
+<table>
+<tr><th>组件</th><th>代表文件</th><th>功能</th><th>适用场景</th></tr>
+<tr><td>PCS</td><td><code>gem_pcs.v</code> 及子模块</td><td>千兆 8b/10b 编码、自协商、同步、链路状态</td><td>SGMII/TBI/SerDes 接口</td></tr>
+<tr><td>1588 TSU</td><td><code>gem_tsu.v</code>, <code>gem_pulse_tsync.v</code></td><td>102-bit 计时器（48s+30ns+24sub-ns）、PTP 时间戳、timer adjust/compare</td><td>时间同步、gPTP/PTP</td></tr>
+<tr><td>CBS (802.1Qav)</td><td><code>edma_tx_sched.v</code>, <code>edma_tx_sched_ets_count.v</code></td><td>信用整形，保障 AVB 流带宽</td><td>AVB/TSN</td></tr>
+<tr><td>EnST/TAS (802.1Qbv)</td><td><code>edma_pbuf_tx_enst*.v</code>, <code>gem_reg_enst.v</code></td><td>门控调度，按时间片开关队列</td><td>确定性 TSN</td></tr>
+<tr><td>FRER (802.1CB)</td><td><code>gem_rx_frer_elim.v</code></td><td>接收侧序列号消除，冗余路径恢复</td><td>高可靠车载网络</td></tr>
+<tr><td>MMSL / 帧抢占</td><td><code>gem_mmsl*.v</code></td><td>802.3br / 802.1Qbu：eMAC/pMAC 双 MAC 合并</td><td>低延迟 TSN</td></tr>
+<tr><td>Screeners</td><td><code>gem_screener_top.v</code>, <code>gem_screener_type1/2.v</code></td><td>Type-1/2 接收分类，QoS 队列映射</td><td>多队列 QoS</td></tr>
+<tr><td>ASF / 安全机制</td><td><code>cdnsdru_asf*.v</code>, <code>cdnsdru_ecc*.v</code></td><td>Parity、ECC、transaction timeout、lockup detection</td><td>ASIL-B 车规</td></tr>
+<tr><td>校验和卸载</td><td><code>edma_csum.v</code>, <code>gem_rx_decode.v</code></td><td>IP/TCP/UDP 硬件计算/校验</td><td>高性能 TCP/IP</td></tr>
+</table>
+
+<div class="warn">
+<strong>可裁剪原则:</strong> 可选组件应通过顶层参数开关（如 Cadence 的 <code>ungroup_params.v</code> 扁平化参数向量）控制。建议在项目初期关闭 PCS、TSN、MMSL、FRER，先验证最小 MAC+DMA；后续按需求逐步开启。
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sec-registers">5. 寄存器空间摘要</h2>
+<!-- ================================================================ -->
+
+<p>APB 寄存器空间以 <code>emac_regs.h</code> 为准。Cadence 将寄存器分为 eMAC（基地址 0x0000）和 pMAC（基地址 0x1000，802.3br 场景）两套镜像。下表为 eMAC 主要分组：</p>
+
+<table>
+<tr><th>地址范围</th><th>分组</th><th>关键寄存器</th></tr>
+<tr><td>0x0000–0x00FC</td><td>网络控制 / DMA / 中断</td><td><code>network_control</code>, <code>network_config</code>, <code>dma_config</code>, <code>int_status</code>, <code>int_enable</code>, <code>phy_management</code></td></tr>
+<tr><td>0x0100–0x01BC</td><td>TX 统计</td><td><code>octets_txed</code>, <code>frames_txed_ok</code>, <code>pause_frames_txed</code>, <code>tx_underruns</code></td></tr>
+<tr><td>0x0150–0x01B8</td><td>RX 统计</td><td><code>octets_rxed</code>, <code>fcs_errors</code>, <code>rx_length_errors</code>, <code>rx_ip_ck_errors</code></td></tr>
+<tr><td>0x01BC–0x01FC</td><td>1588 TSU</td><td><code>tsu_timer_incr</code>, <code>tsu_timer_sec/nsec</code>, <code>tsu_ptp_tx/rx_sec/nsec</code></td></tr>
+<tr><td>0x0200–0x023C</td><td>PCS / AN</td><td><code>pcs_control</code>, <code>pcs_status</code>, <code>pcs_an_adv</code></td></tr>
+<tr><td>0x0280–0x029C</td><td>设计配置调试</td><td><code>designcfg_debug1</code>–<code>designcfg_debug12</code></td></tr>
+<tr><td>0x0300–0x03FC</td><td>扩展地址过滤器</td><td><code>spec_add5</code>–<code>spec_add36</code></td></tr>
+<tr><td>0x0400–0x06A0</td><td>队列中断 / 描述符指针</td><td><code>int_q*_status</code>, <code>transmit_q*_ptr</code>, <code>receive_q*_ptr</code></td></tr>
+<tr><td>0x04A0–0x04BC</td><td>RX Buffer / CBS</td><td><code>dma_rxbuf_size_q*</code>, <code>cbs_control</code>, <code>cbs_idleslope_q_a/b</code></td></tr>
+<tr><td>0x0500–0x0580</td><td>Screener</td><td><code>screening_type_1_register_*</code>, <code>screening_type_2_register_*</code></td></tr>
+<tr><td>0x06E0–0x07FC</td><td>Type-2 比较 / Ethertype</td><td><code>screening_type_2_ethertype_reg_*</code>, <code>type2_compare_*</code></td></tr>
+<tr><td>0x0800–0x0880</td><td>802.1Qbv EnST</td><td><code>enst_start_time_q*</code>, <code>enst_on_time_q*</code>, <code>enst_off_time_q*</code>, <code>enst_control</code></td></tr>
+<tr><td>0x08A0–0x09AC</td><td>802.1CB FRER</td><td><code>frer_timeout</code>, <code>frer_red_tag</code>, <code>frer_control_*_a/b</code>, <code>frer_statistics_*</code></td></tr>
+<tr><td>0x0B00–0x0B80</td><td>RX 队列 Flush / 限速</td><td><code>rx_q*_flush</code>, <code>scr2_reg*_rate_limit</code></td></tr>
+<tr><td>0x0E00–0x0E48</td><td>ASF / FuSa</td><td><code>asf_int_status</code>, <code>asf_sram_corr/uncorr_fault_status</code>, <code>asf_trans_to_ctrl</code></td></tr>
+<tr><td>0x0F00–0x0F24</td><td>MMSL / 802.3br</td><td><code>mmsl_control</code>, <code>mmsl_status</code>, <code>mmsl_err_stats</code>, <code>mmsl_int_*</code></td></tr>
+<tr><td>0x1000–0x1FFF</td><td>pMAC 镜像</td><td>以 <code>emac_</code> 前缀重复的 eMAC 寄存器集</td></tr>
+</table>
+
+<h3>5.1 关键控制寄存器 bit 字段</h3>
+
+<table>
+<tr><th>寄存器</th><th>偏移</th><th>复位值</th><th>关键 bit</th></tr>
+<tr><td><code>network_control</code></td><td>0x00</td><td>0x0000_0000</td><td>bit 2=RX enable, bit 3=TX enable, bit 4=MDIO enable, bit 10=TSU init, bit 11=stats reset</td></tr>
+<tr><td><code>network_config</code></td><td>0x04</td><td>0x0008_0000</td><td>bit 0=speed, bit 1=full duplex, bit 4=discard non-VLAN, bit 8=1536-byte frames, bit 17=FCS strip, bit 24=RX checksum offload</td></tr>
+<tr><td><code>dma_config</code></td><td>0x10</td><td>0x0002_07C4</td><td>bit 0=fixed burst, bit 1=burst length, bit 6:4=RX buffer size, bit 10=TX checksum offload, bit 11=TX checksum gen, bit 24=AXI 4KB boundary disable</td></tr>
+<tr><td><code>int_status/enable/disable/mask</code></td><td>0x24–0x30</td><td>—</td><td>bit 1=RX complete, bit 2=TX complete, bit 6=RX overrun, bit 7=HRESP not OK, bit 10=RX used bit read, bit 13=TX used bit read</td></tr>
+<tr><td><code>phy_management</code></td><td>0x34</td><td>0x0000_0000</td><td>bits [31:30]=clause 45 op, [29:18]=PHY addr, [17:12]=reg addr, [11:0]=data, bit 1=write, bit 0=read capture</td></tr>
+<tr><td><code>receive_q_ptr</code> / <code>transmit_q_ptr</code></td><td>0x18 / 0x1C</td><td>0x0000_0000</td><td>描述符环基地址（按配置 32/64-bit 对齐）</td></tr>
+</table>
+
+<div class="rtl-box">
+<h4>RTL 设计提示 — 寄存器实现</h4>
+<pre>// 1) 优先实现基地址 0x0000-0x00FC 的核心控制寄存器
+// 2) 统计寄存器可用计数器 + APB 读清除实现；早期可只保留关键几项
+// 3) 多队列寄存器按 queue index 生成，避免手工展开 16 组
+// 4) 参考 emac_regs.h 的偏移和字段命名，保持与驱动一致
+// 5) 若支持 802.3br，必须实现 0x1000-0x1FFF 的 pMAC 镜像寄存器
+</pre>
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sec-dma">6. DMA 描述符与数据流</h2>
+<!-- ================================================================ -->
+
+<h3>6.1 描述符格式</h3>
+
+<p>GEM 使用独立的 TX/RX 描述符环。每个描述符字 32-bit，宽度取决于地址模式和扩展 BD 模式：</p>
+
+<table>
+<tr><th>地址模式</th><th>Extended BD</th><th>每 BD 字数</th><th>总宽度</th></tr>
+<tr><td>32-bit</td><td>No</td><td>2</td><td>64 bit</td></tr>
+<tr><td>64-bit</td><td>No</td><td>4</td><td>128 bit</td></tr>
+<tr><td>32-bit</td><td>Yes</td><td>4</td><td>128 bit</td></tr>
+<tr><td>64-bit</td><td>Yes</td><td>6</td><td>192 bit</td></tr>
+</table>
+
+<h4>RX Buffer Descriptor (Word 0 / Word 1)</h4>
+<pre>
+Word 0  [31:3]  Buffer start address [31:3]
+        [2]     Address[2] OR timestamp-valid (extended mode)
+        [1]     Wrap
+        [0]     Ownership: 0=SW/free, 1=GEM used
+
+Word 1  [31]    Broadcast
+        [30]    Multicast hash match
+        [29]    Unicast hash match
+        [28]    External address match
+        [27]    Specific address match
+        [26:25] Specific address register number
+        [24:22] Type-ID match OR RX checksum-offload status
+        [21]    VLAN tag
+        [20]    Priority tag
+        [19:17] VLAN priority
+        [16]    Header buffer flag / FCS error / CFI
+        [15]    End of frame (EOF)
+        [14]    Start of frame (SOF)
+        [13]    Jumbo length MSB OR per-frame FCS status
+        [12:0]  Frame length (or header length if header-split)
+</pre>
+
+<h4>TX Buffer Descriptor — Non-LSO (Word 0 / Word 1)</h4>
+<pre>
+Word 0  [31:0]  Byte address of buffer
+
+Word 1  [31]    Used: 0=ready, 1=complete
+        [30]    Wrap
+        [29]    Retry limit exceeded
+        [28]    Transmit underrun
+        [27]    TX frame corruption / bus error
+        [26]    Late collision
+        [23]    Timestamp captured (extended BD)
+        [22:20] TX checksum-offload error code
+        [16]    No CRC appended by MAC
+        [15]    Last buffer
+        [13:0]  Buffer length
+</pre>
+
+<h3>6.2 DMA 操作流程</h3>
+
+<pre>
+SW:  RX: allocate buffers, fill descriptors (addr, ownership=0)
+     TX: build frame, fill descriptors (addr, len, last, used=0)
+
+DMA: Fetch descriptor from ring base
+     if ownership=1 -> halt / resource error / interrupt
+     TX: read data from memory -> MAC
+     RX: write data from MAC -> memory
+     Write status back to Word 1 (used=1, errors, len, timestamp)
+     Advance pointer; wrap on wrap-bit
+
+IRQ: frame transmitted, frame received, buffer unavailable,
+     overrun, underrun, bus error
+</pre>
+
+<h3>6.3 约束与配置</h3>
+
+<table>
+<tr><th>项目</th><th>值 / 规则</th></tr>
+<tr><td>RX buffer size</td><td>64 – 16320 bytes；默认 128</td></tr>
+<tr><td>TX frame length</td><td>14 – 16383 bytes</td></tr>
+<tr><td>每帧最大 TX buffers</td><td>128</td></tr>
+<tr><td>数据总线宽度</td><td>32/64/128 bit（包缓冲模式）；32/64 bit（内部 FIFO 模式）</td></tr>
+<tr><td>Burst length</td><td>Single, 4, 8, 16, 256（256 仅 AXI4；AHB 最大 16）</td></tr>
+<tr><td>AXI boundary</td><td>不跨越 4 KB</td></tr>
+<tr><td>AHB boundary</td><td>不跨越 1 KB</td></tr>
+<tr><td>Endianness</td><td>默认小端；DMA Config bits [7:6] 控制数据/管理字节序</td></tr>
+<tr><td>RX alignment</td><td>字地址；SOF 偏移最大 3 bytes（64-bit 包缓冲为 +4 bytes）</td></tr>
+<tr><td>64-bit 描述符环</td><td>必须位于同一 4 GB 区域内（高位固定）；包数据无此限制</td></tr>
+</table>
+
+<h3>6.4 高级 DMA 特性</h3>
+
+<table>
+<tr><th>特性</th><th>说明</th><th>使能</th></tr>
+<tr><td>Scatter-Gather</td><td>每帧最多 128 个 TX buffer</td><td>通过描述符链</td></tr>
+<tr><td>Header-Data Split</td><td>RX header 和 payload 分存不同 buffer</td><td>DMA Config bit 5</td></tr>
+<tr><td>RSC</td><td>TCP segment 合并</td><td><code>gem_pbuf_rsc</code> + RSC reg</td></tr>
+<tr><td>TSO/UFO</td><td>TCP/UDP 分段卸载</td><td>Header BD bits [18:17]</td></tr>
+<tr><td>Checksum Offload</td><td>TX/RX IP/TCP/UDP checksum 生成/校验</td><td>Network/DMA Config</td></tr>
+<tr><td>Partial Store & Forward</td><td>低延迟 cut-through</td><td>TX/RX partial-SF regs</td></tr>
+<tr><td>Priority Queuing</td><td>最多 16 个独立 TX/RX 队列</td><td><code>gem_gxl_defs.v</code></td></tr>
+<tr><td>Time-Based TX Scheduling</td><td>每帧发射时间对比 TSU</td><td>Extended BD + UTLT bit</td></tr>
+<tr><td>Timestamp Capture</td><td>PTP 时间戳写入扩展描述符</td><td>Extended BD + BD control</td></tr>
+</table>
+
+<!-- ================================================================ -->
+<h2 id="sec-mac">7. MAC TX/RX/过滤深入</h2>
+<!-- ================================================================ -->
+
+<h3>7.1 MAC 发送状态机与帧格式</h3>
+
+<table>
+<tr><th>步骤</th><th>行为</th></tr>
+<tr><td>数据输入</td><td>外部 FIFO / DMA → 小输入缓冲；按 <code>dma_bus_width</code> 读取 32/64/128-bit，后续按字节处理</td></tr>
+<tr><td>Preamble/SFD</td><td>自动添加 7 字节 preamble + 1 字节 SFD</td></tr>
+<tr><td>数据宽度</td><td>千兆：txd[7:0]；10/100M：低 nibble txd[3:0]，txd[7:4]=0</td></tr>
+<tr><td>Padding</td><td>不足 60 字节时补 0 至 60 字节</td></tr>
+<tr><td>FCS/CRC</td><td>CRC-32 计算并取反追加；最小帧 64 字节</td></tr>
+<tr><td>No-CRC 模式</td><td>TX descriptor bit 16 或 FIFO 接口设置时，不 padding、不追加 CRC</td></tr>
+</table>
+
+<h3>7.2 双工与冲突处理</h3>
+
+<table>
+<tr><th>模式</th><th>行为</th></tr>
+<tr><td>全双工</td><td>立即发送；帧间隔 ≥96 bit times (IFG)</td></tr>
+<tr><td>半双工</td><td>检测载波；若载波有效则等待释放 + 96-bit IFG 后发送</td></tr>
+<tr><td>冲突</td><td>发送 32-bit jam，按截断二进制指数退避重试（最多 16 次）</td></tr>
+<tr><td>P/SFD 期间冲突</td><td>先完成 preamble/SFD，再发送 jam</td></tr>
+<tr><td>延迟冲突</td><td>10/100M：按冲突处理；千兆：中止、不重试、报告 late collision</td></tr>
+<tr><td>Underrun</td><td>自动追加 bad CRC 并置位 <code>tx_er</code></td></tr>
+</table>
+
+<h3>7.3 MAC 接收与错误检测</h3>
+
+<table>
+<tr><th>项目</th><th>说明</th></tr>
+<tr><td>数据通路</td><td>16-bit 内部数据通路</td></tr>
+<tr><td>FCS 移除</td><td>Network config bit 17：存储帧时不带 FCS，报告长度减 4</td></tr>
+<tr><td>CRC 错误处理</td><td>bit 26 置位时忽略 CRC 错误，errored 帧不丢弃；descriptor bit[13] 指示 FCS 有效性</td></tr>
+<tr><td>过长帧 (giant)</td><td>标记 bad frame，停止写入内存</td></tr>
+<tr><td>过小帧 / short</td><td>统计计数；标记 bad</td></tr>
+<tr><td>对齐错误</td><td>统计计数</td></tr>
+<tr><td>Symbol 错误</td><td>统计计数</td></tr>
+<tr><td>Length field 错误</td><td>比较测量长度与 length/type 字段；若测量更短则丢弃（仅 64–1518 字节且 length/type &lt; 0x0600）</td></tr>
+</table>
+
+<h3>7.4 地址过滤</h3>
+
+<table>
+<tr><th>过滤类型</th><th>说明</th></tr>
+<tr><td>Specific address filters</td><td>0–36 个源/目的过滤器；Bottom（前 4 字节）+ Top（后 2 字节 + SA/DA 选择 + 6-bit 字节掩码）。Filter 1 支持 bit 级掩码</td></tr>
+<tr><td>Type ID match</td><td>4 个 type ID 寄存器；匹配字节 13–14（非 VLAN/非 SNAP）</td></tr>
+<tr><td>Broadcast</td><td><code>no broadcast</code> bit=0 时存储</td></tr>
+<tr><td>Hash filter</td><td>64-bit hash 寄存器；6-bit index = DA 每第 6 位 XOR。unicast/multicast hash 独立使能</td></tr>
+<tr><td>External match</td><td>可选引脚 <code>ext_sa/da/type/vid/ip_sa/ip_da/sp/dp</code> + strobe；<code>ext_match1-4</code> OR 合并</td></tr>
+<tr><td>Promiscuous</td><td><code>copy all frames</code> 位：复制所有有效帧；bit 26 置位时也复制 FCS 错误帧</td></tr>
+<tr><td>VLAN filtering</td><td>识别 VLAN tag（字节 13）；支持 stacked VLAN；可丢弃所有非 VLAN 帧</td></tr>
+</table>
+
+<h3>7.5 Checksum Offload</h3>
+
+<table>
+<tr><th>方向</th><th>使能</th><th>行为</th></tr>
+<tr><td>RX</td><td>Network config bit 24</td><td>校验 IPv4 header、TCP、UDP checksum</td></tr>
+<tr><td>TX</td><td>DMA config bit 11</td><td>生成 checksum；仅在包缓冲模式的 full store-and-forward 下可用</td></tr>
+</table>
+
+<div class="warn">
+<strong>限制:</strong> Checksum offload 支持 VLAN/SNAP/PPPoE、IPv4/IPv6、IPv6 extension headers，但<strong>不支持 IP 分片</strong>。当前项目 Arch Spec 若要求分片卸载，需重新评估。
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sec-tsn">8. TSN / 1588 / 车规特性</h2>
+<!-- ================================================================ -->
+
+<h3>8.1 IEEE 1588 TSU</h3>
+
+<table>
+<tr><th>项目</th><th>说明</th></tr>
+<tr><td>计时器宽度</td><td>102-bit：48-bit seconds + 30-bit nanoseconds + 24-bit sub-nanoseconds</td></tr>
+<tr><td>时钟源</td><td><code>pclk</code>，或 <code>gem_tsu_clk</code> 定义时的专用 <code>tsu_clk</code></td></tr>
+<tr><td>递增</td><td><code>tsu_timer_incr</code> + <code>tsu_timer_incr_sub_nsec</code></td></tr>
+<tr><td>调整</td><td>一次性 add/subtract 或 ±1 ns 控制（<code>gem_tsu_inc_ctrl[1:0]</code>）</td></tr>
+<tr><td>比较</td><td>48-bit seconds + 22-bit ns 与 <code>tsu_timer_comparison</code> 比较；匹配产生中断 status bit 29</td></tr>
+<tr><td>外部计时器</td><td>可选 94-bit 外部时间戳端口，同步到 <code>tsu_clk</code></td></tr>
+<tr><td>SOF 捕获</td><td>TX/RX SOF 跨越 MII/GMII 边界时同步到 <code>tsu_clk</code> 采样</td></tr>
+<tr><td>单步同步</td><td>Network-control bit 使能替换时间戳字段；<code>oss_correction_field</code> 使能单步 residence-time correction</td></tr>
+<tr><td>802.1AS</td><td>识别 DA 01-80-C2-00-00-0E；不支持 one-step timestamping</td></tr>
+</table>
+
+<h3>8.2 802.1Qbv EnST</h3>
+
+<table>
+<tr><th>项目</th><th>说明</th></tr>
+<tr><td>概念</td><td>8 个最高优先级 TX 队列的时间感知门控，与 TSU 同步</td></tr>
+<tr><td>每队列寄存器</td><td><code>start_time[31:0]</code>（2-bit seconds + 30-bit ns）、<code>on_time[16:0]</code>（bytes）、<code>off_time[16:0]</code>（bytes）、<code>enst_en</code></td></tr>
+<tr><td>控制</td><td>16-bit enable/disable：bits [7:0] 使能队列，bits [15:8] 禁用（disable 优先级高）</td></tr>
+<tr><td>操作</td><td>Gate 在 <code>start_time</code> 打开，然后重复 <code>on_time</code> / <code>off_time</code> 周期</td></tr>
+<tr><td>帧合格性</td><td>若帧无法在剩余 <code>on_time</code> 内发送完成，则不启动；若永远无法容纳则丢弃并报错</td></tr>
+<tr><td>字节-时间换算</td><td>@1Gb/s：1 byte = 8 ns；@100Mb/s：80 ns；@10Mb/s：800 ns</td></tr>
+</table>
+
+<h3>8.3 802.1CB FRER</h3>
+
+<table>
+<tr><th>项目</th><th>说明</th></tr>
+<tr><td>范围</td><td>仅支持<strong>流识别和帧消除</strong>；<strong>不支持帧复制</strong></td></tr>
+<tr><td>流识别</td><td>使用 Type 2 Screener compares；每个 CB stream 指向 screeners</td></tr>
+<tr><td>序列号源</td><td>Redundancy Tag（Ethertype 0xF1C1），4-byte（draft 2.4）或 6-byte（draft 2.5+）格式；或 byte offset 模式</td></tr>
+<tr><td>恢复算法</td><td>Match 算法和 Vector 算法，每流可配置</td></tr>
+<tr><td>超时</td><td><code>frer_timeout</code> 加载到序列恢复复位计时器；超时后重置 <code>RecovSeqNum</code></td></tr>
+</table>
+
+<h3>8.4 802.3br / 802.1Qbu 帧抢占 (MMSL)</h3>
+
+<table>
+<tr><th>项目</th><th>说明</th></tr>
+<tr><td>架构</td><td>两个 MAC 实例 + MMSL + AXI arbiter/APB switch。eMAC=express，pMAC=preemptable</td></tr>
+<tr><td>eMAC 限制</td><td>固定 1 队列；若 CB 使能则 CB stream 固定为 2；使用 pMAC 的 TSU 作为外部 TSU；不支持 RSC</td></tr>
+<tr><td>TX 抢占</td><td>eMAC 请求通道时，若 pMAC 正在发送 M-frame，则 pMAC 帧暂停并追加 32-bit MCRC，然后发送 express 帧</td></tr>
+<tr><td>不可抢占条件</td><td>剩余 &lt;64 M-frame 字节；未达 <code>add_frag_size</code> 最小值；抢占禁用；验证失败/握手未完成</td></tr>
+<tr><td>RX 重组</td><td>MMSL 路由 M-frames；pMAC 帧使用修改后的 SFD 检测 fragment；RX 状态机在 express 帧期间暂停，continuation fragment 到达后恢复</td></tr>
+<tr><td>验证</td><td>复位后发送 verify frame，10 ms 内期望 respond；最多再重试 2 次后禁用抢占</td></tr>
+<tr><td>地址映射</td><td>pMAC 0x0000–0x0EFC，MMSL 0x0F00–0x0FFC，eMAC 0x1000–0x1FFC</td></tr>
+</table>
+
+<h3>8.5 802.1Qci 接收流量监管</h3>
+
+<table>
+<tr><th>机制</th><th>寄存器</th><th>说明</th></tr>
+<tr><td>队列 flush</td><td><code>rx_q_flush</code> (0x0B00)</td><td>按队列丢弃：全部流量、BD-used 置位、SRAM 使用阈值、帧长度阈值</td></tr>
+<tr><td>速率限制</td><td><code>scr2_reg_rate_limit</code> (0x0B40)</td><td>超过编程速率的帧被丢弃</td></tr>
+</table>
+
+<div class="note">
+<strong>软硬件边界:</strong> 1588 TSU、EnST 门控、FRER 消除、MMSL 抢占均由硬件实现状态机和数据通路，但配置、BMCA、调度表、流映射、验证重启由软件负责。FRER 的帧复制不由 GEM 完成。
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sec-clocks">9. 时钟、复位、集成</h2>
+<!-- ================================================================ -->
+
+<h3>9.1 时钟域</h3>
+
+<table>
+<tr><th>时钟</th><th>典型频率</th><th>用途</th></tr>
+<tr><td><code>pclk</code></td><td>10–500 MHz</td><td>APB 寄存器时钟</td></tr>
+<tr><td><code>hclk</code></td><td>10–500 MHz（ECC 时 ≤250）</td><td>AHB DMA 时钟</td></tr>
+<tr><td><code>aclk</code></td><td>10–500 MHz（ECC 时 ≤400）</td><td>AXI DMA 时钟</td></tr>
+<tr><td><code>tx_clk</code></td><td>1.25/2.5/12.5/25/125 MHz</td><td>MAC 发送路径</td></tr>
+<tr><td><code>rx_clk</code></td><td>1.25/2.5/12.5/25/62.5/125 MHz</td><td>MAC 接收路径</td></tr>
+<tr><td><code>tsu_clk</code></td><td>5–400 MHz（&gt; tx/rx 的 1/8）</td><td>TSU 专用时钟</td></tr>
+<tr><td><code>gtx_clk</code></td><td>125 MHz</td><td>PCS 发送时钟</td></tr>
+<tr><td><code>pcs_rx_clk</code></td><td>62.5 MHz</td><td>PCS 接收通道</td></tr>
+<tr><td><code>ref_clk</code></td><td>50 MHz</td><td>RMII 参考时钟</td></tr>
+</table>
+
+<h3>9.2 复位要求</h3>
+
+<ul>
+<li>每个时钟域需要独立的低有效复位。</li>
+<li>复位可以异步置位；<strong>释放必须同步</strong>到对应时钟。</li>
+<li>大部分时钟异步；跨时钟域使用 2+ 级触发器同步器 + 握手。</li>
+</ul>
+
+<h3>9.3 最小 AXI/AHB 频率（单端口外部存储器）</h3>
+
+<table>
+<tr><th>DMA 总线宽度</th><th>MAC 速率</th><th>最小 <code>aclk</code>/<code>hclk</code></th></tr>
+<tr><td>32-bit</td><td>1000 Mbps</td><td>125 MHz</td></tr>
+<tr><td>32-bit</td><td>100 Mbps</td><td>15 MHz</td></tr>
+<tr><td>32-bit</td><td>10 Mbps</td><td>10 MHz</td></tr>
+<tr><td>64-bit</td><td>1000 Mbps</td><td>65 MHz</td></tr>
+<tr><td>64-bit</td><td>100 Mbps</td><td>10 MHz</td></tr>
+<tr><td>64-bit</td><td>10 Mbps</td><td>10 MHz</td></tr>
+<tr><td>128-bit</td><td>—</td><td>单端口存储器不支持</td></tr>
+</table>
+
+<h3>9.4 RGMII Clocking 变体</h3>
+
+<table>
+<tr><th>变体</th><th>时钟延迟方法</th><th>说明</th></tr>
+<tr><td>RGMII v1.3</td><td>PCB trace delay 1.5–2.0 ns</td><td>SoC 输出边沿对齐；板级延迟使时钟居中于 PHY</td></tr>
+<tr><td>RGMII v2.0+</td><td>片上源延迟选项（RGMII-ID）</td><td>SoC 或 PHY 内增加 ~2 ns 延迟</td></tr>
+<tr><td>RGMII-ID</td><td><code>tx_clk</code> 相对数据延迟 ~2 ns</td><td>PHY 处中心对齐；需可编程延迟缓冲</td></tr>
+</table>
+
+<div class="note">
+<strong>接收:</strong> PHY 已对 <code>rx_clk</code> 做延迟；SoC 引脚处延迟 1–3 ns（最小 1 ns setup/hold）。<br>
+<strong>发射:</strong> v1.3 外部 <code>tx_clk</code> 延迟与数据边沿对齐；RGMII-ID 片内延迟 <code>tx_clk</code> ~2 ns 实现中心对齐。
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sec-safety">10. 功能安全 / DFT / 低功耗</h2>
+<!-- ================================================================ -->
+
+<h3>10.1 Automotive Safety Features (ASF)</h3>
+
+<table>
+<tr><th>机制</th><th>说明</th></tr>
+<tr><td>Fault logging</td><td>统一 ASF 状态寄存器位于 0x0E00；记录 lockup、parity、ECC、protocol errors</td></tr>
+<tr><td>CSR protection</td><td>配置/控制/状态寄存器 parity 保护；关键寄存器（network control、TX/RX status、interrupt、MDIO、scheduler） duplication + comparison</td></tr>
+<tr><td>SRAM ECC</td><td>TX/RX SRAM SECDED ECC；32/64/128-bit datapath 分别增加 7/8/16 bit。记录不可纠正错误地址</td></tr>
+<tr><td>Datapath parity</td><td>TX/RX 数据通路和描述符写回数据/地址每字节 1-bit parity</td></tr>
+<tr><td>Address path parity</td><td>描述符起始地址 parity 保护，增量访问时重新生成</td></tr>
+<tr><td>TSU protection</td><td>可选 TSU 模块 duplication（<code>gem_protect_tsu</code>）+ 连续输出比较；时间戳值 parity 保护</td></tr>
+<tr><td>Scheduler protection</td><td>可选 TX scheduler + EnST/CBS duplication + 连续输出比较</td></tr>
+<tr><td>Transaction timeout</td><td>每 AXI 通道一个 timeout monitor</td></tr>
+<tr><td>Lockup detection</td><td>可编程 prescaler + timer 监控 DMA TX、MAC TX、MAC RX、DMA RX；检测到后可自动关闭 TX/RX</td></tr>
+<tr><td>Protocol fault logging</td><td>RX CRC/short/long/symbol/length/IP/TCP/UDP 错误、TX underrun/retry、AHB hresp、overflow 等可屏蔽中断</td></tr>
+<tr><td>Interrupt classification</td><td>专用 <code>asf_int_fatal</code> 和 <code>asf_int_nonfatal</code> 引脚；通过 <code>asf_fatal_nonfatal_select</code> 和 <code>asf_int_mask</code> 路由</td></tr>
+</table>
+
+<h3>10.2 安全目标与 ASIL 假设</h3>
+
+<table>
+<tr><th>项目</th><th>内容</th></tr>
+<tr><td>开发模式</td><td>SEooC（Safety Element out of Context）按 ISO 26262</td></tr>
+<tr><td>ASIL 目标</td><td>IP701xA 配置通过 SGS-TÜV FMEDA 可达 <strong>ASIL-B Ready</strong></td></tr>
+<tr><td>SPFM / LFM</td><td>无 SRAM ECC：90.7% / 98.1%；<strong>含 SRAM ECC：98.8% / 99.95%</strong></td></tr>
+<tr><td>时钟/电源</td><td>输入时钟和电源故障超出 IP 范围；由集成方负责</td></tr>
+<tr><td>安全状态</td><td>禁用、保持复位、断电；假设不违反系统安全目标</td></tr>
+</table>
+
+<h3>10.3 低功耗与 DFT</h3>
+
+<table>
+<tr><th>类别</th><th>说明</th></tr>
+<tr><td>EEE / LPI</td><td>IEEE 802.3az；固件通过 <code>tx_lpi_en</code> 控制；链路 up ≥1 s 且无帧发送时进入 LPI；<code>txd=0x01</code>, <code>tx_en=0</code>, <code>tx_er=1</code></td></tr>
+<tr><td>唤醒时间</td><td>通过 <code>tw_sys_tx_time</code> 编程；默认 8 个 <code>tx_clk</code> 周期</td></tr>
+<tr><td>SGMII</td><td>不属于 802.3az，<strong>不能</strong>进入 quiet 状态</td></tr>
+<tr><td>DFT</td><td><code>retry_test</code> bit 加速 collision back-off、pause counter、FRER timeout 用于定向测试；所有触发器可扫描，所有时钟在顶层</td></tr>
+</table>
+
+<div class="warn">
+<strong>安全设计提示:</strong> 车规 IP 至少应实现 CSR parity + 关键 SRAM ECC + 总线 timeout + lockup detection。Cadence 的 ASF 模块可作为实现 ASIL-B 安全机制的参考模板，但不应盲目复制全部；需结合项目的 FMEDA 和安全目标裁剪。
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sec-verification">11. 验证资产</h2>
+<!-- ================================================================ -->
+
+<table>
+<tr><th>验证层级</th><th>路径</th><th>内容</th></tr>
+<tr><td>UVM Demo TB</td><td><code>func_ver/sanity/demo_tb/verif/uvc_lib/</code></td><td>APB/AXI/Ethernet PHY VIP、GEM UVM env、scoreboard、virtual sequencer、测试用例</td></tr>
+<tr><td>Legacy Verilog/SV TB</td><td><code>func_ver/sanity/vlog_tb/src/</code></td><td><code>tb_top.v</code>, <code>tb_tx/rx/dma/apb/mdio/pcs.v</code> 等模块级 checker</td></tr>
+<tr><td>SVA</td><td><code>func_ver/sva/</code></td><td>协议断言</td></tr>
+<tr><td>Coverage</td><td><code>func_ver/sanity/vlog_tb/src/*coverage.sv</code></td><td>EDMA、CB、ASF、TB coverage</td></tr>
+<tr><td>软件测试</td><td><code>software/reference_code/tests/</code></td><td>C 语言 MAC/EDD 测试</td></tr>
+<tr><td>专用 TB</td><td><code>func_ver/cdnsdru_datasync/</code></td><td>datasync 模块级验证</td></tr>
+</table>
+
+<h3>11.1 推荐验证流程</h3>
+
+<ol>
+<li>配置生成与文件列表创建 → <code>gem_gxl_defs.v</code>, <code>gem_gxl.f</code>, SDC</li>
+<li>定向 sanity 仿真 → <code>irun.log</code> 显示 PASSED</li>
+<li>UVM/VIP demo 回归（可选）</li>
+<li>Lint / CDC 检查（带 waiver）</li>
+<li>试综合 &amp; QoR 评审</li>
+<li>LEC（rtl2mapped / map2final）</li>
+<li>SDF 后门仿真（若可用）</li>
+<li>ATPG / scan（可选；stuck-at coverage ~99.82%）</li>
+</ol>
+
+<div class="ok">
+<strong>可复用建议:</strong> 当前项目可借鉴 Cadence 的“协议级 UVM TB + 模块级 Verilog TB + SVA”三层验证策略。在 RTL 骨架阶段，优先搭建最小 MAC 的模块级 Verilog TB（TX/RX/checker），再逐步引入 UVM 和 coverage。
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sec-gap">12. 与当前项目的差距分析</h2>
+<!-- ================================================================ -->
+
+<p>当前项目文档（<code>Docs/Arch/ethernet_arch_spec.md</code> 等）定义了一个非常宏大的 Ethernet IP：4-port L2/L3 Switch、8 MAC、全局 DMA 通道池、双 PHC + vPHC、5G/10G、USXGMII 等。而实际 RTL <code>Design/RTL/ip/ethernet/ethernet_top.sv</code> 仍是空壳。主要差距如下：</p>
+
+<table>
+<tr><th>维度</th><th>当前项目规划</th><th>Cadence GEM GXL</th><th>差距评估</th><th>风险</th></tr>
+<tr><td>端口/MAC 数量</td><td>1-8 MAC，4-port Switch</td><td>单端口 MAC；802.3br 为双 MAC + MMSL</td><td>Switch 无参考</td><td>高</td></tr>
+<tr><td>Switch 功能</td><td>L2/L3 Switch、FDB 8K、VLAN、L3 route</td><td>无 Switch</td><td>需从零设计</td><td>极高</td></tr>
+<tr><td>DMA 架构</td><td>全局 8/16/32 通道池，所有 MAC 共享</td><td>每 MAC 独立 AXI/AHB DMA</td><td>架构差异大</td><td>高</td></tr>
+<tr><td>时间同步</td><td>双 PHC + vPHC + Xen IO Rings</td><td>单 TSU，外部/内部可选</td><td>vPHC 无参考</td><td>高</td></tr>
+<tr><td>PHY 接口</td><td>MII/RMII/RGMII/SGMII/USXGMII，2.5G/5G/10G</td><td>MII/RMII/RGMII + PCS (1G)</td><td>高速 SerDes 无参考</td><td>中-高</td></tr>
+<tr><td>TSN 实现</td><td>CBS/TAS/FRER/FP/PSFP 均 P0</td><td>CBS/EnST/FRER/MMSL 有 RTL</td><td>PSFP/Switch TAS 无参考</td><td>中</td></tr>
+<tr><td>安全</td><td>ASIL-B，ECC/Parity/Timeout/SMU_ALERT</td><td>ASF/ECC/Parity/Timeout/Lockup</td><td>机制可借鉴</td><td>低-中</td></tr>
+<tr><td>验证</td><td>UVM 计划存在，RTL 可用 TB 未明确</td><td>UVM + Legacy TB + SVA 完整</td><td>需尽快搭建 TB</td><td>高</td></tr>
+</table>
+
+<div class="crit">
+<strong>核心风险:</strong> 当前 Arch Spec 的范围（Switch + 多 MAC + vPHC + 5G/10G）远超 Cadence GEM GXL 这一成熟单端口千兆 MAC 参考。若按现有规划继续，IDR 阶段极难完成。建议<strong>收敛范围</strong>：先实现单/双端口 GMAC（含 DMA、TSU、基本 TSN），Switch 和 vPHC 作为后续 Phase 扩展。
+</div>
+
+<!-- ================================================================ -->
+<h2 id="sec-optimize">13. 优化建议</h2>
+<!-- ================================================================ -->
+
+<h3>13.1 架构文档 (ethernet_arch_spec.md)</h3>
+<table>
+<tr><th>建议</th><th>优先级</th><th>说明</th></tr>
+<tr><td>将“4-port L2/L3 Switch”从默认开启改为可选扩展模块，MVD 先聚焦单/双 GMAC</td><td>P0</td><td>Switch 无 Cadence 参考，实现风险最高</td></tr>
+<tr><td>将 vPHC / Xen IO Rings 从 P0 降级为 P2 可选项</td><td>P0</td><td>虚拟化时间域可由软件或 Hypervisor 先承担</td></tr>
+<tr><td>将全局 DMA 通道池改为每 MAC 独立 DMA，降低初始集成复杂度</td><td>P1</td><td>与 Cadence 一致，便于验证和时序收敛</td></tr>
+<tr><td>PHY 接口分阶段：Phase-1 实现 MII/RMII/RGMII；SGMII/USXGMII/2.5G+ 后续扩展</td><td>P1</td><td>Cadence 仅支持到 RGMII/PCS 1G</td></tr>
+<tr><td>明确 TSN 特性优先级：CBS/EnST/FRER/MMSL 保留 P0；PSFP/Switch TAS 降级 P2</td><td>P1</td><td>与 Cadence 已实现子集对齐</td></tr>
+</table>
+
+<h3>13.2 协议分析 (protocol_analysis.md)</h3>
+<table>
+<tr><th>建议</th><th>优先级</th><th>说明</th></tr>
+<tr><td>将 802.1Qbv TAS 的范围限定为端点级 EnST（队列门控），删除“Switch 级 TAS”的 P0 要求</td><td>P0</td><td>Cadence 仅在 TX 队列实现 EnST</td></tr>
+<tr><td>将 802.1Qci PSFP 从 P0 降级为 P2/No</td><td>P0</td><td>PSFP 需要 Switch/流过滤/门控完整实现，当前无 RTL 基础</td></tr>
+<tr><td>明确 802.1AS gPTP 的软硬件边界：RTL 负责硬件时间戳 + SOF 事件；BMCA/数据集由软件实现</td><td>P1</td><td>与 Cadence TSU 设计一致</td></tr>
+<tr><td>将 MACsec/IPsec/SecOC/D-TLS 统一作为“安全加速器接口”处理，不作为 Ethernet IP 内部实现</td><td>P1</td><td>Cadence 无内置 MACsec；当前项目可保留接口但不扩展内部密码学</td></tr>
+<tr><td>将 EEE、AVTP/IEEE 1722 保持为 Configurable，默认关闭</td><td>P2</td><td>与 Cadence 可选配置一致</td></tr>
+</table>
+
+<h3>13.3 接口规范 (ethernet_interface_spec.md)</h3>
+<table>
+<tr><th>建议</th><th>优先级</th><th>说明</th></tr>
+<tr><td>参考 Cadence APB 寄存器分组，细化 CSR 地址映射与 bit 字段</td><td>P0</td><td>当前 CSR 规划较粗，驱动无法落地</td></tr>
+<tr><td>AXI ID 分配从 16 路缩减到 4-8 路，与单/双 MAC DMA 匹配</td><td>P1</td><td>降低 AXI 互连复杂度</td></tr>
+<tr><td>删除或延后 SECURITY_ACCEL 128-bit 接口细节，先定义握手/包头格式</td><td>P1</td><td>安全加速器接口应与 CSS/HSE 团队协商标定</td></tr>
+<tr><td>时钟/复位域明确划分为 pclk、tx_clk、rx_clk、aclk、tsu_clk</td><td>P1</td><td>与 Cadence 跨时钟域设计一致</td></tr>
+</table>
+
+<h3>13.4 设计规范 (ethernet_design_spec.md)</h3>
+<table>
+<tr><th>建议</th><th>优先级</th><th>说明</th></tr>
+<tr><td>立即填充 <code>ethernet_top.sv</code>：定义参数、端口、子模块划分</td><td>P0</td><td>当前为 TODO 空壳，IDR 阶段 unacceptable</td></tr>
+<tr><td>微架构先实现：eth_mac (TX/RX/filter) → eth_dma → eth_reg → eth_hsphy</td><td>P0</td><td>与 Cadence gem_top 模块划分对应</td></tr>
+<tr><td>安全模块先实现 CSR parity + 关键 SRAM ECC + bus timeout + lockup detect</td><td>P1</td><td>参考 ASF 最小集</td></tr>
+<tr><td>验证环境优先搭建模块级 Verilog TB，再迁移到 UVM</td><td>P1</td><td>借鉴 Cadence vlog_tb 思路</td></tr>
+</table>
+
+<h3>13.5 推荐开发路线图</h3>
+
+<pre>
+Phase 1 — 最小可用 GMAC (MVD)
+  └─ MAC TX/RX + FCS + filter + MII/RGMII + APB CSR + AXI DMA + 描述符环
+  └─ 模块级 Verilog TB：单包 TX/RX、寄存器读写、FCS 错误注入
+
+Phase 2 — 车规与时间同步
+  └─ 1588 TSU + SOF 事件触发 + 时间戳描述符
+  └─ ASF：parity + ECC + timeout + lockup detection
+  └─ 半双工、PAUSE/PFC、WoL
+
+Phase 3 — TSN 增强
+  └─ CBS (802.1Qav) → EnST/TAS (802.1Qbv) → MMSL/帧抢占 (802.1Qbu/802.3br)
+  └─ FRER (802.1CB) 接收消除
+
+Phase 4 — 扩展 (可选 / 长期)
+  └─ 多 MAC + Switch (L2/L3) + vPHC + 高速 PHY (SGMII/USXGMII)
+</pre>
+
+<div class="ok">
+<strong>总结:</strong> Cadence GEM GXL 是一份高质量的单端口千兆 Ethernet MAC + DMA + 1588 + TSN 参考实现。当前项目应以其为<strong>基线</strong>收敛 Arch Spec 和 Design Spec，优先完成最小 GMAC，再按需叠加 TSN 和 Switch/vPHC 扩展。
+</div>
+
+</body>
+</html>

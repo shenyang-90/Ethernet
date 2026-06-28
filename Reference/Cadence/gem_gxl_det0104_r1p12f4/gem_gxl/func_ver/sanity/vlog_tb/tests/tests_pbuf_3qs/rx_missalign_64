@@ -1,0 +1,1377 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_missalign_64
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 01 May 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------------
+-- This test checks the alignment error detection of the receive path.
+--
+-- 
+-- Functional Coverage
+----------------------
+-- * Checks that the GEM can detect an alignment error
+-- * Checks that the GEM calculates CRC on the correct data of a missaligned
+--   frame
+-- * Checks that the GEM re-alignment buffer can detect missalignment regardless
+--   of number of complete bytes in the frame.
+--
+--  
+-- Detailed Test Description
+----------------------------
+-- 1. Setup DMA wait states for the test.
+-- 2. Initialise the GEM for 100Mbits/s 64-bit DMA mode.
+-- 3. Enable all interrupts, and then enable receive.
+-- 4. Receive a 64 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure that the frame is successfully received, with good status.
+-- 5. Receive a 65 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure that the frame is successfully received, with good status.
+-- 6. Receive a 64 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure that the frame is dropped.
+-- 7. Receive a 65 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure that the frame is dropped.
+-- 8. Check statistics for the above operations.
+--
+-- 9. Enable the strip FCS function in the network control register and
+--    repeat the tests again.
+--10. Receive a 64 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure that the frame is successfully received, with good status.
+--11. Receive a 65 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure that the frame is successfully received, with good status.
+--12. Receive a 64 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure that the frame is dropped.
+--13. Receive a 65 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure that the frame is dropped.
+--14. Receive a 64 byte frame with good CRC, and no extra nibbles.
+--    Ensure that the frame is successfully received, with good status.
+--15. Check statistics for the above operations.
+-- 
+--16. Keep strip FCS function enabled and repeat the tests again, but this time
+--    adjust the amount of preamble so that the realignment buffer overflows.
+--17. Receive a 64 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is a multiple of
+--    2 bytes there will not be an additional force alignment on the last data.
+--    Ensure that the frame is successfully received, with good status.
+--18. Receive a 65 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is not a multiple of
+--    2 bytes there will be an additional force alignment on the last data.
+--    Ensure that the frame is successfully received, with good status.
+--19. Receive a 64 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is a multiple of
+--    2 bytes there will not be an additional force alignment on the last data.
+--    Ensure that the frame is dropped.
+--20. Receive a 65 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is not a multiple of
+--    2 bytes there will be an additional force alignment on the last data.
+--    Ensure that the frame is dropped.
+--21. Receive a 64 byte frame with good CRC, and no extra nibbles.
+--    Ensure that the frame is successfully received, with good status.
+--22. Check statistics for the above operations.
+-- 
+--23. Keep strip FCS function enabled and repeat the tests again, but this time
+--    as well as adjusting the amount of preamble so that the realignment 
+--    buffer overflows, also enable a one byte rx offset.
+--24. Receive a 64 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is a multiple of
+--    2 bytes there will not be an additional force alignment on the last data.
+--    Ensure that the frame is successfully received, with good status.
+--25. Receive a 65 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is not a multiple of
+--    2 bytes there will be an additional force alignment on the last data.
+--    Ensure that the frame is successfully received, with good status.
+--26. Receive a 64 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is a multiple of
+--    2 bytes there will not be an additional force alignment on the last data.
+--    Ensure that the frame is dropped.
+--27. Receive a 65 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is not a multiple of
+--    2 bytes there will be an additional force alignment on the last data.
+--    Ensure that the frame is dropped.
+--28. Receive a 64 byte frame with good CRC, and no extra nibbles.
+--    Ensure that the frame is successfully received, with good status.
+--29. Check statistics for the above operations.
+-- 
+--30. Keep strip FCS function enabled and the offset at one byte, and repeat 
+--    the tests again, but this time adjusting the amount of preamble so that 
+--    the realignment buffer does not overflow overflow.
+--31. Receive a 64 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure that the frame is successfully received, with good status.
+--32. Receive a 65 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure that the frame is successfully received, with good status.
+--33. Receive a 64 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure that the frame is dropped.
+--34. Receive a 65 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure that the frame is dropped.
+--35. Receive a 64 byte frame with good CRC, and no extra nibbles.
+--    Ensure that the frame is successfully received, with good status.
+--36. Check statistics for the above operations.
+-- 
+--------------------------------------------------------------------------------
+
+-- *****************************************************************************
+-- 1. Setup DMA wait states for the test.
+-- *****************************************************************************
+wait_states     3
+bus_grant_delay 3
+
+
+-- *****************************************************************************
+-- 2. Initialise the GEM for 100Mbits/s 64-bit DMA mode.
+-- 3. Enable all interrupts, and then enable receive.
+-- *****************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      98 12345678  -- specific address register 1 bottom
+apbwr      9C 00001111  -- specific address register 1 top
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00280000  -- 64 bit AHB
+apbrd      04 00280000  -- check new value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      18 fffff000  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      20 00000000  -- check contents of the receive status register
+
+
+-- *****************************************************************************
+-- 4. Receive a 64 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 1 : 64 byte + 1 nibble, good CRC"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c3  -- good CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff000 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c 33333333
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 cccccccc
+dma_wr 22222034 dddddddd
+dma_wr 22222038 eeeeeeee
+dma_wr 2222203c c307629e -- CRC
+
+dma_wr fffff000 22222001 -- dma writes ownership bit
+dma_wr fffff004 0c00c040 -- dma writes rx status, local address match and 64 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 1 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+-- *****************************************************************************
+-- 5. Receive a 65 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 1 : 65 byte + 1 nibble, good CRC"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeeeff
+rxd              21b974e8  -- good CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff008 22222100 -- dma reads pointer of 22222100
+dma_wr 22222100 12345678 -- store frame to memory
+dma_wr 22222104 11111111
+dma_wr 22222108 22222222
+dma_wr 2222210c 33333333
+dma_wr 22222110 44444444
+dma_wr 22222114 55555555
+dma_wr 22222118 66666666
+dma_wr 2222211c 77777777
+dma_wr 22222120 88888888
+dma_wr 22222124 99999999
+dma_wr 22222128 aaaaaaaa
+dma_wr 2222212c bbbbbbbb
+dma_wr 22222130 cccccccc
+dma_wr 22222134 dddddddd
+dma_wr 22222138 eeeeeeee
+dma_wr 2222213c 74b921ff -- last data + CRC (first part)
+dma_wr 22222140 000000e8 -- CRC (second part)
+dma_wr 22222144 00000000
+
+dma_wr fffff008 22222101 -- dma writes ownership bit
+dma_wr fffff00c 0c00c041 -- dma writes rx status, local address match and 65 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 2 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+-- *****************************************************************************
+-- 6. Receive a 64 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure that the frame is dropped.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 3, 4 & 5 : bad CRC frames dropped + good one"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c1  -- bad CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff010 22222200 -- dma reads pointer of 22222000
+
+-- *****************************************************************************
+-- 7. Receive a 65 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure that the frame is dropped.
+-- *****************************************************************************
+
+rxd(gap)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeeeff
+rxd              21b974e7  -- bad CRC
+rxd              c         -- extra nibble!
+
+
+
+-- *****************************************************************************
+-- 8. Receive a 64 byte frame with good CRC, and no extra nibbles.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+
+rxd(gap)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c3  -- good CRC
+
+-- Check memory accesses
+dma_wr 22222200 12345678 -- store frame to memory
+dma_wr 22222204 11111111
+dma_wr 22222208 22222222
+dma_wr 2222220c 33333333
+dma_wr 22222210 44444444
+dma_wr 22222214 55555555
+dma_wr 22222218 66666666
+dma_wr 2222221c 77777777
+dma_wr 22222220 88888888
+dma_wr 22222224 99999999
+dma_wr 22222228 aaaaaaaa
+dma_wr 2222222c bbbbbbbb
+dma_wr 22222230 cccccccc
+dma_wr 22222234 dddddddd
+dma_wr 22222238 eeeeeeee
+dma_wr 2222223c c307629e -- good CRC
+
+dma_wr fffff010 22222201 -- dma writes ownership bit
+dma_wr fffff014 0c00c040 -- dma writes rx status, local address match and 64 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 5 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+-- *****************************************************************************
+-- 9. Check statistics for the above operations.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 000000c1  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000003  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000002  -- check frames received 64
+apbrd     16C 00000001  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000002  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+-- *****************************************************************************
+-- 9. Enable the strip FCS function in the network control register and
+--    repeat the tests again.
+-- *****************************************************************************
+apbwr      04 002a0000  -- enable strip FCS
+apbwr      00 00000000  -- disable receive to reset queue pointer
+apbwr      18 fffff000  -- rewrite queue pointer
+apbwr      00 00000004  -- enable receive again
+
+
+
+-- *****************************************************************************
+--10. Receive a 64 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 6 : 64 byte + 1 nibble, good CRC"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c3  -- good CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff000 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222201c 33333333
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 cccccccc
+dma_wr 22222034 dddddddd
+dma_wr 22222038 eeeeeeee
+dma_wr 2222203c 00000000 -- no CRC written
+
+dma_wr fffff000 22222001 -- dma writes ownership bit
+dma_wr fffff004 0c00c03c -- dma writes rx status, local address match and 60 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 6 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+-- *****************************************************************************
+--11. Receive a 65 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 7 : 65 byte + 1 nibble, good CRC"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeeeff
+rxd              21b974e8  -- good CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff008 22222100 -- dma reads pointer of 22222100
+dma_wr 22222100 12345678 -- store frame to memory
+dma_wr 22222104 11111111
+dma_wr 22222108 22222222
+dma_wr 2222210c 33333333
+dma_wr 22222110 44444444
+dma_wr 22222114 55555555
+dma_wr 22222118 66666666
+dma_wr 2222211c 77777777
+dma_wr 22222120 88888888
+dma_wr 22222124 99999999
+dma_wr 22222128 aaaaaaaa
+dma_wr 2222212c bbbbbbbb
+dma_wr 22222130 cccccccc
+dma_wr 22222134 dddddddd
+dma_wr 22222138 eeeeeeee
+dma_wr 2222213c 000000ff -- last data + CRC (first part - not written)
+
+dma_wr fffff008 22222101 -- dma writes ownership bit
+dma_wr fffff00c 0c00c03d -- dma writes rx status, local address match and 61 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 7 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+-- *****************************************************************************
+--12. Receive a 64 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure that the frame is dropped.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 8, 9 & 10 : bad CRC frames dropped + good one"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c1  -- bad CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff010 22222200 -- dma reads pointer of 22222000
+
+-- *****************************************************************************
+--13. Receive a 65 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure that the frame is dropped.
+-- *****************************************************************************
+
+rxd(gap)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeeeff
+rxd              21b974e7  -- bad CRC
+rxd              c         -- extra nibble!
+
+
+
+-- *****************************************************************************
+--14. Receive a 64 byte frame with good CRC, and no extra nibbles.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+
+rxd(gap)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c3  -- good CRC
+
+-- Check memory accesses
+dma_wr 22222200 12345678 -- store frame to memory
+dma_wr 22222204 11111111
+dma_wr 22222208 22222222
+dma_wr 2222220c 33333333
+dma_wr 22222210 44444444
+dma_wr 22222214 55555555
+dma_wr 22222218 66666666
+dma_wr 2222221c 77777777
+dma_wr 22222220 88888888
+dma_wr 22222224 99999999
+dma_wr 22222228 aaaaaaaa
+dma_wr 2222222c bbbbbbbb
+dma_wr 22222230 cccccccc
+dma_wr 22222234 dddddddd
+dma_wr 22222238 eeeeeeee
+dma_wr 2222223c 00000000 -- good CRC - not written
+
+dma_wr fffff010 22222201 -- dma writes ownership bit
+dma_wr fffff014 0c00c03c -- dma writes rx status, local address match and 60 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 10 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+-- *****************************************************************************
+--15. Check statistics for the above operations.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 000000c1  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000003  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000002  -- check frames received 64
+apbrd     16C 00000001  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000002  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- *****************************************************************************
+--16. Keep strip FCS function enabled and repeat the tests again, but this time
+--    adjust the amount of preamble so that the realignment buffer overflows.
+-- *****************************************************************************
+apbwr      00 00000000  -- disable receive to reset queue pointer
+apbwr      18 fffff000  -- rewrite queue pointer
+apbwr      00 00000004  -- enable receive again
+
+
+
+-- *****************************************************************************
+--17. Receive a 64 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is a multiple of
+--    2 bytes there will not be an additional force alignment on the last data.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 11 : 64 byte + 1 nibble, good CRC"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)   5555d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c3  -- good CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff000 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c 33333333
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 cccccccc
+dma_wr 22222034 dddddddd
+dma_wr 22222038 eeeeeeee
+dma_wr 2222203c 00000000 -- no CRC written
+
+dma_wr fffff000 22222001 -- dma writes ownership bit
+dma_wr fffff004 0c00c03c -- dma writes rx status, local address match and 60 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 11 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+-- *****************************************************************************
+--18. Receive a 65 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is not a multiple of
+--    2 bytes there will be an additional force alignment on the last data.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 12 : 65 byte + 1 nibble, good CRC"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)   5555d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeeeff
+rxd              21b974e8  -- good CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff008 22222100 -- dma reads pointer of 22222100
+dma_wr 22222100 12345678 -- store frame to memory
+dma_wr 22222104 11111111
+dma_wr 22222108 22222222
+dma_wr 2222210c 33333333
+dma_wr 22222110 44444444
+dma_wr 22222114 55555555
+dma_wr 22222118 66666666
+dma_wr 2222211c 77777777
+dma_wr 22222120 88888888
+dma_wr 22222124 99999999
+dma_wr 22222128 aaaaaaaa
+dma_wr 2222212c bbbbbbbb
+dma_wr 22222130 cccccccc
+dma_wr 22222134 dddddddd
+dma_wr 22222138 eeeeeeee
+dma_wr 2222213c 000000ff -- last data + CRC (first part - not written)
+
+dma_wr fffff008 22222101 -- dma writes ownership bit
+dma_wr fffff00c 0c00c03d -- dma writes rx status, local address match and 61 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 12 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+-- *****************************************************************************
+--19. Receive a 64 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is a multiple of
+--    2 bytes there will not be an additional force alignment on the last data.
+--    Ensure that the frame is dropped.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 13, 14 & 15 : bad CRC frames dropped + good one"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)   5555d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c1  -- bad CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff010 22222200 -- dma reads pointer of 22222000
+
+
+-- *****************************************************************************
+--20. Receive a 65 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is not a multiple of
+--    2 bytes there will be an additional force alignment on the last data.
+--    Ensure that the frame is dropped.
+-- *****************************************************************************
+
+rxd(gap)   5555d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeeeff
+rxd              21b974e7  -- bad CRC
+rxd              c         -- extra nibble!
+
+
+-- *****************************************************************************
+--21. Receive a 64 byte frame with good CRC, and no extra nibbles.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+
+rxd(gap)   5555d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c3  -- good CRC
+
+-- Check memory accesses
+dma_wr 22222200 12345678 -- store frame to memory
+dma_wr 22222204 11111111
+dma_wr 22222208 22222222
+dma_wr 2222220c 33333333
+dma_wr 22222210 44444444
+dma_wr 22222214 55555555
+dma_wr 22222218 66666666
+dma_wr 2222221c 77777777
+dma_wr 22222220 88888888
+dma_wr 22222224 99999999
+dma_wr 22222228 aaaaaaaa
+dma_wr 2222222c bbbbbbbb
+dma_wr 22222230 cccccccc
+dma_wr 22222234 dddddddd
+dma_wr 22222238 eeeeeeee
+dma_wr 2222223c 00000000 -- good CRC - not written
+
+dma_wr fffff010 22222201 -- dma writes ownership bit
+dma_wr fffff014 0c00c03c -- dma writes rx status, local address match and 60 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 15 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+-- *****************************************************************************
+--22. Check statistics for the above operations.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 000000c1  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000003  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000002  -- check frames received 64
+apbrd     16C 00000001  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000002  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+
+-- *****************************************************************************
+--23. Keep strip FCS function enabled and repeat the tests again, but this time
+--    as well as adjusting the amount of preamble so that the realignment 
+--    buffer overflows, also enable a one byte rx offset.
+-- *****************************************************************************
+apbwr      00 00000000  -- disable receive to reset queue pointer
+apbwr      18 fffff000  -- rewrite queue pointer
+apbwr      04 002a4000  -- enable rx offset & strip FCS
+apbwr      00 00000004  -- enable receive again
+
+
+
+-- *****************************************************************************
+--24. Receive a 64 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is a multiple of
+--    2 bytes there will not be an additional force alignment on the last data.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 16 : 64 byte + 1 nibble, good CRC"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)   5555d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c3  -- good CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff000 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 34567800 -- store frame to memory
+dma_wr 22222004 11111112
+dma_wr 22222008 22222211
+dma_wr 2222200c 33333322
+dma_wr 22222010 44444433
+dma_wr 22222014 55555544
+dma_wr 22222018 66666655
+dma_wr 2222201c 77777766
+dma_wr 22222020 88888877
+dma_wr 22222024 99999988
+dma_wr 22222028 aaaaaa99
+dma_wr 2222202c bbbbbbaa
+dma_wr 22222030 ccccccbb
+dma_wr 22222034 ddddddcc
+dma_wr 22222038 eeeeeedd
+dma_wr 2222203c 000000ee -- last data (no CRC written)
+
+dma_wr fffff000 22222001 -- dma writes ownership bit
+dma_wr fffff004 0c00c03c -- dma writes rx status, local address match and 60 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 16 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+-- *****************************************************************************
+--25. Receive a 65 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is not a multiple of
+--    2 bytes there will be an additional force alignment on the last data.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 17 : 65 byte + 1 nibble, good CRC"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)   5555d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeeeff
+rxd              21b974e8  -- good CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff008 22222100 -- dma reads pointer of 22222100
+dma_wr 22222100 34567800 -- store frame to memory
+dma_wr 22222104 11111112
+dma_wr 22222108 22222211
+dma_wr 2222210c 33333322
+dma_wr 22222110 44444433
+dma_wr 22222114 55555544
+dma_wr 22222118 66666655
+dma_wr 2222211c 77777766
+dma_wr 22222120 88888877
+dma_wr 22222124 99999988
+dma_wr 22222128 aaaaaa99
+dma_wr 2222212c bbbbbbaa
+dma_wr 22222130 ccccccbb
+dma_wr 22222134 ddddddcc
+dma_wr 22222138 eeeeeedd
+dma_wr 2222213c 0000ffee -- last data + CRC (first part - not written)
+
+dma_wr fffff008 22222101 -- dma writes ownership bit
+dma_wr fffff00c 0c00c03d -- dma writes rx status, local address match and 61 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 17 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+-- *****************************************************************************
+--26. Receive a 64 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is a multiple of
+--    2 bytes there will not be an additional force alignment on the last data.
+--    Ensure that the frame is dropped.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 18, 19 & 20 : bad CRC frames dropped + good one"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)   5555d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c1  -- bad CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff010 22222200 -- dma reads pointer of 22222000
+
+
+-- *****************************************************************************
+--27. Receive a 65 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure amount of preamble causes this test to activate the overflow
+--    of the alignment buffer in gem_rx. Because the length is not a multiple of
+--    2 bytes there will be an additional force alignment on the last data.
+--    Ensure that the frame is dropped.
+-- *****************************************************************************
+
+rxd(gap)   5555d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeeeff
+rxd              21b974e7  -- bad CRC
+rxd              c         -- extra nibble!
+
+
+
+-- *****************************************************************************
+--28. Receive a 64 byte frame with good CRC, and no extra nibbles.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+
+rxd(gap)   5555d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c3  -- good CRC
+
+-- Check memory accesses
+dma_wr 22222200 34567800 -- store frame to memory
+dma_wr 22222204 11111112
+dma_wr 22222208 22222211
+dma_wr 2222220c 33333322
+dma_wr 22222210 44444433
+dma_wr 22222214 55555544
+dma_wr 22222218 66666655
+dma_wr 2222221c 77777766
+dma_wr 22222220 88888877
+dma_wr 22222224 99999988
+dma_wr 22222228 aaaaaa99
+dma_wr 2222222c bbbbbbaa
+dma_wr 22222230 ccccccbb
+dma_wr 22222234 ddddddcc
+dma_wr 22222238 eeeeeedd
+dma_wr 2222223c 000000ee -- last data (good CRC but not written)
+
+dma_wr fffff010 22222201 -- dma writes ownership bit
+dma_wr fffff014 0c00c03c -- dma writes rx status, local address match and 60 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 20 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+-- *****************************************************************************
+--29. Check statistics for the above operations.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 000000c1  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000003  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000002  -- check frames received 64
+apbrd     16C 00000001  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000002  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+-- *****************************************************************************
+--30. Keep strip FCS function enabled and the offset at one byte, and repeat 
+--    the tests again, but this time adjusting the amount of preamble so that 
+--    the realignment buffer does not overflow overflow.
+-- *****************************************************************************
+apbwr      00 00000000  -- disable receive to reset queue pointer
+apbwr      18 fffff000  -- rewrite queue pointer
+apbwr      04 002a4000  -- enable rx offset & strip FCS
+apbwr      00 00000004  -- enable receive again
+
+
+
+-- *****************************************************************************
+--24. Receive a 64 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 21 : 64 byte + 1 nibble, good CRC"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c3  -- good CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff000 22222000 -- dma reads pointer of 22222004
+dma_wr 22222000 34567800 -- store frame to memory
+dma_wr 22222004 11111112
+dma_wr 22222008 22222211
+dma_wr 2222200c 33333322
+dma_wr 22222010 44444433
+dma_wr 22222014 55555544
+dma_wr 22222018 66666655
+dma_wr 2222201c 77777766
+dma_wr 22222020 88888877
+dma_wr 22222024 99999988
+dma_wr 22222028 aaaaaa99
+dma_wr 2222202c bbbbbbaa
+dma_wr 22222030 ccccccbb
+dma_wr 22222034 ddddddcc
+dma_wr 22222038 eeeeeedd
+dma_wr 2222203c 000000ee -- last data (no CRC written)
+
+dma_wr fffff000 22222001 -- dma writes ownership bit
+dma_wr fffff004 0c00c03c -- dma writes rx status, local address match and 60 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 21 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+-- *****************************************************************************
+--25. Receive a 65 byte frame with correct CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 22 : 65 byte + 1 nibble, good CRC"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeeeff
+rxd              21b974e8  -- good CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff008 22222100 -- dma reads pointer of 22222100
+dma_wr 22222100 34567800 -- store frame to memory
+dma_wr 22222104 11111112
+dma_wr 22222108 22222211
+dma_wr 2222210c 33333322
+dma_wr 22222110 44444433
+dma_wr 22222114 55555544
+dma_wr 22222118 66666655
+dma_wr 2222211c 77777766
+dma_wr 22222120 88888877
+dma_wr 22222124 99999988
+dma_wr 22222128 aaaaaa99
+dma_wr 2222212c bbbbbbaa
+dma_wr 22222130 ccccccbb
+dma_wr 22222134 ddddddcc
+dma_wr 22222138 eeeeeedd
+dma_wr 2222213c 0000ffee -- last data + CRC (first part - not written)
+
+dma_wr fffff008 22222101 -- dma writes ownership bit
+dma_wr fffff00c 0c00c03d -- dma writes rx status, local address match and 61 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 22 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+-- *****************************************************************************
+--26. Receive a 64 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 129 nibbles in total).
+--    Ensure that the frame is dropped.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 23, 24 & 25 : bad CRC frames dropped + good one"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c1  -- bad CRC
+rxd              c         -- extra nibble!
+
+-- Check memory accesses
+dma_rd fffff010 22222200 -- dma reads pointer of 22222000
+
+
+-- *****************************************************************************
+--27. Receive a 65 byte frame with bad CRC, that has an extra nibble after 
+--    the CRC (i.e. 131 nibbles in total).
+--    Ensure that the frame is dropped.
+-- *****************************************************************************
+
+rxd(gap)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeeeff
+rxd              21b974e7  -- bad CRC
+rxd              c         -- extra nibble!
+
+
+
+-- *****************************************************************************
+--28. Receive a 64 byte frame with good CRC, and no extra nibbles.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+
+rxd(gap)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c3  -- good CRC
+
+-- Check memory accesses
+dma_wr 22222200 34567800 -- store frame to memory
+dma_wr 22222204 11111112
+dma_wr 22222208 22222211
+dma_wr 2222220c 33333322
+dma_wr 22222210 44444433
+dma_wr 22222214 55555544
+dma_wr 22222218 66666655
+dma_wr 2222221c 77777766
+dma_wr 22222220 88888877
+dma_wr 22222224 99999988
+dma_wr 22222228 aaaaaa99
+dma_wr 2222222c bbbbbbaa
+dma_wr 22222230 ccccccbb
+dma_wr 22222234 ddddddcc
+dma_wr 22222238 eeeeeedd
+dma_wr 2222223c 000000ee -- last data (good CRC but not written)
+
+dma_wr fffff010 22222201 -- dma writes ownership bit
+dma_wr fffff014 0c00c03c -- dma writes rx status, local address match and 60 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 25 : Complete"
+apbwr      24 00000002  -- Clear it
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+-- *****************************************************************************
+--29. Check statistics for the above operations.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 000000c1  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000003  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000002  -- check frames received 64
+apbrd     16C 00000001  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000002  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(25000)
+

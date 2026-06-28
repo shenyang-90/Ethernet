@@ -1,0 +1,489 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : toe_carry_64
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 6 April 2006
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- This test applies IP packets of different types where the last data in the
+-- packet forces a carry from the final checksum addition. This test is required
+-- because the implementation adds the carry in the next cycle, so must look
+-- ahead for the final data in the packet to compare against the expected 0xFFFF.
+-- All frames in this test should be received successfully.
+-- 
+-- Functional Coverage
+--  * Checks the one's complement addition for the IP checksum
+--  * Checks the one's complement addition for the TCP checksum
+--  * Checks the one's complement addition for the UDP checksum
+-- 
+-- Detailed Test Description
+--  1. Initialise suitable wait states for the test.
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 64-bit DMA data bus.
+--  3. Send several IP frames with ethernet encapsulation, which
+--     have good IP checksum and are valid UDP or TCP with good checksums
+--     and have a carry on the checksum in the final data of the packet.
+--
+-- Frame 1
+--    Carry on final UDP data.
+--    Broadcast frame, Valid UDP, odd length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & UDP
+--    checksums checked (bits [23:22] = 11) and no SNAP (bit 24 low).
+--
+-- Frame 2
+--    Carry on final TCP data.
+--    Broadcast frame, Valid TCP, even length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+--
+-- Frame 3
+--    Carry on final IP header.
+--    Broadcast frame, Valid TCP, even length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+--
+--  4. Check statistics for correct values from above tests.
+--
+--------------------------------------------------------------------------------
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 0
+bus_grant_delay 0
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 64-bit DMA data bus.
+--******************************************************************************
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 01280013  -- enable RX TCP offload engine, copy all & full duplex
+apbrd      04 01280013  -- verify write to network config register.
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      18 fffff000  -- check receive queue pointer
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      00 00000004  -- enable receive
+
+
+
+--******************************************************************************
+--  3. Send several IP frames with ethernet encapsulation, which
+--     have good IP checksum and are valid UDP or TCP with good checksums
+--     and have a carry on the checksum in the final data of the packet.
+--******************************************************************************
+
+
+
+--******************************************************************************
+-- Frame 1
+--    Carry on final UDP data.
+--    Broadcast frame, Valid UDP, odd length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & UDP
+--    checksums checked (bits [23:22] = 11) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrdf     20 00000000  "Frame 1 : Valid UDP, carry on final UDP data"
+                        -- trigger reception of frame
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        001122334455 -- MAC DA
+rxd        00d0b7b214dd -- MAC SA
+rxd        0800         -- Length/typeID = IP
+rxd        4500         -- Version = IPv4, IHL = no options, type of service
+rxd        00c8         -- total length = 200 (even length)
+rxd        0001         -- ID
+rxd        4000         -- flags & fragmentation = no fragmentation
+rxd        7f11         -- time to live and protocol = UDP
+rxd        75d1         -- IP Header checksum
+rxd        c0a80201     -- IP SA
+rxd        c0a80201     -- IP DA
+rxd        7530         -- UDP source port
+rxd        7530         -- UDP destination port
+rxd        00b4         -- UDP length = 180 bytes
+rxd        9238         -- UDP checksum
+rxd        8000ed1e     -- UDP data (total UDP data = 172 bytes)
+rxd        83419dc9     -- UDP data
+rxd        00000000     -- UDP data
+rxd        feffffff     -- UDP data
+rxd        ffffff7e     -- UDP data
+rxd        fefffeff     -- UDP data
+rxd        7effffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        7effff7e     -- UDP data
+rxd        feffffff     -- UDP data
+rxd        ffffff7e     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffff7e     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ff7effff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffff7e     -- UDP data
+rxd        7effffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        7e7eff7e     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffff7e     -- UDP data
+rxd        ff7effff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffff7e     -- UDP data
+rxd        7effffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ffff7e7e     -- UDP data
+rxd        ffff7eff     -- UDP data
+rxd        ffffffff     -- UDP data
+rxd        ff7effff     -- UDP data
+rxd        17758b23     -- Good FCS (4 bytes)
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da 554433221100 sa dd14b2b7d000 type 0800 ipsa 0102a8c0 ipda 0102a8c0
+
+
+-- supply the receive buffer location
+dma_rd rx_descr fffff000 22222100 -- dma reads pointer of 22222100
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 33221100 -- store frame to memory
+dma_wr 22222104 d0005544
+dma_wr 22222108 dd14b2b7
+dma_wr 2222210c 00450008
+dma_wr 22222110 0100c800
+dma_wr 22222114 117f0040
+dma_wr 22222118 a8c0d175
+dma_wr 2222211c a8c00102
+
+dma_wr 22222120 30750102
+dma_wr 22222124 b4003075
+dma_wr 22222128 00803892
+dma_wr 2222212c 41831eed
+dma_wr 22222130 0000c99d
+dma_wr 22222134 fffe0000
+dma_wr 22222138 ffffffff
+dma_wr 2222213c fffe7eff
+
+dma_wr 22222140 ff7efffe
+dma_wr 22222144 ffffffff
+dma_wr 22222148 ff7effff
+dma_wr 2222214c fffe7eff
+dma_wr 22222150 ffffffff
+dma_wr 22222154 ffff7eff
+dma_wr 22222158 ffffffff
+dma_wr 2222215c ffffffff
+
+dma_wr 22222160 ffffffff
+dma_wr 22222164 ffff7eff
+dma_wr 22222168 ffffffff
+dma_wr 2222216c ffffffff
+dma_wr 22222170 ffffffff
+dma_wr 22222174 ffffffff
+dma_wr 22222178 ffffffff
+dma_wr 2222217c 7effffff
+
+-- next buffer in list
+dma_wr rx_descr fffff000 22222101 -- dma writes ownership bit
+dma_wr rx_descr fffff004 00004000 -- dma writes start of frame status
+
+dma_rd rx_descr fffff008 22222200 -- dma reads pointer of 22222200
+
+dma_wr 22222200 ffffffff
+dma_wr 22222204 ffffffff
+dma_wr 22222208 ffffffff
+dma_wr 2222220c ff7e7eff
+dma_wr 22222210 ffffffff
+dma_wr 22222214 ffffffff
+dma_wr 22222218 7e7effff
+dma_wr 2222221c ffff7eff
+
+dma_wr 22222220 ffffffff
+dma_wr 22222224 ffffffff
+dma_wr 22222228 7eff7eff
+dma_wr 2222222c ffffffff
+dma_wr 22222230 ffffffff
+dma_wr 22222234 ff7e7eff
+dma_wr 22222238 ffffffff
+dma_wr 2222223c ffffffff
+
+dma_wr 22222240 ffffffff
+dma_wr 22222244 ffffffff
+dma_wr 22222248 ffff7e7e
+dma_wr 2222224c ffffff7e
+dma_wr 22222250 7effffff
+dma_wr 22222254 7517ffff
+dma_wr 22222258 0000238b
+dma_wr 2222225c 00000000
+
+dma_wr rx_descr fffff008 22222201 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- IP & UDP checksums OK
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 218 bytes received
+dma_wr rx_descr fffff00c 00c080da -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Frame 1 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Frame 2
+--    Carry on final TCP data.
+--    Broadcast frame, Valid TCP, even length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 2 : Valid TCP, carry on final TCP data"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        00e0f7263fe9 -- MAC DA
+rxd        08002086354b -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002c         -- total length = 55
+rxd        08b8         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        ff06         -- time to live and protocol
+rxd        9997         -- IP Header checksum
+rxd        8b85d96e     -- IP SA
+rxd        8b85e902     -- IP DA
+rxd        9005         -- TCP source port
+rxd        0017         -- TCP destination port
+rxd        7214f114     -- Sequence number
+rxd        00000000     -- Acknowledgement Number
+rxd        60022238     -- Flags and window
+rxd        B0E4         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        FFFFFFFF     -- Telnet data
+rxd        0000         -- PAD
+rxd        323176f0     -- Good FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da e93f26f7e000 sa 4b3586200008 type 0800 ipsa 6ed9858b ipda 02e9858b
+
+
+-- supply the receive buffer location
+dma_rd rx_descr fffff010 22222300 -- dma reads pointer of 22222300
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222300 26f7e000 -- store frame to memory
+dma_wr 22222304 0008e93f
+dma_wr 22222308 4b358620
+dma_wr 2222230c 00450008
+dma_wr 22222310 b8082c00
+dma_wr 22222314 06ff0040
+dma_wr 22222318 858b9799
+dma_wr 2222231c 858b6ed9
+dma_wr 22222320 059002e9
+dma_wr 22222324 14721700
+dma_wr 22222328 000014f1
+dma_wr 2222232c 02600000
+dma_wr 22222330 e4b03822
+dma_wr 22222334 ffff0000
+dma_wr 22222338 0000ffff
+dma_wr 2222233c f0763132
+
+dma_wr rx_descr fffff010 22222301 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- IP & TCP checksums OK
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 64 bytes received
+dma_wr rx_descr fffff014 0080c040 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Frame 2 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+--******************************************************************************
+-- Frame 3
+--    Carry on final IP header.
+--    Broadcast frame, Valid TCP, even length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 3 : Valid TCP, carry on final IP header"
+                        -- trigger reception of frame
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        00e0f7263fe9 -- MAC DA
+rxd        08002086354b -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002c         -- total length = 55
+rxd        08b8         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        ff06         -- time to live and protocol
+rxd        0e20         -- IP Header checksum
+rxd        8b85d96e     -- IP SA
+rxd        FFFFFFFF     -- IP DA
+rxd        9005         -- TCP source port
+rxd        0017         -- TCP destination port
+rxd        7214f114     -- Sequence number
+rxd        00000000     -- Acknowledgement Number
+rxd        60022238     -- Flags and window
+rxd        256D         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        FFFFFFFF     -- Telnet data
+rxd        0000         -- PAD
+rxd        2a9ea23d     -- Good FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da e93f26f7e000 sa 4b3586200008 type 0800 ipsa 6ed9858b ipda ffffffff
+
+
+-- supply the receive buffer location
+dma_rd rx_descr fffff018 22222400 -- dma reads pointer of 22222400
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222400 26f7e000 -- store frame to memory
+dma_wr 22222404 0008e93f
+dma_wr 22222408 4b358620
+dma_wr 2222240c 00450008
+dma_wr 22222410 b8082c00
+dma_wr 22222414 06ff0040
+dma_wr 22222418 858b200e
+dma_wr 2222241c ffff6ed9
+dma_wr 22222420 0590ffff
+dma_wr 22222424 14721700
+dma_wr 22222428 000014f1
+dma_wr 2222242c 02600000
+dma_wr 22222430 6d253822
+dma_wr 22222434 ffff0000
+dma_wr 22222438 0000ffff
+dma_wr 2222243c 3da29e2a
+
+dma_wr rx_descr fffff018 22222401 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- IP & TCP checksums OK
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 64 bytes received
+dma_wr rx_descr fffff01c 0080c040 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Frame 3 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+-- supply the receive buffer location
+dma_rd rx_descr fffff020 22222500 -- dma reads pointer of 22222500
+
+
+--******************************************************************************
+--  4. Check statistics for correct values from above tests.
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 0000015a  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000003  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000002  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000001  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+apbrd     1A8 00000000  -- check receive IP checksum errors
+apbrd     1AC 00000000  -- check receive TCP checksum errors
+apbrd     1B0 00000000  -- check receive UDP checksum errors
+
+dma_rd rx_descr fffff028 12345678 -- Supply final descriptor - this is not used for any data buffers, but the EDMA tries to keep its buffer full so it reads it
+end(20000)
+
+

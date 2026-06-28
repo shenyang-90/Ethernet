@@ -1,0 +1,145 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : sched_rnd_queue
+--
+--   Author         : Ewan McCulloch
+--
+--   Date           : 25 Feb 2008
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Random TX and RX operating together - all RX packets accepted, to maximize
+-- AHB B/W - also operating at gigabit speeds
+--
+-- This is an 802.3br random test running at 2.5Gbps. 
+-- We are receiving Some Verify and Respond packets with some erorrs in there
+-- in order to stimulate particualar corners of the MMSL and get some coverage.
+-- In this test the verification handshake ends with success.
+
+--------------------------------------------------------------------------------
+
+two_pt_five_gig;
+
+sel_ahb_freq 2 
+
+randomize_hready -read_max 4 -write_max 4
+--check_txlinerate
+bus_grant_delay 0 -- This sets hgrant to 1 always
+
+set_random_seed 45;
+--tog_cnt_en 1
+
+-- Disable txd checking for this test
+set_tx_data_check   0;
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      04 0128041a  -- 64bit enable, gigabit mode, full duplex, no PCS yet ...
+apbwr    1004 0128041a  
+apbwr     f00 00000088  -- enable pre-empt, disable verify & route all frames to pMAC until negotiated, invert_mcrc set
+apbwr      10 01a00701
+apbwr    1010 01a00701
+apbwr    1018 f0020000  -- write receive queue pointer 2
+apbwr    101c 99000000  -- write transmit queue pointer 2
+apbrd    101c 99000000  -- check transmit queue pointer
+
+-- initialise the relevant pcs registers
+apbrd      200 00009140  -- check reset value
+apbwr      200 00000140  -- disable auto-negotiation prior to enabling PCS
+
+apbwr      28 00000200  -- enable PCS interrupt
+apbwr      1c 11111100  -- write address of transmit buffer q0 descriptor in memory
+apbwr     440 88000000  -- write transmit queue pointer 1
+apbwr     444 99000000  -- repeat transmit queue pointer 2, just need this for TB (pkt generator)
+apbwr      18 ffff0000  -- write receive queue pointer
+apbwr     480 f0010000  -- write receive queue pointer 1
+apbwr     484 f0020000  -- repeat receive queue pointer 2, just need this for TB (pkt generator)
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      1c 11111100  -- check transmit queue pointer
+
+apbwr     4a0 00000001  -- Buffer size Q1
+apbwr     4a4 000000a0  -- Buffer size Q2 -- just need this for TB (pkt generator)
+
+apbwr      540 00040000  -- Screener2 reg 0, comp reg = 0
+apbwr      544 00042011  -- Screener2 reg 1, comp reg = 1
+apbwr      548 00044022  -- Screener2 reg 2, comp reg = 2
+apbwr      54c 00046033  -- Screener2 reg 3, comp reg = 3
+
+apbwr      700 000000ff  -- Compare reg 0a
+apbwr      704 00000000  -- Compare reg 0b, offset is 0
+apbwr      708 000100ff  -- Compare reg 1a
+apbwr      70c 00000000  -- Compare reg 1b, offset is 0
+apbwr      710 000200ff  -- Compare reg 2a
+apbwr      714 00000000  -- Compare reg 2b, offset is 0
+apbwr      718 000300ff  -- Compare reg 3a
+apbwr      71c 00000000  -- Compare reg 3b, offset is 0
+
+apbwr      00 2000000c  -- enable rx and tx, 2.5G, no loopback
+apbwr    1000 2000000c  -- enable rx and tx, 2.5G, no loopback
+apbwr     f1c ffffffff  -- interrupt enable for the mmsl
+
+apbwr      04 0128041a  -- 64bit enable, gigabit mode, full duplex
+apbwr    1004 0128041a  
+
+apbrd(200) f00 00000088 -- reading to specify the timing 
+
+-- delay for enable rx to propagate though design
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd    284 6ef13fff  -- read design cfg reg to set axi test in trans.pl
+apbrdf     20 00000000  -- check contents of the receive status register 
+
+-- check for link status change
+apbwr      00 2000020c  -- write tx_go and enable tx, enable rx, 2.5G, no loopback
+apbwr    1000 2000020c  -- write tx_go and enable tx, enable rx, 2.5G, no loopback
+
+-- drive the receive frame data into the MII interface
+-- Receiving first a WRONG a verify packet in the payload 
+rxd(apb)      555555555555550700000000000000000000
+rxd           0000000000000000000000000000000000000000 
+rxd           0000000000000000000000000000000000000000 
+rxd           000000000000000000000889edff 
+
+-- drive the receive frame data into the MII interface
+-- Receiving first a WRONG verify packet (finishes prematurely) 
+rxd(gap)      555555555555550700000000000000000000
+rxd           0000000000000000000000000000000000000000 
+rxd           0000000000000000000000000000000000000000 
+rxd           0000000000000000 
+
+-- Receiving a CORRECT verify packet now.
+rxd(gap)      555555555555550700000000000000000000
+rxd           0000000000000000000000000000000000000000 
+rxd           0000000000000000000000000000000000000000 
+rxd           000000000000000000000889edfb 
+
+-- Receiving a CORRECT respond packet now.
+rxd(gap)      555555555555551900000000000000000000
+rxd           0000000000000000000000000000000000000000 
+rxd           0000000000000000000000000000000000000000 
+rxd           000000000000000000000889edfb 
+
+apbwr(1000)  f00 00000000 --writing to zero the pre_enable register
+
+-- force end of test in case it doesn't stop of its own accord
+end(20000)

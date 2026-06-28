@@ -1,0 +1,520 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : col_pcs_tbi
+--
+--   Author         : Martin James(martinj@tality.com)
+--
+--   Date           : 12 July 2002
+--
+--------------------------------------------------------------------------------
+--   Test Description
+--   
+--   This test ensures that the GEM properly deals with collisions in TBI
+--   mode, where the PCS is generating the collision signal to the MAC.
+--   
+--   Functional Coverage
+--   * Checks that the PCS correctly generates the col signal to the TX MAC.
+--   * Checks that the PCS handles transmitted carrier extension errors.
+--   
+--   Detailed Test Description
+--   
+--  INITIALISATION
+-- 1. Setup DMA wait states for the test.
+-- 2. Initialise the GEM for 1Gbits/s, TBI, 64-bit DMA mode, with 
+--    autonegotiation disabled.
+-- 3. Enable all interrupts, and then enable both transmit and receive.
+-- 4. Reduce back off time to one slot-time by writing bit 12 of the config
+--    register
+--
+--  COLLISIONS DURING TRANSMISSION
+-- 5. Start transmitting a frame of 64 bytes (single DMA buffer).
+--    Trigger the testbench to generate a receive frame so that a collision
+--    occurs during transmission of the frame.
+--    Check that the design backs off and then retries the frame. Every time
+--    the frame is retried force another rx frame so that a collision happens
+--    at the following points in the tx frame:
+--
+--     a) First byte of preamble.
+--     b) Mid way though the data.
+--     c) Last byte of the CRC.
+--     d) First byte of carrier extension.
+--     e) Second byte of carrier extension.
+--     f) Now allow the frame to be successfuly transmitted, and check that the
+--        status indicates a multiple collision frame.
+--
+--    Note that all receive frames should be ignored.
+--
+-- 6. Start transmitting a frame of 64 bytes (single DMA buffer).
+--    Trigger the testbench to generate a receive frame so that a collision
+--    occurs at the last byte of carrier extension. This will generate a 
+--    late collision status, and will not be retried.
+--    Check that a late colliison status is reported and the frame is 
+--    successfully received (not address filter blocked in half duplex during
+--    carrier extension of transmit frame).
+-- 7. Check statistics for the above operations.
+--------------------------------------------------------------------------------
+
+-- ************************************************************************** --
+-- 1. Setup DMA wait states for the test.
+-- ************************************************************************** --
+wait_states     0
+bus_grant_delay 0
+
+
+-- ************************************************************************** --
+-- 2. Initialise the GEM for 1Gbits/s, TBI, 64-bit DMA mode, with 
+--    autonegotiation disabled.
+-- 3. Enable all interrupts, and then enable both transmit and receive.
+-- 4. Reduce back off time to one slot-time by writing bit 12 of the config
+--    register
+-- ************************************************************************** --
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr     200 00000040  -- disable autonegotiation
+apbrd     200 00008040  -- check autoneg disabled
+apbwr      98 12345678  -- specific address register 1 bottom
+apbwr      9C 00001111  -- specific address register 1 top
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00281c00  -- reduce backoff time to one slot time, enable gigbait
+                        -- TBI mode into 64 bits
+apbrd      04 00281c00  -- check write to network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      14 00000000  -- read transmit status register
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 aaaaa000  -- write receive queue pointer
+apbrd      18 aaaaa000  -- check receive queue pointer
+apbwr      1c 55555000  -- write address of transmit buffer descriptor
+apbrd      1c 55555000  -- check transmit queue pointer
+
+
+-- check for link status change
+apbrd(int) 24 00000200  -- check interrupt status - link status change
+
+
+
+-- ************************************************************************** --
+-- 5. Start transmitting a frame of 64 bytes (single DMA buffer).
+--    Trigger the testbench to generate a receive frame so that a collision
+--    occurs during transmission of the frame.
+--    Check that the design backs off and then retries the frame. Every time
+--    the frame is retried force another rx frame so that a collision happens
+--    at the following points in the tx frame:
+--
+--     a) First byte of preamble.
+--     b) Mid way though the data.
+--     c) Last byte of the CRC.
+--     d) First byte of carrier extension.
+--     e) Second byte of carrier extension.
+--     f) Now allow the frame to be successfuly transmitted, and check that the
+--        status indicates a multiple collision frame.
+--     g) Finally try a collision at the last byte of carrier extension.
+--        This will generate a late collision status, and will not be
+--        retried.
+--
+--    Note that all receive frames should be ignored.
+-- ************************************************************************** --
+
+-- start transmission
+apbwr      00 0000000c  -- enable transmit & receive
+apbwr      00 0000020c  -- write transmit start bit and enable tx & receive
+apbwr      00 0000040c  -- write transmit halt bit (just one frame transmitted)
+
+
+-- get first rx buffer descriptor
+dma_rd aaaaa000 22222000 -- dma reads pointer of 22222000
+
+
+
+
+-- ************************************************************************** --
+--     a) First byte of preamble.
+-- ************************************************************************** --
+
+-- NOT CURRENTLY POSSIBLE TO GET THE TESTBENCH TO GENERATE A PREAMBLE COLLISION
+
+
+
+
+
+-- ************************************************************************** --
+--     b) Mid way though the data.
+-- ************************************************************************** --
+
+-- supply the transmit buffer location
+dma_rd 55555004 0000803c -- eof, length=60, plus CRC.
+dma_rd 55555000 98765000 -- dma reads pointer of 98765000
+
+dma_rd 98765000 12345678  -- read transmit data
+dma_rd 98765004 00000001
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+dma_rd 98765030 cccccccc
+dma_rd 98765034 dddddddd
+dma_rd 98765038 eeeeeeee
+dma_rd 9876503c 00000000 -- pad to 64 bit
+
+
+-- tx frame (first try)
+pcs_txd(s)     55555555555555d578563412
+pcs_txd                        xx -- trigger rx
+pcs_txd                        01000000222222223333333344444444
+pcs_txd                        555555555555j -- jam
+
+
+-- drive in the rx frame once triggered
+pcs_rxd(s_x)    55d578563412111111112222222233333333
+pcs_rxd             44444444555555556666666677777777
+pcs_rxd             8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd             000000000000000000000000gggggggg
+
+
+
+
+-- ************************************************************************** --
+--     c) Last byte of the CRC.
+-- ************************************************************************** --
+
+-- supply the transmit buffer location
+dma_rd 98765000 12345678  -- read transmit data
+dma_rd 98765004 00000001
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+dma_rd 98765030 cccccccc
+dma_rd 98765034 dddddddd
+dma_rd 98765038 eeeeeeee
+dma_rd 9876503c 00000000 -- pad to 64 bit
+
+-- tx frame (second try)
+pcs_txd(s)       555555555555d578563412010000002222222233333333
+pcs_txd                        44444444555555556666666677777777
+pcs_txd                        8888888899999999aaaaaaaabb
+pcs_txd                        xx -- trigger rx
+pcs_txd                        bbbbbbccccccccddddddddeeeeeeee
+pcs_txd                        ff4ee4 -- CRC
+pcs_txd                        00000000j -- jam
+
+
+-- drive in the rx frame once triggered
+pcs_rxd(s_x)    55d578563412111111112222222233333333
+pcs_rxd             44444444555555556666666677777777
+pcs_rxd             8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd             000000000000000000000000gggggggg
+
+
+
+-- ************************************************************************** --
+--     d) First byte of carrier extension.
+-- ************************************************************************** --
+
+-- supply the transmit buffer location
+dma_rd 98765000 12345678  -- read transmit data
+dma_rd 98765004 00000001
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+dma_rd 98765030 cccccccc
+dma_rd 98765034 dddddddd
+dma_rd 98765038 eeeeeeee
+dma_rd 9876503c 00000000 -- pad to 64 bit
+
+-- tx frame (third try)
+pcs_txd(s)       555555555555d578563412010000002222222233333333
+pcs_txd                        44444444555555556666666677777777
+pcs_txd                        8888888899999999aaaaaaaabbbbbb
+pcs_txd                        xx -- trigger rx
+pcs_txd                        bbccccccccddddddddeeeeeeee
+pcs_txd                        gggggggg t15f4p2t -- replace /T/R/R/ with /T/R/V/
+
+
+-- drive in the rx frame once triggered
+pcs_rxd(s_x)    55d578563412111111112222222233333333
+pcs_rxd             44444444555555556666666677777777
+pcs_rxd             8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd             000000000000000000000000gggggggg
+
+
+
+
+-- ************************************************************************** --
+--     e) Second byte of carrier extension.
+-- ************************************************************************** --
+
+-- supply the transmit buffer location
+dma_rd 98765000 12345678  -- read transmit data
+dma_rd 98765004 00000001
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+dma_rd 98765030 cccccccc
+dma_rd 98765034 dddddddd
+dma_rd 98765038 eeeeeeee
+dma_rd 9876503c 00000000 -- pad to 64 bit
+
+-- tx frame (fourth try)
+pcs_txd(s_x)     555555555555d578563412010000002222222233333333
+pcs_txd                        44444444555555556666666677777777
+pcs_txd                        8888888899999999aaaaaaaabbbbbbbb
+pcs_txd                        xx -- trigger rx
+pcs_txd                        ccccccccddddddddeeeeeeee
+pcs_txd                        gggggggg t15f4p4t -- replace 3rd /R/ in EOP & carr extension with /V/
+
+
+-- drive in the rx frame once triggered
+pcs_rxd(s_x)    55d578563412111111112222222233333333
+pcs_rxd             44444444555555556666666677777777
+pcs_rxd             8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd             000000000000000000000000gggggggg
+
+
+
+-- ************************************************************************** --
+--     f) Now allow the frame to be successfuly transmitted, and check that the
+--        status indicates a multiple collision frame.
+-- ************************************************************************** --
+
+
+-- supply the transmit buffer location
+dma_rd 98765000 12345678  -- read transmit data
+dma_rd 98765004 00000001
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+dma_rd 98765030 cccccccc
+dma_rd 98765034 dddddddd
+dma_rd 98765038 eeeeeeee
+dma_rd 9876503c 00000000 -- pad to 64 bit
+
+-- writeback used bit
+dma_wr 55555004 8000803c -- eof, length=64, no CRC.
+
+-- tx frame (last try)
+pcs_txd(s_x)     555555555555d578563412010000002222222233333333
+pcs_txd                        44444444555555556666666677777777
+pcs_txd                        8888888899999999aaaaaaaabbbbbbbb
+pcs_txd                        ccccccccddddddddeeeeeeeegggggggg
+
+
+
+apbrd(int) 24  00000080  "frame transmitted"
+apbrd      14  00000022  -- tx status - frame transmitted, collision, halted
+apbwr      14  00000022  -- clear it
+apbrd      14  00000000  -- check it again
+
+
+
+-- ************************************************************************** --
+-- 6. Start transmitting a frame of 64 bytes (single DMA buffer).
+--    Trigger the testbench to generate a receive frame so that a collision
+--    occurs at the last byte of carrier extension. This will generate a 
+--    late collision status, and will not be retried.
+--    Check that a late colliison status is reported and the frame is 
+--    successfully received (not address filter blocked in half duplex during
+--    carrier extension of transmit frame).
+-- ************************************************************************** --
+
+apbwr      00 0000020c  -- start tx again
+
+-- supply the transmit buffer location
+dma_rd 5555500c 0000803c -- eof, length=60, plus CRC.
+dma_rd 55555008 98765000 -- dma reads pointer of 98765000
+
+dma_rd 98765000 12345678  -- read transmit data
+dma_rd 98765004 00000001
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+dma_rd 98765030 cccccccc
+dma_rd 98765034 dddddddd
+dma_rd 98765038 eeeeeeee
+dma_rd 9876503c 00000000 -- pad to 64 bit
+
+
+-- begin to read second frame
+dma_rd 55555014 0000803c -- eof, length=60, plus CRC.
+dma_rd 55555010 98765000 -- dma reads pointer of 98765000
+
+dma_rd 98765000 12345678  -- read transmit data
+dma_rd 98765004 00000001
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+dma_rd 98765030 cccccccc
+dma_rd 98765034 dddddddd
+dma_rd 98765038 eeeeeeee
+dma_rd 9876503c 00000000 -- pad to 64 bit
+
+
+-- writeback used bit for first frame with laet collision
+dma_wr 5555500c 8400803c -- eof, length=64, no CRC, late collision
+
+-- tx frame (first try)
+pcs_txd(s_x)   55555555555555d578563412010000002222222233333333
+pcs_txd                        44444444555555556666666677777777
+pcs_txd                        8888888899999999aaaaaaaabbbbbbbb
+pcs_txd                        ccccccccddddddddeeeeeeee
+pcs_txd                        gggggggg t15f4p449t -- replace 446th /R/ in EOP & carr extension with /V/
+
+
+-- drive in the rx frame once triggered
+pcs_rxd(1551_x) 55d578563412111111112222222233333333
+pcs_rxd             44444444555555556666666677777777
+pcs_rxd             8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd             000000000000000000000000gggggggg
+
+
+
+apbrd(int) 24  00000020  "late collision detected"
+apbrd      14  00000080  -- tx status - late collision, halted
+apbwr      14  00000080  -- clear it
+apbrd      14  00000000  -- check it again
+
+
+-- RX frame DMA
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c 33333333
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 00000000
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 9b303826 -- good CRC
+
+dma_wr aaaaa004 0c00c040 -- dma writes rx status, local address match and 64 bytes received
+dma_wr aaaaa000 22222001 -- dma writes ownership bit
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "frame received"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+-- get next rx buffer descriptor
+dma_rd aaaaa008 22222000 -- dma reads pointer of 22222000
+
+
+
+-- ************************************************************************** --
+-- 7. Check statistics for the above operations.
+-- ************************************************************************** --
+-- check transmit statistics
+apbrd     100 00000040  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000001  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000001  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000040  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000001  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000001  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(5000)

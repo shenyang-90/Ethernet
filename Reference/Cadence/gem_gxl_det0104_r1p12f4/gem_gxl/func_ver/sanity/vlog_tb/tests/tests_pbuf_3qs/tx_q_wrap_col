@@ -1,0 +1,1190 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2003
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_q_wrap_col
+--
+--   Author         : Martin James (martinj@cadence.com)
+--
+--   Date           : 22 March 2003
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- This test checks the operation of the TX DMA wrapping when collisions
+-- occur at various times during the wrapping frames.
+--
+-- NOTE: SINCE THE AIM OF THIS TEST IS TO CHECK THE INTERACTION OF THE 
+--       BUFFER DESCRIPTOR READS WITH COLLISION RESTART, THIS TEST IS
+--       NOW LARGELY REDUNDANT WITH THE PACKET BUFFER IN PLACE.
+--
+-- 
+-- Functional Coverage
+-- * Checks the TX queue pointer operation during wrapping.
+-- * Checks that collision retries occur from the correct queue locations.
+-- * Checks that the wrapping operation is unaffected by collisions.
+-- * Checks that used bits read after the collided frame do not affect it.
+-- 
+-- Detailed Test Description
+--  1. Initialise suitable wait states for the test.
+--  2. Check reset values of registers and setup interrupts and then enable 
+--     transmit in 100M half duplex mode from a 32-bit DMA data bus.
+--
+--  3. Try various combinations of multi and single buffer frames, that
+--     wrap at various points within the frame and experience collisions
+--     on different buffers.
+--
+-- TEST 1:
+-- Try a collision on the fifth buffer of a six buffer frame that wraps
+-- after the third buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps.
+--
+-- TEST 2:
+-- Try a collision on the fourth buffer of a six buffer frame that wraps
+-- after the third buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps.
+--
+-- TEST 3:
+-- Try a collision on the third buffer of a six buffer frame that wraps
+-- after the third buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps.
+--
+-- TEST 4:
+-- Try a collision on the third buffer of a six-buffer frame which wraps 
+-- after the first buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps.
+--
+-- TEST 5:
+-- Try a collision on the second buffer of a six-buffer frame which wraps 
+-- after the first buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps.
+--
+-- TEST 6:
+-- Try a collision on the first buffer of a six-buffer frame which wraps 
+-- after the first buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps.
+--
+-- TEST 7:
+-- Try a collision on the only buffer of a single-buffer frame which wraps 
+-- after the only buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps and then subsequently transmits another
+-- good multi-buffer frame.
+--
+-- TEST 8:
+-- Try a collision on the only buffer of a single-buffer frame which wraps 
+-- after the only buffer. This time delay the collision such that the second
+-- frame is starting to be fetched.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps and then subsequently transmits another
+-- good multi-buffer frame.
+--
+-- TEST 9:
+-- Try a collision on the only buffer of a single-buffer frame which wraps 
+-- after the only buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps but then reads a used bit.
+--
+--
+--  4. Check statistics for above operations.
+--
+-- ************************************************************************** --
+
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states     0
+bus_grant_delay 2
+
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts and then enable 
+--     transmit in 100M half duplex mode from a 32-bit DMA data bus.
+--******************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      440 88000000  -- write transmit queue pointer 1
+apbwr      444 99000000  -- write transmit queue pointer 2
+apbrd      24 00000000  -- check interrupt status
+apbrd      30 00000000  -- check that all interrupts are now enabled
+apbwr      04 00080000  -- enable 100M mode into 32-bit bus
+
+
+
+
+-- ************************************************************************** --
+--  3. Try various combinations of multi and single buffer frames, that
+--     wrap at various points within the frame and experience collisions
+--     on different buffers.
+-- ************************************************************************** --
+
+
+-- ************************************************************************** --
+-- TEST 1:
+-- Try a collision on the fifth buffer of a six buffer frame that wraps
+-- after the third buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps.
+-- ************************************************************************** --
+
+apbwr      1c effffff0  -- write address of transmit buffer descriptor in memory
+apbrd      1c effffff0  -- check transmit queue pointer
+apbwr      00 00000208  -- write tx_go and enable tx
+
+-- first a zero length buffer to get queue away from base pointer
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd effffff4 00008000 -- zero length & EOF
+dma_rd effffff0 00000000
+
+
+
+-- With TX packet buffer included all of frame is read in once and retried
+-- from the packet buffer.
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd effffffc 00000020 -- length 32 bytes
+dma_rd effffff8 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 11111111
+dma_rd 98765004 22222222
+dma_rd 98765008 33333333
+dma_rd 9876500c 44444444
+dma_rd 98765010 55555555
+dma_rd 98765014 66666666
+dma_rd 98765018 77777777
+dma_rd 9876501c 88888888
+
+dma_rd f0000004 00000020 -- length 32 bytes
+dma_rd f0000000 98765100 -- dma reads pointer of 98765100
+dma_rd 98765100 99999999
+dma_rd 98765104 aaaaaaaa
+dma_rd 98765108 bbbbbbbb
+dma_rd 9876510c cccccccc
+dma_rd 98765110 dddddddd
+dma_rd 98765114 eeeeeeee
+dma_rd 98765118 ffffffff
+dma_rd 9876511c 00000000
+
+dma_rd f000000c 40000020 -- wrap set mid frame, length 32 bytes
+dma_rd f0000008 98765200 -- dma reads pointer of 98765200
+dma_rd 98765200 11111111
+dma_rd 98765204 22222222
+dma_rd 98765208 33333333
+dma_rd 9876520c 44444444
+dma_rd 98765210 55555555
+dma_rd 98765214 66666666
+dma_rd 98765218 77777777
+dma_rd 9876521c 88888888
+
+dma_rd effffff4 00000020 -- length 32 bytes
+dma_rd effffff0 98765300 -- dma reads pointer of 98765300
+dma_rd 98765300 99999999
+dma_rd 98765304 aaaaaaaa
+dma_rd 98765308 bbbbbbbb
+dma_rd 9876530c cccccccc
+dma_rd 98765310 dddddddd
+dma_rd 98765314 eeeeeeee
+dma_rd 98765318 ffffffff
+dma_rd 9876531c 00000000
+
+dma_rd effffffc 00000020 -- length 32 bytes
+dma_rd effffff8 98765400 -- dma reads pointer of 98765400
+dma_rd 98765400 11111111
+dma_rd 98765404 22222222
+dma_rd 98765408 33333333
+dma_rd 9876540c 44444444
+dma_rd 98765410 55555555
+dma_rd 98765414 66666666
+dma_rd 98765418 77777777
+dma_rd 9876541c 88888888
+
+dma_rd f0000004 00008020 -- end of frame set, length 32 bytes
+dma_rd f0000000 98765500 -- dma reads pointer of 98765500
+dma_rd 98765500 99999999
+dma_rd 98765504 aaaaaaaa
+dma_rd 98765508 bbbbbbbb
+dma_rd 9876550c cccccccc
+dma_rd 98765510 dddddddd
+dma_rd 98765514 eeeeeeee
+dma_rd 98765518 ffffffff
+dma_rd 9876551c 00000000
+
+-- First attempt
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaxaabb -- collision
+txd                    bbbbbbbb -- JAM
+
+-- Second attempt
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    e3b0d9f1 -- crc
+
+
+-- write transmit complete status
+dma_wr effffffc 80000020 -- write used bit
+
+
+apbrd(int) 24 00000080  "TEST 1 COMPLETE"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- tx status - frame transmitted, collision and tx_go
+apbwr      14 00000022  -- clear tx status
+
+
+
+
+-- ************************************************************************** --
+-- TEST 2:
+-- Try a collision on the fourth buffer of a six buffer frame that wraps
+-- after the third buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps.
+-- ************************************************************************** --
+
+-- first transmission attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd f000000c 00000020 -- length 32 bytes
+dma_rd f0000008 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 11111111
+dma_rd 98765004 22222222
+dma_rd 98765008 33333333
+dma_rd 9876500c 44444444
+dma_rd 98765010 55555555
+dma_rd 98765014 66666666
+dma_rd 98765018 77777777
+dma_rd 9876501c 88888888
+
+dma_rd f0000014 00000020 -- length 32 bytes
+dma_rd f0000010 98765100 -- dma reads pointer of 98765100
+dma_rd 98765100 99999999
+dma_rd 98765104 aaaaaaaa
+dma_rd 98765108 bbbbbbbb
+dma_rd 9876510c cccccccc
+dma_rd 98765110 dddddddd
+dma_rd 98765114 eeeeeeee
+dma_rd 98765118 ffffffff
+dma_rd 9876511c 00000000
+
+dma_rd f000001c 40000020 -- wrap set mid frame, length 32 bytes
+dma_rd f0000018 98765200 -- dma reads pointer of 98765200
+dma_rd 98765200 11111111
+dma_rd 98765204 22222222
+dma_rd 98765208 33333333
+dma_rd 9876520c 44444444
+dma_rd 98765210 55555555
+dma_rd 98765214 66666666
+dma_rd 98765218 77777777
+dma_rd 9876521c 88888888
+
+dma_rd effffff4 00000020 -- length 32 bytes
+dma_rd effffff0 98765300 -- dma reads pointer of 98765300
+dma_rd 98765300 99999999
+dma_rd 98765304 aaaaaaaa
+dma_rd 98765308 bbbbbbbb
+dma_rd 9876530c cccccccc
+dma_rd 98765310 dddddddd
+dma_rd 98765314 eeeeeeee
+dma_rd 98765318 ffffffff
+dma_rd 9876531c 00000000
+
+dma_rd effffffc 00000020 -- length 32 bytes
+dma_rd effffff8 98765400 -- dma reads pointer of 98765400
+dma_rd 98765400 11111111
+dma_rd 98765404 22222222
+dma_rd 98765408 33333333
+dma_rd 9876540c 44444444
+dma_rd 98765410 55555555
+dma_rd 98765414 66666666
+dma_rd 98765418 77777777
+dma_rd 9876541c 88888888
+
+dma_rd f0000004 00008020 -- end of frame set, length 32 bytes
+dma_rd f0000000 98765500 -- dma reads pointer of 98765500
+dma_rd 98765500 99999999
+dma_rd 98765504 aaaaaaaa
+dma_rd 98765508 bbbbbbbb
+dma_rd 9876550c cccccccc
+dma_rd 98765510 dddddddd
+dma_rd 98765514 eeeeeeee
+dma_rd 98765518 ffffffff
+dma_rd 9876551c 00000000
+
+-- First attempt
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222x2233 -- collision
+txd                    33333333 -- JAM
+
+-- Second attempt
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    e3b0d9f1 -- crc
+
+
+
+-- write transmit complete status
+dma_wr f000000c 80000020 -- write used bit
+
+
+apbrd(int) 24 00000080  "TEST 2 COMPLETE"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- tx status - frame transmitted, collision and tx_go
+apbwr      14 00000022  -- clear tx status
+
+
+
+
+-- ************************************************************************** --
+-- TEST 3:
+-- Try a collision on the third buffer of a six buffer frame that wraps
+-- after the third buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps.
+-- ************************************************************************** --
+
+-- first transmission attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd f000000c 00000020 -- length 32 bytes
+dma_rd f0000008 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 11111111
+dma_rd 98765004 22222222
+dma_rd 98765008 33333333
+dma_rd 9876500c 44444444
+dma_rd 98765010 55555555
+dma_rd 98765014 66666666
+dma_rd 98765018 77777777
+dma_rd 9876501c 88888888
+
+dma_rd f0000014 00000020 -- length 32 bytes
+dma_rd f0000010 98765100 -- dma reads pointer of 98765100
+dma_rd 98765100 99999999
+dma_rd 98765104 aaaaaaaa
+dma_rd 98765108 bbbbbbbb
+dma_rd 9876510c cccccccc
+dma_rd 98765110 dddddddd
+dma_rd 98765114 eeeeeeee
+dma_rd 98765118 ffffffff
+dma_rd 9876511c 00000000
+
+dma_rd f000001c 40000020 -- wrap set mid frame, length 32 bytes
+dma_rd f0000018 98765200 -- dma reads pointer of 98765200
+dma_rd 98765200 11111111
+dma_rd 98765204 22222222
+dma_rd 98765208 33333333
+dma_rd 9876520c 44444444
+dma_rd 98765210 55555555
+dma_rd 98765214 66666666
+dma_rd 98765218 77777777
+dma_rd 9876521c 88888888
+
+dma_rd effffff4 00000020 -- length 32 bytes
+dma_rd effffff0 98765300 -- dma reads pointer of 98765300
+dma_rd 98765300 99999999
+dma_rd 98765304 aaaaaaaa
+dma_rd 98765308 bbbbbbbb
+dma_rd 9876530c cccccccc
+dma_rd 98765310 dddddddd
+dma_rd 98765314 eeeeeeee
+dma_rd 98765318 ffffffff
+dma_rd 9876531c 00000000
+
+dma_rd effffffc 00000020 -- length 32 bytes
+dma_rd effffff8 98765400 -- dma reads pointer of 98765400
+dma_rd 98765400 11111111
+dma_rd 98765404 22222222
+dma_rd 98765408 33333333
+dma_rd 9876540c 44444444
+dma_rd 98765410 55555555
+dma_rd 98765414 66666666
+dma_rd 98765418 77777777
+dma_rd 9876541c 88888888
+
+dma_rd f0000004 00008020 -- end of frame set, length 32 bytes
+dma_rd f0000000 98765500 -- dma reads pointer of 98765500
+dma_rd 98765500 99999999
+dma_rd 98765504 aaaaaaaa
+dma_rd 98765508 bbbbbbbb
+dma_rd 9876550c cccccccc
+dma_rd 98765510 dddddddd
+dma_rd 98765514 eeeeeeee
+dma_rd 98765518 ffffffff
+dma_rd 9876551c 00000000
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaxaabb -- collision
+txd                    bbbbbbbb -- JAM
+
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    e3b0d9f1 -- crc
+
+
+-- write transmit complete status
+dma_wr f000000c 80000020 -- write used bit
+
+
+apbrd(int) 24 00000080  "TEST 3 COMPLETE"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- tx status - frame transmitted, collision and tx_go
+apbwr      14 00000022  -- clear tx status
+
+
+
+-- ************************************************************************** --
+-- TEST 4:
+-- Try a collision on the third buffer of a six-buffer frame which wraps 
+-- after the first buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps.
+-- ************************************************************************** --
+
+-- first transmission attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd f000000c 40000020 -- wrap set mid frame, length 32 bytes
+dma_rd f0000008 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 11111111
+dma_rd 98765004 22222222
+dma_rd 98765008 33333333
+dma_rd 9876500c 44444444
+dma_rd 98765010 55555555
+dma_rd 98765014 66666666
+dma_rd 98765018 77777777
+dma_rd 9876501c 88888888
+
+dma_rd effffff4 00000020 -- length 32 bytes
+dma_rd effffff0 98765100 -- dma reads pointer of 98765100 (Check that it still wraps!)
+dma_rd 98765100 99999999
+dma_rd 98765104 aaaaaaaa
+dma_rd 98765108 bbbbbbbb
+dma_rd 9876510c cccccccc
+dma_rd 98765110 dddddddd
+dma_rd 98765114 eeeeeeee
+dma_rd 98765118 ffffffff
+dma_rd 9876511c 00000000
+
+dma_rd effffffc 00000020 -- length 32 bytes
+dma_rd effffff8 98765200 -- dma reads pointer of 98765200
+dma_rd 98765200 11111111
+dma_rd 98765204 22222222
+dma_rd 98765208 33333333
+dma_rd 9876520c 44444444
+dma_rd 98765210 55555555
+dma_rd 98765214 66666666
+dma_rd 98765218 77777777
+dma_rd 9876521c 88888888
+
+dma_rd f0000004 00000020 -- length 32 bytes
+dma_rd f0000000 98765300 -- dma reads pointer of 98765300
+dma_rd 98765300 99999999
+dma_rd 98765304 aaaaaaaa
+dma_rd 98765308 bbbbbbbb
+dma_rd 9876530c cccccccc
+dma_rd 98765310 dddddddd
+dma_rd 98765314 eeeeeeee
+dma_rd 98765318 ffffffff
+dma_rd 9876531c 00000000
+
+dma_rd f000000c 00000020 -- length 32 bytes
+dma_rd f0000008 98765400 -- dma reads pointer of 98765400
+dma_rd 98765400 11111111
+dma_rd 98765404 22222222
+dma_rd 98765408 33333333
+dma_rd 9876540c 44444444
+dma_rd 98765410 55555555
+dma_rd 98765414 66666666
+dma_rd 98765418 77777777
+dma_rd 9876541c 88888888
+
+dma_rd f0000014 00008020 -- end of frame set, length 32 bytes
+dma_rd f0000010 98765500 -- dma reads pointer of 98765500
+dma_rd 98765500 99999999
+dma_rd 98765504 aaaaaaaa
+dma_rd 98765508 bbbbbbbb
+dma_rd 9876550c cccccccc
+dma_rd 98765510 dddddddd
+dma_rd 98765514 eeeeeeee
+dma_rd 98765518 ffffffff
+dma_rd 9876551c 00000000
+
+-- First attempt
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaxaabb -- collision
+txd                    bbbbbbbb -- JAM
+
+-- Second attempt
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    e3b0d9f1 -- crc
+
+
+
+-- write transmit complete status
+dma_wr f000000c c0000020 -- write used bit (wrap still set!)
+
+
+apbrd(int) 24 00000080  "TEST 4 COMPLETE"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- tx status - frame transmitted, collision and tx_go
+apbwr      14 00000022  -- clear tx status
+
+
+
+
+-- ************************************************************************** --
+-- TEST 5:
+-- Try a collision on the second buffer of a six-buffer frame which wraps 
+-- after the first buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps.
+-- ************************************************************************** --
+
+-- first transmission attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd f000001c 40000020 -- wrap set mid frame, length 32 bytes
+dma_rd f0000018 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 11111111
+dma_rd 98765004 22222222
+dma_rd 98765008 33333333
+dma_rd 9876500c 44444444
+dma_rd 98765010 55555555
+dma_rd 98765014 66666666
+dma_rd 98765018 77777777
+dma_rd 9876501c 88888888
+
+dma_rd effffff4 00000020 -- length 32 bytes
+dma_rd effffff0 98765100 -- dma reads pointer of 98765100 (Check that it still wraps!)
+dma_rd 98765100 99999999
+dma_rd 98765104 aaaaaaaa
+dma_rd 98765108 bbbbbbbb
+dma_rd 9876510c cccccccc
+dma_rd 98765110 dddddddd
+dma_rd 98765114 eeeeeeee
+dma_rd 98765118 ffffffff
+dma_rd 9876511c 00000000
+
+dma_rd effffffc 00000020 -- length 32 bytes
+dma_rd effffff8 98765200 -- dma reads pointer of 98765200
+dma_rd 98765200 11111111
+dma_rd 98765204 22222222
+dma_rd 98765208 33333333
+dma_rd 9876520c 44444444
+dma_rd 98765210 55555555
+dma_rd 98765214 66666666
+dma_rd 98765218 77777777
+dma_rd 9876521c 88888888
+
+dma_rd f0000004 00000020 -- length 32 bytes
+dma_rd f0000000 98765300 -- dma reads pointer of 98765300
+dma_rd 98765300 99999999
+dma_rd 98765304 aaaaaaaa
+dma_rd 98765308 bbbbbbbb
+dma_rd 9876530c cccccccc
+dma_rd 98765310 dddddddd
+dma_rd 98765314 eeeeeeee
+dma_rd 98765318 ffffffff
+dma_rd 9876531c 00000000
+
+dma_rd f000000c 00000020 -- length 32 bytes
+dma_rd f0000008 98765400 -- dma reads pointer of 98765400
+dma_rd 98765400 11111111
+dma_rd 98765404 22222222
+dma_rd 98765408 33333333
+dma_rd 9876540c 44444444
+dma_rd 98765410 55555555
+dma_rd 98765414 66666666
+dma_rd 98765418 77777777
+dma_rd 9876541c 88888888
+
+dma_rd f0000014 00008020 -- end of frame set, length 32 bytes
+dma_rd f0000010 98765500 -- dma reads pointer of 98765500
+dma_rd 98765500 99999999
+dma_rd 98765504 aaaaaaaa
+dma_rd 98765508 bbbbbbbb
+dma_rd 9876550c cccccccc
+dma_rd 98765510 dddddddd
+dma_rd 98765514 eeeeeeee
+dma_rd 98765518 ffffffff
+dma_rd 9876551c 00000000
+
+-- First attempt
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222x2233 -- collision
+txd                    33333333 -- JAM
+
+
+-- Second attempt
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    e3b0d9f1 -- crc
+
+-- write transmit complete status
+dma_wr f000001c c0000020 -- write used bit (wrap still set!)
+
+
+apbrd(int) 24 00000080  "TEST 5 COMPLETE"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- tx status - frame transmitted, collision and tx_go
+apbwr      14 00000022  -- clear tx status
+
+
+
+-- ************************************************************************** --
+-- TEST 6:
+-- Try a collision on the first buffer of a six-buffer frame which wraps 
+-- after the first buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps.
+-- ************************************************************************** --
+
+-- first transmission attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd f000001c 40000040 -- wrap set mid frame, length 64 bytes (longer to get col in 1st buffer)
+dma_rd f0000018 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 11111111
+dma_rd 98765004 22222222
+dma_rd 98765008 33333333
+dma_rd 9876500c 44444444
+dma_rd 98765010 55555555
+dma_rd 98765014 66666666
+dma_rd 98765018 77777777
+dma_rd 9876501c 88888888
+dma_rd 98765020 99999999
+dma_rd 98765024 aaaaaaaa
+dma_rd 98765028 bbbbbbbb
+dma_rd 9876502c cccccccc
+dma_rd 98765030 dddddddd
+dma_rd 98765034 eeeeeeee
+dma_rd 98765038 ffffffff
+dma_rd 9876503c 00000000
+
+dma_rd effffff4 00000020 -- length 32 bytes
+dma_rd effffff0 98765100 -- dma reads pointer of 98765100 (Check that it still wraps!)
+dma_rd 98765100 99999999
+dma_rd 98765104 aaaaaaaa
+dma_rd 98765108 bbbbbbbb
+dma_rd 9876510c cccccccc
+dma_rd 98765110 dddddddd
+dma_rd 98765114 eeeeeeee
+dma_rd 98765118 ffffffff
+dma_rd 9876511c 00000000
+
+dma_rd effffffc 00000020 -- length 32 bytes
+dma_rd effffff8 98765200 -- dma reads pointer of 98765200
+dma_rd 98765200 11111111
+dma_rd 98765204 22222222
+dma_rd 98765208 33333333
+dma_rd 9876520c 44444444
+dma_rd 98765210 55555555
+dma_rd 98765214 66666666
+dma_rd 98765218 77777777
+dma_rd 9876521c 88888888
+
+dma_rd f0000004 00000020 -- length 32 bytes
+dma_rd f0000000 98765300 -- dma reads pointer of 98765300
+dma_rd 98765300 99999999
+dma_rd 98765304 aaaaaaaa
+dma_rd 98765308 bbbbbbbb
+dma_rd 9876530c cccccccc
+dma_rd 98765310 dddddddd
+dma_rd 98765314 eeeeeeee
+dma_rd 98765318 ffffffff
+dma_rd 9876531c 00000000
+
+dma_rd f000000c 00000020 -- length 32 bytes
+dma_rd f0000008 98765400 -- dma reads pointer of 98765400
+dma_rd 98765400 11111111
+dma_rd 98765404 22222222
+dma_rd 98765408 33333333
+dma_rd 9876540c 44444444
+dma_rd 98765410 55555555
+dma_rd 98765414 66666666
+dma_rd 98765418 77777777
+dma_rd 9876541c 88888888
+
+dma_rd f0000014 00008020 -- end of frame set, length 32 bytes
+dma_rd f0000010 98765500 -- dma reads pointer of 98765500
+dma_rd 98765500 99999999
+dma_rd 98765504 aaaaaaaa
+dma_rd 98765508 bbbbbbbb
+dma_rd 9876550c cccccccc
+dma_rd 98765510 dddddddd
+dma_rd 98765514 eeeeeeee
+dma_rd 98765518 ffffffff
+dma_rd 9876551c 00000000
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    5555555555x5555d5 -- preamble collision
+txd                     11111111 -- JAM
+
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    171c4f82 -- crc
+
+
+-- write transmit complete status
+dma_wr f000001c c0000040 -- write used bit (wrap still set!)
+
+apbrd(int) 24 00000080  "TEST 6 COMPLETE"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- tx status - frame transmitted, collision and tx_go
+apbwr      14 00000022  -- clear tx status
+
+
+
+
+-- ************************************************************************** --
+-- TEST 7:
+-- Try a collision on the only buffer of a single-buffer frame which wraps 
+-- after the only buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps and then subsequently transmits another
+-- good multi-buffer frame.
+-- ************************************************************************** --
+
+-- first transmission attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd f000001c 40008040 -- wrap set mid frame, EOF length 64 bytes
+dma_rd f0000018 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 11111111
+dma_rd 98765004 22222222
+dma_rd 98765008 33333333
+dma_rd 9876500c 44444444
+dma_rd 98765010 55555555
+dma_rd 98765014 66666666
+dma_rd 98765018 77777777
+dma_rd 9876501c 88888888
+dma_rd 98765020 99999999
+dma_rd 98765024 aaaaaaaa
+dma_rd 98765028 bbbbbbbb
+dma_rd 9876502c cccccccc
+dma_rd 98765030 dddddddd
+dma_rd 98765034 eeeeeeee
+dma_rd 98765038 ffffffff
+dma_rd 9876503c 00000000
+
+-- First attempt
+-- check for correct preamble, SFD, data, pad and crc
+txd    5555555555x5555d5 -- preamble collision
+txd                     11111111 -- JAM
+
+-- Second attempt
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    dd74d865 -- crc
+
+
+-- write transmit complete status
+dma_wr f000001c c0008040 -- write used bit (wrap still set!)
+
+
+apbrd(int) 24 00000080  "TEST 7 COMPLETE"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- tx status - frame transmitted, collision and tx_go
+apbwr      14 00000022  -- clear tx status
+
+
+
+
+
+-- ************************************************************************** --
+-- TEST 8:
+-- Try a collision on the only buffer of a single-buffer frame which wraps 
+-- after the only buffer. This time delay the collision such that the second
+-- frame is starting to be fetched.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps and then subsequently transmits another
+-- good multi-buffer frame.
+-- ************************************************************************** --
+
+-- some zero length buffers to get queue away from base pointer
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd effffff4 00008000 -- zero length & EOF
+dma_rd effffff0 00000000
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd effffffc 00008000 -- zero length & EOF
+dma_rd effffff8 00000000
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd f0000004 00008000 -- zero length & EOF
+dma_rd f0000000 00000000
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd f000000c 00008000 -- zero length & EOF
+dma_rd f0000008 00000000
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd f0000014 00008000 -- zero length & EOF
+dma_rd f0000010 00000000
+
+
+-- first transmission attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd f000001c 40008020 -- wrap set mid frame, EOF length 32 bytes
+dma_rd f0000018 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 11111111
+dma_rd 98765004 22222222
+dma_rd 98765008 33333333
+dma_rd 9876500c 44444444
+dma_rd 98765010 55555555
+dma_rd 98765014 66666666
+dma_rd 98765018 77777777
+dma_rd 9876501c 88888888
+
+
+-- start reading second frame
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd effffff4 40008020 -- length 32 bytes, wrap set
+dma_rd effffff0 98765200 -- dma reads pointer of 98765200
+dma_rd 98765200 99999999
+dma_rd 98765204 aaaaaaaa
+dma_rd 98765208 bbbbbbbb
+dma_rd 9876520c cccccccc
+dma_rd 98765210 dddddddd
+dma_rd 98765214 eeeeeeee
+dma_rd 98765218 ffffffff
+dma_rd 9876521c 00000000
+
+-- First attempt
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d51111111122222222333333x3344 -- collision
+txd                    44444444 -- JAM
+
+-- Second attempt
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    00000000000000000000000000000000 -- padding
+txd                    000000000000000000000000
+txd                    83bf6c33 -- crc
+
+-- write transmit complete status
+dma_wr f000001c c0008020 -- write used bit (wrap still set!)
+
+
+apbrd(int) 24 00000080  "TEST 8 FRAME 1 COMPLETE"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- tx status - frame transmitted, collision and tx_go
+apbwr      14 00000022  -- clear tx status
+
+
+-- Second frame transmission
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d599999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff
+txd                    00000000000000000000000000000000 -- padding
+txd                    00000000000000000000000000000000
+txd                    b11c0768 -- crc
+
+-- write transmit complete status
+dma_wr effffff4 c0008020 -- write used bit (wrap still set!)
+
+
+apbrd(int) 24 00000080  "TEST 8 FRAME 2 COMPLETE"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 00000028  -- tx status - frame transmitted, collision and tx_go
+apbwr      14 00000028  -- clear tx status
+
+
+
+
+-- ************************************************************************** --
+-- TEST 9:
+-- Try a collision on the only buffer of a single-buffer frame which wraps 
+-- after the only buffer.
+-- Check that retry starts at beginning again and successfully transmits the
+-- frame and that the queue still wraps but then reads a used bit.
+-- ************************************************************************** --
+
+-- some zero length buffers to get queue away from base pointer
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd effffff4 00008000 -- zero length & EOF
+dma_rd effffff0 00000000
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd effffffc 00008000 -- zero length & EOF
+dma_rd effffff8 00000000
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd f0000004 00008000 -- zero length & EOF
+dma_rd f0000000 00000000
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd f000000c 00008000 -- zero length & EOF
+dma_rd f0000008 00000000
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd f0000014 00008000 -- zero length & EOF
+dma_rd f0000010 00000000
+
+
+-- first transmission attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd f000001c 40008020 -- wrap set mid frame, EOF length 32 bytes
+dma_rd f0000018 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 11111111
+dma_rd 98765004 22222222
+dma_rd 98765008 33333333
+dma_rd 9876500c 44444444
+dma_rd 98765010 55555555
+dma_rd 98765014 66666666
+dma_rd 98765018 77777777
+dma_rd 9876501c 88888888
+
+
+-- start reading second frame
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd effffff4 80008020 -- used
+dma_rd effffff0 98765200 -- dma reads pointer of 98765200
+-- Collision seen here in second frame
+
+-- First attempt
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d51111111122222222333333x3344 -- collision
+txd                    44444444 -- JAM
+
+-- Second attempt
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    00000000000000000000000000000000 -- padding
+txd                    000000000000000000000000
+txd                    83bf6c33 -- crc
+
+
+-- write transmit complete status
+dma_wr f000001c c0008020 -- write used bit (wrap still set!)
+
+
+apbrd(int) 24 00000088  "TEST 9 COMPLETE"
+                        -- check interrupt status - transmit complete & used
+apbwr      24 00000088  -- clear interrupt status
+apbrd      14 00000023  -- tx status - frame transmitted, collision and used
+apbwr      14 00000023  -- clear tx status
+
+
+
+-- ************************************************************************** --
+--  4. Check statistics for above operations.
+-- ************************************************************************** --
+
+-- check transmit statistics
+apbrd     100 000005bc  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 0000000a  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 0000000a  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000003  -- check frames transmitted 64
+apbrd     11C 00000001  -- check frames transmitted 65-127
+apbrd     120 00000006  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000009  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000002  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(11000)
+

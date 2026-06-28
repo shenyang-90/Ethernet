@@ -1,0 +1,1569 @@
+
+
+--- PAGE 58 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+58
+When the RGMII interface is configured (refer to the configuration options in Section 3 User Defined Options on page 17 for 
+details), it is implemented as a bridge function (GMII to RGMII) and replaces the standard GMII interface as shown in 
+Figure 6. 
+Figure 6: RGMII Interface Include
+6.1.1 Direct Memory Access Interface
+GEM is supplied with an optional DMA interface. When GEM is configured to use the DMA, it is attached to the MAC 
+module’s external FIFO interfaces to provide a scatter gather type capability for packet data storage in an embedded 
+processor system or System on Chip (SoC). If GEM is not configured to use the DMA, then the external FIFO interface is 
+left exposed for connecting to external memory controllers and the DMA is removed to save area.
+When included in GEM, the DMA can be configured in two possible modes: 
+• The first using internal transmit and receive FIFOs implemented as synthesizable flip-flops 
+• The second is a packet buffering mode, where Single-Port or Dual-Port memories are used to buffer multiple frames. 
+Both have identical software and hardware interfaces (although the packet buffer mode reduces software overhead in 
+certain circumstances). 
+6.1.1.1 DMA with Internal Transmit and Receive FIFOs
+The key features of this legacy mode of operation are:
+• Internal transmit/receive FIFO DMA
+• AHB support only
+• Lowest possible latency solution
+5
+10
+rgmii_tx_n_clk
+rgmii_tx_clk_sig
+5
+5
+gmii_txd
+gmii_tx_en
+gmii_tx_er
+rgmii_txd
+rgmii_tx_ctl
+10
+rgmii_tx_clk
+5
+5
+rgmii_rxd, rgmii_rx_ctl
+rgmii_rx_n_clk
+rgmii_rx_clk
+5
+5
+10
+gmii_rxd
+gmii_rx_dv
+gmii_rx_en
+
+
+--- PAGE 59 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+59
+• 32 and 64-bit databus width support
+6.1.1.2 Packet Buffer DMA
+• 32, 64, and 128-bit databus width support
+• 32 or 64-bit address bus width support
+• Easier to guarantee maximum line rate due to the ability to store multiple frames in the packet buffer
+• Makes efficient use of the AHB / AXI interface
+• Support for up to 16 outstanding AXI transactions in flight. These transactions can cross multiple frame transfers 
+providing excellent support for systems with high latency.
+• Optional local descriptor caching to improve performance for AXI systems with high latency. 
+• Full store and forward, or partial store and forward programmable options (partial will cater for shorter latency require-
+ments). Note: Partial store and forward is not supported for an AHB configuration with more than one priority queue. 
+Partial store and forward mode is however supported for AXI configurations with priority queues.
+• Support for Transmit TCP/IP checksum offload 
+• Support for priority queuing
+• Support for TCP/IP advanced offloads to reduce CPU overhead
+• When a collision on the line occurs during transmission, the packet will be automatically replayed directly from the 
+packet buffer memory rather than having to re-fetch through the AHB (full store and forward ONLY)
+• Received errored packets are automatically dropped before any of the packet is presented to external memory (full 
+store and forward ONLY), thus reducing AHB or AXI activity
+• Supports manual RX packet flush capabilities
+• Optional RX packet flush when there is lack of resource
+• Optional burst padding at end of packet and end of buffer to maximize AHB / AXI efficiency
+• Optional 64-bit addressing for Data Buffer start address within Buffer Descriptor Entry
+• Optional TX / RX Timestamp capture to Buffer Descriptor Entry
+• Dual-port or single-port SRAM support
+6.1.1.3 DMA Transactions
+The DMA uses separate transmit and receive lists of buffer descriptors, with each descriptor describing a buffer area in 
+memory. This can allow Ethernet packets to be broken up and scattered around the system memory (multi buffer 
+operation), although one buffer per frame is also permitted.
+The DMA controller performs four types of operation on the AMBA bus. When the GEM DMA is configured in internal FIFO 
+mode, in order of priority these are: 
+1. Receive buffer manager write/read
+2. Transmit data DMA read
+3. Receive data DMA write
+4. Transmit buffer manager write/read
+When the GEM DMA is configured in AHB packet buffer mode, in order of priority these are: 
+1. Receive buffer manager write/read
+2. Transmit buffer manager write/read
+3. Receive data DMA write
+4. Transmit data DMA read
+When using AHB, the bus request signal hbusreq is asserted when the DMA block needs to perform any of these 
+operations. The DMA block takes control of the bus when it sees both hgrant and hready asserted high. 
+
+
+--- PAGE 60 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+60
+When using AXI, all read operations are routed to the AXI read channel and all write operations to the write channel. Both 
+read and write channels may operate simultaneously. Arbitration logic is required when multiple requests are active on the 
+same channel (for example when the transmit DMA requests a transmit data read at the same time the receive DMA 
+requests a receive descriptor read). In these cases, the receive DMA is granted the bus before the transmit DMA. However, 
+the vast majority of requests are either receive data writes or transmit data reads both of which can operate in parallel and 
+can execute simultaneously.
+Transfer size can be programmed to be 32, 64, or 128-bit words using the DMA bus width select bits in the network 
+configuration register, and burst size may be programmed to single access or bursts of 4, 8, 16, or 256 words using the 
+DMA Configuration Register.
+6.1.1.4 Using the AXI Interface
+The highest data throughput and system performance will be met when GEM is configured to use the AXI interface. The 
+GEM’s AXI4 interface provides separate data and address connections for Reads and Writes, which allow simultaneous, 
+bidirectional data transfers. GEM supports multiple outstanding transactions on both the Read and Write address channels, 
+up to a programmable limit (see AXI MAX PIPELINE programmable register in Section 11 Registers on page 146). This 
+means the issuing of Read and Write requests from the GEM DMA (on AXI AR and AW channels) are decoupled from the 
+AXI slave responses (on R and B channels). The issuing of outstanding transactions are allowed to span multiple frames, 
+maintaining high data transfer rates even with very high latency systems (when the transactions can take a very long time 
+to complete).
+To further provide support for high latency systems, the DMA will buffer the descriptor accesses locally to avoid the 
+underlying DMA from pausing while descriptor transactions are completed by the system fabric. 
+• TX and RX descriptor reads are issued up-front and stored in a local buffer to feed the underlying DMA when required. 
+This optimizes performance and avoids the need for the underlying DMA to pause while new descriptor fetches are 
+sent to the system bus.  The size of the descriptor read buffers are configurable. For low-latency systems, these buffers 
+can be configured small. The buffer descriptor list should not contain fewer entries than the size of the descriptor read 
+buffers.
+• TX and RX descriptor writes issued by the underlying DMA are buffered locally to avoid holding up the underlying DMA 
+if and when the system delays the completion of descriptor writes. The size of the descriptor write buffers are configu-
+rable. For low-latency systems, these buffers can be configured small. Note: A descriptor write transaction is not con-
+sidered complete until the ‘B’ response associated with that transaction has been collected from the fabric.
+By providing these descriptor buffers, the DMA does not need to use AXI ID’s to support high latency systems. AXI ID’s 
+could have been used for example to differentiate between traffic types. This could theoretically ensure that transactions 
+issued by the underlying DMA that require to be completed before normal data-flow can continue are given unique ID’s that 
+could be processed out-of-order by the system fabric (the traffic types that would require this would be the traffic associated 
+with descriptor accesses). The use of AXI ID’s requires parallel out-of-order completion support in the system fabric and 
+slaves. Any fabric or system limitations with regards to out-of-order support would need to be carefully analyzed to ensure 
+system throughput could be guaranteed. GEM does not provide AXI ID support and encompasses its own buffering to 
+support high latency systems using a single ID.
+The maximum burst lengths GEM uses are programmable. Single, bursts up to 4, 8, 16, or 256 can be selected (256 is 
+supported by AXI4 only). With a 64-bit datapath and a burst length setting of 256, up to 2KB transfers can be made with a 
+single request. The burst length is controlled via the DMA configuration register.
+The DMA adheres to the AXI4 specification and will never issue transactions that break a 4KB boundary. For example, if 
+the burst length is set to 256, a packet to be transmitted is 100 bytes long, the datapath is 64-bits wide, and the data is 
+located in system memory 60 bytes from a 4KB boundary, the GEM DMA will issue two burst requests, one of length 7 and 
+the other of length 5.
+GEM provides an AXI4 interface by default, although it is possible to connect this to an AXI3 system as necessary. Refer to 
+the AMBA specification for details on how to connect AXI3 slaves to an AXI4 master.
+6.1.1.5 Partial Store and Forward Using Packet Buffer DMA
+
+
+--- PAGE 61 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+61
+When the DMA is configured to use SRAM-based packet buffers, it can be programmed into a low-latency mode, known as 
+partial store and forward. This allows for a reduced latency as the full packet is not buffered before forwarding. Note: This 
+option is only available when the device is configured for full-duplex operation and when not using multi buffer frames.
+This feature is enabled via the TX and RX partial store and forward programmable registers. When the transmit partial store 
+and forward mode is activated, the transmitter will only begin to forward the packet to the MAC when there is enough 
+packet data stored in the packet buffer. Likewise, when the receive partial store and forward mode is activated, the receiver 
+will only begin to forward the packet to the external AHB or AXI slave when enough packet data is stored in the packet 
+buffer.
+The amount of packet data required to activate the forwarding process is programmable via watermark registers which are 
+located at the same address as the partial store and forward enable bits. Note: The minimum operational value for the TX 
+partial store and forward watermark is 20. There is no operational limit for the RX partial store and forward watermark. To 
+reduce the bandwidth requirements of the receive buffer manager the receive buffer size can be increased above its default 
+value of 128 bytes by writing to the DMA configuration register. 
+Enabling partial store and forward is a useful means to reduce latency, but there are performance implications. In essence, 
+the packet buffer DMA will start behaving in a similar way to the internal FIFO DMA mode when partial store and forward is 
+enabled.
+6.1.1.6 Locked Accesses When Using AHB and AHB Bus Ownership
+The GEM DMA has been designed to support the loss of hgrant at any time during transmit or receive AHB activities. 
+However, there are certain implications tied to losing hgrant that as the system integrator, you should be aware of:
+• During an AHB data burst, the GEM DMA will drive hburst appropriately. The loss of hgrant during a burst will cause all 
+remaining AHB accesses of that burst to be cancelled thereby breaking the burst. Although the remaining accesses will 
+be restarted when the grant is re-established, an AHB protocol error with respect to hburst will have occurred. If the 
+system integrator requires the use of hburst and this behaviour is not acceptable, then the loss of grant during data 
+bursts must be avoided.
+• When the GEM DMA is configured to be in the internal FIFO mode, or in the packet buffer partial store and forward 
+mode there is a finite time that the DMA has to offload data to the AHB in the receive direction or fetch data from the 
+AHB in the transmit direction. If hgrant is lost during DMA data transfers in a very frequent and/or prolonged manner, 
+there is potential for internal FIFO overflows or underflows causing occasional packet loss. The frequency of this 
+scenario occurring can be minimized by increasing the size of the internal DMA buffers.
+• When the GEM DMA is configured to be in the packet buffer mode (and in full store and forward mode), all packets are 
+fully buffered before being passed between the DMA and MAC. Therefore, the loss of hgrant while in this mode has no 
+effect on data integrity.
+• When the GEM DMA is configured in internal FIFO mode the hlock output of the DMA is asserted together with      
+hbusreq. By connecting this hlock output to the AHB system arbiter, the grant to the DMA should never be removed 
+during a locked transfer and consequently any potential issues discussed above associated with losing the grant will 
+never occur. If you wish to deassert hgrant during certain operating conditions, the hlock output of GEM should be left 
+unconnected. When the GEM DMA is configured to be in the packet buffer mode, the hlock output of the DMA is tied 
+low.
+6.1.1.7 Receive DMA Buffers
+Received frames, optionally including FCS, are written to receive buffers stored in AHB or AXI memory. The receive buffer 
+depth is programmable in the range of 64 bytes to 16320 bytes. If received frames are being routed to different priority 
+queues (via the packet inspection screeners – refer to Section 6.1.1.16 Priority Queuing in the DMA on page 79), it is 
+possible to program different receive buffer depths for each queue:
+• For queue 0, the receive buffer depth is programmed through the DMA Configuration register (offset 0x10)
+• For the other queues, they are programmed in the independent queue configuration registers (starting from offset 
+0x4a0)
+• The default is 128 bytes 
+
+
+--- PAGE 62 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+62
+The start location for each receive buffer is stored in memory in a list of receive buffer descriptors at an address location 
+pointed to by the receive buffer queue pointer. The base address for the receive buffer queue pointer is configured in 
+software using the receive buffer queue base address register(s). For 64-bit addressing mode, the upper receive queue 
+base address register at 0x04d4 is used to set the upper 32 bits of the receive buffer descriptor queue base address, and 
+the upper transmit queue base address register at 0x04c8 is used to set the upper 32 bits of the transmit buffer descriptor 
+queue base address. With 64-bit addressing, there is a restriction that all the descriptors must be located within a region of 
+memory that does not cross a 4GB region, in other words the upper 32 bits of the 64-bit address must be fixed. This is only 
+true of the descriptors and not the packet data which can be anywhere in the 64-bit address space.
+The number of words in each buffer descriptor (BD) is dependent on the operating mode. Each BD word is defined as 32-
+bits.
+The first two words (Word 0 and Word 1) are used for all BD modes.
+In receive Extended Buffer Descriptor Mode (DMA configuration register bit 28 = 1), two BD words are added for 64 bit 
+addressing mode and two BD words are added for timestamp capture. There are therefore either two, four or six BD words 
+in each BD entry depending on operating mode, and every BD entry will have the same number of words. To summarize:
+• Every descriptor will be 64-bit wide when 64-bit addressing is disabled and extended buffer descriptor mode is disabled
+• Every descriptor will be 128-bit wide when 64-bit addressing is enabled and extended buffer descriptor mode is 
+disabled
+• Every descriptor will be 128-bit wide when 64-bit addressing is disabled and extended buffer descriptor mode is 
+enabled
+• Every descriptor will be 192-bit wide when 64-bit addressing is enabled and extended buffer descriptor mode is 
+enabled
+The following description details the functionality of Word 0 and Word 1, but Word 2 must also be set when using 64-bit 
+addressing mode. Each list entry consists of the same first two words. The first contains the start location of the receive 
+buffer and the second the main receive status. If the length of a receive frame exceeds the DMA buffer length, the status 
+word for the used buffer is written with zeroes except for the “start of frame” bit, which is always set for the first buffer in a 
+frame. Bit zero of the address field is written to 1 to show the buffer has been used. The receive buffer manager then reads 
+the location of the next receive buffer and fills that with the next part of the received frame data. Receive buffers are filled 
+until the frame is complete and the final buffer descriptor status word contains the complete frame status. Refer to Table 26, 
+Table 27, and Table 28 for details of the receive buffer descriptor list.
+When using receive descriptor timestamp capture, (DMA configuration register bit 28 = 1) bit 2 of Word 0 is used to indicate 
+a valid timestamp has been captured in the BD. The use of bit 2 for this purpose also necessitates the Data Buffer being 
+located on 64-bit address boundaries. Also note the timestamp can be considered status and will only be present for the 
+final buffer descriptor of a frame. 
+Each receive buffer start location is a word address. The start of the first buffer in a frame can be offset by up to three bytes 
+depending on the value written to bits 14 and 15 of the network configuration register. Note that when the `define 
+gem_pbuf_rsc has been set then these bits are not used. For 64-bit datapath, the start of the frame can be offset by up to a 
+further four bytes if bit 2 of the DMA receive buffer start location in the buffer descriptor is set (This is applicable to the 
+packet buffer DMA only – for the FIFO based DMA configured with a 64bit datapath, bit 2 of the buffer start location is 
+ignored). If the start location of the buffer is offset the available length of the first buffer is reduced by the corresponding 
+number of bytes.
+Table 26: Receive Buffer Descriptor Entry
+Bit
+Function
+Word 0
+31:3
+Address [31:3] of beginning of buffer
+2
+Address [2] of beginning of buffer.
+Or
+In Extended Buffer Descriptor Mode (DMA configuration register[28] = 1), indicates a valid timestamp 
+in the BD entry
+
+
+--- PAGE 63 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+63
+1
+Wrap - marks last descriptor in receive buffer descriptor list.
+0
+Ownership - needs to be zero for GEM to write data to the receive buffer. GEMsets this to 1 once it has 
+successfully written a frame to memory. Software has to clear this bit before the buffer can be used 
+again.
+Word 1
+31
+Global all ones broadcast address detected. 
+30
+Multicast hash match.
+29
+Unicast hash match.
+28
+External address match. Note if the packet buffer mode and the number of configured specific address 
+filters is greater than four in gem_gxl_defs.v then external address matching is not reported in this bit 
+and instead it is set if there has been a match in the first eight specific address registers. Bit 27 is then 
+used along with bits 26:25 to indicate which register matched.
+27
+Specific address register match found, bit 25 and bit 26 indicates which specific address register 
+causes the match. See note for bit 28 above.
+26:25
+Specific address register match. Encoded as follows:
+• 00 - Specific address register 1 match
+• 01 - Specific address register 2 match
+• 10 - Specific address register 3 match
+• 11 - Specific address register 4 match
+If more than one specific address is matched only one is indicated with priority 4 down to 1.
+24
+This bit has a different meaning depending on whether RX checksum offloading is enabled. 
+With RX checksum offloading disabled: (bit 24 clear in Network Configuration)
+Type ID register match found, bit 22 and bit 23 indicate which type ID register causes the match.
+With RX checksum offloading enabled: (bit 24 set in Network Configuration)
+0 - the frame was not SNAP encoded and/or had a VLAN tag with the CFI bit set.
+1 - the frame was SNAP encoded and had either no VLAN tag or a VLAN tag with the CFI bit not set.
+23:22
+This bit has a different meaning depending on whether RX checksum offloading is enabled. 
+With RX checksum offloading disabled: (bit 24 clear in Network Configuration)
+Type ID register match. Encoded as follows:
+• 00 -Type ID register 1 match
+• 01 -Type ID register 2 match
+• 10 -Type ID register 3 match
+• 11 -Type ID register 4 match
+If more than one Type ID is matched only one is indicated with priority 4 down to 1. 
+With RX checksum offloading enabled: (bit 24 set in Network Configuration)
+• 00 -Neither the IP header checksum nor the TCP/UDP checksum was checked.
+• 01 - The IP header checksum was checked and was correct. Neither the TCP nor UDP checksum 
+was checked.
+• 10 -Both the IP header and TCP checksum were checked and were correct.
+• 11 -Both the IP header and UDP checksum were checked and were correct.
+21
+VLAN tag detected — type ID of 0x8100.
+For packets incorporating the stacked VLAN processing feature, this bit will be set if the second VLAN 
+tag received has a type ID of 0x8100
+20
+Priority tag detected — type ID of 0x8100 and null VLAN identifier. 
+For packets incorporating the stacked VLAN processing feature, this bit will be set if the second VLAN 
+tag received has a type ID of 0x8100 and a null VLAN identifier.
+Table 26: Receive Buffer Descriptor Entry (Continued)
+Bit
+Function
+
+
+--- PAGE 64 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+64
+When 64-bit addressing mode is enabled, Table 27 identifies the added descriptor words.
+19:17
+When bit 15 (End of frame) and bit 21 (VLAN tag) are set, these bits represent the VLAN priority.
+When header/data splitting is enabled (via bit 5 of the DMA configuration register, offset 0x10) bit 17 
+indicates this descriptor is pointing to the last buffer of the header. 
+16
+This bit has a different meaning depending on the state of bit 13 (report bad FCS in bit 16 of word 1 of 
+the receive buffer descriptor) and bit 5 (header/data splitting) of the DMA Configuration register (offset 
+0x10).
+When header/data splitting is enabled and this buffer descriptor (BD) is not the last BD of the frame (as 
+indicated in bit 15 of this BD), this bit will indicate that the BD is pointing to a data buffer containing 
+header bytes.
+When this BD is the last BD of the frame (as indicated in bit 15 of this BD), and bit 13 of the DMA 
+configuration register is set, this bit represents FCS/CRC error.
+When this BD is the last BD of the frame (as indicated in bit 15 of this BD), and bit 13 of the DMA 
+configuration register is clear, and the received frame is VLAN tagged, this bit represents the 
+Canonical format indicator (CFI).
+15
+End of frame - when set the buffer contains the end of a frame. 
+If end of frame is not set, then the only valid status bit (unless header/data splitting is enabled) is start 
+of frame (bit 14). If header/data splitting is enabled, then bits 16 and 17 are also valid status bits when 
+this bit is not set.
+14
+Start of frame - when set the buffer contains the start of a frame. 
+If both bits 15 and 14 are set, the buffer contains a whole frame.
+13
+This bit has a different meaning depending on whether jumbo frames and ignore FCS mode are 
+enabled. If neither mode is enabled this bit will be zero. 
+With jumbo frame mode enabled: (bit 3 set in Network Configuration Register)
+Additional bit for length of frame (bit[13]), that is concatenated with bits[12:0]
+With ignore FCS mode enabled and jumbo frames disabled: (bit 26 set in Network Configuration 
+Register and bit 3 clear in Network Configuration Register)
+This indicates per frame FCS status as follows:
+• 0 – Frame had good FCS
+• 1 – Frame had bad FCS, but was copied to memory as ignore FCS enabled
+12:0
+When header/data splitting enabled (via bit 5 of the DMA configuration register, offset 0x10) and bit 17 
+is set (last buffer of header), these bits represent the length of the header in bytes.
+When bit 15 (End of frame) is set, these bits represent the length of the received frame which may or 
+may not include FCS depending on whether FCS discard mode is enabled.
+With FCS discard mode disabled: (bit 17 clear in Network Configuration Register)
+Least significant 12-bits for length of frame including FCS. If jumbo frames are enabled, these 12-bits 
+are concatenated with bit[13] of the descriptor above.
+With FCS discard mode enabled: (bit 17 set in Network Configuration Register)
+Least significant 12-bits for length of frame excluding FCS. If jumbo frames are enabled, these 12-bits 
+are concatenated with bit[13] of the descriptor above.
+Table 27: Receive Buffer Descriptor Entry − 64-Bit Addressing
+Bit
+Function
+Word 2 (64-bit addressing)
+31:0
+Upper 32-bit address of Data Buffer
+Word 3 (64-bit addressing)
+31:0
+Unused
+Table 26: Receive Buffer Descriptor Entry (Continued)
+Bit
+Function
+
+
+--- PAGE 65 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+65
+When Descriptor Timestamp Capture mode is enabled, Table 28 identifies the added descriptor words:
+To receive frames, the receive buffer descriptors must be initialized by writing an appropriate address to bits 31:2 (or 31:3 
+for timestamp capture mode) in the first word of each list entry. Bit 0 must be written with zero. Bit 1 is the wrap bit and 
+indicates the last entry in the buffer descriptor list.
+The start location of the receive buffer descriptor list must be written with the receive buffer queue base address before 
+reception is enabled (receive enable in the network control register). Once reception is enabled, any writes to the receive 
+buffer queue base address register are ignored. When read, it will return the current pointer position in the descriptor list, 
+though this is only valid and stable when receive is disabled.
+If the filter block indicates that a frame should be copied to memory, the receive data DMA operation starts writing data into 
+the receive buffer. If an error occurs, the buffer is recovered.
+An internal counter within GEM represents the receive buffer queue pointer and it is not visible through the CPU interface. 
+The receive buffer queue pointer increments by two, four, or six words after each buffer has been used, depending on the 
+descriptor size. It re-initializes to the receive buffer queue base address if any descriptor has its wrap bit set. Note: This 
+operation is different from Cadence’s Ethernet MAC 10/100 (MACB), which will also wrap after 1024 buffers have been 
+used.
+As receive buffers are used, the receive buffer manager sets bit zero of the first word of the descriptor to logic one 
+indicating the buffer has been used.
+Software should search through the “used” bits in the buffer descriptors to find out how many frames have been received, 
+checking the start of frame and end of frame bits.
+When the DMA is configured for internal FIFO mode, received frames are written out to the AHB buffers as soon as the 
+frame is matched by the filtering logic even though there may still be more data to be received. Similarly, when the DMA is 
+configured in the packet buffer partial store and forward mode, received frames are written out to the AHB/AXI buffers as 
+soon as enough frame data exists in the packet buffer. For both cases, this may mean several full buffers are used before 
+some error conditions can be detected. If a receive error is detected the receive buffer currently being written will be 
+recovered. Previous buffers will not be recovered. As an example, when receiving frames with CRC errors or excessive 
+length, it is possible that a frame fragment might be stored in a sequence of receive buffers. Software can detect this by 
+looking for start of frame bit set in a buffer following a buffer with no end of frame bit set.
+For a properly working 10/100/1000 Ethernet system, there should be no excessive length frames or frames greater than 
+128 bytes with CRC errors. Collision fragments will be less than 128-bytes long, therefore it will be a rare occurrence to find 
+a frame fragment in a receive buffer, when using the default value of 128 bytes for the receive buffers size.
+Table 28: Receive Buffer Descriptor Entry − Timestamp Capture
+Bit
+Function
+Word 2 (64-bit addressing) or Word 4 (64-bit addressing)
+31:30
+Timestamp seconds[1:0] (See Note:1)
+29:0
+Timestamp nanosecs [29:0] (See Note:1)
+Word 3 (64-bit addressing) or Word 5 (64-bit addressing)
+31:10
+Unused
+9:0
+Timestamp seconds[11:2] (See Note:1) (prior to release 1p08f1 this was [5:2])
+Note1: The timestamp is mode is controlled using the rx_bd_control_register. The RX Descriptor 
+Timestamp Insertion mode bits are defined as:
+• 00: TS insertion disable
+• 01: TS inserted for PTP Event Frames only 
+• 10: TS inserted for All PTP Frames only 
+• 11: TS insertion for All Frames
+The timestamp bits are written back to the last buffer descriptor of a frame only. 
+
+
+--- PAGE 66 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+66
+When in packet buffer full store and forward mode only good received frames are written out of the DMA, so no fragments 
+will exist in the buffers due to MAC receiver errors. There is still the possibility of fragments due to DMA errors, for example 
+used bit read on the second buffer of a multi-buffer frame.
+If bit zero of the receive buffer descriptor is already set when the receive buffer manager reads the location of the receive 
+buffer, then the buffer has been already used and cannot be used again until software has processed the frame and 
+cleared bit zero. In this case, the “buffer not available” bit in the receive status register is set and an interrupt triggered. The 
+receive resource error statistics register is also incremented.
+When the DMA is configured in the packet buffer full store and forward mode, the user can optionally select whether 
+received frames should be automatically discarded when no buffer resource is available. This feature is selected via bit 24 
+of the DMA Configuration register (by default, the received frames are not automatically discarded). If this feature is off, 
+then received packets will remain to be stored in the SRAM based packet buffer until AHB or AXI buffer resource next 
+becomes available. This may lead to an eventual packet buffer overflow if packets continue to be received when bit zero 
+(used bit) of the receive buffer descriptor remains set. Note: After a used bit has been read, the receive buffer manager will 
+reread the location of the receive buffer descriptor every time a new packet is received. When the DMA is not configured in 
+the packet buffer full store and forward mode and a used bit is read, the frame currently being received will be automatically 
+discarded.
+When the DMA is configured in the packet buffer full store and forward mode, a receive overrun condition occurs when the 
+receive SRAM based packet buffer is full, or because an AMBA error occurred (via hresp or bresp). In all other modes, a 
+receive overrun condition occurs when either the AHB/AXI bus was not granted quickly enough, or because an AMBA AHB 
+or AXI error occurred, or because a new frame has been detected by the receive block when the status update or write 
+back for the previous frame has not yet finished. For a receive overrun condition, the receive overrun interrupt is asserted 
+and the buffer currently being written is recovered. The next frame that is received whose address is recognized reuses the 
+buffer.
+When the DMA is configured for packet buffer mode, a write to bit 18 of the network control register will force a packet from 
+the external SRAM based receive packet buffer to be flushed. This feature is only acted upon when the RX DMA is not 
+currently writing packet data out to memory– i.e. it is in an IDLE state. If the RX DMA is active, a write to this bit is ignored.
+When the DMA is configured for packet buffer mode, the upper bits of the data buffer address stored in bits 31:2 in the first 
+word of each list entry can be dynamically altered in real-time without physically changing the external memory holding the 
+list entry.  This feature is useful if the user needs to select the destination based on CPU usage or other flow control 
+hardware.  It is achieved using a MUX structure whereby the user can define whether the upper 4 bits of the 32-bit data-
+buffer AHB or AXI address should come from the descriptor list entry or from a programmable register. For further details, 
+refer to the “Receive Data Buffer Address Mask” programmable register in Section 11 Registers on page 146. Note: Any 
+changes to this register will be ignored while the DMA is currently processing a receive packet. It will only affect the next full 
+packet to be written to AHB or AXI memory.
+6.1.1.8 Transmit Buffers
+Frames to transmit are stored in one or more transmit buffers. Transmit frames can be between 14 and 16383 bytes long, 
+so it is possible to transmit frames longer than the maximum length specified in the IEEE 802.3 standard. It should be noted 
+that zero length buffers are allowed and that the maximum number of buffers permitted for each transmit frame is 128.
+The start location for each transmit buffer is stored in AHB or AXI memory in a list of transmit buffer descriptors at a location 
+pointed to by the transmit buffer queue pointer. The base address for this queue pointer is set in software using the transmit 
+buffer queue base address register(s). For 64-bit addressing mode, the upper transmit queue base address register at 
+0x04c8 is used to set the upper 32 bits of the transmit buffer descriptor queue base address. With 64-bit addressing, there 
+is a restriction that all the descriptors must be located within a region of memory that does not cross a 4GB region, in other 
+words the upper 32 bits of the 64-bit address must be fixed. The actual 32 bits chosen for the upper bits are programmed in 
+the upper receive queue base address register at 0x04d4. This is only true of the descriptors and not the packet data which 
+can be anywhere in the 64-bit address space.
+The number of words in each buffer descriptor (BD) is dependent on the operating mode.
+The first two words (Word 0 and Word 1) are used for all BD modes.
+
+
+--- PAGE 67 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+67
+In transmit Extended Buffer Descriptor Modes (bit 29 in the DMA configuration register), two BD words are added for 64 bit 
+addressing mode and two BD words are added for timestamp capture. There are therefore either two, four or six BD words 
+in each BD entry depending on operating mode, and every BD entry will have the same number of words. To summarize:
+• Every descriptor will be 64-bit wide when 64-bit addressing is disabled and extended buffer descriptor mode is disabled
+• Every descriptor will be 128-bit wide when 64-bit addressing is enabled and extended buffer descriptor mode is 
+disabled
+• Every descriptor will be 128-bit wide when 64-bit addressing is disabled and extended buffer descriptor mode is 
+enabled
+• Every descriptor will be 192-bit wide when 64-bit addressing is enabled and extended buffer descriptor mode is 
+enabled
+The following description details the functionality of Word 0 and Word 1, but Word 2 must also be set when using 64-bit 
+addressing mode.
+Each list entry consists of the same first two words. The first is the byte address of the transmit buffer and the second 
+containing the transmit control and status. For the packet buffer DMA, the start location for each AHB or AXI buffer is a byte 
+address, the bottom bits of the address being used to offset the start of the data from the data-word boundary (i.e. bits 2,1 
+and 0 are used to offset the address for 64-bit datapaths). For the FIFO based DMA configured with a 32-bit datapath the 
+address of the buffer is also a byte address. For bus widths of 64 or 128-bits however, the address of the buffer must be 
+aligned to the correct 64-bit or 128-bit boundary, plus an offset of less than 4 bytes (Note: This alignment restriction in FIFO 
+based DMA mode only should be sufficient for applications as the main purpose is to allow alignment of the encapsulated 
+IP packet - Given the 14 bytes of MAC encapsulation, an offset of 2 will always align the IP header to a 128-bit boundary).
+Frames can be transmitted with or without automatic CRC generation. If CRC is automatically generated, pad will also be 
+automatically generated to take frames to a minimum length of 64 bytes. When CRC is not automatically generated (as 
+defined in word 1 of the transmit buffer descriptor or through the control bus of the external FIFO interface), the frame is 
+assumed to be at least 64 bytes long and pad is not generated.
+An entry in the transmit buffer descriptor list is described in Table 29.
+To transmit frames, the buffer descriptors must be initialized by writing an appropriate byte address to bits 31:0 in the first 
+word of each descriptor list entry to indicate the location of the data to be transmitted. 
+The second word of the transmit buffer descriptor is initialized with control information that indicates the length of the frame, 
+whether or not the MAC is to append CRC and whether the buffer is the last buffer in the frame. It also contains the “used” 
+and “wrap” bits. It is very important that the transmit buffer descriptor list contains at least one entry with its “used” 
+bit set. This is because the transmit DMA can read the buffer descriptor list very fast and will loop round retransmitting data 
+when it encounters the wrap bit. When initializing the descriptor list the user needs add an additional buffer descriptor with 
+its “used” bit set after the buffer descriptors which describe the data to be transmitted.
+Also if descriptor read buffering has been configured (with `define gem_axi_tx_descr_rd_buff_bits), the transmit buffer 
+descriptor list should not contain fewer entries than the size of the descriptor read buffers.
+After transmission the status bits are written back to the second word of the first buffer descriptor along with the used bit. Bit 
+31 is the used bit which must be zero when the control word is read if transmission is to take place. It is written to one once 
+the frame has been transmitted. Bits[29:20] indicate various transmit error conditions. Bit 23 indicates a valid timestamp 
+has been captured in the BD. Bit 30 is the wrap bit which can be set for any buffer within a frame. If no wrap bit is 
+encountered the queue pointer continues to increment. This operation is different from Ethernet MAC 10/100 (MACB) from 
+Cadence, which will wrap after 1024 buffers have been used.
+The transmit buffer queue base address register can only be updated whilst transmission is disabled or halted; otherwise 
+any attempted write will be ignored. When transmission is halted the transmit buffer queue pointer will maintain its value. 
+Therefore, when transmission is restarted the next descriptor read from the queue will be from immediately after the last 
+successfully transmitted frame. Whilst transmit is disabled (bit 3 of the network control set low), the transmit buffer queue 
+pointer resets to point to the address indicated by the transmit buffer queue base address register (disabling transmit resets 
+
+
+--- PAGE 68 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+68
+the pointer however reading the transmit queue pointer register through the APB interface may still return the old value until 
+transmission is restarted). Note: Disabling receive does not have the same effect on the receive buffer queue pointer. 
+Once the transmit queue is initialized, transmit is activated either by writing to the transmit start bit (bit 9) of the network 
+control register, or in hardware by toggling the trigger_dma_tx_start input. Transmit is halted when a buffer descriptor with 
+its used bit set is read, a transmit error occurs, or by writing to the transmit halt bit of the network control register. 
+Transmission is suspended if a pause frame is received while the pause enable bit is set in the network configuration 
+register. Rewriting the start bit while transmission is active is allowed. This is implemented with a tx_go variable which is 
+readable in the transmit status register at bit location 3. The tx_go variable is reset when: 
+• Transmit is disabled
+• A buffer descriptor with its ownership bit set is read
+• Bit 10, tx_halt, of the network control register is written
+• There is a transmit error such as too many retries, late collision (gigabit mode only) or a transmit underrun
+To set tx_go write to bit 9, tx_start, of the network control register. Transmit halt does not take effect until any ongoing 
+transmit finishes.
+If the DMA is configured for internal FIFO mode and a collision occurs during transmission of a multi-buffer frame 
+transmission will automatically restart from the first buffer of the frame. For packet buffer mode, the entire contents of the 
+frame are read into the transmit packet buffer memory, so the retry attempt will be replayed directly from the packet buffer 
+memory rather than having to re-fetch through the AHB or AXI.
+If the transmit buffer list is incorrectly set up in such a way that a used bit is read mid-way through a multi buffer frame, 
+transmission will stop. If cut-through is in operation and the MAC has actually starting transmitting the frame which has its 
+used bit set, the MAC treats it as a transmit error, and asserts tx_er truncates the frame and corrupts the FCS.
+Table 29: Transmit Buffer Descriptor Entry − Non-LSO Frame
+Bit
+Function
+Word 0
+31:0
+Byte address of buffer
+Word 1
+31
+Used – must be zero for GEM to read data to the transmit buffer. 
+GEM sets this to one for the first buffer of a frame once it has been successfully transmitted. Software must 
+clear this bit before the buffer can be used again.
+30
+Wrap – marks last descriptor in transmit buffer descriptor list. 
+This can be set for any buffer within the frame.
+29
+Retry limit exceeded, transmit error detected
+28
+Transmit underrun.
+Occurs when the start of packet data has been written into the FIFO and either hresp is not OK, or the 
+transmit data could not be fetched in time, or when buffers are exhausted. This is not set when the DMA is 
+configured for packet buffer mode.
+27
+Transmit frame corruption due to AHB or AXI error – set if an error occurs whilst midway through reading 
+transmit frame from the AHB/AXI, including HRESP or RRESP/BRESP errors and buffers exhausted mid 
+frame (if the buffers run out during transmission of a frame then transmission stops, FCS shall be bad and 
+tx_er asserted). 
+Also set in AHB (not AXI) DMA packet buffer mode if single frame is too large for configured packet buffer 
+memory size.
+26
+Late collision, transmit error detected. 
+Late collisions only force this status bit to be set in gigabit mode.
+25:24
+Reserved.
+23
+For Extended Buffer Descriptor Mode this bit Indicates a timestamp has been captured in the BD. Otherwise 
+Reserved.
+
+
+--- PAGE 69 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+69
+22:20
+Transmit IP/TCP/UDP checksum generation offload errors:
+• 000 - No Error 
+• 001 - The Packet was identified as a VLAN type, but the header was not fully complete, or had an error in it
+• 010 - The Packet was identified as a SNAP type, but the header was not fully complete, or had an error in it
+• 011 - The Packet was not of an IP type, or the IP packet was invalidly short, or the IP was not of type IPv4/
+IPv6
+• 100 - The Packet was not identified as VLAN, SNAP or IP
+• 101 - Non supported packet fragmentation occurred. For IPv4 packets, the IP checksum was generated 
+and inserted
+• 110 - Packet type detected was not TCP or UDP. TCP/UDP checksum was therefore not generated. For 
+IPv4 packets, the IP checksum was generated and inserted
+• 111- A premature end of packet was detected and the TCP/UDP checksum could not be generated
+19:17
+Reserved. 
+Must be set to 3’b000 to disable TSO and UFO
+16
+No CRC to be appended by MAC. 
+When set this implies that the data in the buffers already contains a valid CRC and hence no CRC or 
+padding is to be appended to the current frame by the MAC. 
+This control bit must be set for the first buffer in a frame and will be ignored for the subsequent buffers of a 
+frame. This operation is different from Cadence’s Ethernet MAC 10/100 (Enhanced), which reads the no 
+CRC bit from the final buffer descriptor in the frame.
+Note that this bit must be clear when using the transmit IP/TCP/UDP checksum generation offload, other-
+wise checksum generation and substitution will not occur.
+Note: This bit must also be cleared when TX Partial Store and Forward mode is active.
+15
+Last buffer.
+When set, this bit will indicate the last buffer in the current frame has been reached.
+14
+Reserved.
+13:0
+Length of buffer.
+Word 3 (64-bit addressing)
+31:0
+Unused
+31:0
+Unused
+31:0
+Unused
+Table 30: Transmit Buffer Descriptor Entry − TSO Header Buffer
+Bit
+Function
+Word 0
+31:0
+Byte address of buffer
+Word 1
+31
+Used – must be zero for GEM to read data to the transmit buffer. 
+GEM sets this to one for the first buffer of a frame once it has been successfully transmitted. Software must 
+clear this bit before the buffer can be used again.
+30
+Wrap – marks last descriptor in transmit buffer descriptor list. 
+This can be set for any buffer within the frame.
+29
+Retry limit exceeded, transmit error detected
+28
+Transmit under run – always 0 for TSO
+Table 29: Transmit Buffer Descriptor Entry − Non-LSO Frame (Continued)
+Bit
+Function
+
+
+--- PAGE 70 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+70
+27
+Transmit frame corruption due to AHB or AXI error. 
+Set if an error occurs whilst midway through reading transmit frame from the AHB/AXI, including HRESP or 
+RRESP/BRESP errors and buffers exhausted mid frame (if the buffers run out during transmission of a 
+frame then transmission stops, FCS shall be bad and tx_er asserted). 
+Also set in DMA packet buffer mode if single frame is too large for configured packet buffer memory size.
+26
+Late collision, transmit error detected. 
+Late collisions only force this status bit to be set in gigabit mode.
+25:24
+TCP Stream Identifier. 
+Used to select the hardware counter that is used for TCP sequence number generation.
+23
+For Extended Buffer Descriptor Mode this bit Indicates a timestamp has been captured in the BD. 
+Otherwise Reserved.
+22:20
+Transmit IP/TCP/UDP checksum generation offload errors:
+• 000 - No Error 
+• 001 - The Packet was identified as a VLAN type, but the header was not fully complete, or had an error in 
+it
+• 010 - The Packet was identified as a SNAP type, but the header was not fully complete, or had an error in 
+it
+• 011 - The Packet was not of an IP type, or the IP packet was invalidly short, or the IP was not of type 
+IPv4/IPv6
+• 100 - The Packet was not identified as VLAN, SNAP or IP
+• 101 - Non supported packet fragmentation occurred. For IPv4 packets, the IP checksum was generated 
+and inserted
+• 110Packet type detected was not TCP or UDP. TCP/UDP checksum was therefore not generated. For 
+IPv4 packets, the IP checksum was generated and inserted
+• 111 - A premature end of packet was detected and the TCP/UDP checksum could not be generated
+19
+TCP Sequence Number Source Select
+• 0 – Use sequence number  value from the header buffer for the first small TCP frame and hardware 
+generated sequence number values for subsequent small TCP frames
+• 1 – Use hardware generated sequence number values for all small TCP frames
+18:17
+LSO Control.
+Set to 2’b10 or 2’b11 to enable TSO
+16
+No CRC to be appended by MAC. 
+Must be clear for TSO operation
+15
+Last buffer.
+Must be clear as TSO requires at least one payload buffer
+14
+Reserved.
+13:0
+Length of buffer.
+Table 31: Transmit Buffer Descriptor Entry − TSO Payload Buffer
+Bit
+Function
+Word 0
+31:0
+Byte address of buffer.
+Word 1
+31
+Used – must be zero for GEM to read data to the transmit buffer. 
+GEM sets this to one for the first buffer of a frame once it has been successfully transmitted. Software 
+must clear this bit before the buffer can be used again.
+Table 30: Transmit Buffer Descriptor Entry − TSO Header Buffer (Continued)
+Bit
+Function
+
+
+--- PAGE 71 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+71
+30
+Wrap – marks last descriptor in transmit buffer descriptor list. 
+This can be set for any buffer within the frame.
+29:16
+TCP Maximum Segment Size value in bytes. 
+TSO will use a default value of 536 bytes if the programmed value is zero.
+15
+Last buffer. 
+When set, this bit will indicate the last buffer in the current frame has been reached.
+14
+Reserved.
+13:0
+Length of buffer.
+Table 32: Transmit Buffer Descriptor Entry − UFO Header Buffer
+Bit
+Function
+Word 0
+31:0
+Byte address of buffer.
+Word 1
+31
+Used – must be zero for GEM to read data to the transmit buffer. 
+GEM sets this to one for the first buffer of a frame once it has been successfully transmitted. Software 
+must clear this bit before the buffer can be used again.
+30
+Wrap – marks last descriptor in transmit buffer descriptor list. 
+This can be set for any buffer within the frame.
+29
+Retry limit exceeded, transmit error detected
+28
+Transmit underrun. 
+Always 0 for UFO
+27
+Transmit frame corruption due to AHB or AXI error.
+Set if an error occurs whilst midway through reading transmit frame from the AHB/AXI, including HRESP 
+or RRESP/BRESP errors and buffers exhausted mid frame (if the buffers run out during transmission of a 
+frame then transmission stops, FCS shall be bad and tx_er asserted). 
+Also set in DMA packet buffer mode if single frame is too large for configured packet buffer memory size.
+26
+Late collision, transmit error detected. 
+Late collisions only force this status bit to be set in gigabit mode.
+25:24
+Reserved
+23
+For Extended Buffer Descriptor Mode this bit Indicates a timestamp has been captured in the BD. Other-
+wise Reserved.
+22:20
+Transmit IP/TCP/UDP checksum generation offload errors:
+• 000 - No Error 
+• 001 - The Packet was identified as a VLAN type, but the header was not fully complete, or had an error in 
+it
+• 010 - The Packet was identified as a SNAP type, but the header was not fully complete, or had an error 
+in it
+• 011 - The Packet was not of an IP type, or the IP packet was invalidly short, or the IP was not of type 
+IPv4/IPv6
+• 100 - The Packet was not identified as VLAN, SNAP or IP
+• 101 - Non supported packet fragmentation occurred. For IPv4 packets, the IP checksum was generated 
+and inserted
+• 110 - Packet type detected was not TCP or UDP. TCP/UDP checksum was therefore not generated. For 
+IPv4 packets, the IP checksum was generated and inserted
+• 111 - A premature end of packet was detected and the TCP/UDP checksum could not be generated
+19
+Reserved
+Table 31: Transmit Buffer Descriptor Entry − TSO Payload Buffer (Continued)
+Bit
+Function
+
+
+--- PAGE 72 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+72
+When 64-bit addressing mode is enabled, Table 34 identifies the added descriptor words.
+When Descriptor Timestamp Capture mode is enabled, Table 35 identifies the added descriptor words.
+18:17
+LSO Control.
+Set to 2’b01 to enable UFO
+16
+No CRC to be appended by MAC. 
+Must be clear for UFO operation
+15
+Last buffer.
+Must be clear as TSO requires at least one payload buffer
+14
+Reserved.
+13:0
+Length of buffer.
+Table 33: Transmit Buffer Descriptor Entry − UFO Payload Buffer
+Bit
+Function
+Word 0
+31:0
+Byte address of buffer.
+Word 1
+31
+Used – must be zero for GEM to read data to the transmit buffer. 
+GEM sets this to one for the first buffer of a frame once it has been successfully transmitted. Software must 
+clear this bit before the buffer can be used again.
+30
+Wrap – marks last descriptor in transmit buffer descriptor list. 
+This can be set for any buffer within the frame.
+29:16
+Maximum Ethernet Frame Size value in bytes (including FCS). 
+UFO will use a default value of 1518 bytes if the programmed value is zero.
+15
+Last buffer.
+When set, this bit will indicate the last buffer in the current frame has been reached.
+14
+Reserved.
+13:0
+Length of buffer.
+Table 34: Transmit Buffer Descriptor Entry − 64-Bit Addressing
+Bit
+Function
+Word 2 (64-Bit Addressing)
+31:0
+Upper 32-bit address of Data Buffer.
+Word 3 (64-Bit Addressing)
+31:10
+Unused
+Table 35: Transmit Buffer Descriptor Entry − Timestamp Capture
+Bit
+Function
+Word 2 (64-Bit Addressing) or Word 4 (64-Bit Addressing)
+31:30
+Timestamp seconds[1:0] / launch time (See Note:1)
+29:0
+Timestamp nanosecs [29:0] / launch time (See Note:1)
+Word 3 (64-Bit Addressing) or Word 5 (64-Bit Addressing)
+31:10
+Unused
+9:0
+Timestamp seconds[11:2] (See Note:1) (prior to release 1p08f1 this was [5:2])
+Table 32: Transmit Buffer Descriptor Entry − UFO Header Buffer (Continued)
+Bit
+Function
+
+
+--- PAGE 73 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+73
+6.1.1.9 Time-Based Transmit Scheduling
+The time-based shaper enables the user to specify on a per-frame basis the TSU time (launch time) at which a frame is to 
+be transmitted.
+If a transmit buffer descriptor has the UTLT (Use Transmit Launch Time) bit set, then the value of the timestamp stored in 
+bits [31:0] in word 2 or 4 (depending on whether 64 bit addressing is enabled) of the buffer descriptor becomes the launch 
+time, and is used to delay transmission until the TSU clock time reaches this time.
+The UTLT bit maps to bit 31 of the final word (word 3 or 5) of the transmit buffer descriptor.
+Programming the value of the launch time in the transmit descriptor should follow the flow below:
+1. Read the current timer module value
+2. Calculate the frame launch time and program this value in the launch time field of the transmit descriptor
+3. Set the UTLT bit in the transmit descriptor to indicate the launch time field is significant
+The time-based shaper enables the user to specify when a frame can be transmitted. It can be used in combination with 
+other available scheduling options such as Fixed Priority, DWRR, ETS, 802.1Qav credit-based shaper and the IEEE 
+802.1Qbv EnST protocol. Use of the time-based shaper ensures that frames are transmitted in the correct time slot.
+Time-Based Scheduling is only available if the TSU and AXI configurations have been defined, and transmit extended 
+buffer descriptor mode has been enabled by writing bit 29 (tx_bd_extended_mode_en) in the DMA configuration register. 
+Time-based scheduling only works for AXI configrations, AHB is not supported. 
+The launch time consists of 2 bits for a seconds value and 30 bits for a nanoseconds value after which transmission of the 
+frame pointed to by the transmit descriptor can start. Note the launch time is only valid for the first descriptors for a frame – 
+i.e. if a frame is described by multiple descriptor/data buffer pairs, then only the launch time in the first descriptor of that 
+frame will be used.
+The 32-bit launch time is compared against the equivalent 32 bits in the TSU timer when the descriptor is first read by the 
+DMA. If the 2 seconds bits match then transmission will be delayed if the 30 bit TSU nanosecond value is less than that of 
+the launch time nanosecond value. Transmission of the frame will be delayed until the nanoseconds value of the TSU 
+reaches that of the launch time. Transmission will also be delayed if the 2 seconds bits of the launch time is one more than 
+that of the TSU regardless of the nanosecond value. This will allow frame transmission to be delayed at least one second 
+beyond the current TSU time. Transmission will then start when the TSU seconds value matches the launch time value and 
+the TSU nanoseconds reaches that of the launch time. If the launch time seconds value is 2 or more above that of the TSU 
+then frame transmission will not be delayed. The conditions in Table 36 will cause frame transmission to be delayed.
+Note1: The timestamp is mode is controlled using the tx_bd_control_register. The TX Descriptor Time-
+stamp Insertion mode bits are defined as:
+• 00: TS insertion disable
+• 01: TS inserted for PTP Event Frames only
+• 10: TS inserted for All PTP Frames only 
+• 11: TS insertion for All Frames
+After transmission the timestamp bits are written back only to the first buffer descriptor.  
+Table 36: TSU States which Cause Frame Transmission to be Delayed
+TSU Seconds
+Launch Time Seconds
+00
+00 and TSU ns < launch time ns
+00
+01
+01
+01 and TSU ns < launch time ns
+01
+10
+10
+10 and TSU ns < launch time ns
+10
+11
+11
+11 and TSU ns < launch time ns
+Table 35: Transmit Buffer Descriptor Entry − Timestamp Capture (Continued)
+Bit
+Function
+
+
+--- PAGE 74 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+74
+In summary the transmit buffer descriptors are defined as follows:
+Extended Descriptor (32-bit addressing):
+• UTLT[127] = Use Transmit Launch Time
+• RSVD[126:106] = Reserved
+• TS[105:64] = Timestamp (seconds = 105:94, nanoseconds = 93:64). Written as STATUS.
+• USED[63] = Used bit
+• WRAP[62] = Wrap bit
+• STS1[61:58] = Status bits (written during descriptor writeback only)
+• LSO1[57:56] = Bits to control and enable LSO features
+• STS2[55:52] = Status bits (written during descriptor writeback only)
+• LSO2[51:49] = Bits to control and enable LSO features
+• CRC[48] = Set if no CRC is to be appended to frame
+• LAST[47] = Set if this is the last descriptor buffer of the transmit frame
+• RSVD[46] = Reserved
+• LEN[45:32] = Buffer length
+• ADDL[31:0] = Data Buffer Address (lower 32 bits)
+Extended Descriptor (64-bit addressing):
+The mappings are the same as 32 bit addressing with the following changes:
+• UTLT[191] = Use Transmit Launch Time
+• RSVD[190:170] = Reserved
+• TS[169:128] = Timestamp (seconds = 169:158, nanoseconds = 157:128). Written as STATUS.
+• RSVD[127:96] = Reserved
+6.1.1.10 DMA Bursting
+The AXI DMA will always use INCR type accesses. The AHB DMA will always use SINGLE, or INCR type AHB accesses. 
+When performing data transfers, the burst length used can be programmed using bits [4:0] of the DMA Configuration 
+Register. Either single or fixed length incrementing bursts up to a maximum of 256 (AXI4) or 16 (AHB) are used as 
+appropriate. 
+When there is sufficient space and enough data to be transferred, the programmed fixed length bursts will be used. If there 
+is not enough data or space available, for example when at the end of a buffer or packet, bursts of sizes less than the 
+programmed burst length value will be issued. The same is true at 1024 byte boundaries for AHB or 4096 byte boundaries 
+for AXI, so that the relevant boundaries are not burst over as per AMBA requirements. Where the number of accesses 
+remaining is less than 4 for AHB, single accesses will be used.
+When the DMA is configured for packet buffer mode, an option to force the GEM DMA to pad the remaining bursts at the 
+end of a buffer or EOP to the programmed burst length value is available via bits 26 and 25 of the DMA Configuration 
+Register. Bit 26 will control the TX and bit 25 the RX. For RX, the data to burst is padded with ‘0’s up to the burst boundary 
+11
+00
+UTLT RSVD TS
+USED WRP
+STS1 LSO1 STS2 LSO2 CRC
+LAST RSVD LEN
+ADDL
+UTLT RSVD TS
+ADDM USED
+WRAP STS1 LSO1 STS2 LSO2 CRC
+LAST
+RSVD LED
+ADDL
+Table 36: TSU States which Cause Frame Transmission to be Delayed
+TSU Seconds
+Launch Time Seconds
+
+
+--- PAGE 75 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+75
+defined by burst length. For TX, the extra data that is read is ignored by the DMA. This feature has been included for 
+performance reasons when external AHB or AXI slaves that are being accessed by GEM perform better when accessed 
+using fixed maximum length bursts. Note: Enabling this feature will not break the AHB 1KB rule, or the AXI 4KB rule and 
+the enable bits are ignored if the programmed burst length is 256.
+The DMA will not terminate fixed length bursts early, unless an AHB HRESP error condition is detected (note AXI response 
+errors will never cause a burst to be terminated early) or if receive/transmit operation is disabled by software by writing to 
+the network control register.
+6.1.1.11 DMA Endianism
+The default configuration of the DMA is to use little endian format. In order to interface to different CPU systems with 
+different endianism requirements, GEM DMA may be programmed to swap the endianism using bits 6 and 7 of the DMA 
+Configuration Register. Bit 6 controls the endianism of the management operations and bit 7 controls the endianism of the 
+data operations.
+When either of these modes are enabled, the order of the bytes on the AHB or AXI are swapped for either or both of the 
+buffer management and data operations, as illustrated in the diagram below for a 128-bit system for data operations (bit 7 
+set). The same swapping applies for management operations if bit 6 is set.
+Figure 7 shows the endian swap.
+Figure 7: Endian Swap
+6.1.1.12 DMA Transmit and Receive FIFOs
+This section is not relevant if GEM is configured to use SRAM based packet buffer DMA mode.
+The DMA can be configured to use a very low-latency mode by not including the packet buffer. In this mode, separate 
+transmit and receive FIFOs are included within the DMA which are implemented using synthesizable flip-flop arrays. The 
+FIFOs are used to smooth out data flow delays and latencies on the AHB fabric to ensure consistent service for the MAC 
+pipelines and prevent underflows and overflows. The FIFOs are also used to transition data over the clock boundary 
+between the DMA and the MAC rx_clk and tx_clk.
+The transmitter and receiver FIFO depths are parameterizable. It is important to choose FIFO depths that are appropriate 
+for the system clock speed, memory latency and network speed. In the default implementation of GEM, the receive and 
+transmit FIFO depths are both set to ten locations each of 128 bits, giving a total of 160 bytes of storage per FIFO.
+Data is typically transferred into and out of the FIFOs in bursts of the programmed burst length in the DMA configuration 
+register. 
+For receive, an AHB bus request is asserted when the FIFO contains greater than or equal to the programmed AHB burst 
+length. When the end of frame is reached, single word transfers may be used to complete the frame transfer if there is less 
+data left in the frame to transfer than the programmed burst length. If the frame does not finish on the word boundary — 
+depending on dma_bus_width, the frame length and the initial byte offset — the last word of the last transfer will contain 
+redundant bytes, written as logic zero.
+
+
+--- PAGE 76 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+76
+For transmit, an AHB bus request is generated whenever there is space for greater than or equal to the programmed AHB 
+burst length in the transmit FIFO. This sequence is followed for every transfer in the buffer except the last. Once the last 
+data transfer of a buffer is reached, the final burst may consist of single transfers if there is less data left in the frame to 
+transfer than the programmed burst size. The last word of the last transfer contains redundant bytes if the frame does not 
+finish on the word boundary. This depends upon dma_bus_width and the frame length.
+Transmission of the frame will not begin until as much as the frame as possible has been read into the transmit FIFO. This 
+is deemed to be when there is less space left in the FIFO than the programmed burst length, or if the end of the frame has 
+already been written into the FIFO. Once either of these events occurs, a trigger is sent to the MAC transmitter, which will 
+then begin reading out the frame from the FIFO. This way there is more of a buffer built up to allow for any delays in the 
+AHB which may otherwise cause an underflow of the FIFO.
+As the system designer, you should consider data bus width, transmit/receive clock rates, AMBA DMA bus latency, and the 
+chosen AMBA AHB clock rate. These parameters will determine the FIFO depth.
+The default FIFO depth of 10 means that the bus latency must be less than the time it takes to load the FIFO and transmit 
+or receive six words — 24 bytes in 32-bit AHB mode — of data. At 1000Mbps, it takes 192ns to transmit or receive 24 bytes 
+of data. In addition six hclk cycles should be allowed for data to be loaded from the bus and to propagate through the 
+FIFOs. For an 80MHz hclk this takes 75ns, therefore making the bus latency requirement approximately 120ns.
+Transmit buffers can be any length between 1 and 16383 bytes. For short length buffers, adequate bandwidth must be 
+allowed for the buffer management overhead. It is recommended to perform simulations to ensure the system has 
+adequate bandwidth if transmit frames are likely to contain a number of very short buffers. If the DMA block cannot access 
+transmit data from memory in time, the “transmit underrun” status will be reported and an interrupt asserted.
+Note: The FIFO depths must be chosen to allow for the desired burst length. For instance. if a 16-beat burst is desirable 
+then the depths of both the receiver and transmitter FIFOs must be at least 16 words deep. The DMA Configuration register 
+automatically prevents programming of a burst length that is greater than the FIFOs depth, by masking out the appropriate 
+upper bits of the burst length field in the register.
+AXI operation is not supported when the DMA is configured in this mode.
+6.1.1.13 DMA Packet Buffer
+This section is only relevant if GEM is configured to use SRAM based packet buffer DMA mode.
+The DMA can be configured to use packet buffers for both transmit and receive paths. In this mode, the user has the option 
+of an AXI4 master interface or an AHB master interface. This mode:
+• Allows multiple packets to be buffered in both transmit and receive directions
+• Allows the DMA to withstand variable levels of access latencies on the AHB or AXI fabric 
+• Offers the most efficient use of the system bandwidth
+As described earlier, when the DMA is configured to use packet buffers, it can be programmed into a low latency mode 
+known as partial store and forward. When this is enabled the packet buffer DMA will functionally behave in a similar way to 
+the internal FIFO DMA mode. For further details of this mode, refer to Section 6.1.1.5 Partial Store and Forward Using 
+Packet Buffer DMA on page 60. 
+When the DMA is programmed in full store and forward mode, full packets are buffered providing the opportunity to:
+• Discard packets that are received with errors before they are partially written out of the DMA thus saving system bus 
+bandwidth and driver processing overhead
+• Retry collided transmit frames from the buffer, thus saving AHB or AXI bus bandwidth
+• Implement transmit IP/TCP/UDP checksum generation offload
+
+
+--- PAGE 77 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+77
+Figure  shows the structure of the GEM datapaths when the packet buffers are included.
+Figure 8: Datapath Structure with SRAM Packet Buffers
+6.1.1.14 Transmit Packet Buffer
+The transmitter packet buffer will continue attempting to fetch frame data from the AHB or AXI system memory until the 
+packet buffer itself is full, at which point it will attempt to maintain its full level. 
+To accommodate the status and statistics associated with each frame, 3 words (or 2 if GEM is configured in 64 bit datapath 
+mode) per packet are reserved at the end of the packet data. If the packet was bad and requires to be dropped, the status 
+and statistics are the only information held on that packet. Storing the status in the DPRAM is required in order to decouple 
+the DMA interface of the buffer from the MAC interface, to update the MAC status/stats and to generate interrupts in the 
+order in which the packets that they represent were fetched from the external memory.
+The transmit packet buffer will only attempt to read more frame data from the external memory when space is available in 
+the internal packet buffer memory. If space is not available it must wait until a packet fetched by the MAC completes 
+transmission and is subsequently removed from the packet buffer memory. Note that if full store and forward mode is active 
+and if a single frame is fetched that is too large for the packet buffer memory, the frame is flushed and the DMA halted with 
+an error status. This is because a complete frame must be written into the packet buffer before transmission can begin, and 
+therefore the minimum packet buffer memory size should be chosen to satisfy the maximum frame to be transmitted in the 
+application. 
+
+
+--- PAGE 78 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+78
+To ensure maximum throughput and full line-rate, it is recommended that the transmit packet buffer is greater than twice the 
+size of the largest frame that will be transmitted for the intended application. This is to ensure the MAC pipeline can be kept 
+full at all times. If only short frames will ever be transmitted, it is recommended that an SRAM size substantially more than 
+twice the size of the largest frame is used – this is to offset and smooth potential random latency delays on the AHB or AXI 
+data fetches.
+In full store and forward mode, once the complete transmit frame is written into the packet buffer memory, a trigger is sent 
+across to the MAC transmitter, which will then begin reading the frame from the packet buffer memory. Since the whole 
+frame is present and stable in the packet buffer memory an underflow of the transmitter is not possible. The frame is kept in 
+the packet buffer until notification is received from the MAC that the frame data has either been successfully transmitted or 
+can no longer be re-transmitted (too many retries in half-duplex mode). When this notification is received, the frame is 
+flushed from memory to make room for a new frame to be fetched from the AHB or AXI system memory.
+In partial store and forward mode, a trigger is sent across to the MAC transmitter as soon as sufficient packet data is 
+available in the internal buffer, which will then begin fetching the frame from the packet buffer memory. If, after this point, 
+the MAC transmitter is able to fetch data from the packet buffer faster than the DMA can fill it, an underflow of the 
+transmitter is possible. In this case, the transmission is terminated early, and the packet buffer is flushed. Transmission can 
+only be restarted by writing to the transmit START bit, or by toggling the trigger_dma_tx_start input.
+In half-duplex mode, the frame is kept in the packet buffer until notification is received from the MAC that the frame data 
+has either been successfully transmitted or can no longer be retransmitted (too many retries in half-duplex mode). When 
+this notification is received, the frame is flushed from memory to make room for a new frame to be fetched from external 
+system memory.
+In full-duplex mode, the frame is removed from the packet buffer on the fly.
+Other than underflow, the only MAC related errors that can occur are due to collisions during half-duplex transmissions. 
+When a collision occurs the frame still exists in the packet buffer memory so can be retried directly from there. Only once 
+the MAC transmitter has failed to transmit after sixteen attempts is the frame finally flushed from the packet buffer.
+6.1.1.15 Receive Packet Buffer
+The receive packet buffer stores frames from the MAC receiver along with their status and statistics. Frames with errors are 
+flushed from the packet buffer memory, whilst good frames are pushed onto the DMA AHB interface.
+The receiver packet buffer monitors the external FIFO write interface from the MAC receiver and translates the FIFO 
+pushes into packet buffer writes. At the end of the received frame, the status and statistics are buffered so that the 
+information can be used when the frame is read out. When programmed in full store and forward mode, if the frame has an 
+error, the frame data is immediately flushed from the packet buffer memory allowing subsequent frames to utilize the freed 
+up space. The status and statistics for bad frames are still used to update the GEM registers.
+To accommodate the status and statistics associated with each frame, up to 4 words (one being for descriptor timestamp 
+capture when enabled) (or 2 if you are configured in 64-bit datapath mode) per packet are reserved at the end of the packet 
+data. If the packet was bad and requires to be dropped, the status and statistics are the only information held on that 
+packet. 
+The receiver packet buffer will also detect a full condition such that an overflow condition can be detected. If this occurs, 
+subsequent packets will be dropped and an RX overflow interrupt is raised.
+For full store and forward, the DMA will only begin packet fetches once the status and statistics for a frame are available. If 
+the frame has a bad status due to a frame error, the status and statistics are passed onto the GEM registers. If the frame 
+has a good status, the information is used to read the frame from the packet buffer memory and burst onto the AHB/AXI 
+using the DMA buffer management protocol. Once the last frame data has been transferred to the FIFO, the status and 
+statistics are updated to the GEM registers.
+If partial store and forward mode is active, the DMA will begin fetching the packet data before the status is available. As 
+soon as the status becomes available, the DMA will fetch this information before continuing to fetch the remainder of the 
+frame. Once the last frame data has been transferred to the FIFO, the status and statistics are updated to the GEM 
+registers.
+
+
+--- PAGE 79 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+79
+6.1.1.16 Priority Queuing in the DMA
+The DMA by default uses a single transmit and receive queue. This means the list of transmit/receive buffer descriptors 
+point to data buffers associated with a single transmit/receive data stream. When the DMA is configured to use packet 
+buffer memories, GEM can optionally select up to 16 priority queues. Each queue has an independent list of buffer 
+descriptors pointing to separate data streams. The maximum number of queues is determined by setting appropriate 
+defines in gem_gxl_defs.v (refer to Section 3.2 Configuration ‘defines on page 17). By default, each queue (up to the 
+maximum configured in gem_gxl_defs.v) is active. Queues may be disabled by setting bit 0 of the Transmit or Receive 
+Buffer Queue Base Address register, for which there is one per queue. Note that at least one queue must always remain 
+enabled and only the top indexed queues may ever be disabled. For example for a system configured to have 12 queues, 
+you may decide that only 7 of these need to be active. In this case, the user would disable queues 8 to 12 by setting bit 0 of 
+the Transmit or Receive Buffer Queue Base Address registers specific to queues 8 to 12. (Note: IEEE 802.1Qav (CBS) 
+works on the two highest enabled queues but for 802.1Qbv (EnST) if queues are disabled by software the control register 
+mapping does not change. So EnST functionality is partially lost as transmit queues are disabled, for example with 12 
+queues and two disabled you would only have the ability to do EnST on 6 queues (rather than 8).)
+In the transmit direction, higher priority queues are always serviced before lower priority queues. This strict priority scheme 
+requires the user to ensure that high priority traffic is constrained such that lower priority traffic will have required 
+bandwidth. The DMA will determine the next queue to service by initiating a sequence of buffer descriptor reads 
+interrogating the ownership bits of each. The buffer descriptor corresponding to the highest priority queue is read first. If the 
+ownership bit of this descriptor is set, then the DMA will progress to reading the 2nd highest priority queue's descriptor. If 
+that ownership bit read of this lower priority queue is set, then the DMA will read the 3rd highest priority queue's descriptor, 
+and so on. If all the descriptors return an ownership bit set, then a resource error has occurred, an interrupt is generated 
+and transmission is automatically halted. Transmission can only be restarted by setting the START bit in the network 
+control register or by toggling the trigger_dma_tx_start input. The DMA will need to identify the highest available queue to 
+transmit from when the START bit in the network control register is written to and the TX is in a halted state, or when the 
+last word of any packet has been fetched from external AHB or AXI memory.
+The transmit DMA will maximize the effectiveness of priority queuing by ensuring that high priority traffic be transmitted as 
+early as possible after being fetched from external memory. High priority traffic will be pushed to the MAC layer depending 
+on the specific transmit scheduling algorithm employed (refer to Section 6.1.7 Transmit Scheduling Algorithm on page 91). 
+In order to facilitate the scheduler, the SRAM based packet buffer used within the transmit DMA is split into regions, one 
+region per queue. The size of each region determines the amount of SRAM space allocated per queue and will be 
+configurable by setting relevant defines in gem_gxl_defs.v file. This is implemented by first splitting the transmit SRAM into 
+a number of segments of equal size. This number must be a power of two. Then, each queue is granted a number of 
+segments. These configuration options and how to set them are explained further in Section 3.2 Configuration ‘defines on 
+page 17. Setting the configuration only sets the initial setting for SRAM queue allocation. You can change it by writing to the 
+transmit segment allocation registers at offset 0x5a0 and 0x5a4. This allows you to tweak the SRAM allocation for each 
+queue and is very useful if you wish to disable queues and reallocate the memory assigned to an active queue. There are 
+three bits per queue. Segment allocation for the queue is done by writing a value of:
+• 0 to allocate 1 segment 
+• 1 to allocate 2 segments 
+• 2 to allocate 4 segments 
+• 3 to allocate 8 segments
+• 4 to allocate a maximum of 16 segments
+Writing a value of 5, 6, or 7 is not permitted.
+For each queue, there is an associated Transmit Buffer Queue Base Address register. For the lowest priority queue (or the 
+only queue when only 1 queue is selected), the Transmit Buffer Queue Base Address is located at address 0x1C. For all 
+other queues, the Transmit Buffer Queue Base Address registers are located at sequential addresses starting at address 
+0x440. 
+In the receive direction, each data packet is written to external AHB/AXI data buffers in the order that it is received. For 
+each queue, there is an independent set of receive buffers for each queue. There is, therefore, a separate Receive Buffer 
+Queue Base Address register for each queue. For the lowest priority queue (or the only queue when only one queue is 
+
+
+--- PAGE 80 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+80
+selected), the Receive Buffer Queue Base Address is located at address 0x18. For all other queues, the Receive Buffer 
+Queue Base Address registers are located at sequential addresses starting at address 0x480 for queues one to seven and 
+from 0x5c0 for queues eight to fifteen. Every received packet will pass through a programmable screening algorithm which 
+will allocate to that frame a particular queue to route it to. The user interface to the screeners is via two banks of 
+programmable registers, screener type 1 match registers and screener type 2 match registers. 
+The operation of the screener registers is described in detail in Section 6.1.9.8.1 Screener Type 1 and Type 2 Match 
+Registers on page 98.
+6.1.2 Advanced DMA Features to Reduce CPU Overhead
+The DMA design has support for various optional offload features to reduce CPU overhead.
+6.1.2.1 Receive Header/Data Splitting
+Receive header data splitting is a feature which when enabled will force the receive DMA to split a received frame into its 
+header and payload constituent parts. 
+The header is not dropped, but instead separated from the payload and placed into its own DMA receive buffer. For 
+example, a TCP/IPv4 frame will be split such that its Ethernet, IPv4 and TCP header is written into one or more buffers, and 
+the TCP payload is written into one or more separate buffers. 
+A status bit in the receive descriptors will identify whether the descriptor is pointing to a header buffer or a payload buffer. 
+Another status bit will identify whether the descriptor is pointing to the last buffer of a header (the header may be split over 
+multiple buffers). The length of the header will also be written in the descriptor that points to the last buffer of the header.
+When header/data splitting is enabled, ALL received frames will have their L2/L3/L4 headers separated. Note: Even 
+standard Ethernet only frames containing just 14 bytes of header will be separated. Bit 5 of the DMA configuration register 
+at offset 0x10 enables/disables header data splitting. When enabled there are specific bits of the DMA receive buffer 
+descriptor (refer to the Receive Buffer Descriptor entry for details).
+There are certain limitations to using this feature:
+• Header Data Splitting applies to all received frames. Every frame received which includes a data payload will be split 
+into at least 2 data buffers.
+• Header Data Splitting is not currently available with the partial store and forward mode of operation. It should only be 
+enabled when the full store and forward mode of operation is active.
+6.1.2.2 Receive Side Coalescing
+Receive segmentation coalescing (RS) is a mechanism to reduce CPU overhead. 
+This is done by coalescing received TCP message segments together into a single large message. This means that when 
+the message is complete the CPU only has to process the single header and act upon the one data payload. This will only 
+be effective when processing small non signaling frames. For RSC to work, the Header Data splitting feature must be 
+enabled, and the priority queuing configuration options must be enabled (more details on this below). 
+The design will first inspect the low-level received frames and identify if they are part of a particular TCP stream or not. This 
+is performed using the existing priority queuing feature (refer Section 6.1.1.16 Priority Queuing in the DMA on page 79). 
+Each defined receive priority queue (other than queue 0) will map to a TCP stream capable of performing RSC. Therefore 
+the priority queue screeners must be set up such that received frames can be inspected and routed to the appropriate 
+queue. This can be achieved as follows: 
+Note: It is assumed the reader is already familiar with the priority queue features as defined earlier in this document.
+When the ethertype = IPv4 (0800), then the subsequent TCP/IP streams (or flows) are identified by the 4-tuple of IP source 
+and destination address and TCP source and destination port. This is done using the type 2 screeners. To provide sufficient 
+compare functionality, all three A, B, and C compares are required and the full 32-bit comparison (i.e. mask functionality 
+disabled) will be required for each comparison. Figure  gives an example of the offsets required to identify the tuples.
+
+
+--- PAGE 81 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+81
+Figure 9: TCP/IP Encapsulation in an Ethernet Frame
+The coalesced frames should be controlled using multiple queues therefore RSC requires the following to be set up:
+• Hardware Configuration
+• Memory Setup
+• Enable RSC Control
+6.1.2.2.1 Hardware Configuration Requirements
+Table 37 lists the hardware configuration requirement for RSC.
+Table 37: Hardware Configuration ‘defines
+Name of Define
+Description
+gem_axi
+RSC functionality is only supported when using an AXI interface.
+Set this define if RSC support is required.
+dma_priority_queue1
+RSC functionality is only available if the module is configured to have at least 2 
+queues.
+Multiple queues is a hardware configuration and is set using this `define prior to 
+compile.
+gem_pbuf_rsc
+Enables RSC functionality.
+Set this define to enable RSC.
+
+
+--- PAGE 82 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+82
+6.1.2.2.2 Memory Setup
+Descriptor buffers point to the main system memory. Receive buffers should be configured to their maximum value of 
+16320 in the receive buffer size registers by setting dma_rx_q_buf_size to 0xFF. As header data splitting is enabled, 
+software must provide at least two descriptors; the first being for the header followed by a second for the payload. This will 
+result in a waste of memory space since the header will never be 16K. Therefore, it is suggested that software overlaps the 
+second descriptor as shown in the Figure 10.
+Figure 10: Memory Setup for RSC
+The design will coalesce buffers up to the maximum size of 16K. If the next packet causes the coalesced buffer to exceed 
+the maximum size, at this point it will close the buffer and restart a new buffer. Closing the buffer involves updating the IP 
+length, checksum, and ACK fields in the header buffer and writing used bits for the header and payload buffers. The ACK 
+field is written with the most recently received ACK number with the ACK flag set. 
+If the next packet has TCP Flags SYN, FIN, RST, or URG set, or a frame is received with an out-of-order TCP sequence 
+number, these events are treated as “RSC STOP” events. In these cases, you can optionally select via the RSC control 
+register offset 0x58 whether coalescing should cease (restarting only upon software setting up a new TCP stream for 
+num_type2_screeners
+Defines the number of type 2 screeners.
+RSC needs a number of type2type 2 screeners defined. The number chosen should at 
+minimum reflect the number of TCP streams required. Three compare registers per 
+screener are also required. Below is an example define:
+`define num_type2_screeners 8'd3
+Table 37: Hardware Configuration ‘defines (Continued)
+Name of Define
+Description
+
+
+--- PAGE 83 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+83
+coalescing) or whether the design should simply restart coalescing into a new buffer on the frame following the “RSC 
+STOP” event. The frame received that caused the “RSC STOP” event is always forwarded to main memory in isolation 
+(non-coalesced).
+If the next packet has the PSH TCP Flag set, this will also be treated as an “RSC STOP” event. However, coalescing will 
+restart on the next frame received associated with the TCP stream.
+The memory size for each priority queue is defined in the dma_rxbuf_size_q1 registers. For coalescing on a particular 
+queue, these should be set to the maximum size of 16K.
+6.1.2.2.3 RSC Control
+Header Data splitting must be enabled prior to enabling RSC. RSC is enabled via the RSC Control register offset 0x58. Via 
+this register, the number of TCP streams for coalescing is chosen (each priority queue will map to a particular TCP stream). 
+There is also a control bit in this register to allow the user to select whether coalescing should cease after the “TCP STOP” 
+event occurs.
+6.1.2.2.4 RSC Limitations
+• Little Endian only
+• Header Data Splitting must be enabled to use RSC
+• Buffer Sizes must be set to 16K
+• RSC only works with IPv4 headers
+• RSC should not be used if the GEM will receive jumbo frames
+• Currently RSC cannot be used in conjunction with partial store and forward mode of operation
+• When the gem_pbuf_rsc define has been set the receive buffer offset cannot be changed in the network configuration 
+register
+6.1.2.3 Large Send Offload
+Large Send Offload functionality is included to reduce CPU overhead for transmit. Two mechanisms are included − TCP 
+Segmentation Offload (TSO) and UDP Fragmentation Offload (UFO). CPU overhead is reduced by permitting software to 
+hand off TCP and UDP frames which are larger than the current TCP Maximum Segment Size (MSS) and Ethernet 
+Maximum Frame Size (MFS). Hardware splits the large software supplied frames into smaller frames for transmission and 
+modifies the header fields as required. TCP offload is achieved by creating smaller segments at the TCP level. UDP offload 
+is achieved by performing fragmentation at the IP level.
+For correct TSO and UFO functionality, hardware checksum insertion must be enabled (DMA Configuration Register, bit 
+11).
+For both TSO and UFO, software must supply the header and payload of the large frame in at least two buffers (one for 
+header and one or more for payload). Interaction between hardware and software is similar to the use case where multiple 
+buffers are used to supply a single Ethernet frame.
+There are no control registers associated with TSO and UFO – the features are enabled and configured via fields in the 
+descriptors for the header and payload buffers.
+6.1.2.4 TSO Operation
+Software supplies a large frame containing a large TCP segment via a header buffer and one or more payload buffers, and 
+supplies the associated header and payload descriptor(s). The header buffer contains the Ethernet, IPv4 or IPv6, and TCP 
+headers. The header descriptor has bits [18:17] set to 2’b10 or 2’b11 to enable TSO. 
+The header descriptor contains a sequence number select bit at bit 19. This is cleared if the hardware uses the sequence 
+number from the header buffer for the first small segment (and generate appropriate sequence numbers for the other small 
+segments). It is set if hardware generates sequence numbers for all of the small segments. In this case, the sequence 
+number for the first small segment will be related to the most recent previously transmitted segment of the same stream 
+
+
+--- PAGE 84 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+84
+that were transmitted with TSO enabled. The hardware supports four separate TCP streams per priority queue (and 
+implements a sequence number counter for each). The TCP stream is identified by bits [25:24] of the header descriptor.
+The payload descriptor contains a TCP Maximum Segment Size (MSS) field at bits [29:16] and hardware uses this MSS 
+value to process the payload buffer. Each payload buffer is processed separately (i.e. an integer number of small segments 
+is generated from each payload buffer) using the MSS value in the associated descriptor. Software may supply different 
+MSS values in the payload descriptors of a large frame which has two or more payload buffers. 
+Hardware loads the header descriptor and stores it internally, and uses it to read the associated header buffer multiple 
+times as the payload buffers are processed and small segments are transmitted. Hardware modifies the IPv4 Total Length, 
+IPv4 Header Checksum, IPv6 Payload Length, TCP Sequence Number, and TCP Checksum fields. Software may modify 
+the TCP Acknowledgement Number and TCP Window Size values in the header buffer during the hardware segmentation 
+process – however as software has no notification of when hardware is reading the header buffer, care must be taken to 
+avoid hardware reading a partially updated value. This can be achieved by locating the base address of the header buffer 
+so that a software write of a field to be modified is achieved via a single AXI write access beat – i.e. the Acknowledgement 
+Number field is on a 32-bit boundary in memory and the Window Size field is on a 16-bit boundary in memory. Placement of 
+the header buffer base address to achieve this is dependent on the Ethernet header length.
+Hardware discards the IPv4 Total Length and IPv6 Payload length values in the header buffer supplied by software and 
+therefore it is possible for software to supply a very large TCP segment that exceeds the limitations imposed by IP 
+encapsulation.
+Hardware performs a write back to the header descriptor when the data contained in a payload buffer has been transmitted 
+and the associated payload descriptor has the last bit set. 
+Software can make use of the sequence number generation functionality for all TCP segments regardless of size by:
+• Delivering the frame in separate header and payload buffers and
+• Enabling TSO in the header descriptor 
+It is not necessary for the supplied segment to exceed the TCP Maximum Segment Size in order to use hardware 
+sequence number functionality.
+6.1.2.4.1 TSO Limitations
+• Ethernet Header extensions are limited to VLAN and Stacked VLAN
+• Payload descriptors must not have a value of zero in the length field
+• The Ethernet frame supplied by software must not contain IP fragments
+6.1.2.5 UFO Operation
+Software supplies a large frame containing a large UDP datagram via a header buffer and one or more payload buffers, 
+and supplies the associated header and payload descriptor(s). The header buffer contains the Ethernet and IPv4 headers. 
+The header descriptor has bits [18:17] set to 2’b01 to enable UFO. The payload buffer or buffers contain the IP payload, 
+which consists of the UDP header and UDP payload. 
+The payload descriptor contains an Ethernet Maximum Frame Size (MFS) field at bits [29:16] and hardware uses this MFS 
+value to process the payload buffer. Each payload buffer is processed separately (i.e. an integer number of fragments is 
+generated from each payload buffer) using the MFS value in the associated descriptor. Software may supply different MFS 
+values in the payload descriptors of a large frame which has two or more payload buffers. When software supplies two or 
+more payload buffers, all payload buffers apart from the last must be a multiple of 8 bytes in size.
+Hardware loads the header descriptor and stores it internally, and uses it to read the associated header buffer multiple 
+times as the payload buffers are processed and fragments are transmitted. Hardware modifies the IPv4 Total Length, IPv4 
+More Fragments Flag, and IPv4 Fragment Offset fields. Hardware does not calculate the UDP checksum or modify the 
+UDP checksum field. Therefore, software must set a value of zero in the checksum field in the UDP header (in the first 
+payload buffer) to indicate to the receiver that the UDP datagram does not include a checksum.
+Hardware performs a write back to the header descriptor when the data contained in a payload buffer has been transmitted 
+and the associated payload descriptor has the last bit set.
+
+
+--- PAGE 85 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+85
+6.1.2.5.1 UFO Limitations
+• Ethernet Header extensions are limited to VLAN and Stacked VLAN
+• IP encapsulation is limited to IPv4
+• Payload descriptors must not have a value of zero in the length field
+• Payload buffers, apart from those with the last bit set in the associated descriptor, must be a multiple of 8 bytes in 
+length
+• The Ethernet frame supplied by software must not contain IP fragments
+6.1.3 External FIFO Interface
+6.1.3.1 Description
+In applications where the DMA operation is not required, an exposed FIFO interface is available for both the transmit and 
+receive datapaths. Data bus widths in each direction can be configured to be either 32, 64, or 128 bit. The dma_data_width 
+bits (bits 21 and 22 of the network configuration register) determine the bus width used within the MAC.
+The tx_r_data_rdy signal indicates to the MAC that there is sufficient data in the FIFO for transmission to commence. Once 
+this signal becomes active, the transmit module initiates a read cycle by asserting tx_r_rd for one tx_clk cycle. The FIFO 
+should indicate valid data at the FIFO interface by asserting tx_r_valid for a single cycle. The latency between the read and 
+valid data is controlled using the tx_r_valid response, which may be returned during the same cycle as the tx_r_rd request. 
+Once a read has commenced, it must be terminated with tx_r_valid or tx_r_underflow even if tx_r_data_rdy is de-asserted.
+The MAC transmitter searches for start of packet (SOP), indicated by tx_r_sop, and transmission commences once this 
+input becomes valid coincident with tx_r_valid. The MAC will continuously search for tx_r_sop whilst tx_r_data_rdy is set. 
+Once the SOP has been read, data is extracted from the FIFO on the tx_r_data input every time tx_r_valid is set. The MAC 
+continues to read the frame from memory using tx_r_rd and transmission takes place.
+The end of frame is indicated by tx_r_eop being set coincident with tx_r_valid. Once this condition occurs, the tx_r_mod 
+input indicates how many data bytes are valid in the last transfer. tx_r_mod is only valid at the end of the frame, and cannot 
+be used to insert an offset at the start of frame.
+For frames smaller than the data width, both the SOP and end of packet (EOP) indicators must be set in the same data 
+transfer.
+If two SOPs occur with no intervening EOP, then there is an underrun and both frames are lost, unless the second SOP 
+occurs on the same cycle as EOP in which case the second SOP is ignored. A properly configured system should not 
+generate two SOPs with no intervening EOP.
+The tx_r_err signal may be asserted at any stage in the frame, being driven coincident with tx_r_valid being set.
+In applications where the external FIFO interface is required to operate in a half-duplex system, tx_r_status information is 
+available indicating where collisions, excess collisions, late collisions, and underruns have occurred. Upon each of these 
+conditions, it is necessary to flush the external FIFO and the MAC must wait for this operation to complete before 
+commencing further frames. A falling edge on the tx_r_flushed input signal indicates when the flush is complete. If a 
+collision occurs, it is necessary for the external FIFO interface to repeat the transfer of the current frame, so that the frame 
+may be successfully re-transmitted.
+tx_r_status information must be acknowledged by the external FIFO interface by toggling the tx_r_status_tog input to the 
+MAC each time status is taken. This causes the tx_r_status bus to be cleared until the next end of frame or collision occurs.
+For reception, once it has been determined that a frame should be written to memory, the MAC receiver writes data to the 
+FIFO using rx_w_wr and rx_w_data. SOP is indicated by rx_w_sop and EOP using rx_w_eop. For the last transfer of a 
+frame, the rx_w_mod is driven to indicate how many bytes are valid in this last transfer. rx_w_sop and rx_w_eop will not be 
+asserted in the same cycle.

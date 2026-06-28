@@ -1,0 +1,389 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_an_inval_code_tbi
+--
+--   Author         : Mike MacGillis (mikema@tality.com)
+--
+--   Date           : May 15 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--   To verify that invalid codes, received while xmit=CONFIGURATION,cause auto-negotiation to restart, and that only Ordered Sets that are four bytes in length,
+--   that begin with /K28.5/D21.5 or /K28.5/D2.2/ are treated as valid configuration ordered sets.
+-- 
+-- Detailed Test Description
+----------------------------
+-- 1. Initialise the GEM for Gigabit Operation with PCS enabled. Furthermore, Auto-Negotiation is 
+--    enabled. 
+-- 2. Restart auto-negotiation by resetting bit 9 in the pcs control register
+-- 3. Continuously provide one of the stream of /C/ codes noted below.
+-- 4. Observe the Config_Reg transmitted by the GEM, monitoring bit 14 (ACK). 
+-- 5. Repeat steps (2) through (4) until all patterns noted below have been tested.
+--  
+-- Test patterns 
+-- Part A:
+--
+--     1./K28.5/D21.5/D0.3/D0.0 ?
+--     2./K28.5/D2.2/D0.3/D0.0/K28.5/D2.2/D0.3/D0.0 ?
+--
+--    Test patterns in part A should result in the device setting bit 14 (ACK) to one after several
+--    repetitions of the pattern.
+--
+-- Part B:
+--
+--     1./K28.5/D21.5/K28.5/D21.5 ?
+--     2./K28.5/D2.2/K28.5/D2.2 ?
+--     3./K28.5/D21.5/D0.3 /K28.5/D2.2/D0.3 /K28.5/D21.5/D0.3 /K28.5/D2.2/D0.3 ?
+--     4./K28.5/D21.5/D0.3/D0.0/D0.3 /K28.5/D2.2/D0.3/D0.0/D0.3 /K28.5/D21.5/D0.3/D0.0/D0.3 /K28.5/D2.2/D0.3/D0.0/D0.3 ?
+--     5./K28.5/D0.3/D0.0 ?
+--     6./K28.5/D16.2/K27.7/D16.2 /K28.5/D16.2/K27.7/D16.2 ?
+--     7./K27.7/D16.2/K27.7/D16.2 ?
+--     8./K27.7/D21.5/D0.3/D0.0 /K27.7/D2.2/D0.3/D0.0 /K27.7/D21.5/D0.3/D0.0 /K27.7/D2.2/D0.3/D0.0 ?
+--     9.(Ending RD+) /+K28.5/+D2.2/-D0.3/+D0.0 /+K28.5/-D21.5/-D0.3/+D0.0 ? {D2.2 RD is flipped}
+--   10.(Ending RD+) /+K28.5/-D21.5/+D0.3/-D0.0 /-K28.5/+D2.2/-D0.3/+D0.0 ? {1st D0.3 RD is flipped}
+--   11.(Ending RD+) /+K28.5/-D21.5/-D0.3/-D0.0 /-K28.5/+D2.2/-D0.3/+D0.0 ? {1st D0.0 RD is flipped}
+--   12.(Ending RD+) /+K28.5/-D21.5/-D0.3/+D0.0 /-K28.5/+D2.2/-D0.3/+D0.0 /+K28.5/-D21.5/-D0.3/+D0.0 /+K28.5/-D2.2/+D0.3/-D0.0 /-K28.5/+D21.5/+D0.3/-D0.0
+--       /-K28.5/+D2.2/-D0.3/+D0.0 ? {1st -K28.5 is invalid, should be +K28.5}
+--   13.(Ending RD+) /+K28.5/-D21.5/-D0.3/+D0.0 /+K28.5/-D2.2/+D0.3/-D0.0 /+K28.5/-D21.5/-D0.3/+D0.0 /+K28.5/-D2.2/+D0.3/-D0.0 /-K28.5/+D21.5/+D0.3/-D0.0
+--       /-K28.5/+D2.2/-D0.3/+D0.0 ? {3rd +K28.5 is invalid, should be -K28.5}
+--   14.(Ending RD-) /K28.5/D21.5/D0.3 /K28.5/D2.2/D0.3 ? {sequence begins with RD- but ends with RD+}
+--
+--    Test patterns in part B should result in the device restarting auto-negotiation, resulting in the transmission of a Config_Reg of all zero. Continuous reception of these
+--    patterns should prevent the DUT from ever transmitting a non-zero Config_Reg
+--
+--   Note 1: Ending RD+/- indicates that the current running disparity is either + or - when the pattern is constructed. /+K28.5/ refers to the 10-bit code group for K28.5 from the
+--   Current RD+ column of Table 36-2 in the IEEE 802.3 Spec.
+--
+--   Note 2: To cause the tb_pcs_rx test-bench to be triggered from tb_pcs_tx test-bench
+--   the following commands should be used.
+--
+--  i.e.
+--  pcs_an_tx(trx)        0000
+--  pcs_an_rx(trx)        c16000c26000c16000c26000
+--
+--    The trigger field in the pcs_an_tx command should have trx in it.
+--    This will cause the tb_pcs_tx test-bench to generate a pulse to trigger the
+--    start of the pcs_an_rx command. Then, the trigger field in the pcs_an_rx
+--    command should have trx in it.  This will cause the tb_pcs_rx test-bench
+--    to trigger off the pulse generated in tb_pcs_tx test-bench.
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- ********************************************************************************************* --
+-- 1. Initialise the GEM for Gigabit Operation with PCS enabled. Furthermore, Auto-Negotiation is 
+--    enabled.
+-- ********************************************************************************************* --
+
+-- check and initialise the relevant registers
+apbrd(103) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd     200 00009040  -- check value of pcs control register
+apbwr      04 00081c00  -- Put MAC into gigabit mode with TBI. Retry test enabled
+apbrd      04 00081c00  -- Check value of network config register
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 03020100  -- specific address register 1 bottom
+apbwr      8C 00000504  -- specific address register 1 top
+apbrd     200 00001040  -- check value of pcs control register
+apbrd     204 00000109  -- check pcs status register
+apbwr     210 00000060  -- pcs auto-nego. HD and FD
+apbrdf     20 00000000  -- check receive status register and trigger reception
+
+
+pcs_an_tx             0000  
+
+-- Part A:
+--     1./K28.5/D21.5/D0.3/D0.0 
+pcs_an_err_rx(trx) sbc ob5 o60 o00 sbc ob5 o60 o00 sbc ob5 o60 o00       
+pcs_an_err_rx      sbc ob5 o60 o00 sbc ob5 o60 o00 sbc ob5 o60 o00
+pcs_an_err_rx      sbc ob5 o60 o00 sbc ob5 o60 o00 sbc ob5 o60 o00
+pcs_an_err_rx      sbc ob5 o60 o00 sbc ob5 o60 o00 sbc ob5 o60 o00
+
+pcs_an_tx(trx)             6000
+pcs_an_tx                  6040
+
+apbwr(500)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+
+pcs_an_tx         6000  
+pcs_an_tx         0000  
+pcs_an_tx(trx)    6000
+
+--     2./K28.5/D2.2/D0.3/D0.0/K28.5/D2.2/D0.3/D0.0 
+
+pcs_an_err_rx(trx) sbc ob5 o60 o00 sbc ob5 o60 o00      
+pcs_an_err_rx      sbc ob5 o60 o00 sbc ob5 o60 o00
+pcs_an_err_rx      sbc ob5 o60 o00 sbc ob5 o60 o00
+pcs_an_err_rx      sbc ob5 o60 o00 sbc ob5 o60 o00
+pcs_an_err_rx      sbc ob5 o60 o00 sbc ob5 o60 o00
+pcs_an_err_rx      sbc ob5 o60 o00 sbc ob5 o60 o00
+
+
+pcs_an_tx       6040
+
+
+apbwr(1000)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+--pcs_an_tx         6000  
+pcs_an_tx         0000
+pcs_an_tx(trx)    6000
+
+  
+--
+-- Part B:
+--
+--     1./K28.5/D21.5/K28.5/D21.5 
+pcs_an_err_rx(trx) sbc ob5 sbc ob5
+pcs_an_err_rx      sbc ob5 sbc ob5
+pcs_an_err_rx      sbc ob5 sbc ob5
+pcs_an_err_rx      sbc ob5 sbc ob5
+pcs_an_err_rx      sbc ob5 sbc ob5
+pcs_an_err_rx      sbc ob5 sbc ob5
+pcs_an_err_rx      sbc ob5 sbc ob5
+pcs_an_err_rx      sbc ob5 sbc ob5
+
+
+ 
+pcs_an_tx    0000
+pcs_an_tx    6000
+
+
+
+apbwr(1500)   200 00001240  -- pcs control register -- restart auto-negotiation   
+apbrd        200 00001240  -- check value of pcs control register      
+
+pcs_an_tx         0000
+pcs_an_tx(trx)    6000
+
+--     2./K28.5/D2.2/K28.5/D2.2 
+pcs_an_err_rx(trx) sbc o42 sbc o42
+pcs_an_err_rx      sbc o42 sbc o42
+pcs_an_err_rx      sbc o42 sbc o42
+pcs_an_err_rx      sbc o42 sbc o42
+pcs_an_err_rx      sbc o42 sbc o42
+pcs_an_err_rx      sbc o42 sbc o42
+pcs_an_err_rx      sbc o42 sbc o42
+
+pcs_an_tx    0000
+pcs_an_tx    6000
+  
+apbwr(2000)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+pcs_an_tx         0000
+pcs_an_tx(trx)    6000
+
+--3.               /K28.5/D21.5/D0.3 /K28.5/D2.2/D0.3 /K28.5/D21.5/D0.3 /K28.5/D2.2/D0.3 
+pcs_an_err_rx(trx)  sbc   ob5   o60   sbc   o42   o60  sbc   ob5   o60    sbc   o42  o60
+pcs_an_err_rx       sbc   ob5   o60   sbc   o42   o60  sbc   ob5   o60    sbc   o42  o60
+pcs_an_err_rx       sbc   ob5   o60   sbc   o42   o60  sbc   ob5   o60    sbc   o42  o60
+pcs_an_err_rx       sbc   ob5   o60   sbc   o42   o60  sbc   ob5   o60    sbc   o42  o60
+pcs_an_err_rx       sbc   ob5   o60   sbc   o42   o60  sbc   ob5   o60    sbc   o42  o60
+
+pcs_an_tx    0000
+pcs_an_tx    6000
+  
+apbwr(2500)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+pcs_an_tx         0000
+pcs_an_tx(trx)    6000
+
+4.               /K28.5/D21.5/D0.3/D0.0/D0.3 /K28.5/D2.2/D0.3/D0.0/D0.3 /K28.5/D21.5/D0.3/D0.0/D0.3 /K28.5/D2.2/D0.3/D0.0/D0.3 
+pcs_an_err_rx(trx)  sbc   ob5   o60   o00   o60   sbc  o42 o60   o00  o60   sbc  ob5    o60  o00  o60  sbc  o42 o60 o00 o60
+pcs_an_err_rx       sbc   ob5   o60   o00   o60   sbc  o42 o60   o00  o60   sbc  ob5  o60  o00  o60  sbc  o42 o60 o00 o60
+pcs_an_err_rx       sbc   ob5   o60   o00   o60   sbc  o42 o60   o00  o60   sbc  ob5  o60  o00  o60  sbc  o42 o60 o00 o60
+
+pcs_an_tx    0000
+pcs_an_tx    6000
+  
+apbwr(3000)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+pcs_an_tx         0000
+pcs_an_tx(trx)    6000
+
+--     5.         /K28.5/D0.3/D0.0 
+pcs_an_err_rx(trx)  sbc   o60   o00   sbc   o60   o00  sbc   o60   o00  sbc   o60   o00
+pcs_an_err_rx  sbc   o60   o00   sbc   o60   o00  sbc   o60   o00  sbc   o60   o00
+pcs_an_err_rx  sbc   o60   o00   sbc   o60   o00  sbc   o60   o00  sbc   o60   o00
+
+pcs_an_tx    0000
+pcs_an_tx    6000
+  
+apbwr(3500)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+pcs_an_tx         0000
+pcs_an_tx(trx)    6000
+
+--     6.           /K28.5/D16.2/K27.7/D16.2 /K28.5/D16.2/K27.7/D16.2 
+pcs_an_err_rx(trx)  sbc    o50   sfb   o50  sbc    o50   sfb   o50  
+pcs_an_err_rx       sbc    o50   sfb   o50  sbc    o50   sfb   o50  
+pcs_an_err_rx       sbc    o50   sfb   o50  sbc    o50   sfb   o50  
+pcs_an_err_rx       sbc    o50   sfb   o50  sbc    o50   sfb   o50  
+
+pcs_an_tx    0000
+pcs_an_tx    6000
+  
+apbwr(4000)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+pcs_an_tx         0000
+pcs_an_tx(trx)    6000
+
+--     7.          /K27.7/D16.2/K27.7/D16.2 
+pcs_an_err_rx(trx)  sfb    o50   sfb   o50  sfb    o50   sfb   o50 
+pcs_an_err_rx       sfb    o50   sfb   o50  sfb    o50   sfb   o50 
+pcs_an_err_rx       sfb    o50   sfb   o50  sfb    o50   sfb   o50 
+pcs_an_err_rx       sfb    o50   sfb   o50  sfb    o50   sfb   o50 
+
+pcs_an_tx    0000
+pcs_an_tx    6000
+  
+apbwr(4500)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+pcs_an_tx         0000
+pcs_an_tx(trx)    6000
+
+--     8.          /K27.7/D21.5/D0.3/D0.0 /K27.7/D2.2/D0.3/D0.0 /K27.7/D21.5/D0.3/D0.0 /K27.7/D2.2/D0.3/D0.0 
+pcs_an_err_rx(trx)  sfb    ob5   o60  o00  sfb   o42   o60  o00  sfb   ob5    o60  o00   sfb  o42  o60  o00 
+pcs_an_err_rx       sfb    ob5   o60  o00  sfb   o42   o60  o00  sfb   ob5    o60  o00   sfb  o42  o60  o00 
+pcs_an_err_rx       sfb    ob5   o60  o00  sfb   o42   o60  o00  sfb   ob5    o60  o00   sfb  o42  o60  o00 
+
+pcs_an_tx    0000
+pcs_an_tx    6000
+  
+apbwr(5000)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+pcs_an_tx         0000
+pcs_an_tx(trx)    6000   
+
+--     9.(Ending RD+) /+K28.5/+D2.2/-D0.3/+D0.0 /+K28.5/-D21.5/-D0.3/+D0.0  {D2.2 RD is flipped}
+pcs_an_err_rx(trx)     sbcp    o42p  o60n  o00p  sbcp    ob5n   o60n  o00p
+pcs_an_err_rx          sbcp    o42p  o60n  o00p  sbcp    ob5n   o60n  o00p
+pcs_an_err_rx          sbcp    o42p  o60n  o00p  sbcp    ob5n   o60n  o00p
+pcs_an_err_rx          sbcp    o42p  o60n  o00p  sbcp    ob5n   o60n  o00p
+pcs_an_err_rx          sbcp    o42p  o60n  o00p  sbcp    ob5n   o60n  o00p
+pcs_an_err_rx          sbcp    o42p  o60n  o00p  sbcp    ob5n   o60n  o00p
+pcs_an_err_rx          sbcp    o42p  o60n  o00p  sbcp    ob5n   o60n  o00p
+
+pcs_an_tx    0000
+pcs_an_tx    6000
+  
+apbwr(5500)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+pcs_an_tx         0000
+pcs_an_tx(trx)    6000
+
+--   10.(Ending RD+) /+K28.5/-D21.5/+D0.3/-D0.0 /-K28.5/+D2.2/-D0.3/+D0.0  {1st D0.3 RD is flipped}
+pcs_an_err_rx(trx)     sbcp    ob5n  o60p  o00n  sbcn    o42p   o60n  o00p
+pcs_an_err_rx          sbcp    ob5n  o60p  o00n  sbcn    o42p   o60n  o00p
+pcs_an_err_rx          sbcp    ob5n  o60p  o00n  sbcn    o42p   o60n  o00p
+pcs_an_err_rx          sbcp    ob5n  o60p  o00n  sbcn    o42p   o60n  o00p
+
+pcs_an_tx    0000
+pcs_an_tx    6000
+  
+apbwr(6000)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+pcs_an_tx         0000
+pcs_an_tx(trx)    6000
+
+   11.(Ending RD+) /+K28.5/-D21.5/-D0.3/-D0.0 /-K28.5/+D2.2/-D0.3/+D0.0 ? {1st D0.0 RD is flipped}
+pcs_an_err_rx(trx)     sbcp    ob5n  o60n  o00n  sbcn    o42p   o60n  o00p
+pcs_an_err_rx          sbcp    ob5n  o60n  o00n  sbcn    o42p   o60n  o00p
+pcs_an_err_rx          sbcp    ob5n  o60n  o00n  sbcn    o42p   o60n  o00p
+pcs_an_err_rx          sbcp    ob5n  o60n  o00n  sbcn    o42p   o60n  o00p
+
+pcs_an_tx    0000
+pcs_an_tx    6000
+  
+apbwr(6500)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+pcs_an_tx         0000
+pcs_an_tx(trx)    6000
+
+--   12.(Ending RD+) /+K28.5/-D21.5/-D0.3/+D0.0 /-K28.5/+D2.2/-D0.3/+D0.0 /+K28.5/-D21.5/-D0.3/+D0.0 /+K28.5/-D2.2/+D0.3/-D0.0 
+--                   /-K28.5/+D21.5/+D0.3/-D0.0/-K28.5/+D2.2/-D0.3/+D0.0 ? {1st -K28.5 is invalid, should be +K28.5}
+pcs_an_err_rx(trx)     sbcp    ob5n  o60n  o00p  sbcn    o42p   o60n  o00p sbcp    ob5n  o60n  o00p   sbcp    o42n  o60p  o00n
+pcs_an_err_rx          sbcn    ob5p  o60p  o00n  sbcn    o42p   o60n  o00p
+pcs_an_err_rx          sbcp    ob5n  o60n  o00p  sbcn    o42p   o60n  o00p sbcp    ob5n  o60n  o00p   sbcp    o42n  o60p  o00n
+pcs_an_err_rx          sbcn    ob5p  o60p  o00n  sbcn    o42p   o60n  o00p
+pcs_an_err_rx          sbcp    ob5n  o60n  o00p  sbcn    o42p   o60n  o00p sbcp    ob5n  o60n  o00p   sbcp    o42n  o60p  o00n
+pcs_an_err_rx          sbcn    ob5p  o60p  o00n  sbcn    o42p   o60n  o00p
+
+pcs_an_tx    0000
+pcs_an_tx    6000
+  
+apbwr(7000)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+pcs_an_tx         0000
+pcs_an_tx(trx)    6000
+
+--   13.(Ending RD+)  /+K28.5/-D21.5/-D0.3/+D0.0 /+K28.5/-D2.2/+D0.3/-D0.0 /+K28.5/-D21.5/-D0.3/+D0.0 /+K28.5/-D2.2/+D0.3/-D0.0 
+--                   /-K28.5/+D21.5/+D0.3/-D0.0/-K28.5/+D2.2/-D0.3/+D0.0 ? {3rd +K28.5 is invalid, should be -K28.5}
+pcs_an_err_rx(trx)     sbcp    ob5n  o60n  o00p  sbcp    o42n   o60p  o00n  sbcp    ob5n  o60n  o00p   sbcp    o42n  o60p  o00n
+pcs_an_err_rx          sbcn    ob5p  o60p  o00n  sbcn    o42p   o60n  o00p
+pcs_an_err_rx          sbcp    ob5n  o60n  o00p  sbcp    o42n   o60p  o00n  sbcp    ob5n  o60n  o00p   sbcp    o42n  o60p  o00n
+pcs_an_err_rx          sbcn    ob5p  o60p  o00n  sbcn    o42p   o60n  o00p
+pcs_an_err_rx          sbcp    ob5n  o60n  o00p  sbcp    o42n   o60p  o00n  sbcp    ob5n  o60n  o00p   sbcp    o42n  o60p  o00n
+pcs_an_err_rx          sbcn    ob5p  o60p  o00n  sbcn    o42p   o60n  o00p
+
+pcs_an_tx    0000
+pcs_an_tx    6000
+  
+apbwr(7500)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+pcs_an_tx         0000
+pcs_an_tx(trx)    6000
+
+--   14.(Ending RD-) /K28.5/D21.5/D0.3 /K28.5/D2.2/D0.3 ? {sequence begins with RD- but ends with RD+}
+pcs_an_err_rx(trx)    sbcp    o42n  --starts off sequence with negative disparity 
+pcs_an_err_rx         sbc    ob5  o60   sbc  o42   o60
+pcs_an_err_rx         sbc    ob5  o60   sbc  o42   o60
+pcs_an_err_rx         sbc    ob5  o60   sbc  o42   o60
+pcs_an_err_rx         sbc    ob5  o60   sbc  o42   o60
+ 
+pcs_an_tx    0000
+pcs_an_tx    6000
+  
+apbwr(8000)   200 00001240  -- pcs control register -- restart auto-negotiation     
+apbrd        200 00001240  -- check value of pcs control register      
+
+pcs_an_tx         0000
+pcs_an_tx         6000
+
+apbrd(10025)   204 00000109  -- check pcs status register
+apbrd          200 00001040  -- check pcs control register 
+apbrd          200 00001040  -- check pcs control register 
+apbrd          200 00001040  -- check pcs control register 
+apbrd          210 00000060  -- check pcs auto-neg. advertisment register
+apbrd          214 00000060  -- check pcs auto-neg. link partner advertisment register
+apbrd          218 00000004  -- check pcs auto-neg. expansion register 
+apbrd          21c 00000000  -- check pcs auto-neg. next page register
+apbrd          220 00000000  -- check pcs auto-neg. link partner next page register
+apbrd          23C 00008000  -- check pcs auto-neg. extended status register
+dma_rd 00000000 12345678 -- DMA will read a single descriptor after RX is enabled
+end(10100)

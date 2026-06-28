@@ -1,0 +1,470 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2016
+--                                       Cadence Design Systems, Inc.
+--                                       All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_frer_rogue
+--
+--   Author         : Steven Ho
+--
+--   Date           : 26th Aug 2016
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Checks rogue error statistics saturates at max value.
+--
+-- Functional Coverage
+----------------------
+-- · 
+-- 
+-- 
+--
+-- Detailed Test Description
+----------------------------
+-- Set to use Vector recovery algorithm.
+-- Rogue errors are signalled when the sequence number of a received frame
+-- is outside of the defined window from the previous highest sequence number.
+-- This window is defined as highest_seq_num - window size + 1 to highest
+-- seq num + window size.
+-- 
+-- Use the trans.pl automatic frame generation mechanism.
+--
+-- Set FRER function window size to 4.
+--
+-- First frame will always be accepted regardless of the sequence number.
+-- Receive first frame with sequence 0x0.
+-- After receiving first frame, receive following sequence of frames:
+--  seq_num 0 - 5. This is rogue.
+--  seq_num 0 - 4. This is also rogue.
+--  seq_num 0 - 3. This is accepted.
+--  seq_num 0 - 2. This is accepted.
+--  seq_num 0 - 1. This is accepted.
+--  seq_num 5. This is rogue.
+--  seq_num 1. This is accepted.
+--  seq_num 2. This is accepted.
+--  seq_num 3. This is accepted.
+--  seq_num 4. This is accepted.
+-- Receive non-FRER frame just to allow time for duplicate to be processed.
+-- Check statistics, rogue counter should be set to 6 since each rogue frame
+-- was also duplicated. Out of order will be set to 3 for the first 3 packets
+-- accepted...
+-- 
+-- Disable FRER function.
+-- Set window size to 32.
+-- Enable FRER function
+-- Receive seq_num 1. This is accepted since the function was reset.
+-- Receive 600 frames with inc set to 33, i.e. every frame will be rogue.
+-- Receive seq_num 2.
+-- Receive non-FRER frame to allow sequencing.
+-- Check stats, rogue counter should have saturated at max.
+--
+--------------------------------------------------------------------------------
+
+wait_states 0
+
+-- Set AHB clock freq to 250MHz
+-- At 32bit, this means we have maximum bandwidth of 8Gbit/s shared between
+-- TX and RX. Randomize hready, keeping the maximum to 5 (averages around 2.5)
+-- to ensure no RX overflows occur, and max line rate is acheivable on TX
+sel_ahb_freq 3 
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      10 01a00710  -- DMA config
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 10000000  -- write receive queue pointer
+apbrd      18 10000000  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 0008040a  -- 64bit enable, gigabit mode, full duplex
+
+-- Set up the screener registers
+-- Match against Source MAC address: 11:11:22:22:22:22
+
+-- First compare register set to compare 0x22221111 with no masking. Offset 6.
+-- Second compare register set to compare 0x2222 with mask of 0xffff. Offset 10.
+apbwr     700 22221111  -- Compare registers
+apbwr     704 00000206
+apbwr     708 2222ffff
+apbwr     70c 0000000a
+
+-- Screener Type2 register 0.
+-- Enable Compare A=0, B=1
+-- 0 0 00000 1 00001 1 00000 0000 00000 0000
+apbwr     540 010c0000  -- Screener type 2 setup
+
+-- Repeat for the other 2 stream functions.
+-- Note that we are only using queue 0 in all cases.
+-- Stream 1 match MAC address: 22:22:33:33:33:33
+-- Stream 2 match MAC address: 33:33:44:44:44:44
+apbwr     710 33332222  -- Compare registers
+apbwr     714 00000206
+apbwr     718 3333ffff
+apbwr     71c 0000000a
+apbwr     720 44443333  -- Compare registers
+apbwr     724 00000206
+apbwr     728 4444ffff
+apbwr     72c 0000000a
+
+-- Screener Type2 register 1.
+-- Enable Compare A=2, B=3
+-- 0 0 00000 1 00011 1 00010 0000 00000 0000
+apbwr     544 011c4000  -- Screener type 2 setup
+
+-- Screener Type2 register 2.
+-- Enable Compare A=4, B=5
+-- 0 0 00000 1 00101 1 00100 0000 00000 0000
+apbwr     548 012c8000  -- Screener type 2 setup
+
+-- Program the FRER registers
+apbwr     8a0 0000ffff  -- FRER Timeout value. This is 65535x8ns. Not used.
+apbwr     8a4 c000dada  -- Strip redundancy tag and type set to 0xdada
+apbwr     8c0 d0000000  -- Stream 0 setup A. Enable, Vect, No Timeout, RTag.
+apbwr     8c4 00000004  -- Stream 0 setup B. Set to 16-bit sequence number. Window size 4.
+apbwr     8d0 d0000011  -- Stream 1 setup A. Enable, Vect, No Timeout, RTag.
+apbwr     8d4 00000004  -- Stream 1 setup B. Set to 16-bit sequence number. Window size 4.
+apbwr     8e0 d0000022  -- Stream 2 setup A. Enable, Vect, No Timeout, RTag.
+apbwr     8e4 00000004  -- Stream 2 setup B. Set to 16-bit sequence number. Window size 4.
+
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+-- Note that all frames are duplicated.
+-- First frame to stream 0 to set first sequence number
+rx_frame (apb)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  0000        -- Set an initial value
+      frer_auto_dup     1
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- Followed by 0 - 5 = 0xfffb
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  fffb
+      frer_auto_dup     1
+      frer_discard      true        -- frame should be discarded
+      includerxdma      0           -- do not add DMA activity since will be dropped
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- Followed by 0 - 4 = 0xfffc
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  fffc
+      frer_auto_dup     1
+      frer_discard      true        -- frame should be discarded
+      includerxdma      0           -- do not add DMA activity since will be dropped
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- Followed by 0 - 3 = 0xfffd
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  fffd
+      frer_auto_dup     1
+      includerxdma      1           -- Reset flag as this is not rogue.
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- Followed by 0 - 2 = 0xfffe
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  fffe
+      frer_auto_dup     1
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- Followed by 0 - 1 = 0xffff
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  ffff
+      frer_auto_dup     1
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- Followed by 5
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  0005
+      frer_auto_dup     1
+      frer_discard      true        -- frame should be discarded
+      includerxdma      0           -- do not add DMA activity since will be dropped
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- Followed by 1
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  0001
+      frer_auto_dup     1
+      includerxdma      1           -- Reset field
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- Followed by 2
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  0002
+      frer_auto_dup     1
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- Followed by 3
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  0003
+      frer_auto_dup     1
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  0004
+      frer_auto_dup     1
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- Additional non-FRER frame to give time for above duplicate to complete to sequence APB...
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- check receive statistics
+apbrd     158 00000009  -- check frames received ok
+
+-- Check CB statistics
+apbrd     8c8 00060000  -- Stats A for CB function 0. 6 Rogue, 0 latent errors.
+apbrd     8cc 00000003  -- Stats B for CB function 0. 0 timeouts, 3 out of order frames.
+apbrd     8d8 00000000  -- Stats A for CB function 1. 
+apbrd     8dc 00000000  -- Stats B for CB function 1. 
+apbrd     8e8 00000000  -- Stats A for CB function 2. 
+apbrd     8ec 00000000  -- Stats B for CB function 2. 
+
+-- Disable the FRER function and change settings
+apbwr     8c0 50000000  -- Stream 0 setup A. Disable, Vect, No Timeout, RTag.
+apbwr     8c4 00000020  -- Stream 0 setup B. Set to 16-bit sequence number. Window size 32.
+
+-- Re-enable
+apbwr     8c0 d0000000  -- Stream 0 setup A. Enable, Vect, No Timeout, RTag.
+apbrdf    8c0 d0000000  -- Stream 0 setup A. Enable, Vect, No Timeout, RTag.
+
+-- First frame to stream 0 to set first sequence number to 1.
+rx_frame (apb)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  0001        -- Set an initial value
+      frer_auto_dup     1
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- 600 (+duplicate) frames which will be rogue and discarded.
+rx_frame (gap)  600
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_inc_val      33          -- Increment value of 33, all will be rogue.
+      frer_rtag_seqnum  inc
+      frer_auto_dup     1
+      frer_discard      true        -- frame should be discarded
+      includerxdma      0           -- do not add DMA activity since will be dropped
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- Good receive frame with duplicate
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  0002
+      frer_auto_dup     1
+      includerxdma      1           -- Reset field
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- Additional non-FRER frame to give time for above duplicate to complete to sequence APB...
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- check receive statistics
+apbrd     158 00000003  -- check frames received ok
+
+-- Check CB statistics
+apbrd     8c8 03ff0000  -- Stats A for CB function 0. Max Rogue, 0 latent errors.
+apbrd     8cc 00000000  -- Stats B for CB function 0. 0 timeouts, 0 out of order frames.
+apbrd     8d8 00000000  -- Stats A for CB function 1. 
+apbrd     8dc 00000000  -- Stats B for CB function 1. 
+apbrd     8e8 00000000  -- Stats A for CB function 2. 
+apbrd     8ec 00000000  -- Stats B for CB function 2. 
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(50000)

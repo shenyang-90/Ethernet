@@ -1,0 +1,2004 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2009
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : pfc_pause_basic_minarea
+--
+--   Author         : Christine Lin (htlin@cadence.com)
+--
+--   Date           : 26 Novemeber, 2009
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This checks reception of classic and PFC pause frames
+-- with multicast and reg1 matching, with wrong multicast address,
+-- wrong type-id, wrong op-code, with CRC error and pause-frame
+-- interrupt enabled/disabled for the following 3 conditions
+-- 1. copy all frame bit = 0, disable copy of pause frame = 0
+-- 2. copy all frame bit = 1, disable copy of pause frame = 0
+-- 3. copy all frame bit = 1, disable copy of pause frame = 1
+--
+-- Memory copy, frame rx'ed/pause frame rx'ed interrupt 
+-- frame rx'ed stats/ pasue frame rx'ed stats are monitored
+-- after each frame reception.
+--
+-- minarea configuration does not have any stats registers.
+-- When stats are read, a value of zero is returned.
+--
+-- Functional Coverage
+----------------------
+-- This checks reception of classic and PFC pause frames
+-- for different settings on copy all frame and disable copy of pause frame
+-- bit
+-- 
+-- 
+--
+-- Detailed Test Description
+----------------------------
+--
+-----------------------------------------------------------------
+-- Set copy all frame bit = 0, disable copy of pause frame = 0 --
+-----------------------------------------------------------------
+-- Frame 1 ~ 15 
+-- reception of classic and PFC pause frames
+-- with multicast and reg1 matching, with wrong multicast address,
+-- wrong type-id, wrong op-code, with CRC error and pause-frame
+-- interrupt enabled/disabled 
+--
+-- check stats registersd
+--
+-----------------------------------------------------------------
+-- Set copy all frame bit = 1, disable copy of pause frame = 0
+-----------------------------------------------------------------
+-- Frame 16 ~ 30
+-- reception of classic and PFC pause frames
+-- with multicast and reg1 matching, with wrong multicast address,
+-- wrong type-id, wrong op-code, with CRC error and pause-frame
+-- interrupt enabled/disabled 
+--
+-- check stats registersd
+--
+-----------------------------------------------------------------
+-- Set copy all frame bit = 1, disable copy of pause frame = 1
+-----------------------------------------------------------------
+-- Frame 31 ~ 45
+-- reception of classic and PFC pause frames
+-- with multicast and reg1 matching, with wrong multicast address,
+-- wrong type-id, wrong op-code, with CRC error and pause-frame
+-- interrupt enabled/disabled 
+-- 
+-- check stats registersd
+--
+--------------------------------------------------------------------------------
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      00 0001000C  -- enable receive/transmit and PFC pause frame reception
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 00080001  -- indicate 100M operation, will check pin l8r.
+apbrd      04 00080001  -- verify write to speed register..
+apbrd      20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+-------------
+-- Frame 1 --
+-------------
+-- ************************************************************************** --
+-- Receive a classic pause frame where the destination address matches reg1 
+-- type field = 0x8808, Pause op-code = 0x0001 and pause time 
+-- to be set is 0x00FF. (Frame should be copied to memory)
+-- ************************************************************************** --
+
+
+apbwrf       04 00083003 -- disable copy of pause frame bit(23) = 0,
+                         -- reset retry test bit(12) = 1, 
+                         -- keep enable pause time bit(13) = 1,
+                         -- copy all frames bit(4) = 0
+                         -- full-duplex bit(1) = 1,
+                         -- 100Mbps speed bit(0) = 1
+                        
+pinsc(apb)  pfc_negotiate 0 rx_pfc_paused 00000000
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     55d578563412111111112222222288080001
+rxd              00ff4444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01000888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000010000040    54e952d2
+
+
+apbrd(int)   24 00001002 -- check interrupt status - non-zero pause frame received & frame rx'ed
+apbwr        24 00001002 -- Clear it 
+apbrd       158 00000000 perr -- check frames rxed OK (register 1 match)
+apbrd        38 000000ff -- check the value of the pause time register
+                         -- This will be updated in PCLK by the time we get an interrupt
+                         -- as we have to wait for the DMA to complete.  Note that by 
+                         -- time the interrupt happens, it has already decremented
+
+apbrd(int)   24 00002000 -- check interrupt status - pause timer zero
+apbwr        24 00002000 -- Clear it
+apbrd        38 00000000 -- check the value of the pause time register
+apbrdf       08 00000006 -- check pfc_negotiate = 0
+
+pinsc(apb)  pfc_negotiate 0 rx_pfc_paused 00000000
+
+-------------
+-- Frame 2 --
+-------------
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches pause frame address 
+-- 0x0180C2000001, type field = 0x8808, Pause op-code = 0x0001 and pause time 
+-- to be set is 0x00FF. (Frame should not be copied to memory)
+-- ************************************************************************** --
+
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it
+apbrd        38 000000FF -- check the value of the pause time register
+
+apbrd(int)   24 00002000 -- check interrupt status - pause timer zero
+apbwr        24 00002000 -- Clear it
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       158 00000000 perr -- check no frames rxed OK (no register 1 match)
+apbrd       164 00000000 perr -- check pause frames rxed (frame 1 and 2)
+apbrdf       08 00000006 -- check pfc_negotiate = 0
+
+pinsc(apb) pfc_negotiate 0 rx_pfc_paused 00000000
+
+-------------
+-- Frame 3 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches reg1 
+-- type field = 0x8808, Pause op-code = 0x0101 and priority enable  
+-- to be set is 0x00FF. (Frame should be copied to memory)
+-- ************************************************************************** --
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     55d578563412111111112222222288080101
+rxd              00ff0002000400060008000a000c000e
+rxd              000f888899999999aaaaaaaabbbbbbbb
+rxd              000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    0200ff00
+fifo_wr      1000     0   00xxxxxxxxxx    06000400
+fifo_wr      1000     0   00xxxxxxxxxx    0a000800
+fifo_wr      1000     0   00xxxxxxxxxx    0e000c00
+fifo_wr      1000     0   00xxxxxxxxxx    88880f00
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000010000040    7f398257
+
+apbrd(int)   24 00001002 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001002 -- Clear it 
+apbrd       158 00000000 perr -- check frames rxed OK (register 1 match)
+apbrd        38 00000000 -- pause time register not loaded
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+pinsc(2165) pfc_negotiate 1 rx_pfc_paused 11111111
+pinsc(apb) pfc_negotiate 1 rx_pfc_paused 11110000
+pinsc(2195) pfc_negotiate 1 rx_pfc_paused 00000000
+
+apbrd(2197) 24 00000000 -- check that PFC counter time out does not generate interrupt
+
+-------------
+-- Frame 4 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches pause frame address 
+-- 0x0180C2000001, type field = 0x8808, Pause op-code = 0x0101 and priority enable
+-- to be set is 0x00FF. (Frame should not be copied to memory)
+-- ************************************************************************** --
+
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF0011001200130014001500160017
+rxd            0018888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it
+apbrd        38 00000000 -- pause timer not loaded
+
+apbwr        24 00002000 -- Clear it
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       158 00000000 perr -- check no frames rxed OK (no register 1 match)
+apbrd       164 00000000 perr -- check pause frames rxed (frame 3 and 4)
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+--pinsc(2510) pfc_negotiate 1 rx_pfc_paused 11111111
+pinsc(apb) pfc_negotiate 1 rx_pfc_paused 11111111
+pinsc(2550)  pfc_negotiate 1 rx_pfc_paused 00000000
+
+apbrd(2552) 24 00000000  -- check that PFC counter time out does not generate interrupt
+
+-------------
+-- Frame 5 --
+-------------
+-- ************************************************************************** --
+-- Receive a classic pause frame where the destination address matches pause frame address 
+-- to regsiter 1, type field = 0x8808, Pause op-code = 0x0001 and pause time set to
+-- to be set is 0x00FF. (Frame should be copied to memory)
+-- ************************************************************************** --
+
+rxd(apb)   55d578563412111111112222222288080001
+rxd            00ff0021002200230024002500260027
+rxd            0028888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01000888
+fifo_wr      1000     0   00xxxxxxxxxx    2100ff00
+fifo_wr      1000     0   00xxxxxxxxxx    23002200
+fifo_wr      1000     0   00xxxxxxxxxx    25002400
+fifo_wr      1000     0   00xxxxxxxxxx    27002600
+fifo_wr      1000     0   00xxxxxxxxxx    88882800
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000010000040    2625d4a9
+
+apbrd(int)   24 00000002 -- check interrupt status - No pause frame received
+                         -- bit 2 set (received complete - a frame has been stored in memory)
+apbrd        38 00000000 -- pause time register not loaded
+apbrd       158 00000000 perr -- check no frames rxed OK 
+apbrd       164 00000000 perr -- check no pause frames rxed
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+--pinsc(2851)  pfc_negotiate 1 rx_pfc_paused 00000000
+pinsc(apb)  pfc_negotiate 1 rx_pfc_paused 00000000
+
+-------------
+-- Frame 6 --
+-------------
+-- ************************************************************************** --
+-- Receive a classic pause frame where the destination address matches pause frame address 
+-- 0x0180C2000001, type field = 0x8808, Pause op-code = 0x0001 and pause time 
+-- to be set is 0x00FF. (Frame should not be copied to memory, no interrupt)
+-- ************************************************************************** --
+
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(3200)   24 00000000 -- check interrupt status - no pause frame received
+apbrd        38 00000000 -- pause time register no loaded
+apbrd       158 00000000 perr -- check no frames rxed OK (no register 1 match)
+apbrd       164 00000000 perr -- check no pause frames rxed
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+pinsc(apb)  pfc_negotiate 1 rx_pfc_paused 00000000
+
+-------------
+-- Frame 7 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0102  and 
+-- priority enable to be set is 0x00FF.  (The wrong opcode value is received. 
+-- Therefore, the pause frame should be ignored)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080102
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(3550)  24 00000000 -- check interrupt status - No pause frame received
+apbrd        38 00000000 -- pause time register not loaded
+apbrd       158 00000000 perr -- check no frames rxed OK 
+apbrd       164 00000000 perr -- check no pause frames rxed 
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+--pinsc(3560) pfc_negotiate 1 rx_pfc_paused 00000000
+pinsc(apb) pfc_negotiate 1 rx_pfc_paused 00000000
+
+
+-------------
+-- Frame 8 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches the pause 
+-- frame address 0x0180C2000001, type field = 0x8807, pause op-code = 0x0101 
+-- and priority enable to be set is 0x00FF. (The wrong type-id value is received. 
+-- Therefore, the PFC pause frame should be ignored)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288070101
+rxd            00ff4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(3900)  24 00000000 -- check interrupt status - No pause frame received
+apbrd        38 00000000 -- check overwriting of the pause time register
+apbrd       164 00000000 perr -- check no pause frames rxed
+apbrd       158 00000000 perr -- check no frames rxed OK (no register 1 match)
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+--pinsc(3910) pfc_negotiate 1 rx_pfc_paused 00000000
+pinsc(apb) pfc_negotiate 1 rx_pfc_paused 00000000
+
+-------------
+-- Frame 9 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches register 1, 
+-- type field = 0x8807, pause op-code = 0x0101 and priority enable to be set is 0x00FF.  
+-- (The wrong type-id value was received but the destination address matched the 
+-- local address.  Therefore, the frame should be written to memory)
+-- ************************************************************************** --
+
+rxd(apb)     d578563412111111112222222288070101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010788
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000010000040    1314a891
+
+apbrd(int)   24 00000002 -- check interrupt status - frame rx'ed
+apbwr        24 00000002 -- Clear it
+apbrd       158 00000000 perr -- check frames rxed OK (register 1 match)
+apbrd       164 00000000 perr -- check no pause frames rxed
+apbrd        38 00000000 -- check the value of the pause time register
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+pinsc(apb) pfc_negotiate 1 rx_pfc_paused 00000000
+
+
+-------------
+-- Frame 10 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address is 0x0480C2000001 (i.e.
+-- it doesn't match pause address), type field = 0x8808, pause op-code = 0x0101 and
+-- priority enable to be set is 0x00FF. (The wrong destination address value was received.
+-- Therefore, the frame should not be written to memory and no interrupts will be 
+-- received)
+-- ************************************************************************** --
+
+rxd(apb)     d50480C200000111112222222288080101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(4600)  24 00000000 -- check interrupt status - No pause frame received
+apbrd        38 00000000 -- check overwriting of the pause time register
+apbrd       164 00000000 perr -- check no pause frames rxed
+apbrdf      158 00000000 perr -- check no frames rxed OK (no register 1 match)
+pinsc(apb) pfc_negotiate 1 rx_pfc_paused 00000000
+
+
+-------------
+-- Frame 11 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches the pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0101 and 
+-- pause time to be set is 0x00FF.  However, there is a crc error.  
+-- (The pause frame should be ignored)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000cccccccc -- CRC error
+
+
+-- check the receive data is NOT written out on the AHB interface
+apbrd(4950)  24 00000000 -- check interrupt status - no pause frame received
+
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       164 00000000 perr -- check no pause frames rxed
+apbrdf      158 00000000 perr -- check no frames rxed OK (no register 1 match)
+pinsc(apb) pfc_negotiate 1 rx_pfc_paused 00000000
+
+
+-------------
+-- Frame 12 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches register 1,  
+-- type field = 0x8808, pause op-code = 0x0101 and 
+-- pause time to be set is 0x00FF.  However, there is a crc error. 
+-- (The destination address matched reg1
+--  Therefore, the frame should be written to memory) 
+-- (This is a bad frame => No interrupt) 
+-- ************************************************************************** --
+
+rxd(apb)     d578563412111111112222222288080101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000cccccccc -- CRC error
+
+-- check the receive data as it is written out on the AHB interface
+-- bit 14 of rx_status is set when any RX error occurs (including CRC error)
+-- bit 41 of rx_status indicates the frame had a CRC error 
+
+-- where control is (left to right) WR, ERR, SOP, EOP.
+
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1101     0   020010004040    cccccccc
+
+apbrd(5300)  24 00000000 -- check interrupt status - no frame rx'ed
+apbrd       158 00000000 perr -- check no frames rxed OK (CRC error - bad frame)
+apbrd       164 00000000 perr -- check no pause frames rxed
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+-- ************************************************************************** --
+-- Disable pause received interrupt (bit 12).
+-- ************************************************************************** --
+
+apbwrf       2c 00001000 -- disable pause received interrupt (bit 12)
+
+pinsc(apb)  pfc_negotiate 1 rx_pfc_paused 00000000
+
+-------------
+-- Frame 13 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches the pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0101 and 
+-- priority enable to be set is 0xFF.  (There should be no pause frame received 
+-- interrupt set in the interrupt status register)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF0010001100120013001400150016
+rxd            0017888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+-- check that pause counters decrement
+pinsc(5632) pfc_negotiate 1 rx_pfc_paused 11111111
+pinsc(5664) pfc_negotiate 1 rx_pfc_paused 11111110
+pinsc(5666) pfc_negotiate 1 rx_pfc_paused 11111100
+pinsc(5668) pfc_negotiate 1 rx_pfc_paused 11111000
+pinsc(5670) pfc_negotiate 1 rx_pfc_paused 11110000
+pinsc(5672) pfc_negotiate 1 rx_pfc_paused 11100000
+pinsc(5674) pfc_negotiate 1 rx_pfc_paused 11000000
+pinsc(5676) pfc_negotiate 1 rx_pfc_paused 10000000
+pinsc(5678) pfc_negotiate 1 rx_pfc_paused 00000000
+
+-- check that we do not get any interrupt
+apbrd(5700)  24 00000000 -- check interrupt status 
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       164 00000000 perr -- check 1 pause frame rxed
+apbrd       158 00000000 perr -- check no frames rxed OK (no register 1 match)
+
+-- ************************************************************************** --
+-- Enable pause received interrupt (bit 12) 
+-- ************************************************************************** --
+apbwrf        28 00001000 -- enable pause received interrupt (bit 12)
+
+pinsc(apb)  pfc_negotiate 1 rx_pfc_paused 00000000
+
+
+-------------
+-- Frame 14 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches the pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0101 and 
+-- priority enable to be set is 0xFF.  (There should be no pause frame received 
+-- interrupt set in the interrupt status register)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF0020002100220023002400250026
+rxd            0027888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it
+apbrd        38 00000000 -- pause timer not loaded
+
+apbrd       158 00000000 perr -- check no frames rxed OK (no register 1 match)
+apbrd       164 00000000 perr -- check pause frames rxed 
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+
+pinsc(apb) pfc_negotiate 1 rx_pfc_paused 11111111
+
+
+-------------
+-- Frame 15 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches reg 1, 
+-- type field = 0x8808, pause op-code = 0x0102  and 
+-- priority enable to be set is 0x00FF.  
+-- (Should be copied because exact match 1)
+-- ************************************************************************** --
+
+rxd(apb)     d578563412111111112222222288080102
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+
+--  where control is (left to right) WR, ERR, SOP, EOP.
+
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    02010888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000010000040    14ebb7d4
+
+apbrd(int)  24 00000002 -- check interrupt status - frame rx'ed
+apbrd       158 00000000 perr -- check frames rxed OK 
+apbrd       164 00000000 perr -- check no pause frames rxed
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+pinsc(6370) pfc_negotiate 1 rx_pfc_paused 00000000
+
+-- check receive statistics
+apbrd     150 00000000  perr -- check octets received bottom (= 5*64)
+apbrd     154 00000000  perr -- check octets received top
+apbrd     158 00000000  perr -- check frames received ok
+                        perr -- (cleared from reading this regsiter after
+                            frame reception)
+apbrd     15C 00000000  perr -- check broadcast frames received
+apbrd     160 00000000  perr -- check multicast frames received
+apbrd     164 00000000  perr -- check pause frames received 
+                        perr -- (cleared from reading this regsiter after
+                            frame reception)
+apbrd     168 00000000  perr -- check frames received 64
+apbrd     16C 00000000  perr -- check frames received 65-127
+apbrd     170 00000000  perr -- check frames received 128-255
+apbrd     174 00000000  perr -- check frames received 256-511
+apbrd     178 00000000  perr -- check frames received 512-1023
+apbrd     17C 00000000  perr -- check frames received 1024-1518
+apbrd     180 00000000  perr -- check frames received 1519
+apbrd     184 00000000  perr -- check undersize frame errors
+apbrd     188 00000000  perr -- check excessive receive length errors
+apbrd     18C 00000000  perr -- check receive jabbers errors
+apbrd     190 00000000  perr -- check FCS errors
+apbrd     194 00000000  perr -- check receive length errors
+apbrd     198 00000000  perr -- check receive symbol errors
+apbrd     19C 00000000  perr -- check alignment errors
+apbrd     1A0 00000000  perr -- check receive resource errors
+apbrd     1A4 00000000  perr -- check receive overrun errors
+
+
+-- ************************************************************************** --
+-- #16-30
+-- same frames as #1-15 but copy_all is set
+-- ************************************************************************** --
+apbwr        04 00083013 -- disable copy of pause frame bit(23) = 0,
+                         -- reset retry test bit(12) = 1, 
+                         -- keep enable pause time bit(13) = 1,
+                         -- copy all frames bit(4) = 1
+                         -- full-duplex bit(1) = 1,
+                         -- 100Mbps speed bit(0) = 1
+                        
+apbrd        04 00083013 
+apbrdf       04 00083013 
+
+pinsc(apb)   pfc_negotiate 1 rx_pfc_paused 00000000
+
+
+-------------
+-- Frame 16 --
+-------------
+-- ************************************************************************** --
+-- Receive a classic pause frame where the destination address matches reg1 
+-- type field = 0x8808, Pause op-code = 0x0001 and pause time 
+-- to be set is 0x00FF. (Frame should be copied to memory)
+-- ************************************************************************** --
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     55d578563412111111112222222288080001
+rxd              00ff4444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01000888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000010000040    54e952d2
+
+
+apbrd(int)   24 00000002 -- check interrupt status - frame rx'ed
+apbwr        24 00000002 -- Clear it 
+apbrd       158 00000000 perr -- check frames rxed OK (register 1 match)
+apbrdf       38 00000000 -- check pause counter not loaded
+
+
+
+-------------
+-- Frame 17 --
+-------------
+-- ************************************************************************** --
+-- Receive a classic pause frame where the destination address matches pause frame address 
+-- 0x0180C2000001, type field = 0x8808, Pause op-code = 0x0001 and pause time 
+-- to be set is 0x00FF. (Frame should be copied to memory)
+-- ************************************************************************** --
+
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01000888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    34a980f8
+
+
+apbrd(int)   24 00000002 -- check interrupt status - frame received
+apbwr        24 00000002 -- Clear it
+apbrd        38 00000000 -- check pause counter not loaded
+apbrdf      158 00000000 perr -- check frames rxed OK 
+
+-------------
+-- Frame 18 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches reg1 
+-- type field = 0x8808, Pause op-code = 0x0101 and priority enable  
+-- to be set is 0x00FF. (Frame should be copied to memory)
+-- (pause and frame received interrupts are set)
+-- ************************************************************************** --
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     55d578563412111111112222222288080101
+rxd              00ff0002000400060008000a000c000e
+rxd              000f888899999999aaaaaaaabbbbbbbb
+rxd              000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    0200ff00
+fifo_wr      1000     0   00xxxxxxxxxx    06000400
+fifo_wr      1000     0   00xxxxxxxxxx    0a000800
+fifo_wr      1000     0   00xxxxxxxxxx    0e000c00
+fifo_wr      1000     0   00xxxxxxxxxx    88880f00
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000010000040    7f398257
+
+apbrd(int)   24 00001002 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001002 -- Clear it 
+apbrd       158 00000000 perr -- check frames rxed OK (register 1 match)
+apbrdf       38 00000000 -- pause time register not loaded
+
+-------------
+-- Frame 19 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches pause frame address 
+-- 0x0180C2000001, type field = 0x8808, Pause op-code = 0x0101 and priority enable
+-- to be set is 0x00FF. (Frame should be copied to memory)
+-- (pause and frame receive interrupt is set)
+-- ************************************************************************** --
+
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    4b601b6b
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr        24 00001002 -- Clear it
+apbrd        38 00000000 -- pause timer not loaded
+apbrdf      158 00000000 perr -- check no frames rxed OK 
+
+-------------
+-- Frame 20 --
+-------------
+-- ************************************************************************** --
+-- Receive a classic pause frame where the destination address matches pause frame address 
+-- to regsiter 1, type field = 0x8808, Pause op-code = 0x0001 and pause time set to
+-- to be set is 0x00FF. 
+-- (Frame should be copied to memory)
+-- (Frame receive interrupt is set)
+-- ************************************************************************** --
+
+rxd(apb)   55d578563412111111112222222288080001
+rxd            00ff0021002200230024002500260027
+rxd            0028888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01000888
+fifo_wr      1000     0   00xxxxxxxxxx    2100ff00
+fifo_wr      1000     0   00xxxxxxxxxx    23002200
+fifo_wr      1000     0   00xxxxxxxxxx    25002400
+fifo_wr      1000     0   00xxxxxxxxxx    27002600
+fifo_wr      1000     0   00xxxxxxxxxx    88882800
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000010000040    2625d4a9
+
+apbrd(int)   24 00000002 -- check interrupt status - frame received
+apbwr        24 00000002 -- clear it
+apbrd        38 00000000 -- pause time register not loaded
+apbrdf      158 00000000 perr -- check no frames rxed OK 
+
+-------------
+-- Frame 21 --
+-------------
+-- ************************************************************************** --
+-- Receive a classic pause frame where the destination address matches pause frame address 
+-- 0x0180C2000001, type field = 0x8808, Pause op-code = 0x0001 and pause time 
+-- to be set is 0x00FF. 
+-- (Frame should be copied to memory)
+-- (Frame receive interrupt is set)
+-- ************************************************************************** --
+
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01000888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    34a980f8
+
+apbrd(int)   24 00000002 -- check interrupt status -frame received
+apbwr        24 00000002 -- Clear it
+apbrd        38 00000000 -- pause timer not loaded
+apbrdf      158 00000000 perr -- check frames rxed OK 
+
+
+-------------
+-- Frame 22 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0102  and 
+-- priority enable to be set is 0x00FF. 
+-- (Frame is copied to memory)
+-- (Frame receive interrupt is set)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080102
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    02010888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    74ab65fe
+
+apbrd(int)   24 00000002 -- check interrupt status -frame received
+apbwr        24 00000002 -- Clear it
+apbrd        38 00000000 -- pause timer not loaded
+apbrdf      158 00000000 perr -- check frames rxed OK 
+
+-------------
+-- Frame 23 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches the pause 
+-- frame address 0x0180C2000001, type field = 0x8807, pause op-code = 0x0101 
+-- and priority enable to be set is 0x00FF. 
+-- (Frame is copied to memory)
+-- (Frame receive interrupt is set)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288070101
+rxd            00ff4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010788
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    73547abb
+
+apbrd(int)   24 00000002 -- check interrupt status -frame received
+apbwr        24 00000002 -- Clear it
+apbrd        38 00000000 -- pause timer not loaded
+apbrdf      158 00000000 perr -- check no frames rxed OK 
+
+-------------
+-- Frame 24 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches register 1, 
+-- type field = 0x8807, pause op-code = 0x0101 and priority enable to be set is 0x00FF.  
+-- (The wrong type-id value was received but the destination address matched the 
+-- local address.)  
+-- (Frame is copied to memory)
+-- (Frame receive interrupt is set)
+-- ************************************************************************** --
+
+rxd(apb)     d578563412111111112222222288070101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010788
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000010000040    1314a891
+
+apbrd(int)   24 00000002 -- check interrupt status - frame rx'ed
+apbwr        24 00000002 -- Clear it
+apbrd        38 00000000 -- check the value of the pause time register
+apbrdf      158 00000000 perr -- check frames rxed OK (register 1 match)
+
+-------------
+-- Frame 25 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address is 0x0480C2000001 (i.e.
+-- it doesn't match pause address), type field = 0x8808, pause op-code = 0x0101 and
+-- priority enable to be set is 0x00FF. 
+--(The wrong destination address value was received.)
+-- (Frame is copied to memory)
+-- (Frame receive interrupt is set)
+-- ************************************************************************** --
+
+rxd(apb)     d50480C200000111112222222288080101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    00c28004   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    1c1fa35a
+
+apbrd(int)   24 00000002 -- check interrupt status -frame received
+apbwr        24 00000002 -- Clear it
+apbrd        38 00000000 -- pause timer not loaded
+apbrdf      158 00000000 perr -- check no frames rxed OK 
+
+-------------
+-- Frame 26 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches the pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0101 and 
+-- pause time to be set is 0x00FF.  However, there is a crc error.  
+-- (Frame should be written to memory) 
+-- (This is a bad frame => No interrupt) 
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000cccccccc -- CRC error
+
+
+-- check the receive data as it is written out on the AHB interface
+
+-- bit 14 of rx_status is set when any RX error occurs (including CRC error)
+-- bit 41 of rx_status indicates the frame had a CRC error 
+
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1101     0   020000004040    cccccccc
+                        
+
+apbrd(10120) 24 00000000 -- no interrupt
+apbrd        38 00000000 -- check pause counter not loaded
+apbrdf      158 00000000 perr -- check no frames rxed
+
+
+-------------
+-- Frame 27 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches register 1,  
+-- type field = 0x8808, pause op-code = 0x0101 and 
+-- pause time to be set is 0x00FF.  However, there is a crc error. 
+-- (Frame should be written to memory) 
+-- (This is a bad frame => No interrupt) 
+-- ************************************************************************** --
+
+rxd(apb)     d578563412111111112222222288080101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000cccccccc -- CRC error
+
+-- check the receive data as it is written out on the AHB interface
+
+-- bit 14 of rx_status is set when any RX error occurs (including CRC error)
+-- bit 41 of rx_status indicates the frame had a CRC error 
+
+--  where control is (left to right) WR, ERR, SOP, EOP.
+
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1101     0   020010004040    cccccccc
+
+apbrd(10470) 24 00000000 -- check no interrupt 
+apbrd        38 00000000 -- check pause counter not loaded
+apbrd       158 00000000 perr -- check no frames rxed
+
+
+-- ************************************************************************** --
+-- Disable pause received interrupt (bit 12).
+-- ************************************************************************** --
+
+apbwrf       2c 00001000 -- disable pause received interrupt (bit 12)
+
+
+-------------
+-- Frame 28 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches the pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0101 and 
+-- priority enable to be set is 0xFF.  (There should be no pause frame received 
+-- interrupt set in the interrupt status register)
+-- (Frame is copied to memory.)
+-- (Frame rxed interrupt is set.)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001  -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    4b601b6b
+
+-- check that we do not get any interrupt
+apbrd(int)   24 00000002 -- check interrupt status 
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       158 00000000 perr -- check no frames rxed OK (no register 1 match)
+
+-- ************************************************************************** --
+-- Enable pause received interrupt (bit 12) 
+-- ************************************************************************** --
+apbwrf        28 00001000 -- enable pause received interrupt (bit 12)
+
+-------------
+-- Frame 29 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches the pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0101 and 
+-- priority enable to be set is 0xFF.  (There should be no pause frame received 
+-- interrupt set in the interrupt status register)
+-- (Frame is copied to memory.)
+-- (Frame rxed interrupt is set.)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001  -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    4b601b6b
+
+-- check that we do not get any interrupt
+apbrd(int)   24 00001002 -- check interrupt status - pause frame & frame rxed
+apbrd        38 00000000 -- check the value of the pause time register
+apbrdf      158 00000000 perr -- check frames rxed OK 
+
+-------------
+-- Frame 30 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches reg 1, 
+-- type field = 0x8808, pause op-code = 0x0102  and 
+-- priority enable to be set is 0x00FF.  
+-- (Frame is copied to memory.)
+-- (Frame rxed interrupt is set.)
+-- ************************************************************************** --
+
+rxd(apb)     d578563412111111112222222288080102
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+
+--  where control is (left to right) WR, ERR, SOP, EOP.
+
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    02010888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000010000040    14ebb7d4
+
+apbrd(int)  24  00000002 -- check interrupt status - frame rx'ed
+apbrd       158 00000000 perr -- check frames rxed OK 
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+-- check receive statistics
+apbrd     150 00000000  perr -- check octets received bottom
+apbrd     154 00000000  perr -- check octets received top
+apbrd     158 00000000  perr -- check frames received ok
+apbrd     15C 00000000  perr -- check broadcast frames received
+apbrd     160 00000000  perr -- check multicast frames received (from frame 19,21,22,23,26,28,29)
+apbrd     164 00000000  perr -- check pause frames received
+apbrd     168 00000000  perr -- check frames received 64
+apbrd     16C 00000000  perr -- check frames received 65-127
+apbrd     170 00000000  perr -- check frames received 128-255
+apbrd     174 00000000  perr -- check frames received 256-511
+apbrd     178 00000000  perr -- check frames received 512-1023
+apbrd     17C 00000000  perr -- check frames received 1024-1518
+apbrd     180 00000000  perr -- check frames received 1519
+apbrd     184 00000000  perr -- check undersize frame errors
+apbrd     188 00000000  perr -- check excessive receive length errors
+apbrd     18C 00000000  perr -- check receive jabbers errors
+apbrd     190 00000000  perr -- check FCS errors
+apbrd     194 00000000  perr -- check receive length errors
+apbrd     198 00000000  perr -- check receive symbol errors
+apbrd     19C 00000000  perr -- check alignment errors
+apbrd     1A0 00000000  perr -- check receive resource errors
+apbrd     1A4 00000000  perr -- check receive overrun errors
+
+-- ************************************************************************** --
+-- # 31- 45
+-- same frames as #1-15 but copy_all and discard_pause are set
+-- ************************************************************************** --
+apbwr        04 00883013 -- disable copy of pause frame bit(23) = 1,
+                         -- reset retry test bit(12) = 1, 
+                         -- keep enable pause time bit(13) = 1,
+                         -- copy all frames bit(4) = 1
+                         -- full-duplex bit(1) = 1,
+                         -- 100Mbps speed bit(0) = 1
+                        
+apbrd        04 00883013 
+apbrdf       04 00883013 
+
+-------------
+-- Frame 31 --
+-------------
+-- ************************************************************************** --
+-- Receive a classic pause frame where the destination address matches reg1 
+-- type field = 0x8808, Pause op-code = 0x0001 and pause time 
+-- to be set is 0x00FF.
+-- (frame is copied to fifo, frame received interrupt is set)
+-- ************************************************************************** --
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     55d578563412111111112222222288080001
+rxd              00ff4444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01000888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1101     0   000010000040    54e952d2
+
+
+apbrd(11900) 24 00000000 -- frame rxed interrupt
+apbwr        24 00000000 -- Clear it
+apbrd       158 00000000 perr -- frames rxed OK
+apbrdf       38 00000000 -- check pause counter not loaded
+
+
+
+-------------
+-- Frame 32 --
+-------------
+-- ************************************************************************** --
+-- Receive a classic pause frame where the destination address matches pause frame address 
+-- 0x0180C2000001, type field = 0x8808, Pause op-code = 0x0001 and pause time 
+-- to be set is 0x00FF.
+-- (frame is not copied to fifo, No frame received interrupt is set)
+-- ************************************************************************** --
+
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is NOT  written out on the AHB interface
+
+
+apbrd(12200) 24 00000000 -- no interrupt 
+apbrd        38 00000000 -- check pause counter not loaded
+apbrdf      158 00000000 perr -- No frames rxed  
+
+
+-------------
+-- Frame 33 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches reg1 
+-- type field = 0x8808, Pause op-code = 0x0101 and priority enable  
+-- to be set is 0x00FF.
+-- (frame is copied to fifo with error, pause frame)
+-- ************************************************************************** --
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     55d578563412111111112222222288080101
+rxd              00ff0002000400060008000a000c000e
+rxd              000f888899999999aaaaaaaabbbbbbbb
+rxd              000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    0200ff00
+fifo_wr      1000     0   00xxxxxxxxxx    06000400
+fifo_wr      1000     0   00xxxxxxxxxx    0a000800
+fifo_wr      1000     0   00xxxxxxxxxx    0e000c00
+fifo_wr      1000     0   00xxxxxxxxxx    88880f00
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1101     0   000010000040    7f398257
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it 
+apbrd       158 00000000 perr -- check frames rxed OK (register 1 match)
+apbrdf       38 00000000 -- pause time register not loaded
+
+-------------
+-- Frame 34 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches pause frame address 
+-- 0x0180C2000001, type field = 0x8808, Pause op-code = 0x0101 and priority enable
+-- to be set is 0x00FF.
+-- (frame is not copied to fifo, 
+-- frame received interrupt is not set
+-- pause frame received interrupt is set)
+-- ************************************************************************** --
+
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF0011001200130014001500160017
+rxd            0018888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it
+apbrdf       38 00000000 -- pause timer not loaded
+
+-------------
+-- Frame 35 --
+-------------
+-- ************************************************************************** --
+-- Receive a classic pause frame where the destination address matches pause frame address 
+-- to regsiter 1, type field = 0x8808, Pause op-code = 0x0001 and pause time set to
+-- to be set is 0x00FF.
+-- (frame is copied to fifo, frame received interrupt is set)
+-- ************************************************************************** --
+
+rxd(apb)   55d578563412111111112222222288080001
+rxd            00ff0021002200230024002500260027
+rxd            0028888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01000888
+fifo_wr      1000     0   00xxxxxxxxxx    2100ff00
+fifo_wr      1000     0   00xxxxxxxxxx    23002200
+fifo_wr      1000     0   00xxxxxxxxxx    25002400
+fifo_wr      1000     0   00xxxxxxxxxx    27002600
+fifo_wr      1000     0   00xxxxxxxxxx    88882800
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1101     0   000010000040    2625d4a9
+
+apbrd(13200)   24 00000000 -- check interrupt status - No pause frame received
+apbrd        38 00000000 -- pause time register not loaded
+apbrdf      158 00000000 perr -- check no frames rxed OK 
+
+
+-------------
+-- Frame 36 --
+-------------
+-- ************************************************************************** --
+-- Receive a classic pause frame where the destination address matches pause frame address 
+-- 0x0180C2000001, type field = 0x8808, Pause op-code = 0x0001 and pause time 
+-- to be set is 0x00FF. 
+-- (frame is not copied to fifo, No frame received interrupt is set)
+-- ************************************************************************** --
+
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(13500) 24 00000000 -- check interrupt status - no pause frame received
+apbrd        38 00000000 -- pause time register no loaded
+apbrdf      158 00000000 perr -- check no frames rxed OK (no register 1 match)
+
+
+-------------
+-- Frame 37 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0102  and 
+-- priority enable to be set is 0x00FF. 
+-- (Frame is not copied to memory)
+-- (No  interrupt is set)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080102
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is NOT written out on the AHB interface
+
+apbrd(13880) 24 00000000 -- check interrupt status - no frame received
+apbrd        38 00000000 -- pause timer not loaded
+apbrdf      158 00000000 perr -- check no frames rxed OK 
+
+
+-------------
+-- Frame 38 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches the pause 
+-- frame address 0x0180C2000001, type field = 0x8807, pause op-code = 0x0101 
+-- and priority enable to be set is 0x00FF. 
+-- (Frame is not copied to memory)
+-- (Frame receive interrupt is not set)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288070101
+rxd            00ff4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is NOT written out on the AHB interface
+
+apbrd(14270) 24 00000000 -- check interrupt status - no frame received
+apbrd        38 00000000 -- pause timer not loaded
+apbrdf      158 00000000 perr -- check no frames rxed OK 
+
+
+-------------
+-- Frame 39 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches register 1, 
+-- type field = 0x8807, pause op-code = 0x0101 and priority enable to be set is 0x00FF.  
+-- (The wrong type-id value was received but the destination address matched the 
+-- local address.)  
+-- (Frame is copied to memory)
+-- (Frame receive interrupt is set)
+-- ************************************************************************** --
+
+rxd(apb)     d578563412111111112222222288070101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010788
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000010000040    1314a891
+
+apbrd(int)   24 00000002 -- check interrupt status - frame rx'ed
+apbwr        24 00000002 -- Clear it
+apbrd        38 00000000 -- check the value of the pause time register
+apbrdf      158 00000000 perr -- check frames rxed OK (register 1 match)
+
+-------------
+-- Frame 40 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address is 0x0480C2000001 (i.e.
+-- it doesn't match pause address), type field = 0x8808, pause op-code = 0x0101 and
+-- priority enable to be set is 0x00FF. 
+--(The wrong destination address value was received.)
+-- (Frame is copied to memory)
+-- (Frame receive interrupt is set)
+-- ************************************************************************** --
+
+rxd(apb)     d50480C200000111112222222288080101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    00c28004   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1101     0   000000000040    1c1fa35a
+
+--apbrd(int)   24 00000002 -- check interrupt status -frame received
+--apbwr        24 00000002 -- Clear it
+--apbrd        38 00000000 -- pause timer not loaded
+--apbrdf      158 00000000 perr -- check no frames rxed OK 
+
+
+-------------
+-- Frame 41 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches the pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0101 and 
+-- pause time to be set is 0x00FF.  However, there is a crc error.  
+-- (Frame is not copied to memory)
+-- (No interrupt is set)
+-- ************************************************************************** --
+
+rxd(14900)   d50180C200000111112222222288080101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000cccccccc -- CRC error
+
+
+-- check the receive data as it is written out on the AHB interface
+
+apbrd(15260) 24 00000000 -- check interrupt status - no pause frame received
+apbrd        38 00000000 -- check the value of the pause time register
+apbrdf      158 00000000 perr -- check no frames rxed OK (no register 1 match)
+
+-------------
+-- Frame 42 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches register 1,  
+-- type field = 0x8808, pause op-code = 0x0101 and 
+-- pause time to be set is 0x00FF.  However, there is a crc error. 
+--  frame is written to memory) 
+-- (This is a bad frame => No interrupt) 
+-- ************************************************************************** --
+
+rxd(apb)     d578563412111111112222222288080101
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000cccccccc -- CRC error
+
+-- check the receive data as it is written out on the AHB interface
+
+-- bit 14 of rx_status is set when any RX error occurs (including CRC error)
+-- bit 41 of rx_status indicates the frame had a CRC error 
+
+--  where control is (left to right) WR, ERR, SOP, EOP.
+
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1101     0   020010004040    cccccccc
+
+apbrd(15630)  24 00000000 -- check interrupt status - no frame rx'ed
+apbrd        158 00000000 perr -- check no frames rxed OK (CRC error - bad frame)
+apbrd         38 00000000 -- check the value of the pause time register
+
+-- ************************************************************************** --
+-- Disable pause received interrupt (bit 12).
+-- ************************************************************************** --
+
+apbwrf       2c 00001000 -- disable pause received interrupt (bit 12)
+
+-------------
+-- Frame 43 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches the pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0101 and 
+-- priority enable to be set is 0xFF.  
+-- frame is not copied to memory
+-- no interupt is set
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF0010001100120013001400150016
+rxd            0017888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+-- check that we do not get any interrupt
+apbrd(15960) 24 00000000 -- check interrupt status 
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       158 00000000 perr -- check no frames rxed OK
+
+-- ************************************************************************** --
+-- Enable pause received interrupt (bit 12) 
+-- ************************************************************************** --
+apbwrf        28 00001000 -- enable pause received interrupt (bit 12)
+
+
+-------------
+-- Frame 44 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches the pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0101 and 
+-- priority enable to be set is 0xFF.  
+-- (frame is not copied to fifo, 
+-- frame received interrupt is not set
+-- pause frame received interrupt is set)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF0020002100220023002400250026
+rxd            0027888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check that we do not get any interrupt
+apbrd(int)   24 00001000 -- check interrupt status -pause frame rxed
+apbwr        24 00001000 -- clear it 
+apbrd        38 00000000 -- check the value of the pause time register
+apbwr        04 00083013
+apbrdf      158 00000000 perr -- check no frames rxed 
+
+-------------
+-- Frame 45 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches reg 1, 
+-- type field = 0x8808, pause op-code = 0x0102  and 
+-- priority enable to be set is 0x00FF.  
+-- (Should be copied because exact match 1)
+-- ************************************************************************** --
+
+rxd(apb)     d578563412111111112222222288080102
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+
+--  where control is (left to right) WR, ERR, SOP, EOP.
+
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    02010888
+fifo_wr      1000     0   00xxxxxxxxxx    4444ff00
+fifo_wr      1000     0   00xxxxxxxxxx    55555555
+fifo_wr      1000     0   00xxxxxxxxxx    66666666
+fifo_wr      1000     0   00xxxxxxxxxx    77777777
+fifo_wr      1000     0   00xxxxxxxxxx    88888888
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000010000040    14ebb7d4
+
+apbrd(int)  24 00000002 -- check interrupt status - frame rx'ed
+apbrd      158 00000000 perr -- check frames rxed OK 
+apbrd       38 00000000 -- check the value of the pause time register
+
+
+
+-- check receive statistics
+apbrd     150 00000000  perr -- check octets received bottom (= 6*64)
+apbrd     154 00000000  perr -- check octets received top
+apbrd     158 00000000  perr -- check frames received ok
+apbrd     15C 00000000  perr -- check broadcast frames received
+apbrd     160 00000000  perr -- check multicast frames received
+apbrd     164 00000000  perr -- check pause frames received (frame 33,34,43,44)
+apbrd     168 00000000  perr -- check frames received 64
+apbrd     16C 00000000  perr -- check frames received 65-127
+apbrd     170 00000000  perr -- check frames received 128-255
+apbrd     174 00000000  perr -- check frames received 256-511
+apbrd     178 00000000  perr -- check frames received 512-1023
+apbrd     17C 00000000  perr -- check frames received 1024-1518
+apbrd     180 00000000  perr -- check frames received 1519
+apbrd     184 00000000  perr -- check undersize frame errors
+apbrd     188 00000000  perr -- check excessive receive length errors
+apbrd     18C 00000000  perr -- check receive jabbers errors
+apbrd     190 00000000  perr -- check FCS errors
+apbrd     194 00000000  perr -- check receive length errors
+apbrd     198 00000000  perr -- check receive symbol errors
+apbrd     19C 00000000  perr -- check alignment errors
+apbrd     1A0 00000000  perr -- check receive resource errors
+apbrd     1A4 00000000  perr -- check receive overrun errors
+
+
+
+--=============================== --
+--    set pause enable to zero    --
+--=============================== --
+
+apbwrf       04 00081003 -- disable copy of pause frame bit(23) = 0,
+                         -- reset retry test bit(12) = 1, 
+                         -- enable pause time bit(13) = 0,
+                         -- copy all frames bit(4) = 0
+                         -- full-duplex bit(1) = 1,
+                         -- 100Mbps speed bit(0) = 1
+                        
+-------------
+-- Frame 46 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches reg1 
+-- type field = 0x8808, Pause op-code = 0x0101 and priority enable  
+-- to be set is 0x00FF. (Frame should be copied to memory)
+-- ************************************************************************** --
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     55d578563412111111112222222288080101
+rxd              00ff0002000400060008000a000c000e
+rxd              000f888899999999aaaaaaaabbbbbbbb
+rxd              000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    12345678   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11111111
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    0200ff00
+fifo_wr      1000     0   00xxxxxxxxxx    06000400
+fifo_wr      1000     0   00xxxxxxxxxx    0a000800
+fifo_wr      1000     0   00xxxxxxxxxx    0e000c00
+fifo_wr      1000     0   00xxxxxxxxxx    88880f00
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000010000040    7f398257
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr        24 00001002 -- Clear it 
+apbrd       158 00000000 perr -- check frames rxed OK (register 1 match)
+apbrd       164 00000000 perr -- check pause frames rxed
+apbrd        38 00000000 -- pause time register not loaded
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+
+-------------
+-- Frame 47 --
+-------------
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches pause frame address 
+-- 0x0180C2000001, type field = 0x8808, Pause op-code = 0x0101 and priority enable
+-- to be set is 0x00FF. (Frame should not be copied to memory)
+-- ************************************************************************** --
+
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF0011001200130014001500160017
+rxd            0018888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(int)   24 00001000 -- check interrupt status - pause frame received
+apbwr        24 00001000 -- Clear it 
+
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       158 00000000 perr -- check no frames rxed OK (no register 1 match)
+apbrd       164 00000000 perr -- check pause frames rxed 
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+
+pinsc(17404)   pfc_negotiate 1 rx_pfc_paused 11111111 -- PFC counters are loaded
+pinsc(17406)   pfc_negotiate 1 rx_pfc_paused 11111110 -- PFC counters are decrementing
+pinsc(17408)   pfc_negotiate 1 rx_pfc_paused 11111100 -- PFC counters are decrementing
+pinsc(17410)   pfc_negotiate 1 rx_pfc_paused 11111000 -- PFC counters are decrementing
+pinsc(17412)   pfc_negotiate 1 rx_pfc_paused 11110000 -- PFC counters are decrementing
+pinsc(17414)   pfc_negotiate 1 rx_pfc_paused 11100000 -- PFC counters are decrementing
+pinsc(17416)   pfc_negotiate 1 rx_pfc_paused 11000000 -- PFC counters are decrementing
+pinsc(17418)   pfc_negotiate 1 rx_pfc_paused 10000000 -- PFC counters are decrementing
+pinsc(17420)   pfc_negotiate 1 rx_pfc_paused 00000000 -- PFC counters are decrementing
+
+
+---- ************************************************************************** --
+-- force end of test in case it doesn't stop of its own accord
+end(20000)
+
+
+
+
+
+

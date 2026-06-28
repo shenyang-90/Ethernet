@@ -1,0 +1,612 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2009
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : pfc_counter_fifo
+--
+--   Author         : Christine Lin (htlin@cadence.com)
+--
+--   Date           : 04 November 2009
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This checks PFC pause frame priority enable and the pause counters.
+--
+--
+-- Functional Coverage
+----------------------
+-- This checks that the 8 PFC counters can decrement concurrently and will be
+-- indepentdently updated of new PFC pause frames. Each counter is always loaded
+-- on reception of a non-zero PFC frame when priority enable is set, and cleared 
+-- on reception of a zero PFC frame. When priority enable is zero, the counter 
+-- value is zero independent of the pause time value set in the PFC frame.
+-- rx_pfc_paused[7:0] outputs are monitored when the counter is loaded 
+-- and when the counter decrements to zero.Interrupt status bit is checked (that
+-- it is not set) when timeout occurs.
+-- Priority enable, loading counter with zero for zero pause frame and loading counters
+-- with diffrent pause time value are checked in 'debug fast mode' (retry test bit set to 1)
+-- Only check that the 8 PFC counters can decrement concurrently and will be
+-- indepentdently updated of new PFC pause frames for nibble mode at 100Mbits/s 
+-- and gigabit mode.
+-- 
+--
+-- Detailed Test Description
+----------------------------
+--
+-- *************************************************************
+-- **** Set to 'debug fast mode' (retry test bit set to 1) *****
+-- *************************************************************
+--
+-- Receive 3 PFC multicast pause frames with priority enable = 0x00FF
+-- with diffrent pause time value. New PFC frames are recieved when all the counters 
+-- decrement to zero.
+-- Check rx_pfc_paused[7:0] outputs, interrupt status
+--
+-- Receive PFC multicast pause frame with priority enable = 0x00FF
+-- with large pause time value. A new zero PFC frame is recieved when all the counters 
+-- are not zero.
+-- Check counters are cleared when zero PFC frame is recieved.
+--
+-- Receive PFC multicast pause frame with priority enable = 0x0055
+-- Check the counters associated with zero priority enable are zero when the PFC frame is 
+-- received and the other counters are loaded with their pause time and decrements over time.
+--
+-- Receive PFC multicast pause frame with priority enable = 0x00aa
+-- Check the counters associated with zero priority enable are zero when the PFC frame is 
+-- received and the other counters are loaded with their pause time and decrements over time.
+--
+-- Receive PFC multicast pause frame with priority enable = 0x0000
+-- Check all the counters are zero when the PFC frame is received.
+--
+-- Receive a non-zero PFC multicast pause frame with 0x00ff pause time for each priority
+-- priority enable =0x00FF.
+-- Check that all the counters are loaded with 0x00FF and decrements to zero.
+--
+--
+-- ******************************************************
+-- ******** Set to  nibble mode at 100Mbits/s ***********
+-- ******************************************************
+--
+-- Receive a PFC multicast pause frame with priority enable = 0x00FF
+-- with diffrent pause time value. 
+-- Check rx_pfc_paused[7:0] outputs, interrupt status (counter decrements evry 128 rx_clk)
+--
+-- ******************************************************
+-- ********        Set to gigabit mode          *********
+-- ******************************************************
+--
+-- Receive a PFC multicast pause frame with priority enable = 0x00FF
+-- with diffrent pause time value. 
+-- Check rx_pfc_paused[7:0] outputs, interrupt status (counter decrements evry 64 rx_clk)
+--
+--
+-- *************************************************************
+-- **** Set to 'debug fast mode' (retry test bit set to 1) *****
+-- *************************************************************
+-- Receive a non-zero PFC multicast pause frame with max pause time9 (0xffff)for each priority
+-- priority enable =0x00FF.
+-- Check that all the counters are loaded with 0xFFFF and decrements to zero.
+--
+--
+-- 
+--------------------------------------------------------------------------------
+
+
+-- Configuration Requirements ..
+requires ext_fifo_interface 1
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+
+-- this is the event count that will initialize the scaler for event counts. it will cause any future scaling to only scale
+-- the counts after start_scale
+start_scale
+
+apbwr      00 0001000C  -- enable receive/transmit and PFC pause frame reception
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbrd      08 00000006  -- check reset value of network status register
+
+-- # Initialize the network configuration register
+-- #   -eam      <1|0|random>, default = 0. This is external address matching
+-- #   -duplex   <full|half|random>, default = random
+-- #   -speed    <1g|100m|10m|random>, default = random
+-- #   -jumbo    <1|0|random>, default = random. This wont affect the RX transactor below, but will automatically cause jumbos to be dropped.
+-- #   -copy_all <1|0|random>, default = 0. If 0, ensure you initialize the dest_addr in the rx transactor to something that will match
+-- #   -databus  <32|64|128|take_from_cfg|random>, default = random, bus <= config.  The max value is the value set in dma_bus_width in gem_defs.v
+-- #   -rx_toe   <1|0|random>, default = 0. Enables RX TCP/IP checksum offload
+-- #   -pcs_en   <1|0|random>, default = 0. Enables SGMII PCS
+-- #   -pause_en <1|0|random>, default = 0. Enables pausing of transmission
+-- #   -dont_copy_pause <1|0|random>, default = 0. Controls whether pause frames are copied
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 0 -copy_all 0 -duplex half -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 0 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+apbrd      20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+-- ============================================
+-- set  retry test bit to 1                  --
+-- counter decrement every rx_clck cycle     --
+-- ============================================
+
+-------------
+-- Frame 1 --
+-------------
+-- ************************************************************************** --
+-- Receive a non-zero PFC pause frame 
+-- priority enable =0x00FF.
+-- PFC pause time for priority 0 = 0x0010
+-- PFC pause time for priority 1 = 0x0011
+-- PFC pause time for priority 2 = 0x0012
+-- PFC pause time for priority 3 = 0x0013
+-- PFC pause time for priority 4 = 0x0014
+-- PFC pause time for priority 5 = 0x0015
+-- PFC pause time for priority 6 = 0x0016
+-- PFC pause time for priority 7 = 0x0017
+-- ************************************************************************** --
+apbrdf 1A0 00000000 -- set trig to continue test
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 1 -copy_all 0 -duplex full -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 1 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+                         -- reset retry test bit(12) = 1, 
+                         -- keep enable pause time bit(13) = 1,
+                         -- copy all frames bit(4) = 0
+                         -- full-duplex bit(1) = 1,
+                         -- 100Mbps speed bit(0) = 1
+                        
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF0010001100120013001400150016
+rxd            0017888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+
+-- event counts increment by 2 every rx_clk clock cycle
+-- counter decrement every rx_clck cycle
+
+apbrd(1000) 24 00000000   -- check that PFC counter time out does not generate interrupt
+apbrdf       08 00000046 -- check pfc_negotiate = 1, trigger next PFC frame on rxd
+
+-------------
+-- Frame 2 --
+-------------
+-- ************************************************************************** --
+-- Receive a non-zero PFC pause frame when all the counters are to zero
+-- priority enable =0x00FF.
+-- PFC pause time for priority 0 = 0x0053
+-- PFC pause time for priority 1 = 0x0056
+-- PFC pause time for priority 2 = 0x0059
+-- PFC pause time for priority 3 = 0x005c
+-- PFC pause time for priority 4 = 0x00ac
+-- PFC pause time for priority 5 = 0x00a9
+-- PFC pause time for priority 6 = 0x00a6
+-- PFC pause time for priority 7 = 0x00a3
+-- (All the counetrs are loaded with new pause time)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF005300560059005c00ac00a900a6
+rxd            00a3888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+
+-- event counts increment by 2 every rx_clk clock cycle
+
+apbrd(2000)  24 00000000  -- check that PFC counter time out does not generate interrupt
+
+apbrdf       08 00000046  -- check pfc_negotiate = 1, trigger next PFC frame on rxd
+
+-------------
+-- Frame 3 --
+-------------
+-- ************************************************************************** --
+-- Receive a non-zero PFC pause frame when all counters are zero
+-- priority enable =0x00FF.
+-- PFC pause time for priority 0 = 0x00ac
+-- PFC pause time for priority 1 = 0x00a9
+-- PFC pause time for priority 2 = 0x00a6
+-- PFC pause time for priority 3 = 0x00a3
+-- PFC pause time for priority 4 = 0x0053
+-- PFC pause time for priority 5 = 0x0056
+-- PFC pause time for priority 6 = 0x0059
+-- PFC pause time for priority 7 = 0x005c
+-- (All the counetrs are loaded with new pause time)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF00ac00a900a600a3005300560059
+rxd            005c888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+
+-- event counts increment by 2 every rx_clk clock cycle
+
+apbrd(3000)  24 00000000  -- check that PFC counter time out does not generate interrupt
+
+apbrdf       08 00000046 -- check pfc_negotiate = 1, trigger next PFC frame on rxd
+
+-------------
+-- Frame 4 --
+-------------
+-- ************************************************************************** --
+-- Receive a non-zero PFC pause frame when all counters are zero
+-- priority enable =0x00FF.
+-- PFC pause time for priority 0 = 0x00ff
+-- PFC pause time for priority 1 = 0x00fe
+-- PFC pause time for priority 2 = 0x00fd
+-- PFC pause time for priority 3 = 0x00fc
+-- PFC pause time for priority 4 = 0x00fb
+-- PFC pause time for priority 5 = 0x00fa
+-- PFC pause time for priority 6 = 0x00f9
+-- PFC pause time for priority 7 = 0x00f8
+-- (All the counetrs are loaded with new value)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF00ff00fe00fd00fc00fb00fa00f9
+rxd            00f8888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+-- event counts increment by 2 every rx_clk clock cycle
+
+-------------
+-- Frame 5 --
+-------------
+-- ************************************************************************** --
+-- Receive a zero PFC pause frame when all the counters are not zero
+-- priority enable =0x00FF.
+-- PFC pause time for priority 0 = 0x0000
+-- PFC pause time for priority 1 = 0x0000
+-- PFC pause time for priority 2 = 0x0000
+-- PFC pause time for priority 3 = 0x0000
+-- PFC pause time for priority 4 = 0x0000
+-- PFC pause time for priority 5 = 0x0000
+-- PFC pause time for priority 6 = 0x0000
+-- PFC pause time for priority 7 = 0x0000
+-- (All the counetrs are cleared)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+
+
+-------------
+-- Frame 6 --
+-------------
+-- ************************************************************************** --
+-- Receive a non-zero PFC pause frame when all the PFC counters are zero 
+-- priority enable =0x0055.
+-- PFC pause time for priority 0 = 0x00aa
+-- PFC pause time for priority 1 = 0x009a
+-- PFC pause time for priority 2 = 0x008a
+-- PFC pause time for priority 3 = 0x007a
+-- PFC pause time for priority 4 = 0x006a
+-- PFC pause time for priority 5 = 0x005a
+-- PFC pause time for priority 6 = 0x004a
+-- PFC pause time for priority 7 = 0x003a
+-- (Only counetr 0,2,4,6 are loaded with new value.)
+-- (Counter 1,2,5,7 value are 0)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            005500aa009a008a007a006a005a004a
+rxd            003a888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+                                                     -- with new pause time
+
+apbrd(5000)  24 00000000  -- check that PFC counter time out does not generate interrupt
+apbrdf       08 00000046  -- check pfc_negotiate = 1
+
+-------------
+-- Frame 7 --
+-------------
+-- ************************************************************************** --
+-- Receive a non-zero PFC pause frame when all the PFC counters are zero
+-- priority enable =0x00aa.
+-- PFC pause time for priority 0 = 0x00aa
+-- PFC pause time for priority 1 = 0x009a
+-- PFC pause time for priority 2 = 0x008a
+-- PFC pause time for priority 3 = 0x007a
+-- PFC pause time for priority 4 = 0x006a
+-- PFC pause time for priority 5 = 0x005a
+-- PFC pause time for priority 6 = 0x004a
+-- PFC pause time for priority 7 = 0x003a
+-- (Only counetr 1,3,5,7 are loaded with new value.)
+-- (Counter 0,2,4,6 value is kept)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00aa00aa009a008a007a006a005a004a
+rxd            003a888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+
+                                                    -- with new pause
+
+apbrd(7000) 24 00000000  -- check that PFC counter time out does not generate interrupt
+
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+
+
+-------------
+-- Frame 8 --
+-------------
+-- ************************************************************************** --
+-- Receive a non-zero PFC pause frame when all counters are zero
+-- priority enable =0x00FF.
+-- PFC pause time for priority 0 = 0x00f8
+-- PFC pause time for priority 1 = 0x00f9
+-- PFC pause time for priority 2 = 0x00fa
+-- PFC pause time for priority 3 = 0x00fb
+-- PFC pause time for priority 4 = 0x00fc
+-- PFC pause time for priority 5 = 0x00fd
+-- PFC pause time for priority 6 = 0x00fe
+-- PFC pause time for priority 7 = 0x00ff
+-- (All the counetrs are loaded with new value)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF00f800f900fa00fb00fc00fd00fe
+rxd            00ff888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+
+-------------
+-- Frame 9 --
+-------------
+-- ************************************************************************** --
+-- Receive a non-zero PFC pause frame when PFC counters are not zero
+-- priority enable =0x0000.
+-- PFC pause time for priority 0 = 0x1234
+-- PFC pause time for priority 1 = 0x5678
+-- PFC pause time for priority 2 = 0x9abc
+-- PFC pause time for priority 3 = 0xdeef
+-- PFC pause time for priority 4 = 0x4321
+-- PFC pause time for priority 5 = 0x8765
+-- PFC pause time for priority 6 = 0xcba9
+-- PFC pause time for priority 7 = 0xfeed
+-- (All the counters are not loaded with new pause time. Old value is kept)
+-- When this PFC frame is received, counter 0 value is 0x005a 
+--                                  counter 1 value is 0x005b 
+--                                  counter 2 value is 0x005c 
+--                                  counter 3 value is 0x005d 
+--                                  counter 4 value is 0x005e 
+--                                  counter 5 value is 0x005f 
+--                                  counter 6 value is 0x0060 
+--                                  counter 7 value is 0x0061 
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            0000123456789abcdeef43218765cba9
+rxd            feed888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+
+-- check that counter decrement to zero with the pause time from the previous frame
+
+-------------
+-- Frame 10 --
+-------------
+-- ************************************************************************** --
+-- Receive a non-zero PFC pause frame with max pause time for each priority
+-- priority enable =0x00FF.
+-- PFC pause time for priority 0 = 0x00ff
+-- PFC pause time for priority 1 = 0x00ff
+-- PFC pause time for priority 2 = 0x00ff
+-- PFC pause time for priority 3 = 0x00ff
+-- PFC pause time for priority 4 = 0x00ff
+-- PFC pause time for priority 5 = 0x00ff
+-- PFC pause time for priority 6 = 0x00ff
+-- PFC pause time for priority 7 = 0x00ff
+-- (All the counetrs are loaded with new value)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF00ff00ff00ff00ff00ff00ff00ff
+rxd            00ff888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbrd        08 00000046 -- check pfc_negotiate = 1
+-- event counts increment by 2 every rx_clk clock cycle
+
+apbrd(12000)  24 00000000  -- check that PFC counter time out does not generate interrupt
+
+
+-- =====================================================
+-- set  retry test bit to 0 in 10/100 nibble mode     --
+-- counter decrement every 128 rx_clck cycle          --
+-- =====================================================
+-------------
+-- Frame 11 --
+-------------
+-- ************************************************************************** --
+-- Receive a non-zero PFC pause frame 
+-- priority enable =0x00FF.
+-- PFC pause time for priority 0 = 0x0017
+-- PFC pause time for priority 1 = 0x0016
+-- PFC pause time for priority 2 = 0x0015
+-- PFC pause time for priority 3 = 0x0014
+-- PFC pause time for priority 4 = 0x0013
+-- PFC pause time for priority 5 = 0x0012
+-- PFC pause time for priority 6 = 0x0011
+-- PFC pause time for priority 7 = 0x0010
+-- ************************************************************************** --
+
+-------------------- set retry test bit to 0  --------------------
+apbrdf 1A0 00000000 -- set trig to continue test
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 0 -copy_all 0 -duplex full -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 1 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+                         -- reset retry test bit(12) = 0, 
+                         -- keep enable pause time bit(13) = 1,
+                         -- gigabit mode enable bit (10) = 0
+                         -- copy all frames bit(4) = 0
+                         -- full-duplex bit(1) = 1,
+                         -- 100Mbps speed bit(0) = 1
+                        
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF0017001600150014001300120011
+rxd            0010888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+
+-- event counts increment by 2 every rx_clk clock cycle
+-- counter decrement every 128 rx_clk in nibble mode
+
+apbrd(15000) 24 00000000   -- check that PFC counter time out does not generate interrupt
+apbrd        08 00000046   -- check pfc_negotiate = 1
+
+
+-- =====================================================
+-- set  retry test bit to 0 in byte mode             --
+-- counter decrement every 64 rx_clck cycle          --
+-- =====================================================
+-------------
+-- Frame 12 --
+-------------
+-- ************************************************************************** --
+-- Receive a non-zero PFC pause frame 
+-- priority enable =0x00FF.
+-- PFC pause time for priority 0 = 0x0028
+-- PFC pause time for priority 1 = 0x0029
+-- PFC pause time for priority 2 = 0x002a
+-- PFC pause time for priority 3 = 0x002b
+-- PFC pause time for priority 4 = 0x002c
+-- PFC pause time for priority 5 = 0x002d
+-- PFC pause time for priority 6 = 0x002e
+-- PFC pause time for priority 7 = 0x002f
+-- ************************************************************************** --
+
+-------------------- set retry test bit to 0 & gigabit mode to 1 -----------------
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 0 -copy_all 0 -duplex full -speed 1g -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 1 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+                         -- reset retry test bit(12) = 0, 
+                         -- keep enable pause time bit(13) = 1,
+                         -- gigabit mode enable bit (10) = 1
+                         -- copy all frames bit(4) = 0
+                         -- full-duplex bit(1) = 1,
+                         -- 100Mbps speed bit(0) = 1
+
+-- the following 2 apbrd are dummy commands to wait until the gigabit mode & rx-clk are switched                       
+apbrd        08 00000046 num=20 -- check pfc_negotiate = 1,
+apbrdf       08 00000046 -- check pfc_negotiate = 1,
+                         -- wait until tx_byte_mode is set, and rx_clk is switched to 125MHz
+                         -- then trigger next PFC frame on rxd
+                        
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF00280029002a002b002c002d002e
+rxd            002f888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 ffffffff  -- clear interrupt
+
+-- event counts increment by 1 every 2.5 rx_clk clock cycle
+-- counter decrement every 64 rx_clk in byte mode
+
+
+apbrd(18000) 24 00000000   -- check that PFC counter time out does not generate interrupt
+apbrd        08 00000046   -- check pfc_negotiate = 1
+
+-- ============================================
+-- set  retry test bit to 1                  --
+-- counter decrement every rx_clck cycle     --
+-- ============================================
+
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 1 -copy_all 0 -duplex full -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 1 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+-- the following 2 apbrd are dummy commands to wait until the gigabit mode & rx-clk are switched                       
+apbrd        08 00000046 num=10 
+apbrdf       08 00000046 -- check pfc_negotiate = 1,
+                         -- wait until tx_byte_mode is set, and rx_clk is switched to 125MHz
+                         -- then trigger next PFC frame on rxd
+                         -- 100Mbps speed bit(0) = 1
+ -------------
+-- Frame 13 --
+-------------
+-- ************************************************************************** --
+-- Receive a non-zero PFC pause frame with max pause time for each priority
+-- priority enable =0x00FF.
+-- PFC pause time for priority 0 = 0xffff
+-- PFC pause time for priority 1 = 0xffff
+-- PFC pause time for priority 2 = 0xffff
+-- PFC pause time for priority 3 = 0xffff
+-- PFC pause time for priority 4 = 0xffff
+-- PFC pause time for priority 5 = 0xffff
+-- PFC pause time for priority 6 = 0xffff
+-- PFC pause time for priority 7 = 0xffff
+-- (All the counetrs are loaded with new value)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FFffffffffffffffffffffffffffff
+rxd            ffff888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 ffffffff  -- clear interrupt
+apbrd        08 00000046 -- check pfc_negotiate = 1
+-- event counts increment by 2 every rx_clk clock cycle
+
+apbrd(200000)  24 00000000  -- check that PFC counter time out does not generate interrupt
+
+
+---- ************************************************************************** --
+-- force end of test in case it doesn't stop of its own accord
+end(324000)
+
+
+
+
+

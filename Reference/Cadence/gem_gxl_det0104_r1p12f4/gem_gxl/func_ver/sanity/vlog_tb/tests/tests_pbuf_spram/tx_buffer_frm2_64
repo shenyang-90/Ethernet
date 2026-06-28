@@ -1,0 +1,549 @@
+-------------------------------------------------------
+-- tx_buffer_frm2_64 test scenario for the Ethernet MAC --
+-------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+-- Written by Adam Walker
+--
+-- 07Mar2002 awalker started it off
+--
+-- 1. Complete the second frame in the system and then make sure it starts 
+--    working on frm1 again, check that when the writeback comes along it is
+--    able to change states correctly between wr2 and data1 
+--         
+-- 2. Frame two oldest and frm1 dma activity occuring, hresp error allows frm2 to
+--    be written back and frm1 lost       
+--
+-- 3. One whole frame in frm2 states
+--
+-- 4. Collision in frame two when in frm1 data state check transition back to 
+--    frm2 data state and subsequent buffer recovery
+--
+-- 5. Queue two short frames (frame 1 and frame 2). Queue another multibuffer
+--    frame (frame 1), which finishes it's first buffer just as the writeback
+--    for the frame 2 occurs.
+--    This test is to ensure that codecoverage see a transition between
+--    TX_MAN_FRM2_WR and TX_MAN_FRM1_RD states.
+-- ************************************************************************** --
+
+
+wait_states 3
+bus_grant_delay 3
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      04 00280000  -- check reset value of network config register
+apbrd      04 00280000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+
+
+
+-------------------------------------------------------------------------
+-- 1. Complete the second frame in the system and then make sure it starts
+--    working on frm1 again, check that when the writeback comes along it is
+--    able to change states correctly between wr2 and data1
+-------------------------------------------------------------------------
+
+
+apbwr      00 00000208 "1. frame 2 oldest and in frm1 data then wr2"
+-- write tx_go and enable tx
+
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd 55555504 00008020 -- end of frame, length 32 bytes
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 11111111
+dma_rd 98765004 22222222
+dma_rd 98765008 33333333
+dma_rd 9876500c 44444444
+dma_rd 98765010 55555555
+dma_rd 98765014 66666666
+dma_rd 98765018 77777777
+dma_rd 9876501c 88888888
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd		       55555555666666667777777788888888
+txd		       00000000000000000000000000000000
+txd		       00000000000000000000000083bf6c33
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 80008020 -- write used bit
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	    14 00000028  -- tx status - frame transmitted, go bit set
+
+
+
+dma_rd 55555508 ccccc000 -- dma reads pointer of ccccc000
+dma_rd 5555550c 40018008 -- end of frame, length 32 bytes & wrap
+
+-- supply the transmit data to the AHB interface
+dma_rd ccccc000 99999999
+dma_rd ccccc004 10101010
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d59999999910101010
+
+-- write transmit complete status for the oldest frame 2
+dma_wr 5555550c c0018008 -- write used bit
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	    14 00000028  -- tx status - frame transmitted, go bit set
+
+
+dma_rd 55555500 ddddd000 -- dma reads pointer of ddddd000
+dma_rd 55555504 00008080 -- end of frame, length 128 bytes
+
+
+-- supply the transmit data to the AHB interface
+dma_rd ddddd000 99999999
+dma_rd ddddd004 10101010
+dma_rd ddddd008 11111111
+dma_rd ddddd00c 12121212
+dma_rd ddddd010 13131313
+dma_rd ddddd014 14141414
+dma_rd ddddd018 15151515
+dma_rd ddddd01c 16161616
+dma_rd ddddd020 99999999
+dma_rd ddddd024 10101010
+dma_rd ddddd028 11111111
+dma_rd ddddd02c 12121212
+dma_rd ddddd030 13131313
+dma_rd ddddd034 14141414
+dma_rd ddddd038 15151515
+dma_rd ddddd03c 16161616
+dma_rd ddddd040 99999999
+dma_rd ddddd044 10101010
+dma_rd ddddd048 11111111
+dma_rd ddddd04c 12121212
+dma_rd ddddd050 13131313
+dma_rd ddddd054 14141414
+dma_rd ddddd058 15151515
+dma_rd ddddd05c 16161616
+dma_rd ddddd060 99999999
+dma_rd ddddd064 10101010
+dma_rd ddddd068 11111111
+dma_rd ddddd06c 12121212
+dma_rd ddddd070 13131313
+dma_rd ddddd074 14141414
+dma_rd ddddd078 15151515
+dma_rd ddddd07c 16161616
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d599999999101010101111111112121212
+txd		       13131313141414141515151516161616
+txd		       99999999101010101111111112121212
+txd		       13131313141414141515151516161616
+txd		       99999999101010101111111112121212
+txd		       13131313141414141515151516161616
+txd		       99999999101010101111111112121212
+txd		       13131313141414141515151516161616e88a0653
+
+
+-- write transmit complete status for the oldest frame 3
+dma_wr 55555504 80008080 -- write used bit
+
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete
+apbwr       24 00000088  -- clear interrupt status
+apbrd	      14 00000021  -- tx status - frame transmitted, halted
+apbwr	      14 00000021  -- clear it
+apbrd	      14 00000000  -- tx status - frame transmitted, halted
+
+dma_rd 55555508 98765000 -- dma reads pointer of 98765000
+dma_rd 5555550c 80008008 -- end of frame, length 8 bytes
+
+
+-------------------------------------------------------------------------
+-- 2. Frame two oldest and frm1 dma activity occuring, hresp error allows frm2
+--    to be written back and frm1 lost
+-------------------------------------------------------------------------
+
+apbwr      1c 66666600  -- write address of transmit buffer descriptor in memory
+apbrd      1c 66666600  -- check transmit queue pointer
+apbwr      00 00000208  "2. Queue up 3 frames and hresp in 3rd"
+
+dma_rd 66666600 98765000 -- dma reads pointer of 98765000
+dma_rd 66666604 00008008 -- end of frame, length 8 bytes
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 11111111
+dma_rd 98765004 22222222
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222220000000000000000
+txd		       00000000000000000000000000000000
+txd		       00000000000000000000000000000000
+txd		       00000000000000000000000075faa11b
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 66666604 80008008 -- write used bit
+
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	      14 00000028  -- tx status - complete and tx go
+apbwr	      14 00000028  -- clear tx status
+
+
+dma_rd 66666608 fedcb000 -- dma reads pointer of fedcb000
+dma_rd 6666660c 0000801c -- end of frame, length 28 bytes
+
+-- supply the transmit data to the AHB interface frame 2
+dma_rd fedcb000 11111111
+dma_rd fedcb004 22222222
+dma_rd fedcb008 33333333
+dma_rd fedcb00c 44444444
+dma_rd fedcb010 55555555
+dma_rd fedcb014 66666666
+dma_rd fedcb018 77777777
+dma_rd fedcb01c 00000000
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd		       55555555666666667777777700000000
+txd		       00000000000000000000000000000000
+txd		       0000000000000000000000000c81f719
+
+-- write transmit complete status for the oldest frame 2
+dma_wr 6666660c 8000801c -- write used bit
+
+dma_rd 66666610 98765000 -- dma reads pointer of 98765000
+dma_rd 66666614 0000801c -- end of frame, length 28 bytes
+
+-- supply the transmit data to the AHB interface frame 3, hresp detected
+dma_rd 98765000 005e0001 not_ok
+dma_rd 98765004 11111111
+dma_rd 98765008 00000000
+dma_rd 9876500c 00000000
+dma_rd 98765010 00000000
+dma_rd 98765014 00000000
+dma_rd 98765018 00000000
+dma_rd 9876501c 00000000
+-- no further data read due to hresp error
+
+-- eventually will writeback frame 3 with error
+dma_wr 66666614 9000801c -- end of frame, length 28 bytes, transmit error
+
+
+apbrd(int)  24 000008c0  -- check interrupt status - hresp & exhausted
+apbwr       24 000008c0  -- clear interrupt status
+apbrd	    14 00000130  -- tx status - hresp
+apbwr	    14 00000130  -- tx status - hresp
+
+
+
+
+
+-------------------------------------------------------------------------
+-- 3. One whole frame in frm2 states
+-------------------------------------------------------------------------
+apbwr      1c 77777700  -- change q ptr
+apbrd      1c 77777700  -- check q ptr
+
+apbwr      00 00000208  "TX two frames sequentially in frm2 states"
+
+
+dma_rd 77777700 98765000 -- dma reads pointer of 98765000
+dma_rd 77777704 00018008 -- end of frame, length 8 bytes
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 77777704 80018008 -- write used bit
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	    14 00000028  -- tx status - frame transmitted
+
+
+dma_rd 77777708 fedcb000 -- dma reads pointer of fedcb000
+dma_rd 7777770c 0000001c -- end of frame, length 28 bytes
+
+-- supply the transmit data to the AHB interface
+dma_rd fedcb000 005e0001
+dma_rd fedcb004 d0000200
+dma_rd fedcb008 04e7ecbc
+dma_rd fedcb00c c0450008
+dma_rd fedcb010 00003000
+dma_rd fedcb014 11020000
+dma_rd fedcb018 8c9e7258
+dma_rd fedcb01c 00000000
+
+dma_rd 77777710 abcde000 -- dma reads pointer of fedcb000
+dma_rd 77777714 00018020 -- end of frame, length 32 bytes
+
+
+-- supply the transmit data to the AHB interface
+dma_rd abcde000 10101010
+dma_rd abcde004 01010101
+dma_rd abcde008 20202020
+dma_rd abcde00c 02020202
+dma_rd abcde010 30303030
+dma_rd abcde014 03030303
+dma_rd abcde018 40404040
+dma_rd abcde01c 04040404
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8c10101010
+txd		       01010101202020200202020230303030
+txd		       030303034040404004040404397291fe
+
+
+
+-- write transmit complete status for the oldest frame 2
+dma_wr 7777770c 8000001c -- write used bit
+
+
+dma_rd 77777718 fedcb000 -- dma reads pointer of fedcb000
+dma_rd 7777771c 8000001c -- used, end of frame, length 28 bytes
+
+
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete
+apbwr       24 00000088  -- clear interrupt status
+apbrd	    14 00000021  -- tx status - frame transmitted, used bit
+apbwr	    14 00000021  -- tx status - frame transmitted, used bit 
+
+-------------------------------------------------------------------------
+-- 4. Collision in frame two when in frm1 data state check transition back to
+--    frm2 data state and subsequent buffer recovery
+-------------------------------------------------------------------------
+
+apbwr      1c 88888800  -- change q ptr
+apbrd      1c 88888800  -- check q ptr
+
+apbwr      00 00000208  "4. collision in frm2 when dma is in frm1 data"
+
+-- short first frame
+dma_rd 88888800 98765000 -- dma reads pointer of 98765000
+dma_rd 88888804 00018008 -- end of frame, length 8 bytes
+
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 88888804 80018008 -- write used bit
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	    14 00000028  -- tx status - frame transmitted, go bit set
+                         -- go bit set, used bit set
+
+
+dma_rd 88888808 fedcb000 -- dma reads pointer of fedcb000
+dma_rd 8888880c 0000001c -- end of frame, length 28 bytes
+
+-- supply the transmit data to the AHB interface
+dma_rd fedcb000 005e0001
+dma_rd fedcb004 d0000200
+dma_rd fedcb008 04e7ecbc
+dma_rd fedcb00c c0450008
+dma_rd fedcb010 00003000
+dma_rd fedcb014 11020000
+dma_rd fedcb018 8c9e7258
+dma_rd fedcb01c 00000000
+
+dma_rd 88888810 abcde000 -- dma reads pointer of fedcb000
+dma_rd 88888814 00018020 -- end of frame, length 32 bytes
+
+
+-- supply the transmit data to the AHB interface
+dma_rd abcde000 10101010
+dma_rd abcde004 01010101
+dma_rd abcde008 20202020
+dma_rd abcde00c 02020202
+dma_rd abcde010 30303030
+dma_rd abcde014 03030303
+dma_rd abcde018 40404040
+dma_rd abcde01c 04040404
+
+-- frame 3 used...
+dma_rd 88888818 11111000 -- dma reads pointer of fedcb000
+dma_rd 8888881c 80000020 -- end of frame, length 28 bytes
+
+
+-- check for correct preamble, SFD, data and crc (col in data)
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8c10101010
+txd		       01010101x202000000000
+
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8c10101010
+txd		       01010101202020200202020230303030
+txd		       030303034040404004040404397291fe
+
+-- write transmit complete status for the oldest frame 2
+dma_wr 8888880c 8000001c -- write used bit
+
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete
+apbwr       24 00000088  -- clear interrupt status
+apbrd	    14 00000023  -- tx status - frame transmitted, collision
+                         -- used bit set
+apbwr	    14 00000023  -- clear tx status
+
+
+
+-------------------------------------------------------------------------
+-- 5. Queue two short frames (frame 1 and frame 2). Queue another multibuffer
+--    frame (frame 1), which finishes it's first buffer just as the writeback
+--    for the frame 2 occurs.
+--    This test is to ensure that codecoverage see a transition between
+--    TX_MAN_FRM2_WR and TX_MAN_FRM1_RD states.
+-------------------------------------------------------------------------
+
+apbwr      00 00000208  "5. use buffer in frame 1 just as frame 2 writeback"
+
+
+-----------------------------------
+-- frame 1
+dma_rd 88888818 98765000 -- dma reads pointer of 98765000
+dma_rd 8888881c 00018001 -- end of frame, length 1 bytes, no crc
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 11111111
+dma_rd 98765004 00000000
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 8888881c 80018001 -- write used bit
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	    14 00000028  -- tx status - frame transmitted
+-----------------------------------
+
+
+
+-----------------------------------
+-- frame 2
+dma_rd 88888820 98765000 -- dma reads pointer of 98765000
+dma_rd 88888824 00018008 -- end of frame, length 8 bytes, no crc
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 44332211
+dma_rd 98765004 88776655
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d51122334455667788
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 88888824 80018008 -- write used bit
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	    14 00000028  -- tx status - frame transmitted
+-----------------------------------
+
+
+
+-----------------------------------
+-- frame 1
+dma_rd 88888828 98765000 -- dma reads pointer of 98765000
+dma_rd 8888882c 00010008 -- length 8 bytes, no crc
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 11111111
+dma_rd 98765004 22222222
+
+dma_rd 88888830 98765008 -- dma reads pointer of 98765000
+dma_rd 88888834 00008038 -- end of frame, length 56 bytes
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765008 33333333
+dma_rd 9876500c 44444444
+dma_rd 98765010 55555555
+dma_rd 98765014 66666666
+dma_rd 98765018 77777777
+dma_rd 9876501c 88888888
+dma_rd 98765020 11111111
+dma_rd 98765024 22222222
+dma_rd 98765028 33333333
+dma_rd 9876502c 44444444
+dma_rd 98765030 55555555
+dma_rd 98765034 66666666
+dma_rd 98765038 77777777
+dma_rd 9876503c 88888888
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d511111111222222223333333344444444
+txd		       55555555666666667777777788888888
+txd		       11111111222222223333333344444444
+txd		       55555555666666667777777788888888
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 8888882c 80010008 -- write used bit
+
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete, used
+apbwr       24 00000088  -- clear interrupt status
+apbrd	    14 00000021  -- tx status - frame transmitted, used & halted
+-----------------------------------
+
+
+dma_rd 88888838 11111000 -- dma reads pointer of fedcb000
+dma_rd 8888883c 80000020 -- end of frame, length 28 bytes
+
+
+-- check transmit statistics, one frame short, not recorded
+apbrd     100 00000225  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 0000000c  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 0000000b  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000006  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000001  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000001  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+
+
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(7000)
+

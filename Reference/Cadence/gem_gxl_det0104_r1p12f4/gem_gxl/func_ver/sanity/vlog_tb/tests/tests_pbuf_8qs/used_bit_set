@@ -1,0 +1,246 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2011
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : used_bit_set
+--
+--   Author         : Ewan McCulloch
+--
+--   Date           : 2 May 2011
+--
+--------------------------------------------------------------------------------
+--
+
+-- wait_states 5 -- set the number of AHB wait states
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00  00000000  -- check reset value of network control register
+apbwr      28  ffffffff  -- enable all interrupts q0
+apbwr      600 ffffffff  -- enable all interrupts q1
+apbwr      604 ffffffff  -- enable all interrupts q2
+apbwr      608 ffffffff  -- enable all interrupts q3
+apbwr      60c ffffffff  -- enable all interrupts q4
+apbwr      610 ffffffff  -- enable all interrupts q5
+apbwr      614 ffffffff  -- enable all interrupts q6
+apbwr      618 ffffffff  -- enable all interrupts q7
+apbwr      1c  55555508  -- write transmit queue pointer 0
+apbwr      440 ffffff10  -- write transmit queue pointer 1
+apbwr      444 ffffff20  -- write transmit queue pointer 2
+apbwr      448 ffffff30  -- write transmit queue pointer 3
+apbwr      44c ffffff40  -- write transmit queue pointer 4
+apbwr      450 ffffff50  -- write transmit queue pointer 5
+apbwr      454 ffffff60  -- write transmit queue pointer 6
+apbwr      458 ffffff70  -- write transmit queue pointer 7
+apbrd      04  00080000  -- check reset value of network config register
+apbwr      04  00280002  -- set to full duplex mode, 64 bit
+apbrd      08  00000006  -- check reset value of network status register
+apbrd      1c  55555508  -- check transmit queue pointer
+apbwr      00  00000208  -- write tx_go and enable tx
+
+-- First transmit from Queue 1 - 
+-- Queue 1 and Queue 0 have the used bit = 0
+-- Queue 7:2 have the used bit = 1
+
+dma_rd ffffff70 99990000 -- dma reads pointer for Queue 7
+dma_rd ffffff74 99990000 -- dma reads pointer for Queue 7 - used bit is high
+dma_rd ffffff60 99990000 -- dma reads pointer for Queue 6
+dma_rd ffffff64 99990000 -- dma reads pointer for Queue 6 - used bit is high
+dma_rd ffffff50 99990000 -- dma reads pointer for Queue 5
+dma_rd ffffff54 99990000 -- dma reads pointer for Queue 5 - used bit is high
+dma_rd ffffff40 99990000 -- dma reads pointer for Queue 4
+dma_rd ffffff44 99990000 -- dma reads pointer for Queue 4 - used bit is high
+dma_rd ffffff30 99990000 -- dma reads pointer for Queue 3
+dma_rd ffffff34 99990000 -- dma reads pointer for Queue 3 - used bit is high
+dma_rd ffffff20 99990000 -- dma reads pointer for Queue 2
+dma_rd ffffff24 99990000 -- dma reads pointer for Queue 2 - used bit is high
+dma_rd ffffff10 98765000 -- dma reads pointer for Queue 1
+dma_rd ffffff14 4000807e -- dma reads pointer for Queue 1 - used bit is low
+dma_rd 55555508 98764000 -- 
+dma_rd 5555550c 0000807e -- dma reads pointer for Queue 0 - used bit is low
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 0000fde0
+dma_rd 98765040 005e0001
+dma_rd 98765044 d0000200
+dma_rd 98765048 04e7ecbc
+dma_rd 9876504c c0450008
+dma_rd 98765050 00003000
+dma_rd 98765054 11020000
+dma_rd 98765058 8c9e7258
+dma_rd 9876505c 00e0fce0
+dma_rd 98765060 c1070200
+dma_rd 98765064 1c00c107
+dma_rd 98765068 0000e9b6
+dma_rd 9876506c 640a0308
+dma_rd 98765070 69630002
+dma_rd 98765074 006f6373
+dma_rd 98765078 8c9e0000
+dma_rd 9876507c 0000fde0
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fd0000
+txd                    01005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fdb560d634
+
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr ffffff14 c000807e -- write used bit to queue 1
+
+
+
+apbrd(int1)  400 00000080  -- check interrupt status - transmit complete
+apbwr        400 00000080  -- write to clear
+apbrd	      14 00000028  -- tx status - frame transmitted, tx go
+
+
+
+-- Next transmit from Queue 7 - 
+-- Queue 7:0 have the used bit = 0
+dma_rd ffffff70 98765000 -- dma reads pointer for Queue 7
+dma_rd ffffff74 4000803e -- dma reads pointer for Queue 7 - used bit is clear
+dma_rd ffffff60 99990000 -- dma reads pointer for Queue 6
+dma_rd ffffff64 0000803e -- dma reads pointer for Queue 6 - used bit is clear
+dma_rd ffffff50 0000803e -- dma reads pointer for Queue 6
+dma_rd ffffff54 0000803e -- dma reads pointer for Queue 6 - used bit is clear
+
+-- No more pointers are read as the queue has been determined
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 0000fde0
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fdfb2c1f72
+
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr ffffff74 c000803e -- write used bit
+
+dma_rd ffffff70 99990000 -- dma reads pointer for Queue 7
+dma_rd ffffff74 99990000 -- dma reads pointer for Queue 7 - used bit is high
+dma_rd ffffff60 99990000 -- dma reads pointer for Queue 6
+dma_rd ffffff64 99990000 -- dma reads pointer for Queue 6 - used bit is high
+dma_rd ffffff50 99990000 -- dma reads pointer for Queue 5
+dma_rd ffffff54 99990000 -- dma reads pointer for Queue 5 - used bit is high
+dma_rd ffffff40 99990000 -- dma reads pointer for Queue 4
+dma_rd ffffff44 99990000 -- dma reads pointer for Queue 4 - used bit is high
+dma_rd ffffff30 99990000 -- dma reads pointer for Queue 3
+dma_rd ffffff34 99990000 -- dma reads pointer for Queue 3 - used bit is high
+dma_rd ffffff20 99990000 -- dma reads pointer for Queue 2
+dma_rd ffffff24 99990000 -- dma reads pointer for Queue 2 - used bit is high
+dma_rd ffffff10 98765000 -- dma reads pointer for Queue 1
+dma_rd ffffff14 99990000 -- dma reads pointer for Queue 1 - used bit is high
+dma_rd 55555508 98764000 -- dma reads pointer for Queue 0
+dma_rd 5555550c 99990000 -- dma reads pointer for Queue 0 - used bit is high
+
+apbrd(int7)  418 00000080  -- check interrupt status - transmit complete
+apbwr        418 00000080  -- write to clear
+apbrd        418 00000000  -- check clear
+
+apbrd       24 00000008  -- check interrupt status - used bit set
+apbwr       24 00000008  -- write to clear
+
+
+
+
+-- check transmit statistics
+apbrd     100 000000c4  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000002  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000002  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000001  -- check frames transmitted 65-127
+apbrd     120 00000001  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+apbrd       14 00000021  -- tx status - frame transmitted, used bit set
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(5000)
+
+bus_grant_delay 0

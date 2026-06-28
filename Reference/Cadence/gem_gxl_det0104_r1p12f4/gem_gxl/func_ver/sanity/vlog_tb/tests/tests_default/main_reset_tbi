@@ -1,0 +1,109 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_an_advert_register_tbi
+--
+--   Author         : Mike MacGillis (mikema@tality.com)
+--
+--   Date           : June 27, 2002
+--
+--------------------------------------------------------------------------------
+--
+--Purpose: To verify that bit 0.15 causes Auto-Negotiation to restart. 
+--
+--
+--Procedure:
+--
+-- 1. Provide a link of /I/ ordered sets to the GEM (or /C/ ordered sets encoded with 0020h).
+-- 2. Enable auto-negotiation. (write a value one to bit 0.12 in the Control register)
+-- 3. Wait until the GEM begins transmission of non-zero /C/ ordered sets.
+--    While observing transmission from the GEM, write a value one to bit 0.15 in the Control register.
+--
+--Observable Results:
+--
+--    a.The GEM should source /C/ ordered sets encoded with 0000h (breaklink) following the write to 0.15.
+--
+--
+--
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+
+-- ********************************************************************************************* --
+-- 1. Initialise the GEM for Gigabit Operation with PCS enabled. Furthermore, Auto-Negotiation is 
+--    enabled.
+-- ********************************************************************************************* --
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd     200 00009040  -- check value of pcs control register
+apbrd     210 00000020  -- check reset value of pcs auto-nego. adv. register
+apbwr     210 00000060  -- pcs auto-nego. adv. register 
+apbrd     210 00000060  -- check pcs auto-nego. adv. register
+apbrd     21c 00000000  -- check reset value of pcs auto-nego. next page register
+
+apbwr      04 00081c00  -- Put MAC into gigabit mode with TBI. Retry test enabled
+apbrd      04 00081c00  -- Check value of network config register
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 03020100  -- specific address register 1 bottom
+apbwr      8C 00000504  -- specific address register 1 top
+apbrd     200 00001040  -- check value of pcs control register
+apbrd     204 00000109  -- check pcs status register
+apbrd      20 00000000  -- check receive status register and trigger reception
+
+
+-- ********************************************************************************************* --
+-- 2. Once the GEM enters AN_ENABLE state, it should start transmitting alternating /C/ codes with the Config_Reg field all zeros.
+-- ********************************************************************************************* --
+
+pcs_an_tx          0000  
+
+-- ********************************************************************************************* --
+-- 3. After the link timer in the GEM finishes counting, the GEM should then transmit alternating /C/
+--    codes with the Conf_Reg field incdicating the same values that are in the PCS auto-negotiation 
+--    advertisement register.  (Enter into ABILITY_DETECT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      0      1      0     0      0      0     0      0        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_tx(re)        6000
+
+-- ********************************************************************************************* --
+-- 4. Set PCS software reset bit. GEM should restart auto negotiation.
+-- ********************************************************************************************* --
+
+apbwr(160)     200 00009040  -- write pcs control register -- PCS software reset
+apbrd          200 00001040  -- check value of pcs control register
+
+-- ********************************************************************************************* --
+-- 5. Once the GEM enters AN_ENABLE state, it should start transmitting alternating /C/ codes with the Config_Reg field all zeros.
+-- ********************************************************************************************* --
+
+pcs_an_tx          0000  
+
+-- ********************************************************************************************* --
+-- 6. After the link timer in the GEM finishes counting, the GEM should then transmit alternating /C/
+--    codes with the Conf_Reg field incdicating the same values that are in the PCS auto-negotiation 
+--    advertisement register.  (Enter into ABILITY_DETECT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      0      1      0     0      0      0     0      0        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_tx(trx)        2000
+dma_rd 00000000 12345678 -- DMA will read a single descriptor after RX is enabled
+end(500)

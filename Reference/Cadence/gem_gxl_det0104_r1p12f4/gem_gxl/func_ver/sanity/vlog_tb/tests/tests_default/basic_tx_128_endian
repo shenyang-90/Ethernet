@@ -1,0 +1,164 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2006
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : basic_tx_128_endian
+--
+--   Author         : Martin James (martinj@cadence.com)
+--
+--   Date           : 10th July 2006
+--
+--------------------------------------------------------------------------------
+--
+-- Description
+----------------
+--
+-- This checks endian swap function for transmit in 128-bit mode where both
+-- data and management are endian swapped from the default value.
+--
+-- NOTE: endian_swap is used on a dma_* command to swap from the default
+--       endianism value defined by `gem_endian_swap_def.
+--
+--
+-- Functional Coverage
+----------------------
+-- · This checks endian swap function for transmit can be programmed
+-- · This checks endian swap function for transmit data
+-- · This checks endian swap function for transmit management
+-- 
+--
+-- Detailed Test Description
+----------------------------
+-- 1. check and initialise the relevant registers
+-- 2. Supply buffer descriptor information
+-- 3. supply the transmit data to the AHB interface.
+-- 4. check the bytes in the TX frame have the correct order
+-- 5. Check writeback.
+-- 6. Check transmit complete status and statistics.
+-- 
+--------------------------------------------------------------------------------
+
+
+-- *****************************************************************************
+-- 1. check and initialise the relevant registers
+-- *****************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      10 000201c4  -- enable endian swap mode (data and management)
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00680000  -- network config register - 128 bit AHB
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000408  -- write tx halt immediately keeping tx enabled
+                        -- this stops fetch of second frame
+
+
+-- *****************************************************************************
+-- 2. Supply buffer descriptor information
+-- *****************************************************************************
+dma_rd 55555504 0000803e endian_swap -- start of frame, length 62 bytes
+dma_rd 55555500 98765000 endian_swap -- dma reads pointer of 98765000
+
+
+-- *****************************************************************************
+-- 3. supply the transmit data to the AHB interface.
+-- *****************************************************************************
+dma_rd 98765000 33221100 endian_swap
+dma_rd 98765004 77665544 endian_swap
+dma_rd 98765008 bbaa9988 endian_swap
+dma_rd 9876500c ffeeddcc endian_swap
+dma_rd 98765010 33221100 endian_swap
+dma_rd 98765014 77665544 endian_swap
+dma_rd 98765018 bbaa9988 endian_swap
+dma_rd 9876501c ffeeddcc endian_swap
+dma_rd 98765020 33221100 endian_swap
+dma_rd 98765024 77665544 endian_swap
+dma_rd 98765028 bbaa9988 endian_swap
+dma_rd 9876502c ffeeddcc endian_swap
+dma_rd 98765030 33221100 endian_swap
+dma_rd 98765034 77665544 endian_swap
+dma_rd 98765038 bbaa9988 endian_swap
+dma_rd 9876503c ffeeddcc endian_swap
+
+
+-- *****************************************************************************
+-- 4. check the bytes in the TX frame have the correct order
+-- *****************************************************************************
+txd    55555555555555d500112233445566778899aabbccddeeff
+txd		       00112233445566778899aabbccddeeff
+txd		       00112233445566778899aabbccddeeff
+txd		       00112233445566778899aabbccdd15ade4f9
+
+
+
+-- *****************************************************************************
+-- 5. Check writeback.
+-- *****************************************************************************
+dma_wr 55555504 8000803e endian_swap -- write used bit
+
+
+
+-- *****************************************************************************
+-- 6. Check transmit complete status and statistics.
+-- *****************************************************************************
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbrd	    14 00000020  -- tx status - frame transmitted, used bit set
+apbrd       1c 55555508  -- transmit queue pointer not changed
+
+
+-- check transmit statistics
+apbrd     100 00000042  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000001  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(5000)
+

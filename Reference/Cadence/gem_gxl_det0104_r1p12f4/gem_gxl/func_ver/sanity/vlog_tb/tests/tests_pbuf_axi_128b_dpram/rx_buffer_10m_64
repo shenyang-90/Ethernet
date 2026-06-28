@@ -1,0 +1,1131 @@
+-------------------------------------------------
+-- rx_buffer_10m_64 test scenario for the GEM --
+-------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+-- Written by Steven Ho
+--
+-- 18 May 2001
+--
+-- Basic test on GEM behaviour with multi-buffer frames.
+-- These include buffer recovery on ownership bit set and crc errors.
+-- Wrap bit operation.
+-- Verify status write back for some vlan, unicast and multicast frames.
+-- Verify operation of mask bit for interrupt 2 (buffer unavailable).
+-- Extended with some crc errors on 128 and 129 byte frames.
+
+ten_meg_bit  -- 10Mbit/s operation (2.5Mhz tx_clk and rx_clk, 50MHz Pclk and Hclk)
+
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      04 00280001  -- indicate 100M operation, will check pin l8r.
+apbwr      4ec 0000000f -- set the RX descriptor trigger rate to very slow, otherwise it changes the behaviour of this test.
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 66660000  -- write receive queue pointer
+apbrd      18 66660000  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      98 12345678  -- specific address register 3 bottom
+apbwr      9C 00001111  -- specific address register 3 top
+apbrd      08 00000006  -- check reset value of network status register
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+
+-- Receive a small two buffer frame (144 bytes), but have 2nd buffer used bit
+-- set so that frame should be discarded and the second buffer recovered.
+
+dma_rd rx_descr 66660000 55550000 -- dma reads pointer of 55550000
+dma_rd rx_descr 66660008 55551003 -- this is ignored by design as it is the 2nd buffer read with used bit set
+
+rxd(apb)     d578563412111111112222222233333333   
+rxd            00000001555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            ddddddddeeeeeeeeffffffff11111111
+rxd            222222223333333344444444gggggggg
+
+dma_wr 55550000 12345678 -- store frame to memory
+dma_wr 55550004 11111111
+dma_wr 55550008 22222222
+dma_wr 5555000c 33333333
+dma_wr 55550010 01000000
+dma_wr 55550014 55555555
+dma_wr 55550018 66666666
+dma_wr 5555001c 77777777
+dma_wr 55550020 88888888
+dma_wr 55550024 99999999
+dma_wr 55550028 aaaaaaaa
+dma_wr 5555002c bbbbbbbb
+dma_wr 55550030 cccccccc
+dma_wr 55550034 dddddddd
+dma_wr 55550038 eeeeeeee
+dma_wr 5555003c ffffffff
+dma_wr 55550040 11111111
+dma_wr 55550044 22222222
+dma_wr 55550048 33333333
+dma_wr 5555004c 44444444
+dma_wr 55550050 55555555
+dma_wr 55550054 66666666
+dma_wr 55550058 77777777
+dma_wr 5555005c 88888888
+dma_wr 55550060 99999999
+dma_wr 55550064 aaaaaaaa
+dma_wr 55550068 bbbbbbbb
+dma_wr 5555006c cccccccc
+dma_wr 55550070 dddddddd
+dma_wr 55550074 eeeeeeee
+dma_wr 55550078 ffffffff
+dma_wr 5555007c 11111111
+
+dma_wr rx_descr 66660000 55550001 -- dma writes ownership bit
+                         -- note that no eof, so other bits ignored.
+                         -- maybe will be changed to write null length?
+dma_wr rx_descr 66660004 00004000 -- dma writes start of frame status
+                         
+-- Read location for next buffer for current frame..
+
+dma_rd rx_descr 66660008 55550081 -- dma reads pointer of 55550080 - used
+
+-- MAC generates an interrupt due to resource error.
+-- rx_resource_error stat is incremented, will check at end...
+
+apbrd(int)   24 00000004 -- check interrupt status - rx buffer used.
+apbwr        24 00000004 -- Clear it
+apbrd        24 00000000 -- check reset after read.
+apbrd        20 00000001 -- check receive status register -- buffer unavailable.
+apbwr        20 00000001 -- reset it
+apbrd        20 00000000 -- check been reset
+
+-- wait for eop and read a descriptor again - still used
+dma_rd rx_descr 66660008 55550081 -- dma reads pointer of 55550080 - used
+
+apbrd(int)   24 00000004 -- check interrupt status - rx buffer used.
+apbwr        24 00000004  -- Clear it
+apbrd        24 00000000 -- check reset after read.
+apbrd        20 00000001 -- check receive status register -- buffer unavailable.
+apbwr        20 00000001 -- reset it
+apbrd        20 00000000 -- check been reset
+
+
+-- Rx another frame, MAC should re-use previous buffer.
+-- Buffer still marked as used, so generate another interrupt.
+-- rx_resource_error stat is incremented, will check at end...
+
+rxd(gap)     d578563412111111112222222233333333   
+rxd            00000002555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            ddddddddeeeeeeeeffffffff11111111
+rxd            222222223333333344444444gggggggg
+
+
+-- At end of frame read the descriptor again
+dma_rd rx_descr 66660008 55550000 -- dma reads pointer of 55550000 - available
+
+-- Now we can write out the remainder of the first frame ...
+dma_wr 55550000 22222222 -- writes the rest of the frame.
+dma_wr 55550004 33333333
+dma_wr 55550008 44444444
+dma_wr 5555000c b608d90b -- checksum
+
+-- Do pkt writeback and generate interrupt
+dma_wr rx_descr 66660008 55550001 -- dma writes ownership bit
+dma_wr rx_descr 6666000c 0c008090 
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register
+apbwr      20 00000002  -- reset it
+apbrdf     20 00000000  -- check been reset
+
+
+-- read the next descriptor, it is available, so the 2nd backed up pkt
+-- can be written back to memory
+dma_rd rx_descr 66660010 55550000 -- dma reads pointer of 55550000 - available
+
+dma_wr 55550000 12345678 -- store frame to memory
+dma_wr 55550004 11111111
+dma_wr 55550008 22222222
+dma_wr 5555000c 33333333
+dma_wr 55550010 02000000
+dma_wr 55550014 55555555
+dma_wr 55550018 66666666
+dma_wr 5555001c 77777777
+dma_wr 55550020 88888888
+dma_wr 55550024 99999999
+dma_wr 55550028 aaaaaaaa
+dma_wr 5555002c bbbbbbbb
+dma_wr 55550030 cccccccc
+dma_wr 55550034 dddddddd
+dma_wr 55550038 eeeeeeee
+dma_wr 5555003c ffffffff
+dma_wr 55550040 11111111
+dma_wr 55550044 22222222
+dma_wr 55550048 33333333
+dma_wr 5555004c 44444444
+dma_wr 55550050 55555555
+dma_wr 55550054 66666666
+dma_wr 55550058 77777777
+dma_wr 5555005c 88888888
+dma_wr 55550060 99999999
+dma_wr 55550064 aaaaaaaa
+dma_wr 55550068 bbbbbbbb
+dma_wr 5555006c cccccccc
+dma_wr 55550070 dddddddd
+dma_wr 55550074 eeeeeeee
+dma_wr 55550078 ffffffff
+dma_wr 5555007c 11111111
+
+dma_wr rx_descr 66660010 55550001 -- dma writes ownership bit
+                         -- note that no eof, so other bits ignored.
+                         -- maybe will be changed to write null length?
+dma_wr rx_descr 66660014 00004000 -- dma writes start of frame status
+                         
+-- Read location for next buffer for current frame..
+
+dma_rd rx_descr 66660018 55550080 -- dma reads pointer of 55550080 - available
+
+-- Now we can write out the remainder of the first frame ...
+dma_wr 55550080 22222222 -- writes the rest of the frame.
+dma_wr 55550084 33333333
+dma_wr 55550088 44444444
+dma_wr 5555008c 586eda12 -- checksum
+
+-- Do writeback
+dma_wr rx_descr 66660018 55550081 -- dma writes ownership bit
+dma_wr rx_descr 6666001c 0c008090 
+
+dma_rd rx_descr 66660020 55550000 -- dma reads pointer of 55550080 - available
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register
+apbwr      20 00000002  -- reset it
+apbrdf     20 00000000  -- check been reset
+
+
+-- Rx same 144 byte frame again, this time should be fine..
+
+rxd(gap)     d578563412111111112222222233333333   
+rxd            00000003555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            ddddddddeeeeeeeeffffffff11111111
+rxd            222222223333333344444444gggggggg
+
+
+dma_wr 55550000 12345678 -- store frame to memory
+dma_wr 55550004 11111111
+dma_wr 55550008 22222222
+dma_wr 5555000c 33333333
+dma_wr 55550010 03000000
+dma_wr 55550014 55555555
+dma_wr 55550018 66666666
+dma_wr 5555001c 77777777
+dma_wr 55550020 88888888
+dma_wr 55550024 99999999
+dma_wr 55550028 aaaaaaaa
+dma_wr 5555002c bbbbbbbb
+dma_wr 55550030 cccccccc
+dma_wr 55550034 dddddddd
+dma_wr 55550038 eeeeeeee
+dma_wr 5555003c ffffffff
+dma_wr 55550040 11111111
+dma_wr 55550044 22222222
+dma_wr 55550048 33333333
+dma_wr 5555004c 44444444
+dma_wr 55550050 55555555
+dma_wr 55550054 66666666
+dma_wr 55550058 77777777
+dma_wr 5555005c 88888888
+dma_wr 55550060 99999999
+dma_wr 55550064 aaaaaaaa
+dma_wr 55550068 bbbbbbbb
+dma_wr 5555006c cccccccc
+dma_wr 55550070 dddddddd
+dma_wr 55550074 eeeeeeee
+dma_wr 55550078 ffffffff
+dma_wr 5555007c 11111111
+
+dma_wr rx_descr 66660020 55550001 -- dma writes ownership bit
+dma_wr rx_descr 66660024 00004000 -- dma writes start of frame status
+
+                         
+-- Read location for next buffer for current frame..
+
+dma_rd rx_descr 66660028 55550180 -- dma reads pointer of 55550180 - unused
+
+dma_wr 55550180 22222222 -- writes the rest of the frame.
+dma_wr 55550184 33333333
+dma_wr 55550188 44444444
+dma_wr 5555018c b49c26da -- checksum
+
+dma_wr rx_descr 66660028 55550181 -- write used bit
+dma_wr rx_descr 6666002c 0c008090 -- writes status..EOF.
+
+dma_rd rx_descr 66660030 55551003 -- buffer wasnt empty when this was read so design ignores it and will retry it
+dma_rd rx_descr 66660030 55551003 -- read next buffer - used & wrap
+
+
+-- check status on reception of receive complete interrupt
+-- changed for zero wait state support, so trigger on apb since with
+-- zero wait state, dma reading used bit before frame begins to store.
+
+apbrd(int) 24 00000004  -- check interrupt status - buffer not available
+apbwr      24 00000004  -- Clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000003  -- check contents of the receive status register
+-- frame received and new buffer not available
+apbwr      20 00000003 -- reset it
+apbrdf     20 00000000 -- check been reset
+
+-- Rx a new frame, however wrap and used bit set..
+-- wrap is ignored.. for now..
+-- rx_resource_error stat is incremented, will check at end...
+
+-- drive a frame which will be dropped because no buffer available
+rxd(apb)     d578563412111111112222222233333333   
+rxd            00000004555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            ddddddddeeeeeeeeffffffff11111111
+rxd            222222223333333344444444gggggggg
+
+-- Rx another frame, but this time generate a crc error so last buffer should
+-- be recovered and frame discarded.
+
+rxd(gap)     d578563412111111112222222233333333   
+rxd            00000005555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            aaaaaaaabbbbbbbbccccccccdddddddd
+rxd            eeeeeeeeffffffff1111111122222222
+rxd            ddddddddeeeeeeeeffffffff12121212 -- crc error
+
+-- At end of the above frame read descriptor again - this time buffer available
+dma_rd rx_descr 66660030 55550002 -- read next buffer location, wrap bit is set.
+
+
+dma_wr 55550000 12345678 -- store frame to memory
+dma_wr 55550004 11111111
+dma_wr 55550008 22222222
+dma_wr 5555000c 33333333
+dma_wr 55550010 04000000
+dma_wr 55550014 55555555
+dma_wr 55550018 66666666
+dma_wr 5555001c 77777777
+dma_wr 55550020 88888888
+dma_wr 55550024 99999999
+dma_wr 55550028 aaaaaaaa
+dma_wr 5555002c bbbbbbbb
+dma_wr 55550030 cccccccc
+dma_wr 55550034 dddddddd
+dma_wr 55550038 eeeeeeee
+dma_wr 5555003c ffffffff
+dma_wr 55550040 11111111
+dma_wr 55550044 22222222
+dma_wr 55550048 33333333
+dma_wr 5555004c 44444444
+dma_wr 55550050 55555555
+dma_wr 55550054 66666666
+dma_wr 55550058 77777777
+dma_wr 5555005c 88888888
+dma_wr 55550060 99999999
+dma_wr 55550064 aaaaaaaa
+dma_wr 55550068 bbbbbbbb
+dma_wr 5555006c cccccccc
+dma_wr 55550070 dddddddd
+dma_wr 55550074 eeeeeeee
+dma_wr 55550078 ffffffff
+dma_wr 5555007c 11111111
+
+dma_wr rx_descr 66660030 55550003 -- dma writes ownership bit
+dma_wr rx_descr 66660034 00004000 -- dma writes start of frame status
+
+                         
+-- Read location for next buffer for current frame..
+
+dma_rd rx_descr 66660000 55550182 -- dma reads pointer of 55550180 - unused
+
+dma_wr 55550180 22222222 -- writes the rest of the frame.
+dma_wr 55550184 33333333
+dma_wr 55550188 44444444
+dma_wr 5555018c 5fd3da61 -- checksum
+
+dma_wr 66660000 55550183 -- write used bit
+dma_rd rx_descr 66660000 55551003 -- read next buffer - used & wrap
+
+dma_wr 66660004 0c008090 -- writes status..EOF.
+
+
+-- check status on reception of receive complete interrupt
+-- changed for zero wait state support, so trigger on apb since with
+-- zero wait state, dma reading used bit before frame begins to store.
+
+apbrd(int) 24 00000004  -- check interrupt status - buffer not available
+apbwr      24 00000004  -- Clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000003  -- check contents of the receive status register
+-- frame received and new buffer not available
+apbwr      20 00000003 -- reset it
+apbrd      20 00000000 -- check been reset
+
+
+
+dma_rd rx_descr 66660000 55555002 -- read next buffer - wrap
+
+
+-- rest of frame discarded due to invalid fcs.
+-- fcs error stat will be incremented.
+
+-- Rx another frame to prove that buffer was recovered..
+
+rxd(gap)     d578563412111111112222222233333333   
+rxd            00000006555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            ddddddddeeeeeeeeffffffff11gggggggg
+
+-- re-uses last buffer..
+-- note that wrap bit was set so next buffer (after this) will be read from 
+-- the first buffer descriptor.
+
+dma_wr 55555000 12345678 -- store frame to memory
+dma_wr 55555004 11111111
+dma_wr 55555008 22222222
+dma_wr 5555500c 33333333
+dma_wr 55555010 06000000
+dma_wr 55555014 55555555
+dma_wr 55555018 66666666
+dma_wr 5555501c 77777777
+dma_wr 55555020 88888888
+dma_wr 55555024 99999999
+dma_wr 55555028 aaaaaaaa
+dma_wr 5555502c bbbbbbbb
+dma_wr 55555030 cccccccc
+dma_wr 55555034 dddddddd
+dma_wr 55555038 eeeeeeee
+dma_wr 5555503c ffffffff
+dma_wr 55555040 11111111
+dma_wr 55555044 22222222
+dma_wr 55555048 33333333
+dma_wr 5555504c 44444444
+dma_wr 55555050 55555555
+dma_wr 55555054 66666666
+dma_wr 55555058 77777777
+dma_wr 5555505c 88888888
+dma_wr 55555060 99999999
+dma_wr 55555064 aaaaaaaa
+dma_wr 55555068 bbbbbbbb
+dma_wr 5555506c cccccccc
+dma_wr 55555070 dddddddd
+dma_wr 55555074 eeeeeeee
+dma_wr 55555078 ffffffff
+dma_wr 5555507c 91f52111 -- part of checksum
+
+
+dma_wr 66660000 55555003 -- dma writes ownership bit (and wrap bit)
+dma_rd rx_descr 66660000 55550000 -- dma reads pointer of 55550000 - unused
+                       
+-- Read location for next buffer for current frame from beginning...
+
+dma_wr 66660004 00004000 -- dma writes start of frame status
+
+dma_wr 55550000 0000005b -- writes the rest of the frame.
+dma_wr 55550004 00000000 -- writes the rest of the frame.
+
+
+dma_wr 66660000 55550001 -- write used bit
+dma_wr 66660004 0c008081 -- writes status, EOF.
+
+-- Default read for next buffer location..
+
+dma_rd rx_descr 66660008 55553000 -- read next buffer
+
+-- check status on reception of receive complete interrupt
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      24 00000000  -- check interrupt status cleared after read
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear contents of the receive status register
+apbrd      20 00000000  -- check contents is cleared
+
+
+
+
+-- Check the writing back of status bits for some different multi-buffered 
+-- frames starting with vlan frames..
+-- Note that frames are triggered by rxd(apb) rather than rxd(gap)
+-- this is to allow time for setting up the different registers prior to 
+-- initiating any frames.
+
+
+-- This frame requires a preamble due to problems of receiving another frame
+-- in close proximity to a short (129 byte) frame.  This would not be a 
+-- problem as pre-amble should exist anyway.
+
+-- A priority tagged vlan frame.
+
+rxd(gap)     55555555
+rxd          d578563412111111112222222281000000
+rxd            00000007555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            aaaaaaaabbbbbbbbccccccccdddddddd
+rxd            eeeeeeeeffffffff1111111122222222
+rxd            ddddddddeeeeeeeeffffffff42b833ba
+
+dma_wr 55553000 12345678 -- store frame to memory
+dma_wr 55553004 11111111
+dma_wr 55553008 22222222
+dma_wr 5555300c 00000081
+dma_wr 55553010 07000000
+dma_wr 55553014 55555555
+dma_wr 55553018 66666666
+dma_wr 5555301c 77777777
+dma_wr 55553020 88888888
+dma_wr 55553024 99999999
+dma_wr 55553028 aaaaaaaa
+dma_wr 5555302c bbbbbbbb
+dma_wr 55553030 cccccccc
+dma_wr 55553034 dddddddd
+dma_wr 55553038 eeeeeeee
+dma_wr 5555303c ffffffff
+dma_wr 55553040 11111111
+dma_wr 55553044 22222222
+dma_wr 55553048 33333333
+dma_wr 5555304c 44444444
+dma_wr 55553050 55555555
+dma_wr 55553054 66666666
+dma_wr 55553058 77777777
+dma_wr 5555305c 88888888
+dma_wr 55553060 99999999
+dma_wr 55553064 aaaaaaaa
+dma_wr 55553068 bbbbbbbb
+dma_wr 5555306c cccccccc
+dma_wr 55553070 aaaaaaaa
+dma_wr 55553074 bbbbbbbb
+dma_wr 55553078 cccccccc
+dma_wr 5555307c dddddddd
+
+dma_wr 66660008 55553001 -- write used bit.
+dma_wr 6666000C 00004000 -- write status bits.
+
+dma_rd rx_descr 66660010 55554000 -- read next buffer location.
+
+dma_wr 55554000 eeeeeeee -- write the rest of the data..
+dma_wr 55554004 ffffffff
+dma_wr 55554008 11111111
+dma_wr 5555400C 22222222
+dma_wr 55554010 dddddddd
+dma_wr 55554014 eeeeeeee
+dma_wr 55554018 ffffffff
+dma_wr 5555401c ba33b842
+
+
+dma_wr 66660010 55554001 -- dma writes ownership bit
+dma_wr 66660014 0c3080a0 -- checks for vlan tag, priority 000, length 160 and local address match
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check rx status - rx complete
+apbwr      20 00000002  -- reset it.
+apbrdf     20 00000000  -- check been reset.
+
+
+-- Broadcast frame - 129 bytes.
+
+rxd(apb)     d5FFFFFFFFFFFF11112222222233333333   -- BROADCAST
+rxd            00000008555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            ddddddddeeeeeeeeffffffff11gggggggg
+
+dma_rd rx_descr 66660018 55555000 -- reads locations of rx buffer
+
+dma_wr 55555000 FFFFFFFF -- store frame to memory
+dma_wr 55555004 1111FFFF
+dma_wr 55555008 22222222
+dma_wr 5555500C 33333333
+dma_wr 55555010 08000000
+dma_wr 55555014 55555555
+dma_wr 55555018 66666666
+dma_wr 5555501c 77777777
+dma_wr 55555020 88888888
+dma_wr 55555024 99999999
+dma_wr 55555028 aaaaaaaa
+dma_wr 5555502c bbbbbbbb
+dma_wr 55555030 cccccccc
+dma_wr 55555034 dddddddd
+dma_wr 55555038 eeeeeeee
+dma_wr 5555503c ffffffff
+dma_wr 55555040 11111111
+dma_wr 55555044 22222222
+dma_wr 55555048 33333333
+dma_wr 5555504c 44444444
+dma_wr 55555050 55555555
+dma_wr 55555054 66666666
+dma_wr 55555058 77777777
+dma_wr 5555505c 88888888
+dma_wr 55555060 99999999
+dma_wr 55555064 aaaaaaaa
+dma_wr 55555068 bbbbbbbb
+dma_wr 5555506c cccccccc
+dma_wr 55555070 dddddddd
+dma_wr 55555074 eeeeeeee
+dma_wr 55555078 ffffffff
+dma_wr 5555507c d21b3611 -- part of checksum
+
+
+dma_wr 66660018 55555001 -- dma writes ownership bit (and wrap bit)
+dma_wr 6666001c 00004000 -- dma writes start of frame status
+
+                       
+-- Read location for next buffer for current frame from beginning...
+
+dma_rd rx_descr 66660020 55556000 -- dma reads pointer of 55556000 - unused
+
+dma_wr 55556000 0000004f -- writes the rest of the frame.
+dma_wr 55556004 00000000 -- writes the rest of the frame.
+
+
+dma_wr 66660020 55556001 -- write used bit
+dma_wr 66660024 80008081 -- writes status, EOF.
+
+-- Default read for next buffer location..
+
+dma_rd rx_descr 66660028 55557000 -- read next buffer
+
+apbrd(int)   24 00000002 -- check interrupt status - rx complete.
+apbwr        24 00000002  -- Clear it
+apbrd        24 00000000 -- check reset after read.
+apbrd        20 00000002 -- check receive status register -- rx complete.
+apbwr        20 00000002 -- reset it
+apbrd        20 00000000 -- check been reset
+
+
+
+-- A unicast hashed frame..
+
+-- destination address is 1111aaaaaaaa. The hashing reduces to 111001 or 57
+
+-- check and initialise the relevant registers
+apbwr      04 00280080  -- enable unicast in network config register
+apbwr      80 00200000  -- write hash index value bottom
+apbwrf     84 02000000  -- write hash index value (hash index of 57)
+
+
+rxd(apb)     d5aaaaaaaa111111112222222233333333
+rxd            00000009555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            ddddddddeeeeeeeeffffffff11gggggggg
+
+dma_wr 55557000 aaaaaaaa -- store frame to memory
+dma_wr 55557004 11111111
+dma_wr 55557008 22222222
+dma_wr 5555700C 33333333
+dma_wr 55557010 09000000
+dma_wr 55557014 55555555
+dma_wr 55557018 66666666
+dma_wr 5555701c 77777777
+dma_wr 55557020 88888888
+dma_wr 55557024 99999999
+dma_wr 55557028 aaaaaaaa
+dma_wr 5555702c bbbbbbbb
+dma_wr 55557030 cccccccc
+dma_wr 55557034 dddddddd
+dma_wr 55557038 eeeeeeee
+dma_wr 5555703c ffffffff
+dma_wr 55557040 11111111
+dma_wr 55557044 22222222
+dma_wr 55557048 33333333
+dma_wr 5555704c 44444444
+dma_wr 55557050 55555555
+dma_wr 55557054 66666666
+dma_wr 55557058 77777777
+dma_wr 5555705c 88888888
+dma_wr 55557060 99999999
+dma_wr 55557064 aaaaaaaa
+dma_wr 55557068 bbbbbbbb
+dma_wr 5555706c cccccccc
+dma_wr 55557070 dddddddd
+dma_wr 55557074 eeeeeeee
+dma_wr 55557078 ffffffff
+dma_wr 5555707c aa6e7411 -- part of checksum
+
+
+dma_wr 66660028 55557001 -- dma writes ownership bit (and wrap bit)
+dma_wr 6666002c 00004000 -- dma writes start of frame status
+
+                       
+-- Read location for next buffer for current frame from beginning...
+
+dma_rd rx_descr 66660030 55558000 -- dma reads pointer of 55558000 - unused
+
+dma_wr 55558000 00000027 -- writes the rest of the frame.
+dma_wr 55558004 00000000 -- writes the rest of the frame.
+
+
+dma_wr 66660030 55558001 -- write used bit
+dma_wr 66660034 20008081 -- writes status, EOF.
+
+-- Default read for next buffer location..
+
+dma_rd rx_descr 66660038 55559000 -- read next buffer
+
+apbrd(int)   24 00000002 -- check interrupt status - rx complete.
+apbwr        24 00000002  -- Clear it
+apbrd        24 00000000 -- check reset after read.
+apbrd        20 00000002 -- check receive status register -- rx complete.
+apbwr        20 00000002 -- reset it
+apbrd        20 00000000 -- check been reset
+
+
+-- Multicast hash address checking..
+
+-- check and initialise the relevant registers
+apbwr      04 00280040  -- enable multicast hash in network config register
+apbwr      80 00200020  -- write hash index value bottom
+apbwrf     84 00000000  -- write hash index value top (hash index of 5)
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5bbbbbbbbffffffffeeeeeeeedddddddd
+rxd            00000010555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            ddddddddeeeeeeeeffffffff11gggggggg
+
+dma_wr 55559000 bbbbbbbb -- store frame to memory
+dma_wr 55559004 ffffffff
+dma_wr 55559008 eeeeeeee
+dma_wr 5555900C dddddddd
+dma_wr 55559010 10000000
+dma_wr 55559014 55555555
+dma_wr 55559018 66666666
+dma_wr 5555901c 77777777
+dma_wr 55559020 88888888
+dma_wr 55559024 99999999
+dma_wr 55559028 aaaaaaaa
+dma_wr 5555902c bbbbbbbb
+dma_wr 55559030 cccccccc
+dma_wr 55559034 dddddddd
+dma_wr 55559038 eeeeeeee
+dma_wr 5555903c ffffffff
+dma_wr 55559040 11111111
+dma_wr 55559044 22222222
+dma_wr 55559048 33333333
+dma_wr 5555904c 44444444
+dma_wr 55559050 55555555
+dma_wr 55559054 66666666
+dma_wr 55559058 77777777
+dma_wr 5555905c 88888888
+dma_wr 55559060 99999999
+dma_wr 55559064 aaaaaaaa
+dma_wr 55559068 bbbbbbbb
+dma_wr 5555906c cccccccc
+dma_wr 55559070 dddddddd
+dma_wr 55559074 eeeeeeee
+dma_wr 55559078 ffffffff
+dma_wr 5555907c 6ef89a11 -- part of checksum
+
+
+dma_wr rx_descr 66660038 55559001 -- dma writes ownership bit (and wrap bit)
+dma_wr rx_descr 6666003c 00004000 -- dma writes start of frame status
+
+                       
+-- Read location for next buffer for current frame from beginning...
+
+dma_rd rx_descr 66660040 55560000 -- dma reads pointer of 55560000 - unused
+
+dma_wr 55560000 0000001d -- writes the rest of the frame.
+dma_wr 55560004 00000000 -- writes the rest of the frame.
+
+
+dma_wr rx_descr 66660040 55560001 -- write used bit
+dma_wr rx_descr 66660044 40008081 -- writes status, EOF.
+
+dma_rd rx_descr 66660048 55561001 -- reads locations of next rx buffer - used
+dma_rd rx_descr 66660048 55561001 -- ignored as used set and buffer was still not empty when this was read
+dma_rd rx_descr 66660048 55561001 -- ignored as used set and buffer was still not empty when this was read
+
+
+apbrd(int) 24 00000004  -- used bit read interrupt...
+apbwr      24 00000004  -- Clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000003  -- check rx status - rx complete, used bit.
+apbwr      20 00000003  -- reset it.
+apbrd      20 00000000  -- check been reset.
+
+
+-- Check masking of interrupt 2 (0x4) with buffer unavailable.
+-- Will mask interrupt, then rx frame with buffer used bit set.
+
+apbwr      2C 00000004  -- Mask interrupt
+apbrdf     30 00000004  -- Check been masked and initiate rx.
+
+-- this frame will be stored until there is a buffer available
+rxd(apb)     d578563412111111112222222233333333
+rxd            00000011555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            ddddddddeeeeeeeeffffffff11111111
+rxd            22222222ddddddddeeeeeeeeffffffffgggggggg
+
+-- at end of the above frame read descriptor again
+dma_rd rx_descr 66660048 55561001 -- reads locations of rx buffer - used.
+
+-- verify buffer_used interrupt masked correctly
+apbrd(85000) 24 00000000 -- check interrupt status - no interrupts generated.
+apbrd       20 00000001  -- check rx status register.
+apbwr       20 00000001  -- reset it.
+apbrd       20 00000000  -- verify reset.
+apbwr       28 00000004  -- re-enable the interrupt
+apbrd       30 00000000  -- check no interrupts masked.
+apbrdf      24 00000000  -- verify no change in interrupt status.
+
+-- this frame will also be stored until buffer available
+rxd(apb)     d578563412111111112222222233333333
+rxd            00000012555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            ddddddddeeeeeeeeffffffff12121212
+rxd            22222222ddddddddeeeeeeeeffffffffgggggggg
+
+-- at the end of the above frame read descriptor again - buffer available now
+dma_rd rx_descr 66660048 55560000 -- dma reads pointer of 55560000 - unused
+
+dma_wr 55560000 12345678 -- store frame to memory
+dma_wr 55560004 11111111
+dma_wr 55560008 22222222
+dma_wr 5556000c 33333333
+dma_wr 55560010 11000000
+dma_wr 55560014 55555555
+dma_wr 55560018 66666666
+dma_wr 5556001c 77777777
+dma_wr 55560020 88888888
+dma_wr 55560024 99999999
+dma_wr 55560028 aaaaaaaa
+dma_wr 5556002c bbbbbbbb
+dma_wr 55560030 cccccccc
+dma_wr 55560034 dddddddd
+dma_wr 55560038 eeeeeeee
+dma_wr 5556003c ffffffff
+dma_wr 55560040 11111111
+dma_wr 55560044 22222222
+dma_wr 55560048 33333333
+dma_wr 5556004c 44444444
+dma_wr 55560050 55555555
+dma_wr 55560054 66666666
+dma_wr 55560058 77777777
+dma_wr 5556005c 88888888
+dma_wr 55560060 99999999
+dma_wr 55560064 aaaaaaaa
+dma_wr 55560068 bbbbbbbb
+dma_wr 5556006c cccccccc
+dma_wr 55560070 dddddddd
+dma_wr 55560074 eeeeeeee
+dma_wr 55560078 ffffffff
+dma_wr 5556007c 11111111
+
+dma_wr rx_descr 66660048 55560001 -- dma writes ownership bit
+                         -- note that no eof, so other bits ignored.
+                         -- maybe will be changed to write null length?
+dma_wr rx_descr 6666004c 00004000 -- dma writes start of frame status
+                         
+-- Read location for next buffer for current frame..
+
+dma_rd rx_descr 66660050 55560080 -- dma reads pointer of 55550080 - available
+
+-- Now we can write out the remainder of the first frame ...
+dma_wr 55560080 22222222 -- writes the rest of the frame.
+dma_wr 55560084 dddddddd
+dma_wr 55560088 eeeeeeee
+dma_wr 5556008c ffffffff
+dma_wr 55560090 7928299a -- checksum
+dma_wr 55560094 00000000 
+
+-- Do writeback
+dma_wr rx_descr 66660050 55560081 -- dma writes ownership bit
+dma_wr rx_descr 66660054 0c008094 
+
+dma_rd rx_descr 66660058 55570000 -- dma reads pointer of 55550080 - available
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register
+apbwr      20 00000002  -- reset it
+apbrdf     20 00000000  -- check been reset
+
+
+
+
+-- 2nd frame
+dma_wr 55570000 12345678 -- store frame to memory
+dma_wr 55570004 11111111
+dma_wr 55570008 22222222
+dma_wr 5557000c 33333333
+dma_wr 55570010 12000000
+dma_wr 55570014 55555555
+dma_wr 55570018 66666666
+dma_wr 5557001c 77777777
+dma_wr 55570020 88888888
+dma_wr 55570024 99999999
+dma_wr 55570028 aaaaaaaa
+dma_wr 5557002c bbbbbbbb
+dma_wr 55570030 cccccccc
+dma_wr 55570034 dddddddd
+dma_wr 55570038 eeeeeeee
+dma_wr 5557003c ffffffff
+dma_wr 55570040 11111111
+dma_wr 55570044 22222222
+dma_wr 55570048 33333333
+dma_wr 5557004c 44444444
+dma_wr 55570050 55555555
+dma_wr 55570054 66666666
+dma_wr 55570058 77777777
+dma_wr 5557005c 88888888
+dma_wr 55570060 99999999
+dma_wr 55570064 aaaaaaaa
+dma_wr 55570068 bbbbbbbb
+dma_wr 5557006c cccccccc
+dma_wr 55570070 dddddddd
+dma_wr 55570074 eeeeeeee
+dma_wr 55570078 ffffffff
+dma_wr 5557007c 12121212
+
+dma_wr rx_descr 66660058 55570001 -- dma writes ownership bit
+                         -- note that no eof, so other bits ignored.
+                         -- maybe will be changed to write null length?
+dma_wr rx_descr 6666005c 00004000 -- dma writes start of frame status
+                         
+-- Read location for next buffer for current frame..
+
+dma_rd rx_descr 66660060 55570080 -- dma reads pointer of 55550080 - available
+
+-- Now we can write out the remainder of the first frame ...
+dma_wr 55570080 22222222 -- writes the rest of the frame.
+dma_wr 55570084 dddddddd
+dma_wr 55570088 eeeeeeee
+dma_wr 5557008c ffffffff
+dma_wr 55570090 9789c10d -- checksum
+dma_wr 55570094 00000000 
+
+-- Do writeback
+dma_wr rx_descr 66660060 55570081 -- dma writes ownership bit
+dma_wr rx_descr 66660064 0c008094 
+
+dma_rd rx_descr 66660068 55560000 -- dma reads pointer of 55550080 - available
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register
+apbwr      20 00000002  -- reset it
+apbrdf     20 00000000  -- check been reset
+
+
+
+-- this frame will has invalid crc
+rxd(gap)     d578563412111111112222222233333333
+rxd            00000012555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            ddddddddeeeeeeeeffffffff12121212
+
+
+
+
+-- this frame will has invalid crc
+rxd(gap)     d578563412111111112222222233333333
+rxd            00000013555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            ddddddddeeeeeeeeffffffff1112121212
+
+-- discarded, buffer recovered.
+
+-- a good frame to check buffer.
+rxd(gap)     d578563412111111112222222281000000
+rxd            00000014555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            ccccccccddddddddeeeeeeeeffffffff
+rxd            11111111222222223333333344444444
+rxd            55555555666666667777777788888888
+rxd            99999999aaaaaaaabbbbbbbbcccccccc
+rxd            ddddddddeeeeeeeeffffffff11gggggggg
+
+
+dma_wr 55560000 12345678 -- store frame to memory
+dma_wr 55560004 11111111
+dma_wr 55560008 22222222
+dma_wr 5556000C 00000081
+dma_wr 55560010 14000000
+dma_wr 55560014 55555555
+dma_wr 55560018 66666666
+dma_wr 5556001c 77777777
+dma_wr 55560020 88888888
+dma_wr 55560024 99999999
+dma_wr 55560028 aaaaaaaa
+dma_wr 5556002c bbbbbbbb
+dma_wr 55560030 cccccccc
+dma_wr 55560034 dddddddd
+dma_wr 55560038 eeeeeeee
+dma_wr 5556003c ffffffff
+dma_wr 55560040 11111111
+dma_wr 55560044 22222222
+dma_wr 55560048 33333333
+dma_wr 5556004c 44444444
+dma_wr 55560050 55555555
+dma_wr 55560054 66666666
+dma_wr 55560058 77777777
+dma_wr 5556005c 88888888
+dma_wr 55560060 99999999
+dma_wr 55560064 aaaaaaaa
+dma_wr 55560068 bbbbbbbb
+dma_wr 5556006c cccccccc
+dma_wr 55560070 dddddddd
+dma_wr 55560074 eeeeeeee
+dma_wr 55560078 ffffffff
+dma_wr 5556007c e1a8b011 -- part of checksum
+
+
+dma_wr rx_descr 66660068 55560001 -- dma writes ownership bit
+dma_wr rx_descr 6666006c 00004000 -- dma writes start of frame status
+
+                       
+-- Read location for next buffer for current frame from beginning...
+
+dma_rd rx_descr 66660070 55561000 -- dma reads pointer of 55561000 - unused
+
+dma_wr 55561000 00000004 -- writes the rest of the frame.
+dma_wr 55561004 00000000 -- writes the rest of the frame.
+
+
+dma_wr rx_descr 66660070 55561001 -- write used bit
+dma_wr rx_descr 66660074 0c308081 -- writes status, EOF, local addr match, vlan tag 000 priority.
+
+dma_rd rx_descr 66660078 55562001 -- reads locations of next rx buffer - used (do 3 of these to make sure it is observed by design. first 2 are dropped as descriptor buffer isnt empty)
+dma_rd rx_descr 66660078 55562001 -- reads locations of next rx buffer - used 
+dma_rd rx_descr 66660078 55562001 -- reads locations of next rx buffer - used
+dma_rd rx_descr 66660078 55562001 -- reads locations of next rx buffer - used
+dma_rd rx_descr 66660078 55562001 -- reads locations of next rx buffer - used
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000004  -- used bit read interrupt...
+apbwr      24 00000004  -- Clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000003  -- check contents of the receive status register- frame received
+apbrd      20 00000003  -- check it again
+apbwr      20 0000fffc  -- don't clear it
+apbrd      20 00000003  -- check it again
+apbwr      20 00000003  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 66660078  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 0000068d  -- check octets received bottom (949 bytes)
+apbrd     154 00000000  -- check octets received top
+apbrd     158 0000000c  -- check frames received ok
+apbrd     15C 00000001  -- check broadcast frames received
+apbrd     160 00000001  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 0000000c  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000003  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000007  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- now check stats, look for -
+--   7 frames received OK.
+--   3 crc error (FCS error)
+--   4 resource errors.
+
+-- force end of test in case it doesn't stop of its own accord
+end(250000)
+bus_grant_delay 0

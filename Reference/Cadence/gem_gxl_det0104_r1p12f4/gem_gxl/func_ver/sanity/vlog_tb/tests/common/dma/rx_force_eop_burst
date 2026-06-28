@@ -1,0 +1,102 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_force_eop_burst
+--
+--   Authors        : Ewan McCulloch
+--
+--   Date           : 16 January 2002
+--
+--------------------------------------------------------------------------------
+-- Test Description
+-- This test verifies the feature that forces data bursts to always be
+-- singles or MAX length
+-- When this mode is enabled, the random frame transactor automatically
+-- validates the extra AXI transactions are made.
+--
+
+-- define config compatibility (names are the verilog defines in the defs file without the IP prefix)
+requires ext_fifo_interface 0
+requires rx_pkt_buffer 1
+requires tx_pkt_buffer 1
+requires axi 1  -- this is only required because the AHB design does a couple of descriptor reads at the end of the test but we dont add them in here.  The AXI TB can cope without having them in the test. AHB cant.
+
+randomize_hready -read_max 1 -write_max 4
+sel_ahb_freq 3 
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      48 00000f0f  -- write max jumbo frame size
+
+# Initialize the transmit and receive DMA queue pointers (random values by default)
+# Disables all queues not mentioned here ...
+init_q_ptr  -num_tx_queues take_from_cfg   -num_rx_queues take_from_cfg
+
+# Initialize the screener type 1 registers (random values)
+# Note this will automatically force the transactor later on to
+# randomly create frames that match on these screeners, thus routing
+# frames to receive queues ..
+init_screener_type1 -num_type1_screeners take_from_cfg   -num_rx_queues take_from_cfg 
+
+# initialize the DMA specific options for random data xfers
+init_dma -ext_bd random -addr_bus random  -burst random -min_buf_size 16320 -force_max_burst_rx 1
+
+# Enable the interrupts
+enable_ints -num_queues take_from_cfg   -vector ffffffff  # enable all ints
+
+# Initialize the network configuration register
+# Args are
+#   -eam      <1|0|random>, default = 0. This is external address matching
+#   -duplex   <full|half|random>, default = random
+#   -speed    <1g|100m|10m|random>, default = random
+#   -jumbo    <1|0|random>, default = random. This wont affect the RX transactor below, but will automatically cause jumbos to be dropped.
+#   -copy_all <1|0|random>, default = 0. If 0, ensure you initialize the dest_addr in the rx transactor to something that will match
+#   -databus  <32|64|128|take_from_cfg|random>, default = random, bus <= config.  The max value is the value set in dma_bus_width in gem_defs.v
+init_ncr -duplex full -speed random -jumbo random -databus take_from_cfg -rx_buf_offset random
+
+apbwr      00  00000004  -- enable receive
+apbrd      24  00000000  -- check interrupt status
+apbrd      24  00000000  -- check interrupt status
+apbwr      88  12345678  -- specific address register 1 bottom
+apbwr      8C  00001111  -- specific address register 1 top
+apbwr      90  abababab  -- specific address register 2 bottom (multicast)
+apbwr      94  0000abab  -- specific address register 2 top
+apbwr      98  abcdef10  -- specific address register 3 bottom (unicast)
+apbwr      9C  0000a5a5  -- specific address register 3 top
+apbwr      a0  cccccccc  -- specific address register 4 bottom (unicast)
+apbwr      a4  00005a5a  -- specific address register 4 top
+apbrd      08  00000006  -- check reset value of network status register
+apbrd      20  00000000 num=200  -- allow rx_enable to filter
+apbrdf     20  00000000  -- set APB trigger to start TB sending 
+
+
+rx_frame (apb)  25
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           broadcast
+      src_addr            111122222222
+      type_len_field      0080
+      
+      #------------------------------
+      # Payload (total size will be dest+src+crc+payload)
+      data_size           16-200
+      data                random
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      take_from_cfg
+      auto_gen_int        0
+      fcs                 good
+
+-- force end of test in case it doesn't stop of its own accord
+end(scale 100000)
+

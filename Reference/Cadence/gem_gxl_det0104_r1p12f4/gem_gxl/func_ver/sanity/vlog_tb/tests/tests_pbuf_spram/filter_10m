@@ -1,0 +1,2443 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : filter
+--
+--   Author         : Arthur Marris (arthurm@tality.com)/ Mike MacGillis
+--                    (mikema@tality.com)
+--
+--   Date           : 21 January 2001
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- This tests all the destination address recognition modes of the GEM in 
+-- 10 or 100 mode.
+--
+-- Functional Coverage
+-- � Ensures that a frame will not be copied to memory if the GEM is 
+--   transmitting in half duplex mode at the time a destination address 
+--   is received.
+-- � Ensures that the GEM does proper external address recognition.
+-- � Ensures that the GEM does proper address recognition for broadcast 
+--   addressing in 10 or 100 mode.
+-- � Ensures that the GEM does proper address recognition for unicast hash 
+--   addressing in 10 or 100 mode.
+-- � Ensures that the GEM does proper address recognition for multicast 
+--   hash addressing in 10 or 100 mode.
+-- � Ensure that the all of the specific address registers work 
+--   properly.
+--
+-- Detailed Test Description
+-- 1. Initialise GEM for 10 or 100-mode operation and external address 
+--    match enable.
+-- 2. Check status registers to ensure they have the proper value after reset.
+-- 3. Write an address to specific address register one.
+-- 4. Transmit a frame.
+-- 5. Start receiving a frame.  (The GEM should not be able to receive a 
+--    frame because the GEM is currently transmitting a frame)
+-- 6. Check the interrupt status register once the frame is completely 
+--    transmitted.
+-- 7. Receive a frame that matches both the external address and local address.
+--    (Local addresses are in the specific address registers)
+-- 8. Check the interrupt status register once the frame is completely received.
+--
+-- External Addressing:
+-- 9. Write new addresses to all the local address registers so that there 
+--    is no local address match. Therefore, the next received frame will 
+--    only match on external address.
+-- 10. Receive a frame that will only match on external address. The 
+--     frame should be accepted and written to memory.
+-- 11. Check the interrupt status register once the frame is completely 
+--     received.
+-- 12. Repeat external address matching for each of the external address 
+--     match pins.
+--
+-- Broadcast matching
+-- 13. Disable external address matching and send a BROADCAST frame.
+--     This frame should only match on the BROADCAST all ones address
+--     Broadcast frames do not increment the rx multicast bucket counter
+-- 14. Check the interrupt status register once the frame is completely 
+--     received.
+--
+-- Copy all frames & broadcast:
+-- 15. Enable the GEM to copy all frames and send a broadcast frame. 
+--     (This frame should be copied to memory but should not set any of the 
+--     address matching status bits)
+-- 16. Check the interrupt status register and the receive status register 
+--     once the frame is completely received.
+--
+-- Unicast Hash Addressing:
+-- 17. Initialise the GEM for unicast hash addressing.
+-- 18. Set the hash register bottom to 0 hex and only set bit 57 in the 
+--     hash register top.
+-- 19. Receive a frame with the destination address set to '1111aaaaaaaa".  
+--     The hashing of this destination address reduces to '111001' (57 decimal)
+--     or bit 57 in the hash address registers. (This frame should be stored to 
+--     memory)
+-- 20. Check the interrupt status register once the frame is received.
+-- 21. Now set all hash indices (set all the bits in the hash registers) except
+--     bit 57.
+-- 22. Receive the same frame with the same destination address as in point 19. 
+--     (This frame should be discarded.)
+-- 23. Receive a broadcast frame. (The multicast frame bit is not enabled. 
+--     Therefore, this frame should be discarded because it's a type of 
+--     multicast frame.)
+-- 25. Receive a frame with the destination address set to 'aaaa22222222'. 
+--     The hashing of this destination address reduces to '001010' (10 decimal)
+--     or bit 10 in the hash address registers. (This frame should be stored to
+--     memory)
+-- 26. Check the interrupt status register once the frame is received.
+-- 27.  Set hash register bit 27 and clear all the remaining bits. (hash index 
+--      of 27 decimal)
+-- 28. Receive a frame with the destination address set to '1111aaaaaaaa'. 
+--     The hashing of this destination address reduces to '011011' (27 decimal) 
+--     or bit 27 in the hash address registers. (This frame should be stored 
+--     to memory)
+-- 29. Check the interrupt status register once the frame is received.
+--
+-- Multicast Hash Addressing:-
+-- 30. Initialise the GEM for multicast hash addressing.
+-- 31. Set hash register bit 5 and clear all the remaining bits. 
+--     (hash index of 5 decimal)
+-- 32. Receive a frame with the destination address set to 'ffffbbbbbbbb'.  
+--     The hashing of this destination address reduces to '000101' (5 decimal) 
+--     or bit 5 in the hash address registers. (This frame should be stored to 
+--     memory)
+-- 33. Check the interrupt status register once the frame is received.
+-- 34. Now set all hash indices (set all the bits in the hash registers) except 
+--     bit 5.
+-- 35. Receive the same frame with the same destination address as in point 32. 
+--     (This frame should be discarded.)
+-- 36. Receive a frame with the destination address set to 'ffff77777777'. 
+--     The hashing of this destination address reduces to '001010' (10 decimal)
+--     or bit 10 in the hash address registers. (This frame should be stored to 
+--     memory since all hash indices are enabled except 5)
+-- 37. Check the interrupt status register once the frame is received.
+--
+-- Specific Address Register Two:
+-- 38. Clear the hash registers.
+-- 39. Enable the GEM for all address matching (unicast, and multicast) except 
+--     for copy all frames.
+-- 40. Write an address to specific address register two.
+-- 41. Receive a frame that matches the local address. (Local addresses are 
+--     in the specific address registers)
+-- 42. Check the interrupt status register once the frame is received.
+
+-- Specific Address Register Three:
+-- 43. Write an address to specific address register three.
+-- 44. Receive a frame that matches the local address. (Local addresses are
+--     in the specific address registers)
+-- 45. Check the interrupt status register once the frame is received.
+--
+-- Specific Address Register Four:
+-- 46. Write an address to specific address register four.
+-- 47. Receive a frame that matches the local address. (Local addresses are 
+--     in the specific address registers)
+-- 48. Check the interrupt status register once the frame is received.
+--
+-- Specific Address Register Three:
+-- 49. Write an address to specific address register three.
+-- 50. Receive a frame that matches the local address. (Local addresses are in 
+--     the specific address registers)
+-- 51. Check the interrupt status register once the frame is received.
+--     Check all status and statistic registers and ensure that the above
+--     operations were dealt with properly.
+--
+-- Type ID match register 1:
+-- 52. Write a type to specific type register one.
+-- 53. Receive a frame that matches the type, but no specific addresses.
+-- 54. Check the interrupt status register once the frame is received.
+--     Check all status registers and ensure that the above operations were 
+--     dealt with properly.
+--
+-- Type ID match register 2:
+-- 55. Write a type to specific type register two.
+-- 56. Receive a frame that matches the type, but no specific addresses.
+-- 57. Check the interrupt status register once the frame is received.
+--     Check all status registers and ensure that the above operations were 
+--     dealt with properly.
+--
+-- Type ID match register 3:
+-- 58. Write a type to specific type register three.
+-- 59. Receive a frame that matches the type, but no specific addresses.
+-- 60. Check the interrupt status register once the frame is received.
+--     Check all status registers and ensure that the above operations were 
+--     dealt with properly.
+--
+-- Type ID match register 4:
+-- 61. Write a type to specific type register four.
+-- 62. Receive a frame that matches the type, but no specific addresses.
+-- 63. Check the interrupt status register once the frame is received.
+--     Check all status registers and ensure that the above operations were 
+--     dealt with properly.
+--
+-- Two or more matches on specific address/type:
+-- 64. Write the same address to specific address register one and two, and the
+--     same typeID to typeID regsiters one and two.
+-- 65. Receive a frame that matches the local address of 1 & 2 and the typeID
+--     of 1 & 2
+-- 66. Check the interrupt status register once the frame is received.
+--     Check all status and statistic registers and ensure that the above
+--     operations were dealt with properly.
+--
+-- check copy all VLAN tagged frames
+-- 67. Set the "copy all frames" and "discard of Non VLAN frame" bits in the
+--     Network Configuration Register.
+-- 68. Receive a VLAN tagged frame which doesn't match any addresses or types
+--     and ensure that it is copied to memory and the correct status reported.
+-- 69. Disable the "copy all frames" bit in the Network Configuration Register.
+--     but keep "discard of Non VLAN frame" set.
+-- 70. Receive a VLAN tagged frame that matches specific address 2 and ensure 
+--     that it is copied to memory and the correct status reported.
+-- 71. Receive a VLAN tagged frame that has a broadcast address and ensure 
+--     that it is copied to memory and the correct status reported.
+-- 72. Receive a VLAN tagged frame that matches typeID register 1 and ensure 
+--     that it is copied to memory and the correct status reported.
+-- 73. Receive a VLAN tagged frame that matches on unicast hash matching and
+--     ensure that it is copied to memory and the correct status reported.
+-- 74. Receive a VLAN tagged frame that matches on multicast hash matching.
+--     Ensure that it is copied to memory and the correct status reported.
+-- 75. Receive a non-VLAN tagged frame that matches on specific address 2,
+--     typeID 1 and unicast hash matching
+--     Ensure that it is not copied to memory and no status is received.
+-- 76. Receive a non-VLAN tagged frame with broadcast address that also matches
+--     on typeID 1 and multicast hash matching.
+--     Ensure that it is not copied to memory and no status is received.
+-- 77. Receive a non-VLAN tagged frame that matches on typeID 1.
+--     Ensure that it is not copied to memory and no status is received.
+-- 78. Receive a non-VLAN tagged frame that matches on unicast hash matching.
+--     Ensure that it is not copied to memory and no status is received.
+-- 79. Receive a non-VLAN tagged frame that matches on multicast hash matching.
+--     Ensure that it is not copied to memory and no status is received.
+-- 80. Receive a VLAN tagged frame that matches on multicast hash matching.
+--     Ensure that it is copied to memory and correct status is received.
+-- 81. Check the statistics registers for correct operation.
+--
+-- Match too late timing
+-- 82. Re-initialise all configuration registers for basic 100M operation
+-- 83. Receive a frame and pulse the external address match one input on the
+--     last clock before match_too_late signal in gem_rx is set (match_too_late 
+--     is set when the new_pipeline_data signal in gem_rx is active for the 
+--     first data in the frame).
+-- 84. Receive a frame and pulse the external address match one input one
+--     clock after the match_too_late signal in gem_rx is set.
+-- 85. Receive a frame and pulse the external address match one input one
+--     clock before the ext_da_stb output is activated.
+--     Check that the frame is not matched, as the match signal will be outside
+--     the window of the external match (starts at ext_da_stb)
+-- 86. Receive a frame and pulse the external address match one input at the
+--     same clock that the ext_da_stb output is activated.
+--     Check that the frame is matched and copied to memory with correct 
+--     status.
+-- 87. Check the statistics registers for correct operation.
+--
+--------------------------------------------------------------------------------
+
+ten_meg_bit  -- 10Mbit/s operation (2.5Mhz tx_clk and rx_clk, 50MHz Pclk and Hclk)
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- *****************************************************************************
+-- 1. Initialise GEM for 10 or 100-mode operation and external address 
+--    match enable.
+-- 2. Check status registers to ensure they have the proper value after reset.
+-- 3. Write an address to specific address register one.
+-- *****************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+
+apbwr      04 00080200  -- enable eam in network config register
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      18 01234000  -- write receive queue pointer
+apbwr      00 0000000c  -- enable transmit and receive
+
+apbrd      24 00000000  -- check interrupt status
+apbrdf     20 00000000  -- check receive status register and trigger reception of frame
+
+
+-- *****************************************************************************
+-- 4. Transmit a frame.
+-- 5. Start receiving a frame.  (The GEM should not be able to receive a 
+--    frame because the GEM is currently transmitting a frame)
+-- 6. Check the interrupt status register once the frame is completely 
+--    transmitted.
+-- *****************************************************************************
+
+-- setup transmit buffer descriptor queue in memory
+apbwr      1c ffffff00  "Scenario 1: receive whilst transmitting in half duplex"
+                        -- write address of transmit buffer descriptor in memory
+apbwr      00 0000020c  -- Start transmitter, setting go bit in network control register
+
+-- supply the transmit buffer location
+dma_rd ffffff04 00008030 -- reads tx control of eof and length of 48 bytes
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+
+-- ********************************
+-- drive the receive frame data into the MII interface
+-- won't be received because tx is active
+rxd(720)   55d578563412111111112222222233333333 
+rxd          44444444555555556666666677777777
+rxd          8888888899999999aaaaaaaabbbbbbbb
+rxd          0000000000000000000000002638309b
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da 111112345678 sa 222222221111 type 3333
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd                  003000000000021158729e8ce0fce000
+txd                  000207c107c1001cb6e9000008030a64
+txd                  000000000000000000000000502d1ed5
+
+-- write used bit
+dma_wr ffffff04 80008030
+
+-- supply the next transmit buffer location
+dma_rd ffffff0c 8000c030 -- 48 bytes (ownership bit set)
+dma_rd ffffff08 98765030 -- dma reads pointer of 98765000
+
+-- check interrupt status - transmit complete and transmit buffers exhausted
+apbrd(int) 24 00000088  "Scenario 1: Complete"
+                        -- interrupt status - transmit complete and tx buffer used
+apbwr      24 00000088  -- Clear it
+apbrd      24 00000000  -- check interrupt status is now clear
+apbrd      14 00000021  -- transmit status register - transmit complete and tx buffer used
+apbrd      14 00000021  -- check it again
+apbwr      14 0000ffde  -- don't clear it
+apbrd      14 00000021  -- check it again
+apbwr      14 00000001  -- clear used bit
+apbrd      14 00000020  -- check it again
+apbwr      14 00000020  -- clear transmit complete
+apbrd      14 00000000  -- transmit status register is cleared
+apbrd      1c ffffff08  -- check transmit queue pointer
+
+-- supply the receive buffer location
+dma_rd 01234000 22222000 -- dma reads pointer of 22222000
+
+-- *****************************************************************************
+-- 7. Receive a frame that matches both the external address and local address.
+--    (Local addresses are in the specific address registers)
+-- 8. Check the interrupt status register once the frame is completely received.
+-- *****************************************************************************
+
+apbrdf     3c 0000ffff  "Scenario 2: local address match 1"
+
+-- set one of the external address match pins
+filterd(apb)   ext_match1 1 ext_match2 0 ext_match3 0 ext_match4 0
+
+-- drive the receive frame data into the MII interface
+-- have a long preamble for a change
+rxd(apb)       555555555555555555d5
+rxd            78563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da 111112345678 sa 222222221111 type 3333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c 33333333
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 00000000
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 9b303826
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234004 1800c040 -- dma writes rx status:
+                         -- external address match, specific address 1 match,
+                         -- end of frame set, start of frame set
+                         -- 64 bytes received, 
+dma_wr 01234000 22222001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234008 33330000
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 2: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234008  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+
+-- *****************************************************************************
+-- External Addressing:
+-- 9. Write new addresses to all the local address registers so that there 
+--    is no local address match. Therefore, the next received frame will 
+--    only match on external address.
+-- 10. Receive a frame that will only match on external address. The 
+--     frame should be accepted and written to memory.
+-- 11. Check the interrupt status register once the frame is completely 
+--     received.
+-- 12. Repeat external address matching for each of the external address 
+--     match pins.
+-- *****************************************************************************
+apbwr      88 aaaaaaaa  "Scenario 3: External matching (ext_match_1)"
+                        -- specific address register 1
+apbwr      8C 00555500  -- specific address register 1
+apbwr      90 65890245  -- specific address register 2
+apbwr      94 00001111  -- specific address register 2
+apbwr      98 11223344  -- specific address register 3
+apbwr      9C 00008899  -- specific address register 3
+apbwr      a0 aabbccdd  -- specific address register 4
+apbwr      a4 0000eeff  -- specific address register 4
+
+-- *****************************
+-- The next RX frame will therefore only match on EXTERNAL address
+
+apbrd      04 00080200  -- check value of network config register (eam enabled)
+apbrdf     08 00000006  -- check value of network status register
+
+-- set external address match pin 1
+filterd(apb)   ext_match1 1 ext_match2 0 ext_match3 0 ext_match4 0
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d57856341211110123456789ab12343333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da 111112345678 sa ab8967452301 type 1234
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 33330000 12345678 -- store frame to memory
+dma_wr 33330004 23011111
+dma_wr 33330008 ab896745
+dma_wr 3333000c 33333412
+dma_wr 33330010 44444444
+dma_wr 33330014 55555555
+dma_wr 33330018 66666666
+dma_wr 3333001c 77777777
+dma_wr 33330020 88888888
+dma_wr 33330024 99999999
+dma_wr 33330028 aaaaaaaa
+dma_wr 3333002c bbbbbbbb
+dma_wr 33330030 00000000
+dma_wr 33330034 00000000
+dma_wr 33330038 00000000
+dma_wr 3333003c 57750d1a
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123400c 1000c040 -- dma writes rx status:
+                         -- external address match,
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234008 33330001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234010 33331000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234010  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+-- *****************************
+-- The next RX frame will therefore only match on EXTERNAL address
+
+apbrd      04 00080200  -- check value of network config register (eam enabled)
+apbrdf     08 00000006  "Scenario 4: External matching (ext_match_2)"
+                        -- check value of network status register
+
+-- set external address match pin 2
+filterd(apb)   ext_match1 0 ext_match2 1 ext_match3 0 ext_match4 0
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5785634121111000000000000edcb3333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da 111112345678 sa 000000000000 type edcb
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 33331000 12345678 -- store frame to memory
+dma_wr 33331004 00001111
+dma_wr 33331008 00000000
+dma_wr 3333100c 3333cbed
+dma_wr 33331010 44444444
+dma_wr 33331014 55555555
+dma_wr 33331018 66666666
+dma_wr 3333101c 77777777
+dma_wr 33331020 88888888
+dma_wr 33331024 99999999
+dma_wr 33331028 aaaaaaaa
+dma_wr 3333102c bbbbbbbb
+dma_wr 33331030 00000000
+dma_wr 33331034 00000000
+dma_wr 33331038 00000000
+dma_wr 3333103c 96fb3d19
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234014 1000c040 -- dma writes rx status:
+                         -- external address match,
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234010 33331001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234018 33332000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 4: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234018  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+-- *****************************
+-- The next RX frame will therefore only match on EXTERNAL address
+
+apbrd      04 00080200  -- check value of network config register (eam enabled)
+apbrdf     08 00000006  "Scenario 5: External matching (ext_match_3)"
+                        -- check value of network status register
+
+-- set external address match pin 3
+filterd(apb)   ext_match1 0 ext_match2 0 ext_match3 1 ext_match4 0
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5785634121111ffffffffffff33333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da 111112345678 sa ffffffffffff type 3333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 33332000 12345678 -- store frame to memory
+dma_wr 33332004 ffff1111
+dma_wr 33332008 ffffffff
+dma_wr 3333200c 33333333
+dma_wr 33332010 44444444
+dma_wr 33332014 55555555
+dma_wr 33332018 66666666
+dma_wr 3333201c 77777777
+dma_wr 33332020 88888888
+dma_wr 33332024 99999999
+dma_wr 33332028 aaaaaaaa
+dma_wr 3333202c bbbbbbbb
+dma_wr 33332030 00000000
+dma_wr 33332034 00000000
+dma_wr 33332038 00000000
+dma_wr 3333203c 9f8974d8
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123401c 1000c040 -- dma writes rx status:
+                         -- external address match,
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234018 33332001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234020 33333000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 5: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234020  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+-- *****************************
+-- The next RX frame will therefore only match on EXTERNAL address
+
+apbrd      04 00080200  -- check value of network config register (eam enabled)
+apbrdf     08 00000006  "Scenario 6: External matching (ext_match_4)"
+                        -- check value of network status register
+
+-- set external address match pin 4
+filterd(apb)   ext_match1 0 ext_match2 0 ext_match3 0 ext_match4 1
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da 111112345678 sa 222222221111 type 3333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 33333000 12345678 -- store frame to memory
+dma_wr 33333004 11111111
+dma_wr 33333008 22222222
+dma_wr 3333300c 33333333
+dma_wr 33333010 44444444
+dma_wr 33333014 55555555
+dma_wr 33333018 66666666
+dma_wr 3333301c 77777777
+dma_wr 33333020 88888888
+dma_wr 33333024 99999999
+dma_wr 33333028 aaaaaaaa
+dma_wr 3333302c bbbbbbbb
+dma_wr 33333030 00000000
+dma_wr 33333034 00000000
+dma_wr 33333038 00000000
+dma_wr 3333303c 9b303826
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234024 1000c040 -- dma writes rx status:
+                         -- external address match,
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234020 33333001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234028 44440000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 6: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234028  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+-- *****************************************************************************
+-- Broadcast matching
+-- 13. Disable external address matching and send a BROADCAST frame.
+--     This frame should only match on the BROADCAST all ones address
+--     Broadcast frames do not increment the rx multicast bucket counter
+-- 14. Check the interrupt status register once the frame is completely 
+--     received.
+-- *****************************************************************************
+
+apbwrf       04 00080000  "Scenario 7: Broadcast matching"
+                          -- disable eam in network config register
+
+-- set all the external match pins
+filterd(apb) ext_match1 1 ext_match2 1 ext_match3 1 ext_match4 1
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5FFFFFFFFFFFF11112222222233333333   -- BROADCAST
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg   -- autogenerate CRC
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 222222221111 type 3333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 44440000 FFFFFFFF -- store frame to memory
+dma_wr 44440004 1111FFFF
+dma_wr 44440008 22222222
+dma_wr 4444000c 33333333
+dma_wr 44440010 44444444
+dma_wr 44440014 55555555
+dma_wr 44440018 66666666
+dma_wr 4444001c 77777777
+dma_wr 44440020 88888888
+dma_wr 44440024 99999999
+dma_wr 44440028 aaaaaaaa
+dma_wr 4444002c bbbbbbbb
+dma_wr 44440030 00000000
+dma_wr 44440034 00000000
+dma_wr 44440038 00000000
+dma_wr 4444003c 02580ce0
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123402c 8000c040 -- dma writes rx status:
+                         -- broadcast,
+                         -- 64 bytes received
+dma_wr 01234028 44440001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234030 abcd0000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 7: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234030  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+-- *****************************************************************************
+-- Copy all frames & broadcast:
+-- 15. Enable the GEM to copy all frames and send a broadcast frame. 
+--     (This frame should be copied to memory but should not set any of the 
+--     address matching status bits)
+-- 16. Check the interrupt status register and the receive status register 
+--     once the frame is completely received.
+-- *****************************************************************************
+
+apbwrf     04 00080010  "Scenario 8: Copy all frames & Broadcast matching"
+                        -- network config, set copy all frames
+
+-- reset all the external match pins
+filterd(apb) ext_match1 0 ext_match2 0 ext_match3 0 ext_match4 0
+
+rxd(apb)     d5FFFFFFFFFFFe11112222222233333333   -- should be copied because of 
+rxd            44444444555555556666666677777777   -- copy all frames
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg   -- autogenerate CRC
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da feffffffffff sa 222222221111 type 3333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr abcd0000 FFFFFFFF -- store frame to memory
+dma_wr abcd0004 1111FeFF
+dma_wr abcd0008 22222222
+dma_wr abcd000c 33333333
+dma_wr abcd0010 44444444
+dma_wr abcd0014 55555555
+dma_wr abcd0018 66666666
+dma_wr abcd001c 77777777
+dma_wr abcd0020 88888888
+dma_wr abcd0024 99999999
+dma_wr abcd0028 aaaaaaaa
+dma_wr abcd002c bbbbbbbb
+dma_wr abcd0030 00000000
+dma_wr abcd0034 00000000
+dma_wr abcd0038 00000000
+dma_wr abcd003c 205bbff0
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234034 0000c040 -- dma writes rx status,:
+                         -- (no status bit for copy all frames)
+                         -- 64 bytes received
+dma_wr 01234030 abcd0001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234038 55330000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 8: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234038  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+-- *****************************************************************************
+-- Unicast Hash Addressing:
+-- 17. Initialise the GEM for unicast hash addressing.
+-- 18. Set the hash register bottom to 0 hex and only set bit 57 in the 
+--     hash register top.
+-- 19. Receive a frame with the destination address set to '1111aaaaaaaa".  
+--     The hashing of this destination address reduces to '111001' (57 decimal)
+--     or bit 57 in the hash address registers. (This frame should be stored to 
+--     memory)
+-- 20. Check the interrupt status register once the frame is received.
+-- *****************************************************************************
+
+-- check and initialise the relevant registers
+apbwr      04 00080080  -- enable unicast in network config register
+apbwr      80 00000000  -- write hash index value bottom
+apbwrf     84 02000000  "Scenario 9: Unicast Hash Addressing matching"
+                        -- write hash index value (hash index of 57)
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5aaaaaaaa111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da 1111aaaaaaaa sa 222222221111 type 3333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55330000 aaaaaaaa -- store frame to memory
+dma_wr 55330004 11111111
+dma_wr 55330008 22222222
+dma_wr 5533000c 33333333
+dma_wr 55330010 44444444
+dma_wr 55330014 55555555
+dma_wr 55330018 66666666
+dma_wr 5533001c 77777777
+dma_wr 55330020 88888888
+dma_wr 55330024 99999999
+dma_wr 55330028 aaaaaaaa
+dma_wr 5533002c bbbbbbbb
+dma_wr 55330030 00000000
+dma_wr 55330034 00000000
+dma_wr 55330038 00000000
+dma_wr 5533003c 2f0de8a7
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123403c 2000c040 -- dma writes rx status: 
+                         -- unicast hash match,
+                         -- 64 bytes received
+dma_wr 01234038 55330001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234040 55660000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 9: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234040  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+
+-- *****************************************************************************
+-- 21. Now set all hash indices (set all the bits in the hash registers) except
+--     bit 57.
+-- 22. Receive the same frame with the same destination address as in point 19. 
+--     (This frame should be discarded.)
+-- *****************************************************************************
+
+-- check and initialise the relevant registers
+apbwr      04 000800a0  -- unicast hash enable and no braodcast
+apbrd      08 00000006  -- check  value of network status register
+apbwr      80 ffffffff  -- write hash index value
+apbwrf     84 fdffffff  "Scenario 10: More Unicast Hash Addressing matching"
+                        -- write hash index value (all except hash index of 57)
+
+
+-- Try hash index 57 again (should be discarded)
+rxd(apb)     d5aaaaaaaa111111112222222233333333   -- should be discarded
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da 1111aaaaaaaa sa 222222221111 type 3333
+
+
+-- *****************************************************************************
+-- 23. Receive a broadcast frame. (The multicast frame bit is not enabled. 
+--     Therefore, this frame should be discarded because it's a type of 
+--     multicast frame.)
+-- *****************************************************************************
+rxd(gap)     d5FFFFFFFFFFFF11112222222233333333   -- BROADCAST (ie multicast)
+rxd            44444444555555556666666677777777   -- should be discarded because no
+rxd            8888888899999999aaaaaaaabbbbbbbb   -- broadcast set in network config
+rxd            000000000000000000000000gggggggg   -- autogenerate CRC
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da ffffffffffff sa 222222221111 type 3333
+
+
+-- *****************************************************************************
+-- 25. Receive a frame with the destination address set to 'aaaa22222222'. 
+--     The hashing of this destination address reduces to '001010' (10 decimal)
+--     or bit 10 in the hash address registers. (This frame should be stored to
+--     memory)
+-- 26. Check the interrupt status register once the frame is received.
+-- *****************************************************************************
+rxd(gap)     d522222222aaaaaaaa5555555511111111   -- should be stored (hash of 10 decimal)
+rxd            2222222266666666bbbbbbbb99999999
+rxd            bbbbbbbbeeeeeeee5555555588888888
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da aaaa22222222 sa 55555555aaaa type 1111
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55660000 22222222 -- store frame to memory
+dma_wr 55660004 aaaaaaaa
+dma_wr 55660008 55555555
+dma_wr 5566000c 11111111
+dma_wr 55660010 22222222
+dma_wr 55660014 66666666
+dma_wr 55660018 bbbbbbbb
+dma_wr 5566001c 99999999
+dma_wr 55660020 bbbbbbbb
+dma_wr 55660024 eeeeeeee
+dma_wr 55660028 55555555
+dma_wr 5566002c 88888888
+dma_wr 55660030 00000000
+dma_wr 55660034 00000000
+dma_wr 55660038 00000000
+dma_wr 5566003c d0f4f6c0
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234044 2000c040 -- dma writes rx status:
+                         -- unicast hash match,
+                         -- 64 bytes received
+dma_wr 01234040 55660001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234048 55660000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 10: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234048  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+
+-- *****************************************************************************
+-- 27.  Set hash register bit 27 and clear all the remaining bits. (hash index 
+--      of 27 decimal)
+-- 28. Receive a frame with the destination address set to '1111aaaaaaaa'. 
+--     The hashing of this destination address reduces to '011011' (27 decimal) 
+--     or bit 27 in the hash address registers. (This frame should be stored 
+--     to memory)
+-- 29. Check the interrupt status register once the frame is received.
+-- *****************************************************************************
+
+apbwr      80 08000000  -- write hash index value bottom
+apbwrf     84 00000000  "Scenario 11: Even more Unicast Hash Addressing matching"
+                        -- write hash index value top (hash index of 27)
+
+rxd(apb)     d588888888111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da 111188888888 sa 222222221111 type 3333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55660000 88888888 -- store frame to memory
+dma_wr 55660004 11111111
+dma_wr 55660008 22222222
+dma_wr 5566000c 33333333
+dma_wr 55660010 44444444
+dma_wr 55660014 55555555
+dma_wr 55660018 66666666
+dma_wr 5566001c 77777777
+dma_wr 55660020 88888888
+dma_wr 55660024 99999999
+dma_wr 55660028 aaaaaaaa
+dma_wr 5566002c bbbbbbbb
+dma_wr 55660030 00000000
+dma_wr 55660034 00000000
+dma_wr 55660038 00000000
+dma_wr 5566003c 2820fa46
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123404c 2000c040 -- dma writes rx status:
+                         -- unicast hash match,
+                         -- 64 bytes received
+dma_wr 01234048 55660001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234050 55880000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 11: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234050  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+
+
+-- *****************************************************************************
+-- Multicast Hash Addressing:-
+-- 30. Initialise the GEM for multicast hash addressing.
+-- 31. Set hash register bit 5 and clear all the remaining bits. 
+--     (hash index of 5 decimal)
+-- 32. Receive a frame with the destination address set to 'ffffbbbbbbbb'.  
+--     The hashing of this destination address reduces to '000101' (5 decimal) 
+--     or bit 5 in the hash address registers. (This frame should be stored to 
+--     memory)
+-- 33. Check the interrupt status register once the frame is received.
+-- *****************************************************************************
+
+--first try a multicast hash index of 5 and get a match
+
+-- check and initialise the relevant registers
+apbwr      04 00080040  -- enable multicast hash in network config register
+apbwr      80 00000020  -- write hash index value bottom
+apbwrf     84 00000000  "Scenario 12: Multicast Hash Addressing matching"
+                        -- write hash index value top (hash index of 5)
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5bbbbbbbbffffffffeeeeeeeedddddddd
+rxd            ccccccccbbbbbbbbaaaaaaaa11111111
+rxd            22222222333333334444444455555555
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da ffffbbbbbbbb sa eeeeeeeeffff type dddd
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55880000 bbbbbbbb -- store frame to memory
+dma_wr 55880004 ffffffff
+dma_wr 55880008 eeeeeeee
+dma_wr 5588000c dddddddd
+dma_wr 55880010 cccccccc
+dma_wr 55880014 bbbbbbbb
+dma_wr 55880018 aaaaaaaa
+dma_wr 5588001c 11111111
+dma_wr 55880020 22222222
+dma_wr 55880024 33333333
+dma_wr 55880028 44444444
+dma_wr 5588002c 55555555
+dma_wr 55880030 00000000
+dma_wr 55880034 00000000
+dma_wr 55880038 00000000
+dma_wr 5588003c 69c3078c
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234054 4000c040 -- dma writes rx status
+                         -- multicast hash match,
+                         -- 64 bytes received
+dma_wr 01234050 55880001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234058 56000000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 12: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234058  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+
+-- *****************************************************************************
+-- 34. Now set all hash indices (set all the bits in the hash registers) except 
+--     bit 5.
+-- 35. Receive the same frame with the same destination address as in point 32. 
+--     (This frame should be discarded.)
+-- *****************************************************************************
+
+-- check and initialise the relevant registers
+apbwr      80 ffffffdf  -- write hash index value bottom
+apbwrf     84 ffffffff  "Scenario 13: More Multicast Hash Addressing matching"
+                        -- write hash index value top (all except hash index of 5)
+
+-- try sending a hash index of 5. Shouldn't be copied.
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5bbbbbbbbffffffffeeeeeeeedddddddd  -- not copied
+rxd            ccccccccbbbbbbbbaaaaaaaa11111111
+rxd            22222222333333334444444455555555
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da ffffbbbbbbbb sa eeeeeeeeffff type dddd
+
+
+-- *****************************************************************************
+-- 36. Receive a frame with the destination address set to 'ffff77777777'. 
+--     The hashing of this destination address reduces to '001010' (10 decimal)
+--     or bit 10 in the hash address registers. (This frame should be stored to 
+--     memory since all hash indices are enabled except 5)
+-- 37. Check the interrupt status register once the frame is received.
+-- *****************************************************************************
+-- drive the receive frame data into the MII interface
+rxd(gap)     d577777777ffffffffeeeeeeeedddddddd
+rxd            ccccccccbbbbbbbbaaaaaaaa11111111
+rxd            22222222333333334444444455555555
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da ffff77777777 sa eeeeeeeeffff type dddd
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 56000000 77777777 -- store frame to memory
+dma_wr 56000004 ffffffff
+dma_wr 56000008 eeeeeeee
+dma_wr 5600000c dddddddd
+dma_wr 56000010 cccccccc
+dma_wr 56000014 bbbbbbbb
+dma_wr 56000018 aaaaaaaa
+dma_wr 5600001c 11111111
+dma_wr 56000020 22222222
+dma_wr 56000024 33333333
+dma_wr 56000028 44444444
+dma_wr 5600002c 55555555
+dma_wr 56000030 00000000
+dma_wr 56000034 00000000
+dma_wr 56000038 00000000
+dma_wr 5600003c 7b2d69ca
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123405c 4000c040 -- dma writes rx status:
+                         -- multicast hash match,
+                         -- 64 bytes received
+dma_wr 01234058 56000001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234060 56220000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 13: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234060  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+-- *****************************************************************************
+-- SPECIFIC ADDRESS REGISTER
+-- *****************************************************************************
+
+-- *****************************************************************************
+-- Specific Address Register Two:
+-- 38. Clear the hash registers.
+-- 39. Enable the GEM for all address matching (unicast, and multicast) except 
+--     for copy all frames.
+-- 40. Write an address to specific address register two.
+-- 41. Receive a frame that matches the local address. (Local addresses are 
+--     in the specific address registers)
+-- 42. Check the interrupt status register once the frame is received.
+-- *****************************************************************************
+apbwr      04 000802c0  -- enable all matching except copy all frames
+apbwr      80 00000000  -- clear hash register
+apbwr      84 00000000  -- clear hash register 
+apbwr      90 78563412  -- specific address register 2 bottom
+apbwr      94 0000f1de  -- specific address register 2 top
+apbrd      08 00000006  -- check value of network status register
+apbwr      18 01555555  -- try to write receive queue pointer while rx enabled
+apbrdf     18 01234060  "Scenario 14: specific address 2 matching"
+                        -- check the above write is ignored
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d512345678def111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da f1de78563412 sa 222222221111 type 3333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 56220000 78563412 -- store frame to memory
+dma_wr 56220004 1111f1de
+dma_wr 56220008 22222222
+dma_wr 5622000c 33333333
+dma_wr 56220010 44444444
+dma_wr 56220014 55555555
+dma_wr 56220018 66666666
+dma_wr 5622001c 77777777
+dma_wr 56220020 88888888
+dma_wr 56220024 99999999
+dma_wr 56220028 aaaaaaaa
+dma_wr 5622002c bbbbbbbb
+dma_wr 56220030 00000000
+dma_wr 56220034 00000000
+dma_wr 56220038 00000000
+dma_wr 5622003c 15823b7f
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234064 0a00c040 -- dma writes rx status:
+                         -- local address match2,
+                         -- 64 bytes received
+dma_wr 01234060 56220001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234068 56440000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 14: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234068  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+-- *****************************************************************************
+-- Specific Address Register Three:
+-- 43. Write an address to specific address register three.
+-- 44. Receive a frame that matches the local address. (Local addresses are
+--     in the specific address registers)
+-- 45. Check the interrupt status register once the frame is received.
+-- *****************************************************************************
+apbwr      98 44332211  -- specific address register 3 bottom
+apbwr      9C 00009988  -- specific address register 3 top
+apbrdf     08 00000006  "Scenario 15: specific address 3 matching"
+                        -- check value of network status register
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d511223344889911112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da 998844332211 sa 222222221111 type 3333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 56440000 44332211 -- store frame to memory
+dma_wr 56440004 11119988
+dma_wr 56440008 22222222
+dma_wr 5644000c 33333333
+dma_wr 56440010 44444444
+dma_wr 56440014 55555555
+dma_wr 56440018 66666666
+dma_wr 5644001c 77777777
+dma_wr 56440020 88888888
+dma_wr 56440024 99999999
+dma_wr 56440028 aaaaaaaa
+dma_wr 5644002c bbbbbbbb
+dma_wr 56440030 00000000
+dma_wr 56440034 00000000
+dma_wr 56440038 00000000
+dma_wr 5644003c e2acab48
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123406c 0c00c040 -- dma writes rx status:
+                         -- local address match3,
+                         -- 64 bytes received
+dma_wr 01234068 56440001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234070 56660000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 15: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234070  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+-- *****************************************************************************
+-- Specific Address Register Four:
+-- 46. Write an address to specific address register four.
+-- 47. Receive a frame that matches the local address. (Local addresses are 
+--     in the specific address registers)
+-- 48. Check the interrupt status register once the frame is received.
+-- *****************************************************************************
+apbwr      a0 ddeefeff  -- specific address register 4 bottom
+apbwr      a4 0000bbcc  -- specific address register 4 top
+apbrdf     08 00000006  "Scenario 16: specific address 4 matching"
+                        -- check value of network status register
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5fffeeeddccbb11112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da bbccddeefeff sa 222222221111 type 3333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 56660000 ddeefeff -- store frame to memory
+dma_wr 56660004 1111bbcc
+dma_wr 56660008 22222222
+dma_wr 5666000c 33333333
+dma_wr 56660010 44444444
+dma_wr 56660014 55555555
+dma_wr 56660018 66666666
+dma_wr 5666001c 77777777
+dma_wr 56660020 88888888
+dma_wr 56660024 99999999
+dma_wr 56660028 aaaaaaaa
+dma_wr 5666002c bbbbbbbb
+dma_wr 56660030 00000000
+dma_wr 56660034 00000000
+dma_wr 56660038 00000000
+dma_wr 5666003c 816852d9
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234074 0e00c040 -- dma writes rx status:
+                         -- local address match4,
+                         -- 64 bytes received
+dma_wr 01234070 56660001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234078 56880000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 16: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234078  -- check receive queue pointer
+
+-- *****************************************************************************
+-- Specific Address Register Three:
+-- 49. Write an address to specific address register three.
+-- 50. Receive a frame that matches the local address. (Local addresses are in 
+--     the specific address registers)
+-- 51. Check the interrupt status register once the frame is received.
+--     Check all status and statistic registers and ensure that the above
+--     operations were dealt with properly.
+-- *****************************************************************************
+apbrdf     38 00000000  "Scenario 17: specific address 3 matching"
+                        
+
+rxd(apb)     d511223344889911112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da 998844332211 sa 222222221111 type 3333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 56880000 44332211 -- store frame to memory
+dma_wr 56880004 11119988
+dma_wr 56880008 22222222
+dma_wr 5688000c 33333333
+dma_wr 56880010 44444444
+dma_wr 56880014 55555555
+dma_wr 56880018 66666666
+dma_wr 5688001c 77777777
+dma_wr 56880020 88888888
+dma_wr 56880024 99999999
+dma_wr 56880028 aaaaaaaa
+dma_wr 5688002c bbbbbbbb
+dma_wr 56880030 00000000
+dma_wr 56880034 00000000
+dma_wr 56880038 00000000
+dma_wr 5688003c e2acab48
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123407c 0c00c040 -- dma writes rx status
+                         -- local address match3,
+                         -- 64 bytes received
+dma_wr 01234078 56880001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234080 56aa0000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 17: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+-- *****************************************************************************
+-- TYPE ID REGISTER
+-- *****************************************************************************
+
+-- *****************************************************************************
+-- Type ID match register 1:
+-- 52. Write a type to specific type register one.
+-- 53. Receive a frame that matches the type, but no specific addresses.
+-- 54. Check the interrupt status register once the frame is received.
+--     Check all status registers and ensure that the above operations were 
+--     dealt with properly.
+-- *****************************************************************************
+apbwr      a0 ddeefeff  -- write spec addr 4 bottom to disable it
+apbwrf     a8 80000100  "Scenario 18: specific type 1 matching"
+                        -- type ID match 1
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5fffeeeddccbb11112222222201003333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da bbccddeefeff sa 222222221111 type 0100
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 56aa0000 ddeefeff -- store frame to memory
+dma_wr 56aa0004 1111bbcc
+dma_wr 56aa0008 22222222
+dma_wr 56aa000c 33330001
+dma_wr 56aa0010 44444444
+dma_wr 56aa0014 55555555
+dma_wr 56aa0018 66666666
+dma_wr 56aa001c 77777777
+dma_wr 56aa0020 88888888
+dma_wr 56aa0024 99999999
+dma_wr 56aa0028 aaaaaaaa
+dma_wr 56aa002c bbbbbbbb
+dma_wr 56aa0030 00000000
+dma_wr 56aa0034 00000000
+dma_wr 56aa0038 00000000
+dma_wr 56aa003c 94eb2e37
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234084 0100c040 -- dma writes rx status:
+                         -- type id match1,
+                         -- 64 bytes received
+dma_wr 01234080 56aa0001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234088 56bb0000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 18: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+-- *****************************************************************************
+-- Type ID match register 2:
+-- 55. Write a type to specific type register two.
+-- 56. Receive a frame that matches the type, but no specific addresses.
+-- 57. Check the interrupt status register once the frame is received.
+--     Check all status registers and ensure that the above operations were 
+--     dealt with properly.
+-- *****************************************************************************
+apbwrf     ac 80000002  "Scenario 19: specific type 2 matching"
+                        -- type ID match 2
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5fffeeeddccbb11112222222200023333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da bbccddeefeff sa 222222221111 type 0002
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 56bb0000 ddeefeff -- store frame to memory
+dma_wr 56bb0004 1111bbcc
+dma_wr 56bb0008 22222222
+dma_wr 56bb000c 33330200
+dma_wr 56bb0010 44444444
+dma_wr 56bb0014 55555555
+dma_wr 56bb0018 66666666
+dma_wr 56bb001c 77777777
+dma_wr 56bb0020 88888888
+dma_wr 56bb0024 99999999
+dma_wr 56bb0028 aaaaaaaa
+dma_wr 56bb002c bbbbbbbb
+dma_wr 56bb0030 00000000
+dma_wr 56bb0034 00000000
+dma_wr 56bb0038 00000000
+dma_wr 56bb003c 7ba8d421
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123408c 0140c040 -- dma writes rx status:
+                         -- type id match2,
+                         -- 64 bytes received
+dma_wr 01234088 56bb0001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234090 56cc0000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 19: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+-- *****************************************************************************
+-- Type ID match register 3:
+-- 58. Write a type to specific type register three.
+-- 59. Receive a frame that matches the type, but no specific addresses.
+-- 60. Check the interrupt status register once the frame is received.
+--     Check all status registers and ensure that the above operations were 
+--     dealt with properly.
+-- *****************************************************************************
+apbwrf     b0 80000011  "Scenario 20: specific type 3 matching"
+                        -- type ID match 3
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5fffeeeddccbb11112222222200113333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da bbccddeefeff sa 222222221111 type 0011
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 56cc0000 ddeefeff -- store frame to memory
+dma_wr 56cc0004 1111bbcc
+dma_wr 56cc0008 22222222
+dma_wr 56cc000c 33331100
+dma_wr 56cc0010 44444444
+dma_wr 56cc0014 55555555
+dma_wr 56cc0018 66666666
+dma_wr 56cc001c 77777777
+dma_wr 56cc0020 88888888
+dma_wr 56cc0024 99999999
+dma_wr 56cc0028 aaaaaaaa
+dma_wr 56cc002c bbbbbbbb
+dma_wr 56cc0030 00000000
+dma_wr 56cc0034 00000000
+dma_wr 56cc0038 00000000
+dma_wr 56cc003c e106609b
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234094 0180c040 -- dma writes rx status:
+                         -- type id match3,
+                         -- 64 bytes received
+dma_wr 01234090 56cc0001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234098 56dd0000 -- reads locations of next rx buffer
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 20: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+
+-- *****************************************************************************
+-- Type ID match register 4:
+-- 61. Write a type to specific type register four.
+-- 62. Receive a frame that matches the type, but no specific addresses.
+-- 63. Check the interrupt status register once the frame is received.
+--     Check all status registers and ensure that the above operations were 
+--     dealt with properly.
+-- *****************************************************************************
+apbwrf     b4 80000004  "Scenario 21: specific type 4 matching"
+                        -- type ID match 4
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5fffeeeddccbb11112222222200043333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da bbccddeefeff sa 222222221111 type 0004
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 56dd0000 ddeefeff -- store frame to memory
+dma_wr 56dd0004 1111bbcc
+dma_wr 56dd0008 22222222
+dma_wr 56dd000c 33330400
+dma_wr 56dd0010 44444444
+dma_wr 56dd0014 55555555
+dma_wr 56dd0018 66666666
+dma_wr 56dd001c 77777777
+dma_wr 56dd0020 88888888
+dma_wr 56dd0024 99999999
+dma_wr 56dd0028 aaaaaaaa
+dma_wr 56dd002c bbbbbbbb
+dma_wr 56dd0030 00000000
+dma_wr 56dd0034 00000000
+dma_wr 56dd0038 00000000
+dma_wr 56dd003c d7cfe93e
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123409c 01c0c040 -- dma writes rx status:
+                         -- type id match4,
+                         -- 64 bytes received
+dma_wr 01234098 56dd0001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 012340a0 56ee0000 -- reads locations of next rx buffer
+
+apbrd(int) 24 00000002  "Scenario 21: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+-- *****************************************************************************
+-- Two or more matches on specific address/type:
+-- 64. Write the same address to specific address register one and two, and the
+--     same typeID to typeID regsiters one and two.
+-- 65. Receive a frame that matches the local address of 1 & 2 and the typeID
+--     of 1 & 2
+-- 66. Check the interrupt status register once the frame is received.
+--     Check all status and statistic registers and ensure that the above
+--     operations were dealt with properly.
+-- *****************************************************************************
+apbwr      88 ddeefeff  -- specific address register 1 bottom
+apbwr      8c 0000bbcc  -- specific address register 1 top
+apbwr      90 ddeefeff  -- specific address register 2 bottom
+apbwr      94 0000bbcc  -- specific address register 2 top
+apbwr      a8 80000004  -- type ID match 1
+apbwr      ac 80000004  -- type ID match 2
+apbwrf     b4 00000004  "Scenario 22: More than one address & type matching"
+                        -- disable type ID match 4
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5fffeeeddccbb11112222222200043333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da bbccddeefeff sa 222222221111 type 0004
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 56ee0000 ddeefeff -- store frame to memory
+dma_wr 56ee0004 1111bbcc
+dma_wr 56ee0008 22222222
+dma_wr 56ee000c 33330400
+dma_wr 56ee0010 44444444
+dma_wr 56ee0014 55555555
+dma_wr 56ee0018 66666666
+dma_wr 56ee001c 77777777
+dma_wr 56ee0020 88888888
+dma_wr 56ee0024 99999999
+dma_wr 56ee0028 aaaaaaaa
+dma_wr 56ee002c bbbbbbbb
+dma_wr 56ee0030 00000000
+dma_wr 56ee0034 00000000
+dma_wr 56ee0038 00000000
+dma_wr 56ee003c d7cfe93e
+
+-- check updates to the receive buffer descriptor list
+dma_wr 012340a4 0b40c040 -- dma writes rx status:
+                         -- spec addr match2,
+                         -- type id match2,
+                         -- 64 bytes received
+dma_wr 012340a0 56ee0001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 012340a8 56ff0000 -- reads locations of next rx buffer
+
+apbrd(int) 24 00000002  "Scenario 22: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+-- *****************************************************************************
+-- check copy all VLAN tagged frames
+-- 67. Set the "copy all frames" and "discard of Non VLAN frame" bits in the
+--     Network Configuration Register.
+-- 68. Receive a VLAN tagged frame which doesn't match any addresses or types
+--     and ensure that it is copied to memory and the correct status reported.
+-- *****************************************************************************
+apbrd      80 00000000  -- check hash register is clear
+apbrd      84 00000000  -- check hash register is clear
+apbwrf     04 000802d4  "Scenario 23: copy all & vlan tagged frames"
+                        -- ext match en, uni/multi hash, copy all frames 
+                        -- and discard of Non VLAN frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d500feeeddccbb11112222222281003333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da bbccddeefe00 sa 222222221111 type 4444 vid 3333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 56ff0000 ddeefe00 -- store frame to memory
+dma_wr 56ff0004 1111bbcc
+dma_wr 56ff0008 22222222
+dma_wr 56ff000c 33330081
+dma_wr 56ff0010 44444444
+dma_wr 56ff0014 55555555
+dma_wr 56ff0018 66666666
+dma_wr 56ff001c 77777777
+dma_wr 56ff0020 88888888
+dma_wr 56ff0024 99999999
+dma_wr 56ff0028 aaaaaaaa
+dma_wr 56ff002c bbbbbbbb
+dma_wr 56ff0030 00000000
+dma_wr 56ff0034 00000000
+dma_wr 56ff0038 00000000
+dma_wr 56ff003c 2c9a518f
+
+-- check updates to the receive buffer descriptor list
+dma_wr 012340ac 0023c040 -- dma writes rx status:
+                         -- no match indication,
+                         -- 64 bytes received
+dma_wr 012340a8 56ff0001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 012340b0 57000000 -- reads locations of next rx buffer
+
+apbrd(int) 24 00000002  "Scenario 23: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+
+-- *****************************************************************************
+-- 69. Disable the "copy all frames" bit in the Network Configuration Register.
+--     but keep "discard of Non VLAN frame" set.
+-- 70. Receive a VLAN tagged frame that matches specific address 2 and ensure 
+--     that it is copied to memory and the correct status reported.
+-- *****************************************************************************
+apbwr      90 ddeefe00  -- specific address register 2 bottom
+apbwr      94 0000bbcc  -- specific address register 2 top
+apbwrf     04 000802c4  "Scenario 24: discard non-vlan tagged frames & spec add"
+                        -- unicast and multicast hash enable and discard of Non VLAN frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d500feeeddccbb11112222222281001333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da bbccddeefe00 sa 222222221111 type 4444 vid 1333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 57000000 ddeefe00 -- store frame to memory
+dma_wr 57000004 1111bbcc
+dma_wr 57000008 22222222
+dma_wr 5700000c 33130081
+dma_wr 57000010 44444444
+dma_wr 57000014 55555555
+dma_wr 57000018 66666666
+dma_wr 5700001c 77777777
+dma_wr 57000020 88888888
+dma_wr 57000024 99999999
+dma_wr 57000028 aaaaaaaa
+dma_wr 5700002c bbbbbbbb
+dma_wr 57000030 00000000
+dma_wr 57000034 00000000
+dma_wr 57000038 00000000
+dma_wr 5700003c d55017a6
+
+-- check updates to the receive buffer descriptor list
+dma_wr 012340b4 0a21c040 -- dma writes rx status:
+                         -- spec address 2 match
+                         -- VLAN tagged,
+                         -- 64 bytes received
+dma_wr 012340b0 57000001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 012340b8 57100000 -- reads locations of next rx buffer
+
+apbrd(int) 24 00000002  "Scenario 24: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+-- *****************************************************************************
+-- 71. Receive a VLAN tagged frame that has a broadcast address and ensure 
+--     that it is copied to memory and the correct status reported.
+-- *****************************************************************************
+apbwrf     04 000802c4  "Scenario 25: discard non-vlan tagged frames & broadcast"
+                        -- unicast and multicast hash enable and discard of Non VLAN frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5ffffffffffff11112222222281002333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da ffffffffffff sa 222222221111 type 4444 vid 2333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 57100000 ffffffff -- store frame to memory
+dma_wr 57100004 1111ffff
+dma_wr 57100008 22222222
+dma_wr 5710000c 33230081
+dma_wr 57100010 44444444
+dma_wr 57100014 55555555
+dma_wr 57100018 66666666
+dma_wr 5710001c 77777777
+dma_wr 57100020 88888888
+dma_wr 57100024 99999999
+dma_wr 57100028 aaaaaaaa
+dma_wr 5710002c bbbbbbbb
+dma_wr 57100030 00000000
+dma_wr 57100034 00000000
+dma_wr 57100038 00000000
+dma_wr 5710003c 5f82d6a8
+
+-- check updates to the receive buffer descriptor list
+dma_wr 012340bc 8022c040 -- dma writes rx status:
+                         -- broadcast
+                         -- 64 bytes received
+dma_wr 012340b8 57100001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 012340c0 57200000 -- reads locations of next rx buffer
+
+apbrd(int) 24 00000002  "Scenario 25: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+-- *****************************************************************************
+-- 72. Receive a VLAN tagged frame that matches typeID register 1 and ensure 
+--     that it is copied to memory and the correct status reported.
+-- *****************************************************************************
+-- check type match VLAN tagged frames
+apbwrf     a8 80004444  "Scenario 26: discard non-vlan tagged frames & type"
+                        -- type ID match 1
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5000eeeddccbb11112222222281003333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da bbccddee0e00 sa 222222221111 type 4444 vid 3333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 57200000 ddee0e00 -- store frame to memory
+dma_wr 57200004 1111bbcc
+dma_wr 57200008 22222222
+dma_wr 5720000c 33330081
+dma_wr 57200010 44444444
+dma_wr 57200014 55555555
+dma_wr 57200018 66666666
+dma_wr 5720001c 77777777
+dma_wr 57200020 88888888
+dma_wr 57200024 99999999
+dma_wr 57200028 aaaaaaaa
+dma_wr 5720002c bbbbbbbb
+dma_wr 57200030 00000000
+dma_wr 57200034 00000000
+dma_wr 57200038 00000000
+dma_wr 5720003c 0b0b94cd
+
+-- check updates to the receive buffer descriptor list
+dma_wr 012340c4 0123c040 -- dma writes rx status:
+                         -- type id match1,
+                         -- 64 bytes received
+dma_wr 012340c0 57200001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 012340c8 57300000 -- reads locations of next rx buffer
+
+apbrd(int) 24 00000002  "Scenario 26: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+-- *****************************************************************************
+-- 73. Receive a VLAN tagged frame that matches on unicast hash matching and
+--     ensure that it is copied to memory and the correct status reported.
+-- *****************************************************************************
+apbwr      80 ffffffff  -- enable all hash match bits
+apbwr      84 ffffffff  -- check hash register is clear
+apbwrf     a8 00008100  "Scenario 27: discard non-vlan tagged frames & unicast"
+                        -- disable type ID match 1
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5000eeeddccbb11112222222281004333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da bbccddee0e00 sa 222222221111 type 4444 vid 4333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 57300000 ddee0e00 -- store frame to memory
+dma_wr 57300004 1111bbcc
+dma_wr 57300008 22222222
+dma_wr 5730000c 33430081
+dma_wr 57300010 44444444
+dma_wr 57300014 55555555
+dma_wr 57300018 66666666
+dma_wr 5730001c 77777777
+dma_wr 57300020 88888888
+dma_wr 57300024 99999999
+dma_wr 57300028 aaaaaaaa
+dma_wr 5730002c bbbbbbbb
+dma_wr 57300030 00000000
+dma_wr 57300034 00000000
+dma_wr 57300038 00000000
+dma_wr 5730003c 4b79f8c3
+
+-- check updates to the receive buffer descriptor list
+dma_wr 012340cc 2024c040 -- dma writes rx status:
+                         -- unicast hash match
+                         -- 64 bytes received
+dma_wr 012340c8 57300001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 012340d0 57400000 -- reads locations of next rx buffer
+
+apbrd(int) 24 00000002  "Scenario 27: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+-- *****************************************************************************
+-- 74. Receive a VLAN tagged frame that matches on multicast hash matching.
+--     Ensure that it is copied to memory and the correct status reported.
+-- *****************************************************************************
+apbwr      80 ffffffff  -- enable all hash match bits
+apbwr      84 ffffffff  -- check hash register is clear
+apbwrf     a8 00008100  "Scenario 28: discard non-vlan tagged frames & multicast"
+                        -- disable type ID match 1
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5fff0eeddccbb11112222222281005333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the correct destination, source addresses and type are
+-- present on the filter interface
+filterc da bbccddeef0ff sa 222222221111 type 4444 vid 5333
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 57400000 ddeef0ff -- store frame to memory
+dma_wr 57400004 1111bbcc
+dma_wr 57400008 22222222
+dma_wr 5740000c 33530081
+dma_wr 57400010 44444444
+dma_wr 57400014 55555555
+dma_wr 57400018 66666666
+dma_wr 5740001c 77777777
+dma_wr 57400020 88888888
+dma_wr 57400024 99999999
+dma_wr 57400028 aaaaaaaa
+dma_wr 5740002c bbbbbbbb
+dma_wr 57400030 00000000
+dma_wr 57400034 00000000
+dma_wr 57400038 00000000
+dma_wr 5740003c cc9bddf2
+
+-- check updates to the receive buffer descriptor list
+dma_wr 012340d4 4025c040 -- dma writes rx status:
+                         -- multicast hash match
+                         -- 64 bytes received
+dma_wr 012340d0 57400001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 012340d8 57500000 -- reads locations of next rx buffer
+
+
+
+-- check check dont receive frames that are not VLAN tagged
+apbrd(int) 24 00000002  "Scenario 28: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+
+-- *****************************************************************************
+-- 75. Receive a non-VLAN tagged frame that matches on specific address 2,
+--     typeID 1 and unicast hash matching
+--     Ensure that it is not copied to memory and no status is received.
+-- *****************************************************************************
+apbwrf     a8 80008101  "Scenario 29: discard non-vlan tagged frames no macthes"
+                        -- enable type ID match 1
+
+rxd(apb)     d500feeeddccbb11112222222281013333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check filter interface
+filterc da bbccddeefe00 sa 222222221111 type 8101
+
+
+-- *****************************************************************************
+-- 76. Receive a non-VLAN tagged frame with broadcast address that also matches
+--     on typeID 1 and multicast hash matching.
+--     Ensure that it is not copied to memory and no status is received.
+-- *****************************************************************************
+rxd(gap)     d5ffffffffffff11112222222281013333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check filter interface
+filterc da ffffffffffff sa 222222221111 type 8101
+
+
+-- *****************************************************************************
+-- 77. Receive a non-VLAN tagged frame that matches on typeID 1.
+--     Ensure that it is not copied to memory and no status is received.
+-- *****************************************************************************
+rxd(gap)     d5000eeeddccbb11112222222281013333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check filter interface
+filterc da bbccddee0e00 sa 222222221111 type 8101
+
+
+-- *****************************************************************************
+-- 78. Receive a non-VLAN tagged frame that matches on unicast hash matching.
+--     Ensure that it is not copied to memory and no status is received.
+-- *****************************************************************************
+rxd(gap)     d5000eeeddccbb11112222222281013333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check filter interface
+filterc da bbccddee0e00 sa 222222221111 type 8101
+
+
+-- *****************************************************************************
+-- 79. Receive a non-VLAN tagged frame that matches on multicast hash matching.
+--     Ensure that it is not copied to memory and no status is received.
+-- *****************************************************************************
+rxd(gap)     d5fffeeeddccbb11112222222281013333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check filter interface
+filterc da bbccddeefeff sa 222222221111 type 8101
+
+
+-- multicast hash match but will will be copied because
+-- it is VLAN tagged
+-- *****************************************************************************
+-- 80. Receive a VLAN tagged frame that matches on multicast hash matching.
+--     Ensure that it is copied to memory and correct status is received.
+-- *****************************************************************************
+rxd(gap)     d5fffeeeddccbb1111222222228100c333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check filter interface
+filterc da bbccddeefeff sa 222222221111 type 4444 vid c333
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 57500000 ddeefeff -- store frame to memory
+dma_wr 57500004 1111bbcc
+dma_wr 57500008 22222222
+dma_wr 5750000c 33c30081
+dma_wr 57500010 44444444
+dma_wr 57500014 55555555
+dma_wr 57500018 66666666
+dma_wr 5750001c 77777777
+dma_wr 57500020 88888888
+dma_wr 57500024 99999999
+dma_wr 57500028 aaaaaaaa
+dma_wr 5750002c bbbbbbbb
+dma_wr 57500030 00000000
+dma_wr 57500034 00000000
+dma_wr 57500038 00000000
+dma_wr 5750003c 5c56508d
+
+-- check updates to the receive buffer descriptor list
+dma_wr 012340dc 482cc040 -- dma writes rx status:
+                         -- multicast hash and specific address 1 match
+                         -- 64 bytes received
+dma_wr 012340d8 57500001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 012340e0 57600000 -- reads locations of next rx buffer
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 29: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 012340e0  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+-- *****************************************************************************
+-- 81. Check the statistics registers for correct operation.
+-- *****************************************************************************
+-- check transmit statistics
+apbrd     100 00000040  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000700  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 0000001c  -- check frames received ok
+apbrd     15C 00000002  -- check broadcast frames received
+apbrd     160 0000000d  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 0000001c  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- *****************************************************************************
+-- Match too late timing
+-- 82. Re-initialise all configuration registers for basic 100M operation
+-- 83. Receive a frame and pulse the external address match one input on the
+--     last clock before match_too_late signal in gem_rx is set (match_too_late 
+--     is set when the new_pipeline_data signal in gem_rx is active for the 
+--     first data in the frame).
+-- *****************************************************************************
+
+-- check and initialise the relevant registers
+filterd(150000)  ext_match1 0 ext_match2 0 ext_match3 0 ext_match4 0
+
+apbwr(150000) 00 00000000  -- check reset value of network control register
+apbwr      28 0001ffff  -- enable all interrupts
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 00080200  -- enable eam in network config register
+apbrd      04 00080200  -- check reset value of network config register
+apbwr      88 00000000  -- specific address register 1 bottom
+apbwr      8C 00000000  -- specific address register 1 top
+apbwr      18 01234000  -- write receive queue pointer
+apbrd      24 00000000  -- check interrupt status
+apbwr      00 00000004  -- enable receive 
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrdf     20 00000000  "Scenario 30: match too late - just in time"
+                        -- check receive status register and trigger reception of frame
+
+-- supply the receive buffer location
+dma_rd 01234000 33330000 -- dma reads pointer of 33330000
+
+-- pulse external address match pin 1
+filterd(150979)   ext_match1 1 ext_match2 0 ext_match3 0 ext_match4 0
+filterd(151019)   ext_match1 0 ext_match2 0 ext_match3 0 ext_match4 0
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d57856341211110123456789ab12343333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check filter interface
+filterc da 111112345678 sa ab8967452301 type 1234
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 33330000 12345678 -- store frame to memory
+dma_wr 33330004 23011111
+dma_wr 33330008 ab896745
+dma_wr 3333000c 33333412
+dma_wr 33330010 44444444
+dma_wr 33330014 55555555
+dma_wr 33330018 66666666
+dma_wr 3333001c 77777777
+dma_wr 33330020 88888888
+dma_wr 33330024 99999999
+dma_wr 33330028 aaaaaaaa
+dma_wr 3333002c bbbbbbbb
+dma_wr 33330030 00000000
+dma_wr 33330034 00000000
+dma_wr 33330038 00000000
+dma_wr 3333003c 57750d1a
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234004 1000c040 -- dma writes rx status:
+                         -- external address match,
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234000 33330001 -- dma writes ownership bit
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 30: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+
+
+-- *****************************************************************************
+-- 84. Receive a frame and pulse the external address match one input one
+--     clock after the match_too_late signal in gem_rx is set.
+-- *****************************************************************************
+apbwr      20 00000002  "Scenario 31: match too late - too late"
+
+-- next rx buffer is read
+dma_rd 01234008 33331000 -- reads locations of next rx buffer
+
+-- pulse external address match pin 1
+filterd(154119)   ext_match1 1 ext_match2 0 ext_match3 0 ext_match4 0
+filterd(154159)   ext_match1 0 ext_match2 0 ext_match3 0 ext_match4 0
+
+-- drive the receive frame data into the MII interface
+rxd(gap)     d57856341211110123456789ab12340001
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check filter interface
+filterc da 111112345678 sa ab8967452301 type 1234
+
+
+
+-- *****************************************************************************
+-- 85. Receive a frame and pulse the external address match one input one
+--     clock before the ext_da_stb output is activated.
+--     Check that the frame is not matched, as the match signal will be outside
+--     the window of the external match (starts at ext_da_stb)
+-- *****************************************************************************
+
+-- pulse external address match pin 1
+filterd(156479)   ext_match1 1 ext_match2 0 ext_match3 0 ext_match4 0
+filterd(156500)   ext_match1 0 ext_match2 0 ext_match3 0 ext_match4 0
+
+-- drive the receive frame data into the MII interface
+rxd(gap)     d57856341211110123456789ab12340002
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check filter interface
+filterc da 111112345678 sa ab8967452301 type 1234
+
+
+
+-- *****************************************************************************
+-- 86. Receive a frame and pulse the external address match one input at the
+--     same clock that the ext_da_stb output is activated.
+--     Check that the frame is matched and copied to memory with correct 
+--     status.
+-- *****************************************************************************
+
+-- set external address match pin 1
+filterd(159639)   ext_match1 1 ext_match2 0 ext_match3 0 ext_match4 0
+filterd(159660)   ext_match1 0 ext_match2 0 ext_match3 0 ext_match4 0
+
+-- drive the receive frame data into the MII interface
+rxd(gap)     d57856341211110123456789ab12343333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 33331000 12345678 -- store frame to memory
+dma_wr 33331004 23011111
+dma_wr 33331008 ab896745
+dma_wr 3333100c 33333412
+dma_wr 33331010 44444444
+dma_wr 33331014 55555555
+dma_wr 33331018 66666666
+dma_wr 3333101c 77777777
+dma_wr 33331020 88888888
+dma_wr 33331024 99999999
+dma_wr 33331028 aaaaaaaa
+dma_wr 3333102c bbbbbbbb
+dma_wr 33331030 00000000
+dma_wr 33331034 00000000
+dma_wr 33331038 00000000
+dma_wr 3333103c 57750d1a
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123400c 1000c040 -- dma writes rx status:
+                         -- external address match,
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234008 33331001 -- dma writes ownership bit
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 31: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+
+-- check that location of next rx buffer is read
+dma_rd 01234010 33332000 -- reads locations of next rx buffer
+
+
+-- *****************************************************************************
+-- 87. Check the statistics registers for correct operation.
+-- *****************************************************************************
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000080  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000002  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000002  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(200000)
+bus_grant_delay 0

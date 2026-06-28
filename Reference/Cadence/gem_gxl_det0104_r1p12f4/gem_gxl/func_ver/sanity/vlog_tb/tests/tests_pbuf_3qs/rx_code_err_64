@@ -1,0 +1,603 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_code_err_64
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 13 Nov 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------------
+-- This test checks the handling of frames with code/symbol errors by
+-- the receive path.
+--
+-- 
+-- Functional Coverage
+----------------------
+-- * Checks that gem_rx can detect rx_er active during any part of frame,
+--   which are greater than MinFrameSize.
+--   NOTE: short frames with code errors are already checked by rx_short* tests.
+--
+--  
+-- Detailed Test Description
+----------------------------
+-- 1. Setup DMA wait states for the test.
+-- 2. Initialise the GEM for 100Mbits/s 64-bit DMA mode.
+-- 3. Enable all interrupts, and then enable receive.
+-- 4. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    third nibble of preamble.
+--    Ensure that the frame is discarded with a symbol error status.
+-- 5. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    fourth nibble of preamble.
+--    Ensure that the frame is discarded with a symbol error status.
+-- 6. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    fifth nibble of preamble.
+--    Ensure that the frame is discarded with a symbol error status.
+-- 7. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    sixth nibble of preamble.
+--    Ensure that the frame is discarded with a symbol error status.
+-- 8. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    first nibble of SFD.
+--    Ensure that the frame is discarded with a symbol error status.
+-- 9. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    second nibble of SFD.
+--    Ensure that the frame is discarded with a symbol error status.
+--10. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    first nibble of DA.
+--    Ensure that the frame is discarded with a symbol error status.
+--11. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    last nibble of DA.
+--    Ensure that the frame is discarded with a symbol error status.
+--12. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    first nibble of SA.
+--    Ensure that the frame is discarded with a symbol error status.
+--13. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    second nibble of SA.
+--    Ensure that the frame is discarded with a symbol error status.
+--14. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    third nibble of SA.
+--    Ensure that the frame is discarded with a symbol error status.
+--15. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    last nibble of SA.
+--    Ensure that the frame is discarded with a symbol error status.
+--16. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    first nibble of typeID.
+--    Ensure that the frame is discarded with a symbol error status.
+--17. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    last nibble of typeID.
+--    Ensure that the frame is discarded with a symbol error status.
+--18. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    first nibble of data.
+--    Ensure that the frame is discarded with a symbol error status.
+--19. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    last nibble of data.
+--    Ensure that the frame is discarded with a symbol error status.
+--20. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    first nibble of CRC.
+--    Ensure that the frame is discarded with a symbol error status.
+--21. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    last nibble of CRC.
+--    Ensure that the frame is discarded with a symbol error status.
+--22. Receive a 64 byte frame with good CRC that has an extra nibble (i.e. an
+--    odd number of nibbles). Make the extra nibble have a symbol error on it.
+--    Ensure that the frame is discarded with a symbol error status.
+--23. Receive a 64 byte frame with good CRC.
+--    Ensure that the frame is successfully received, with good status.
+--24. Check statistics for the above operations.
+--
+--------------------------------------------------------------------------------
+
+-- *****************************************************************************
+-- 1. Setup DMA wait states for the test.
+-- *****************************************************************************
+wait_states     0
+bus_grant_delay 0
+
+
+-- *****************************************************************************
+-- 2. Initialise the GEM for 100Mbits/s 64-bit DMA mode.
+-- 3. Enable all interrupts, and then enable receive.
+-- *****************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      98 12345678  -- specific address register 1 bottom
+apbwr      9C 00001111  -- specific address register 1 top
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00280000  -- 64 bit AHB
+apbrd      04 00280000  -- check new value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      18 fffff000  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      20 00000000  -- check contents of the receive status register
+
+
+
+apbrdf     20 00000000  "Scenarios 1 to 18 : symbol error frames (dropped) + good one"
+
+
+-- *****************************************************************************
+-- 4. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    third nibble of preamble.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(apb) 55x5555555555d578563412111111112222222233333333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+
+dma_rd fffff000 22222000 -- dma reads pointer of 22222000
+
+
+-- frame dropped because of symbol error
+-- No further DMA because symbol error occurs before address match.
+
+
+
+
+-- *****************************************************************************
+-- 5. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    fourth nibble of preamble.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555x555555555d578563412111111112222222233333333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+
+-- *****************************************************************************
+-- 6. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    fifth nibble of preamble.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 5555x55555555d578563412111111112222222233333333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+
+
+-- *****************************************************************************
+-- 7. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    sixth nibble of preamble.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 55555x5555555d578563412111111112222222233333333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+
+
+-- *****************************************************************************
+-- 8. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    first nibble of SFD.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555xd578563412111111112222222233333333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+
+
+-- *****************************************************************************
+-- 9. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    second nibble of SFD.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555dx578563412111111112222222233333333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+
+
+-- *****************************************************************************
+--10. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    first nibble of DA.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555d5x78563412111111112222222233333333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+
+
+-- *****************************************************************************
+--11. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    last nibble of DA.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555d578563412111x111112222222233333333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+
+
+-- *****************************************************************************
+--12. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    first nibble of SA.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555d5785634121111x11112222222233333333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+
+
+-- *****************************************************************************
+--13. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    second nibble of SA.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555d5785634121111x11112222222233333333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+
+
+-- *****************************************************************************
+--14. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    third nibble of SA.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555d578563412111111x112222222233333333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+
+
+-- *****************************************************************************
+--15. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    last nibble of SA.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555d578563412111111112222222x233333333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+
+
+-- *****************************************************************************
+--16. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    first nibble of typeID.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555d5785634121111111122222222x33333333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+
+
+-- *****************************************************************************
+--17. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    last nibble of typeID.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555d5785634121111111122222222333x33333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+
+-- *****************************************************************************
+--18. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    first nibble of data.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555d57856341211111111222222223333x3333 -- symbol error
+rxd                     44444444555555556666666677777777
+rxd                     8888888899999999aaaaaaaabbbbbbbb
+rxd                     ccccccccddddddddeeeeeeee
+rxd                     9e6207c3  -- good CRC
+
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+-- *****************************************************************************
+--19. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    last nibble of data.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555d578563412111111112222222233333333
+rxd                    44444444555555556666666677777777
+rxd                    8888888899999999aaaaaaaabbbbbbbb
+rxd                    ccccccccddddddddeeeeeeexe        -- symbol error
+rxd                    9e6207c3  -- good CRC
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+-- *****************************************************************************
+--20. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    first nibble of CRC.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555d578563412111111112222222233333333
+rxd                    44444444555555556666666677777777
+rxd                    8888888899999999aaaaaaaabbbbbbbb
+rxd                    ccccccccddddddddeeeeeeee
+rxd                    x9e6207c3  -- good CRC, but symbol error
+
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+-- *****************************************************************************
+--21. Receive a 64 byte frame with good CRC that has a symbol error on 
+--    last nibble of CRC.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555d578563412111111112222222233333333
+rxd                    44444444555555556666666677777777
+rxd                    8888888899999999aaaaaaaabbbbbbbb
+rxd                    ccccccccddddddddeeeeeeee
+rxd                    9e6207cx3  -- good CRC, but symbol error
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+-- *****************************************************************************
+--22. Receive a 64 byte frame with good CRC that has an extra nibble (i.e. an
+--    odd number of nibbles). Make the extra nibble have a symbol error on it.
+--    Ensure that the frame is discarded with a symbol error status.
+-- *****************************************************************************
+
+
+rxd(gap) 555555555555d578563412111111112222222233333333
+rxd                    44444444555555556666666677777777
+rxd                    8888888899999999aaaaaaaabbbbbbbb
+rxd                    ccccccccddddddddeeeeeeee
+rxd                    9e6207c3x1  -- good CRC, but symbol error on extra nibble
+
+
+-- frame dropped because of symbol error
+-- No DMA because symbol error occurs before address match.
+
+
+
+-- *****************************************************************************
+--23. Receive a 64 byte frame with good CRC.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+
+rxd(gap)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c3  -- good CRC
+
+-- Check memory accesses
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c 33333333
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 cccccccc
+dma_wr 22222034 dddddddd
+dma_wr 22222038 eeeeeeee
+dma_wr 2222203c c307629e -- good CRC
+
+dma_wr fffff000 22222001 -- dma writes ownership bit
+dma_wr fffff004 0c00c040 -- dma writes rx status, local address match and 64 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenarios 1 to 18 : Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+-- *****************************************************************************
+--24. Check statistics for the above operations.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000040  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000001  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000001  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000012  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000013  -- check receive symbol errors
+apbrd     19C 00000001  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(8000)
+

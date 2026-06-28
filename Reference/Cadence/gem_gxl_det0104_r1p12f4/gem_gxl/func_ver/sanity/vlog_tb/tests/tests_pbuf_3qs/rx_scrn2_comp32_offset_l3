@@ -1,0 +1,335 @@
+-------------------------------------------------
+-- rx_random test scenario for the Ethernet MAC --
+-------------------------------------------------
+--
+-- Written by Alastair Boomer/Arthur Marris
+--
+-- Cadence Design Systems Ltd
+-- Livingston Design Centre,
+-- West Lothian.
+--
+-- 
+-- ************************************************************************** --
+
+wait_states 0
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 f0000000  -- write receive queue pointer
+apbrd      18 f0000000  -- check receive queue pointer
+apbwr     480 f0010000  -- write receive queue pointer
+apbwr     484 f0020000  -- write receive queue pointer
+apbwr     488 f0030000  -- write receive queue pointer
+apbwr     48c f0040000  -- write receive queue pointer
+apbwr     490 f0050000  -- write receive queue pointer
+apbwr     494 f0060000  -- write receive queue pointer
+apbwr     498 f0070000  -- write receive queue pointer
+apbwr     10  000107c4  -- set buffer size to 64
+apbwr     4a0 00000001  -- Buffer size Q1
+apbwr     4a4 00000001  -- Buffer size Q2
+-- Setup the screeners
+-- [3:0]  - Selected Queue
+-- [7:4]  - VLAN priority 
+-- [8]    - VLAN enable 
+-- [11:9] - ethertype reg#
+-- [12]   - ethertype match enable
+-- [17:13]- compa reg#
+-- [18]   - compa match enable
+-- [23:19]- compb reg#
+-- [24]   - compb match enable
+-- [29:25]- compc reg#
+-- [30]   - compc match enable
+apbwr      540 00040002  -- Screener2 reg 0, vlan enabled, comp reg = 0
+apbwr      544 00042011  -- Screener2 reg 1, vlan enabled, comp reg = 1
+apbwr      548 00044020  -- Screener2 reg 2, vlan enabled, comp reg = 2
+apbwr      54c 00046032  -- Screener2 reg 3, vlan enabled, comp reg = 3
+apbwr      550 00048041  -- Screener2 reg 4, vlan enabled, comp reg = 4
+apbwr      554 0004a050  -- Screener2 reg 5, vlan enabled, comp reg = 5
+apbwr      558 0004c061  -- Screener2 reg 6, vlan enabled, comp reg = 6
+apbwr      55c 0004e072  -- Screener2 reg 7, vlan enabled, comp reg = 7
+
+-- In this test, the oofset type is always TYPE, and the mask is fixed
+-- we are testing the offset field here
+apbwr      700 12345678  -- Compare reg 0a
+apbwr      704 00000300  -- Compare reg 0b, offset is 0
+apbwr      708 23456789  -- Compare reg 1a
+apbwr      70c 00000301  -- Compare reg 1b, offset is 1
+apbwr      710 3456789a  -- Compare reg 2a
+apbwr      714 00000302  -- Compare reg 2b, offset is 2
+apbwr      718 456789ab  -- Compare reg 3a
+apbwr      71c 00000303  -- Compare reg 3b, offset is 3
+apbwr      720 56789abc  -- Compare reg 4a
+apbwr      724 0000037f  -- Compare reg 4b, offset is 127 (max)
+apbwr      728 6789abcd  -- Compare reg 5a
+apbwr      72c 0000037e  -- Compare reg 5b, offset is 126 
+apbwr      730 789abcde  -- Compare reg 6a
+apbwr      734 0000036a  -- Compare reg 6b, offset is even and in full range (106 dec)
+apbwr      738 89abcdef  -- Compare reg 7a
+apbwr      73c 00000321  -- Compare reg 7b, offset is odd and in full range (33 dec)
+
+apbwr      00  00000004  -- enable receive
+apbrd      24  00000000  -- check interrupt status
+apbwr      28  ffffffff  -- enable all interrupts
+apbrd      24  00000000  -- check interrupt status
+apbwr      600 ffffffff  -- enable q1 interrupts
+apbwr      604 ffffffff  -- enable q2 interrupts
+apbrd      04  00080000  -- check reset value of network config register
+apbrd      08  00000006  -- check reset value of network status register
+apbwr      04  01080413  -- indicate 1gb operation, will check pin l8r.
+apbrd      04  01080413  -- verify write to speed register..
+apbrd      20  00000000  -- check contents of the receive status register and trigger reception of frame
+apbrd      20  00000000  -- check contents of the receive status register and trigger reception of frame
+apbrd      20  00000000  -- check contents of the receive status register and trigger reception of frame
+apbrd      20  00000000  -- check contents of the receive status register and trigger reception of frame
+apbrdf     20  00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+rx_frame (apb)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           copy_all
+      src_addr            111122222222
+      vlan1_en            random
+      vlan1_field         random
+      type_len_field      ffff
+
+      #------------------------------
+      # Level 3 Stuff
+      ipv4_en             1
+        num_ipv4_options  random
+      ipv6_en             1
+
+      #------------------------------
+      # Payload
+      data_size           16-300
+      data                random
+      data_byte_l3ind     78@0 
+      data_byte_l3ind     56@1 
+      data_byte_l3ind     34@2 
+      data_byte_l3ind     12@3 
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+rx_frame (gap)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           copy_all
+      src_addr            111122222222
+      vlan1_en            random
+      vlan1_field         random
+      type_len_field      ffff
+
+      #------------------------------
+      # Level 3 Stuff
+      ipv4_en             1
+        num_ipv4_options  random
+      ipv6_en             1
+
+      data_size           16-300
+      data                random
+      data_byte_l3ind     89@1 
+      data_byte_l3ind     67@2 
+      data_byte_l3ind     45@3 
+      data_byte_l3ind     23@4 
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+rx_frame (gap)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           copy_all
+      src_addr            111122222222
+      vlan1_en            random
+      vlan1_field         random
+      type_len_field      ffff
+
+      #------------------------------
+      # Level 3 Stuff
+      ipv4_en             1
+        num_ipv4_options  random
+      ipv6_en             1
+
+      data_size           16-300
+      data                random
+      data_byte_l3ind     9a@2 
+      data_byte_l3ind     78@3
+      data_byte_l3ind     56@4
+      data_byte_l3ind     34@5
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+rx_frame (gap)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           copy_all
+      src_addr            111122222222
+      vlan1_en            random
+      vlan1_field         random
+      type_len_field      ffff
+
+      #------------------------------
+      # Level 3 Stuff
+      ipv4_en             1
+        num_ipv4_options  random
+      ipv6_en             1
+
+      data_size           16-300
+      data                random
+      data_byte_l3ind     ab@3 
+      data_byte_l3ind     89@4 
+      data_byte_l3ind     67@5 
+      data_byte_l3ind     45@6 
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+rx_frame (gap)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           copy_all
+      src_addr            111122222222
+      vlan1_en            random
+      vlan1_field         random
+      type_len_field      ffff
+
+      #------------------------------
+      # Level 3 Stuff
+      ipv4_en             1
+        num_ipv4_options  random
+      ipv6_en             1
+
+      data_size           135-300
+      data                random
+      data_byte_l3ind     bc@127 
+      data_byte_l3ind     9a@128 
+      data_byte_l3ind     78@129 
+      data_byte_l3ind     56@130 
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+rx_frame (gap)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           copy_all
+      src_addr            111122222222
+      vlan1_en            random
+      vlan1_field         random
+      type_len_field      ffff
+
+      #------------------------------
+      # Level 3 Stuff
+      ipv4_en             1
+        num_ipv4_options  random
+      ipv6_en             1
+
+      data_size           135-300
+      data                random
+      data_byte_l3ind     cd@126 
+      data_byte_l3ind     ab@127 
+      data_byte_l3ind     89@128 
+      data_byte_l3ind     67@129 
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+rx_frame (gap)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           copy_all
+      src_addr            111122222222
+      vlan1_en            random
+      vlan1_field         random
+      type_len_field      ffff
+
+      #------------------------------
+      # Level 3 Stuff
+      ipv4_en             1
+        num_ipv4_options  random
+      ipv6_en             1
+
+      data_size           150-300
+      data                random
+      data_byte_l3ind     de@106 
+      data_byte_l3ind     bc@107 
+      data_byte_l3ind     9a@108 
+      data_byte_l3ind     78@109 
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+rx_frame (gap)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           copy_all
+      src_addr            111122222222
+      vlan1_en            random
+      vlan1_field         random
+      type_len_field      ffff
+
+      #------------------------------
+      # Level 3 Stuff
+      ipv4_en             1
+        num_ipv4_options  random
+      ipv6_en             1
+
+      data_size           150-300
+      data                random
+      data_byte_l3ind     ef@33 
+      data_byte_l3ind     cd@34 
+      data_byte_l3ind     ab@35 
+      data_byte_l3ind     89@36 
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(100000)
+

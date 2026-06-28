@@ -1,0 +1,482 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : col_retry_16_1gm
+--
+--   Author         : Stewart Penman
+--
+--   Date           : 07 February 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+-- 
+-- This test ensures that the GEM properly deals with excessive collisions 
+-- in 1 gigabit mode.
+-- 
+-- Functional Coverage
+-- -------------------
+-- · Ensures that the GEM flags a collision frame statistic when more 
+--     than 15 collisions occur in 1 gigabit mode.  
+-- · Ensures that the GEM will not retransmit a frame when more than 15 
+--     collisions occur.
+-- · Ensures that the GEM is able to transmit a frame after it is properly 
+--     reconfigured.
+-- 
+-- Detailed Test Description
+-- -------------------------
+-- 1.  Check reset state of loopback, half_duplex, and extint pins.
+-- 2.  Initialise GEM for 1 gigabit operation.
+-- 3.  Transmit a frame and at the beginning of the data portion of 
+--      the frame cause a collision.
+-- 4.  The GEM should back-off and sometime later re-try to 
+--      retransmit the frame.
+-- 5.  Repeat steps 4 and 5 fifteen more times.
+-- 6.  After the 16th collision the frame should not be transmitted and 
+--      a flag for excessive collisions should be set. Also, there should be 
+--      16 collision frames logged in the collision frames statistic register.
+-- 7.  Check status and statistics registers and ensure that the above 
+--      operations were handled properly.
+-- 8.  Transmit a frame.
+-- 9.  Check status and statistics registers and ensure that the above 
+--      operations were handled properly.
+--
+--------------------------------------------------------------------------------
+
+wait_states 1
+bus_grant_delay 1
+
+
+--******************************************************************************
+-- 1.  Check reset state of loopback, half_duplex, and extint pins.
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+--******************************************************************************
+-- 2.  Initialise GEM for 1 gigabit operation.
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00081400  -- network config register - 1gig mode
+                        -- reduce backoff time to zero
+apbwr      00 00000008  -- write enable tx
+apbwr      1c ffffff00  -- write address of transmit buffer descriptor
+apbrd      1c ffffff00  -- check transmit queue pointer
+apbwr      00 00000208  -- write transmit start bit and enable tx
+
+
+
+-- ************************************************************************** --
+--   7. Transmit a frame and at the beginning of the data portion of the frame cause a collision.
+--   8. The GEM backs-off and one slot time later re-tries to retransmit the frame.
+--   9. Repeat steps 7 and 8 fifteen more times.
+--   10. After the 16th collision the frame should not be transmitted and a flag for excessive collisions should be set. Check that transmission is halted by too many retries.
+-- ************************************************************************** --
+
+-- DMA will now read in frame 1
+-- With TX packet buffer included all of frame is read in once and retried
+-- from the packet buffer.
+dma_rd tx_descr ffffff04 40008050 -- reads tx control of eof and length
+dma_rd tx_descr ffffff00 98765000 -- dma reads pointer of 98765000
+
+dma_rd 98765000 3b51cefe
+dma_rd 98765004 23d657df
+dma_rd 98765008 5f18183e
+dma_rd 9876500c b5222fb6
+dma_rd 98765010 41ccd444
+dma_rd 98765014 b6c1f9ed
+dma_rd 98765018 fe49dc11
+dma_rd 9876501c 37f8a9fd
+dma_rd 98765020 a4466f14
+dma_rd 98765024 bf7f3137
+dma_rd 98765028 dbd2372d
+dma_rd 9876502c fa542f81
+dma_rd 98765030 b8594db4
+dma_rd 98765034 39fae96b
+dma_rd 98765038 e6925aaa
+dma_rd 9876503c e6925aaa
+dma_rd 98765040 b8594db4
+dma_rd 98765044 39fae96b
+dma_rd 98765048 e6925aaa
+dma_rd 9876504c e6925aaa
+
+
+apbrd      14 00000000  "Scenario 1 : too many retries"
+
+-- ************************************************************************** --
+-- attempt 1
+-- ************************************************************************** --
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fecxe513bdf57575757
+
+--******************************************************************************
+-- 4.  The GEM should back-off and sometime later re-try to 
+--      retransmit the frame.
+-- 5.  Repeat steps 4 and 5 fifteen more times.
+
+--**************************************
+-- 5.  retry 1
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fece513bdf57d6233e18185fbx62f22b5
+txd                         44444444
+
+--**************************************
+-- 5.  retry 2
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fece513bdf57d6233e18185fb62f22b5
+txd                         44d4cc41xedf9c1b611111111
+
+--**************************************
+-- 5.  retry 3
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fece513bdf57d6233e18185fb62f22b5
+txd                         44d4cc41edf9c1b611dc49fefxda9f837
+txd                         14141414
+
+--**************************************
+-- 5.  retry 4
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fece513bdf57d6233e18185fb62f22b5
+txd                         44d4cc41edf9c1b611dc49fefda9f837
+txd                         14x6f46a43731313131
+
+--**************************************
+-- 5.  retry 5
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fece513bdf57d6233e18185fb62f22b5
+txd                         44d4cc41edf9c1b611dc49fefda9f837
+txd                         146f46a437317fbf2d37d2db812fx54fa
+txd                         b44d59595959
+
+--**************************************
+-- 5.  retry 6
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fece513bdf57d6233e18185fbx62f22b5
+txd                         44444444
+
+--**************************************
+-- 5.  retry 7
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fece513bdf57d6233e18185fb62f22b5
+txd                         44d4cc41xedf9c1b611111111
+
+--**************************************
+-- 5.  retry 8
+
+txd         55555555555555d5fece513bdf57d6233e18185fb62f22b5
+txd                         44d4cc41edf9c1b611dc49fefxda9f837
+txd                         14141414
+
+--**************************************
+-- 5.  retry 9
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fece513bdf57d6233e18185fb62f22b5
+txd                         44d4cc41edf9c1b611dc49fefda9f837
+txd                         14x6f46a43731313131
+
+--**************************************
+-- 5.  retry 10
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fece513bdf57d6233e18185fb62f22b5
+txd                         44d4cc41edf9c1b611dc49fefda9f837
+txd                         146f46a437317fbf2d37d2db812fx54fa
+txd                         b44d59595959
+
+--**************************************
+-- 5.  retry 11
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fece513bdf57d6233e18185fbx62f22b5
+txd                         44444444
+
+--**************************************
+-- 5.  retry 12
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fece513bdf57d6233e18185fb62f22b5
+txd                         44d4cc41xedf9c1b611111111
+
+--**************************************
+-- 5.  retry 13
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fece513bdf57d6233e18185fb62f22b5
+txd                         44d4cc41edf9c1b611dc49fefxda9f837
+txd                         14141414
+
+--**************************************
+-- 5.  retry 14
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fece513bdf57d6233e18185fb62f22b5
+txd                         44d4cc41edf9c1b611dc49fefda9f837
+txd                         14x6f46a43731313131
+
+--**************************************
+-- 5.  retry 15
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x57df3b51cefe' unicast frame
+-- srcaddr:  '0x5f18183e23d6'
+-- typeid:   '0xb62f'
+-- data:      46 bytes
+-- crc:      '0x389ba42f'
+
+txd         55555555555555d5fece513bdf57d6233e18185fb62f22b5
+txd                         44d4cc41edf9c1b611dc49fefda9f837
+txd                         146f46a437317fbf2d37d2db812fx54fa
+txd                         b44d59595959
+
+-- write used bit
+dma_wr ffffff04 e0008050   -- Too many retries
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000020  "SCENARIO COMPLETE - retry limit exceeded"
+                        -- check interrupt status - receive complete
+apbwr      24 00000020  -- clear interrupt status
+
+apbrd      14 0000000e  -- tx status - collision occurred
+                        --             retry limit exceeded
+apbwr      14 0000000e  -- clear it
+apbrd      14 00000008  -- check it again 
+
+--******************************************************************************
+--   Transmit a frame.
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x55285bced359' multicast frame
+-- srcaddr:  '0x47ed6cee8434'
+-- typeid:   '0xa332'
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+dma_rd tx_descr ffffff04 0000803c -- reads tx control of eof and length
+dma_rd tx_descr ffffff00 98765200 -- dma reads pointer of 98765200
+
+dma_rd 98765200 5bced359
+dma_rd 98765204 84345528
+dma_rd 98765208 47ed6cee
+dma_rd 9876520c 6ac932a3
+dma_rd 98765210 6ecf9874
+dma_rd 98765214 47a74715
+dma_rd 98765218 e44a4e3f
+dma_rd 9876521c effb8b28
+dma_rd 98765220 a14a8a1d
+dma_rd 98765224 6d314796
+dma_rd 98765228 61c42413
+dma_rd 9876522c 2a1b84ca
+dma_rd 98765230 6a4d5aa1
+dma_rd 98765234 54538338
+dma_rd 98765238 ecabf194
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x55285bced359' multicast frame
+-- srcaddr:  '0x47ed6cee8434'
+-- typeid:   '0xa332'
+-- data:      46 bytes
+-- crc:      '0x171e96c4'
+
+txd         55555555555555d559d3ce5b28553484ee6ced47a332c96a
+txd                         7498cf6e1547a7473f4e4ae4288bfbef
+txd                         1d8a4aa19647316d1324c461ca841b2a
+txd                         a15a4d6a3883535494f1abec4c69e171
+
+-- write used bit
+dma_wr ffffff04 8000803c
+
+dma_rd tx_descr ffffff0c 80008018 -- used bit read, stop TX
+dma_rd tx_descr ffffff08 aaaaaaa0 
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- write to clear
+apbrd(int) 24 00000008  "SCENARIO 17. complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000008  -- write to clear
+apbrd      14 00000021  -- transmit status - used
+apbwr      14 00000021  -- clear transmit status
+apbrd      14 00000000  -- check it again
+
+-- check transmit statistics
+apbrd     100 00000040  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000001  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(5000)

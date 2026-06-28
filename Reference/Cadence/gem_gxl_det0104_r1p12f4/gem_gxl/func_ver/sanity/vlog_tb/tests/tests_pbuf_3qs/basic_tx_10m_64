@@ -1,0 +1,185 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : basic_tx_10m_64
+--
+--   Author         : Arthur Marris (arthurm@cadence.com)
+--
+--   Date           : 24 January 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This tests basic transmit functionality in nibble mode at 10Mbits/s.
+--
+--
+-- Functional Coverage
+----------------------
+-- · Checks transmission with all combinations of data code group present
+--   within the one frame using 10Mbits/s mode.
+-- 
+--
+-- Detailed Test Description
+----------------------------
+--
+-- Enable transmit and interrupts, write transmit address and
+-- control registers.
+--
+-- Supply transmit data to the AHB interface and check the
+-- transmitted data, pad and crc.
+--
+-- On reception of the transmit complete interrupt check the
+-- interrupt and trasnmit status registers and the statistics
+-- registers
+--
+-- This tests a frame supplied with known CRC:-
+--
+--    01 00 5E 00 00 02 Destination 
+--    00 D0 BC EC E7 04 Source 
+--    08 00 Protocol Type 
+--    45 C0 00 30 00 00 00 00 02 11 IP Header 
+--    58 72 IP Header Checksum 
+--    9E 8C E0 FC E0 00 
+--    00 02 
+--    07 C1 Source Port 
+--    07 C1 Destination Port 
+--    00 1C Length 
+--    B6 E9 UDP Checksum 
+--
+--    00 00 08 03 0A 64 02 00 63 69 73 63 6F 00 00 00 9E 8C E0 FD 
+--    UDP Data 
+--    FB 2C 1F 72 Frame Checksum 
+--
+--
+--    Raw Packet Data 
+--
+--    01 00 5e 00 00 02 00 d0 bc ec e7 04 08 00 45 c0 
+--    00 30 00 00 00 00 02 11 58 72 9e 8c e0 fc e0 00 
+--    00 02 07 c1 07 c1 00 1c b6 e9 00 00 08 03 0a 64 
+--    02 00 63 69 73 63 6f 00 00 00 9e 8c e0 fd fb 2c 1f 72
+--
+-- 
+--------------------------------------------------------------------------------
+
+ten_meg_bit  -- 10Mbit/s operation (2.5Mhz tx_clk and rx_clk, 50MHz Pclk and Hclk)
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      440 88000000  -- write transmit queue pointer 1
+apbwr      444 99000000  -- write transmit queue pointer 2
+apbwr      04 00280000  -- check reset value of network config register
+apbrd      04 00280000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000408  -- write tx halt immediately keeping tx enabled
+                        -- this stops fetch of second frame
+
+
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd 55555504 0000803e -- start of frame, length 62 bytes
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 0000fde0
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fdfb2c1f72
+
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 8000803e -- write used bit
+
+
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbrd	    14 00000020  -- tx status - frame transmitted, used bit set
+apbrd       1c 55555508  -- transmit queue pointer not changed
+
+
+-- check transmit statistics
+apbrd     100 00000042  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000001  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(5000)
+
+bus_grant_delay 0

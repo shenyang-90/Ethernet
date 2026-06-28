@@ -1,0 +1,140 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_traf_pol_mode0_1
+--
+--   Author         : fmalaspi@cadence.com
+--
+--   Date           : 6 Feb 2017
+--
+--------------------------------------------------------------------------------
+--
+--   Test Description
+--   This test wants to prove the enable bit of Mode0 can be set dynamically
+--   during the test without setting the soft reset.
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+
+-- *****************************************************************************
+-- Initialise the GEM for 10 or 100-mode operation.
+-- Check the receive status and control registers.
+-- Write an address to specific address register one.
+-- *****************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 f0000000  -- write receive queue pointer
+apbwr     480 f0010000  -- write receive queue pointer
+apbwr     484 f0020000  -- write receive queue pointer
+apbwr     488 f0030000  -- write receive queue pointer
+apbwr     48c f0040000  -- write receive queue pointer
+apbwr     490 f0050000  -- write receive queue pointer
+apbwr     494 f0060000  -- write receive queue pointer
+apbwr     498 f0070000  -- write receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupt
+apbwr     600 ffffffff  -- enable all interrupt for q1
+apbwr     604 ffffffff  -- enable all interrupt for q2
+
+apbrd      24 00000000  -- check interrupt status
+apbwr      98 12345678  -- specific address register 3 bottom
+apbwr      9C 00001111  -- specific address register 3 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+-- Setup the screeners
+-- [3:0]  - Selected Queue
+-- [7:4]  - VLAN priority 
+-- [8]    - VLAN enable 
+-- [11:9] - ethertype reg#
+-- [12]   - ethertype match enable
+-- [17:13]- compa reg#
+-- [18]   - compa match enable
+-- [23:19]- compb reg#
+-- [24]   - compb match enable
+-- [29:25]- compc reg#
+-- [30]   - compc match enable
+apbwr      540 00000102  -- Screener2 reg 0, vlan enabled, pri = 0
+apbwr      544 00000111  -- Screener2 reg 1, vlan enabled, pri = 1
+apbwr      548 00000121  -- Screener2 reg 2, vlan enabled, pri = 2
+apbwr      54c 00000131  -- Screener2 reg 3, vlan enabled, pri = 3
+apbwr      550 00000141  -- Screener2 reg 4, vlan enabled, pri = 4
+apbwr      554 00000151  -- Screener2 reg 5, vlan enabled, pri = 5
+apbwr      558 00000160  -- Screener2 reg 6, vlan enabled, pri = 6
+apbwr      55c 00000170  -- Screener2 reg 7, vlan enabled, pri = 7
+
+apbwr      6e0 0000ffff  -- Ethtype reg 0
+apbwr      6e4 00005a5a  -- Ethtype reg 1
+apbwr      6e8 0000a5a5  -- Ethtype reg 2
+apbwr      6ec 0000def0  -- Ethtype reg 3
+apbwr      6f0 00009abc  -- Ethtype reg 4
+apbwr      6f4 00005678  -- Ethtype reg 5
+apbwr      6f8 00001234  -- Ethtype reg 6
+apbwr      6fc 00000080  -- Ethtype reg 7
+
+apbwr      700 2211ffff  -- Compare reg 0a
+apbwr      704 00000007  -- Compare reg 0b
+apbwr      708 a334ffff  -- Compare reg 1a
+apbwr      70c 00000022  -- Compare reg 1b
+
+-- rx traffic policing registers
+apbwr     b00  00000000 -- initially mode0 is disabled for queue0
+apbwr     b04  00000000 -- initially mode0 is disabled for queue1
+apbwr     b08  00000000 -- initially mode0 is disabled for queue2
+
+apbrdf 20 00000000 
+
+rx_frame (apb)  1
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      num_dma_queues take_from_cfg
+      data_size      64
+      data           random
+      resource_err   0
+      auto_gen_int   0
+      fcs            good
+
+-- enabling Mode1 for all the queues now
+apbwr(800) b00 00000002
+apbwr      b04 00000002
+apbwr      b08 00000002
+
+rx_frame (gap)  1
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      num_dma_queues take_from_cfg
+      data_size      64
+      data           random
+      resource_err   1
+      auto_gen_int   0
+      fcs            good
+
+-- disabling Mode1 for all the queues now
+apbwr(1100) b00 00000002
+apbwr       b04 00000002
+apbwr       b08 00000002
+
+rx_frame (gap)  1
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      num_dma_queues take_from_cfg
+      data_size      64
+      data           random
+      resource_err   0
+      auto_gen_int   0
+      fcs            good
+
+-- force end of test in case it doesn't stop of its own accord
+end(50000)

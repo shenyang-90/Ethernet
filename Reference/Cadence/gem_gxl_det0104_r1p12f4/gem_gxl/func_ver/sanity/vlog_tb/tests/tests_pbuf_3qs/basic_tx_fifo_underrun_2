@@ -1,0 +1,345 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : basic_tx_fifo_underrun_2
+--
+--   Author         : Brian Torley 
+--
+--   Date           : Oct 2012
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Based on basic_tx_fifo_underrun but added random DMA frames at the same time
+--
+-- Send good and underrun frames into the tx fifo interface while sending
+-- DMA frames
+--
+-- Functional Coverage
+----------------------
+-- · Checks transmission with good and underrun frames on fifo port
+--    
+--
+-- Detailed Test Description
+----------------------------
+--
+-- Enable transmit and interrupts, write control registers.
+--
+-- Supply transmit data to the FIFO interface and check the
+-- transmitted data, pad and crc.
+-- Supply transmit data to the DMA and check the transmitted 
+-- data, pad and crc.
+--
+-- On reception of the transmit complete interrupt check the
+-- interrupt and trasnmit status registers and the statistics
+-- registers/
+--
+-- Underrun frames sent from the tx_fifo interface will not produce 
+-- underrun interrupt or interrupt status or underrun statistics 
+-- but DMA frames will produce underrun indication in this 
+-- configuration.
+--
+-- Check underrun indicate is indicated directly to the tx_fifo 
+-- interface on the tx_r_status bus.
+--
+-- This tests a frame supplied with known CRC:-
+-- 
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 0000ffff  -- enable all interrupts
+apbwr      440 88000000  -- write transmit queue pointer 1
+apbwr      444 99000000  -- write transmit queue pointer 2
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer  ( force fifo to send first burst of frames before dma frames)
+apbwr      00 00000208  -- write tx_go and enable tx and rx
+
+
+apbrd(3000)     1d8 00000000  -- dummy reads from write only register
+apbrdf     1d8 00000000  -- dummy reads from write only register and trigger for fifo frame
+
+
+-- test 10 frames of random number of buffers with random data at random buffer locations
+tx_frame  10
+      number_of_bufs 1-10
+      buffer_size    1-100
+      data           random
+      auto_gen_int   0
+      num_dma_queues 3
+      fix_queue_num  2
+      fcs            YES
+
+
+-- frame  1
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd(apb)    00001010   0   00000000      04e7ecbc -- SOP
+fifo_rd         00000000   0   00000000      c0450008
+fifo_rd         00000000   0   00000000      00003000
+fifo_rd         00000000   0   00000000      11020000
+fifo_rd         00000000   0   00000000      8c9e7258
+fifo_rd         00000000   0   00000000      00e0fce0
+fifo_rd         00000000   0   00000000      c1070200
+fifo_rd         00000000   0   00000000      1c00c107
+fifo_rd         00000000   0   00000000      0000e9b6
+fifo_rd         00000000   0   00000000      640a0308
+fifo_rd         00000000   0   00000000      69630002
+fifo_rd         00000000   0   00000000      006f6373
+fifo_rd         00000000   0   00000000      8c9e0000
+fifo_rd         00001001   2   00000000      0000fde0
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d5bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fd000000000000e32dc210
+
+
+
+-- frame  2
+-
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         00001010   0   00000000      04e7ecbc  -- SOP
+fifo_rd         00000000   0   00000000      c0450008
+fifo_rd         00000000   0   00000000      00003000
+fifo_rd         00000000   0   00000000      11020000
+fifo_rd         00000000   0   00000000      8c9e7258
+fifo_rd         00000000   0   00000000      00e0fce0
+fifo_rd         00000000   0   00000000      c1070200
+fifo_rd         00000000   0   00000000      1c00c107
+fifo_rd         00000000   0   00000000      0000e9b6
+fifo_rd         00000000   0   00000000      640a0308
+fifo_rd         00000000   0   00000000      69630002
+fifo_rd         00000000   0   00000000      006f6373
+fifo_rd         00000000   0   00000000      8c9e0000
+fifo_rd         00001001   2   00000000      0000fde0
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d5bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fd000000000000e32dc210
+
+
+
+-- frame  3
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         00001010   0   00000000      04e7ecbc  --SOP
+fifo_rd         00000000   0   00000000      c045bbaa
+fifo_rd         00011000   0   00001000      00003000  -- UNDERRUN
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d5bcece704aabb  -- cut off here
+txd                   55555555 
+
+
+-- frame  4
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         00001010   0   00000000      04e7ecbc -- SOP
+fifo_rd         00000000   0   00000000      c0450008
+fifo_rd         00000000   0   00000000      00003000
+fifo_rd         00000000   0   00000000      11020000
+fifo_rd         00000000   0   00000000      8c9e7258
+fifo_rd         00000000   0   00000000      00e0fce0
+fifo_rd         00000000   0   00000000      c1070200
+fifo_rd         00000000   0   00000000      1c00c107
+fifo_rd         00000000   0   00000000      0000e9b6
+fifo_rd         00000000   0   00000000      640a0308
+fifo_rd         00000000   0   00000000      69630002
+fifo_rd         00000000   0   00000000      006f6373
+fifo_rd         00000000   0   00000000      8c9e0000
+fifo_rd         00001001   2   00000000      0000fde0
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d5bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fd000000000000e32dc210
+
+-- frame  5
+-
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         00001010   0   00000000      04e7ecbc  -- SOP
+fifo_rd         00000000   0   00000000      c0450008
+fifo_rd         00000000   0   00000000      00003000
+fifo_rd         00000000   0   00000000      11020000
+fifo_rd         00000000   0   00000000      8c9e7258
+fifo_rd         00000000   0   00000000      00e0fce0
+fifo_rd         00000000   0   00000000      c1070200
+fifo_rd         00000000   0   00000000      1c00c107
+fifo_rd         00000000   0   00000000      0000e9b6
+fifo_rd         00000000   0   00000000      640a0308
+fifo_rd         00000000   0   00000000      69630002
+fifo_rd         00000000   0   00000000      006f6373
+fifo_rd         00000000   0   00000000      8c9e0000
+fifo_rd         00011001   2   00001000      0000fde0  -- UNDERRUN
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d5bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f000000eeeeeeee   -- cut off
+
+
+-- frame  6
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         00011010   0   00001000      04e7ecbc -- SOP  -- UNDERRUN
+
+--
+-- No frame transmitted, so not TXD check here
+--
+
+
+
+-- frame  7
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         00001010   0   00000000      04e7ecbc  -- SOP
+fifo_rd         00000000   0   00000000      c0450008
+fifo_rd         00000000   0   00000000      00003000
+fifo_rd         00000000   0   00000000      11020000
+fifo_rd         00000000   0   00000000      8c9e7258
+fifo_rd         00000000   0   00000000      00e0fce0
+fifo_rd         00000000   0   00000000      c1070200
+fifo_rd         00000000   0   00000000      1c00c107
+fifo_rd         00000000   0   00000000      0000e9b6
+fifo_rd         00000000   0   00000000      640a0308
+fifo_rd         00000000   0   00000000      69630002
+fifo_rd         00000000   0   00000000      006f6373
+fifo_rd         00000000   0   00000000      8c9e0000
+fifo_rd         00001001   2   00000000      0000fde0
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d5bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fd000000000000e32dc210
+
+-- frame  8
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         00001010   0   00000000      04e7ecbc -- SOP
+fifo_rd         00000000   0   00000000      c0450008
+fifo_rd         00000000   0   00000000      00003000
+fifo_rd         00000000   0   00000000      11020000
+fifo_rd         00000000   0   00000000      8c9e7258
+fifo_rd         00000000   0   00000000      00e0fce0
+fifo_rd         00000000   0   00000000      c1070200
+fifo_rd         00000000   0   00000000      1c00c107
+fifo_rd         00000000   0   00000000      0000e9b6
+fifo_rd         00000000   0   00000000      640a0308
+fifo_rd         00000000   0   00000000      69630002
+fifo_rd         00000000   0   00000000      006f6373
+fifo_rd         00000000   0   00000000      8c9e0000
+fifo_rd         00000001   2   00000000      0000fde0
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d5bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fd000000000000e32dc210
+
+
+
+-- no interupts are received for fifo interface frames as tx_complete is not
+-- routed to reg block when DMA is in circuit (but would report DMA frames)
+-- also status = 0 for the same reason
+-- Check not int status seen after frame sent
+apbrd(int)  24 00000008  -- check interrupt status for the DMA frames 
+apbwr       24 00000008  -- clear
+
+apbrd(20000)  24 00000000  -- check no interrupt at end
+
+-- bit 3 maps to tx_go for fifo frames = 0 as not set by apbwr to network control reg
+-- bit 5 = tx complete = 0 for fifo frames but indicates DMA frames
+-- Check transmit complete set for DMA frames and used bit set fro DMA frames
+apbrd	      14 00000021  -- tx status - frame transmitted, always enabled
+
+
+-- check transmit statistics
+-- Note: several statistics cannot be checked as we are sending random frames 
+--apbrd     100 00000c98  -- check octets transmitted bottom
+--apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 0000000f  -- check frames transmitted ok
+--apbrd     10C 00000000  -- check broadcast frames transmitted
+--apbrd     110 00000005  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+--apbrd     118 00000007  -- check frames transmitted 64
+--apbrd     11C 00000001  -- check frames transmitted 65-127
+--apbrd     120 00000001  -- check frames transmitted 128-255
+--apbrd     124 00000006  -- check frames transmitted 256-511
+--apbrd     128 00000000  -- check frames transmitted 512-1023
+--apbrd     12C 00000000  -- check frames transmitted 1024-1518
+--apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(25000)
+

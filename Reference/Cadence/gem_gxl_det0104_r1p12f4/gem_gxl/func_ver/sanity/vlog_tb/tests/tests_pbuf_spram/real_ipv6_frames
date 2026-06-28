@@ -1,0 +1,825 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : real_ipv6_frames
+--
+--   Author         : Andreas Bode (abode@cadence.com)
+--
+--   Date           : 09 October 2007
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- See if a variety of real IPv6 framescan be detected
+-- From Ethereal v6.pcap
+--
+-- Transmit frames:-
+-- TX Frame 1 : UDP/DNS Frame 1
+-- TX Frame 2 : ICMPv6 Frame 3
+-- TX Frame 3 : TCP Frame 16
+-- TX Frame 4 : UDP Frame 82
+-- TX Frame 5 : TCP/SSH Frame 19
+--
+-- Receive frames:-
+-- RX Frame 1 : UDP/DNS Frame 1
+-- RX Frame 2 : UDP Frame 82
+-- RX Frame 3 : TCP Frame 16
+-- RX Frame 4 : TCP/SSH Frame 19
+-- RX Frame 5 : ICMPv6 Frame 3
+--
+--------------------------------------------------------------------------------
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 0
+bus_grant_delay 0
+
+
+--******************************************************************************
+--  check reset state of PTP output flags
+--******************************************************************************
+pinsc(50) sof_tx         0
+pinsc     sync_frame_tx  0
+pinsc     delay_req_tx   0
+pinsc     sof_rx         0
+pinsc     sync_frame_rx  0
+pinsc     delay_req_rx   0
+pinsc     loopback       0
+pinsc     half_duplex    1
+pinsc     extint         0 
+--******************************************************************************
+-- Transmit Frames
+--******************************************************************************
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      10 00020c04  -- enable 4k ram and tcp offload
+apbwr      00 00000208  -- write tx_go and enable tx
+
+--******************************************************************************
+-- TX Frame 1 : UDP/DNS Frame 1 of v6.pcap
+--******************************************************************************
+
+dma_rd 55555504   0000805a -- end of frame, 
+dma_rd 55555500   98765000 -- dma reads pointer of 98765000
+
+dma_rd 98765000   07976000
+dma_rd 98765004   0000ea69
+dma_rd 98765008   da800586
+dma_rd 9876500c   0060dd86
+dma_rd 98765010   24000000
+dma_rd 98765014   fe3f4011
+dma_rd 98765018   00000705
+dma_rd 9876501c   00020100
+dma_rd 98765020   05feff86
+dma_rd 98765024   fe3fda80
+dma_rd 98765028   19480105
+dma_rd 9876502c   00000000
+dma_rd 98765030   00000000
+dma_rd 98765034   5c094200
+dma_rd 98765038   24003500
+dma_rd 9876503c   060009f0
+dma_rd 98765040   01000001
+dma_rd 98765044   00000000
+dma_rd 98765048   69060000
+dma_rd 9876504c   756a6f74
+dma_rd 98765050   726f036e
+dma_rd 98765054   ff000067
+dma_rd 98765058   00000100
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        0060970769ea     -- MAC DA
+txd        0000860580da     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        60000000         -- Version, Traffic Class, Flow Label  
+txd        0024             -- Payload length  (==36)                
+txd        1140             -- Next Header=UDP, Hop Limit=64
+txd        3ffe0507         -- Source Address (1st 32)
+txd        00000001         -- Source Address (2nd 32) 
+txd        020086ff         -- Source Address (3rd 32)
+txd        fe0580da         -- Source Address (4th 32) 
+txd        3ffe0501         -- Dest Address (1st 32)
+txd        48190000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        00000042         -- Dest Address (4th 32)
+txd        095c0035         -- UDP: Source and Destination Port
+txd        0024f009         -- UDP: Length, CheckSum
+txd        0006             -- DNS: Transaction ID
+txd        0100             -- DNS: Flags
+txd        0001             -- DNS: Questions
+txd        0000             -- DNS: Answers
+txd        00000000         -- DNS: Authority, Additional
+txd        0669746f         -- DNS: Queries
+txd        6a756e03         -- DNS: Queries
+txd        6f726700         -- DNS: Queries
+txd        00ff0001         -- DNS: Queries
+txd        40835549         -- CRC
+
+
+dma_wr 55555504 8000805a -- write used bit,
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "TX Frame 1 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- check TX status register - transmit complete
+apbwr      14 00000020  -- clear TX status register
+
+
+--******************************************************************************
+-- TX Frame 2 : ICMPv6 Frame 3 of v6.pcap
+--******************************************************************************
+
+dma_rd 5555550c   00008056 -- end of frame, 
+dma_rd 55555508   98765000 -- dma reads pointer of 98765000
+
+dma_rd 98765000   07976000
+dma_rd 98765004   0000ea69
+dma_rd 98765008   da800586
+dma_rd 9876500c   0060dd86
+dma_rd 98765010   20000000
+dma_rd 98765014   80feff3a
+dma_rd 98765018   00000000
+dma_rd 9876501c   00020000
+dma_rd 98765020   05feff86
+dma_rd 98765024   80feda80
+dma_rd 98765028   00000000
+dma_rd 9876502c   60020000
+dma_rd 98765030   07feff97
+dma_rd 98765034   0087ea69
+dma_rd 98765038   0000bd68
+dma_rd 9876503c   80fe0000
+dma_rd 98765040   00000000
+dma_rd 98765044   60020000
+dma_rd 98765048   07feff97
+dma_rd 9876504c   0101ea69
+dma_rd 98765050   05860000
+dma_rd 98765054   0000da80
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        0060970769ea     -- MAC DA
+txd        0000860580da     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        60000000         -- Version, Traffic Class, Flow Label
+txd        0020             -- Payload length  (==32)
+txd        3aff             -- Next Header=ICMPv6, Hop Limit= 255
+txd        fe800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        020086ff         -- Source Address (3rd 32)
+txd        fe0580da         -- Source Address (4th 32) 
+txd        fe800000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        026097ff         -- Dest Address (3rd 32)
+txd        fe0769ea         -- Dest Address (4th 32)
+txd        870068bd         -- ICMPv6: Type, Code, CheckSum
+txd        00000000         -- ICMPv6: Option
+txd        fe800000         -- ICMPv6: Target
+txd        00000000         -- ICMPv6: Target
+txd        026097ff         -- ICMPv6: Target
+txd        fe0769ea         -- ICMPv6: Target
+txd        01010000         -- ICMPv6: Option
+txd        860580da         -- ICMPv6: Option
+txd        c354fab5         -- CRC
+
+
+dma_wr 5555550c 80608056 -- write used bit
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "TX Frame 2 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- check TX status register - transmit complete
+apbwr      14 00000020  -- clear TX status register
+
+--******************************************************************************
+-- TX Frame 3 : TCP Frame 16 of v6.pcap
+--******************************************************************************
+
+dma_rd 55555514   0000805e -- end of frame, 
+dma_rd 55555510   98765000 -- dma reads pointer of 98765000
+
+
+dma_rd 98765000   07976000
+dma_rd 98765004   0000ea69
+dma_rd 98765008   da800586
+dma_rd 9876500c   0060dd86
+dma_rd 98765010   28000000
+dma_rd 98765014   fe3f4006
+dma_rd 98765018   00000705
+dma_rd 9876501c   00020100
+dma_rd 98765020   05feff86
+dma_rd 98765024   fe3fda80
+dma_rd 98765028   10040105
+dma_rd 9876502c   c0020000
+dma_rd 98765030   47feffdf
+dma_rd 98765034   fe033e03
+dma_rd 98765038   76d61600
+dma_rd 9876503c   000021f3
+dma_rd 98765040   02a00000
+dma_rd 98765044   d5180020
+dma_rd 98765048   04020000
+dma_rd 9876504c   0301a005
+dma_rd 98765050   01010003
+dma_rd 98765054   08000a08
+dma_rd 98765058   000057ca
+dma_rd 9876505c   00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        0060970769ea     -- MAC DA
+txd        0000860580da     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        60000000         -- Version, Traffic Class, Flow Label  
+txd        0028             -- Payload length  (==40)                
+txd        0640             -- Next Header=TCP, Hop Limit=64
+txd        3ffe0507         -- Source Address (1st 32)
+txd        00000001         -- Source Address (2nd 32) 
+txd        020086ff         -- Source Address (3rd 32)
+txd        fe0580da         -- Source Address (4th 32) 
+txd        3ffe0501         -- Dest Address (1st 32)
+txd        04100000         -- Dest Address (2nd 32)
+txd        02c0dfff         -- Dest Address (3rd 32)
+txd        fe47033e         -- Dest Address (4th 32)
+txd        03fe0016         -- TCP: Source and Destination Port
+txd        d676f321         -- TCP: Sequence number
+txd        00000000         -- TCP: Sequence number
+txd        a0022000         -- TCP: Header length, Flags, Window size
+txd        18d5             -- TCP: Checksum
+txd        00000204         -- TCP: Options
+txd        05a00103         -- TCP: Options
+txd        03000101         -- TCP: Options
+txd        080a0008         -- TCP: Options
+txd        ca570000         -- TCP: Options
+txd        0000             -- TCP: Options
+txd        48dc49e4         -- CRC
+
+
+dma_wr 55555514 8000805e -- write used bit
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "TX Frame 3 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- check TX status register - transmit complete
+apbwr      14 00000020  -- clear TX status register
+
+
+--******************************************************************************
+-- TX Frame 4 : UDP Frame 82 of v6.pcap
+--******************************************************************************
+
+dma_rd 5555551c   0000804a -- end of frame, 
+dma_rd 55555518   98765000 -- dma reads pointer of 98765000
+
+dma_rd 98765000   07976000
+dma_rd 98765004   0000ea69
+dma_rd 98765008   da800586
+dma_rd 9876500c   0060dd86
+dma_rd 98765010   14000000
+dma_rd 98765014   fe3f0111
+dma_rd 98765018   00000705
+dma_rd 9876501c   00020100
+dma_rd 98765020   05feff86
+dma_rd 98765024   fe3fda80
+dma_rd 98765028   10040105
+dma_rd 9876502c   c0020000
+dma_rd 98765030   47feffdf
+dma_rd 98765034   75a03e03
+dma_rd 98765038   14009b82
+dma_rd 9876503c   01018b82
+dma_rd 98765040   c8f90000
+dma_rd 98765044   edf536e7
+dma_rd 98765048   00000008
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        0060970769ea     -- MAC DA
+txd        0000860580da     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        60000000         -- Version, Traffic Class, Flow Label  
+txd        0014             -- Payload length  (==20)                
+txd        1101             -- Next Header=UDP, Hop Limit=1
+txd        3ffe0507         -- Source Address (1st 32)
+txd        00000001         -- Source Address (2nd 32) 
+txd        020086ff         -- Source Address (3rd 32)
+txd        fe0580da         -- Source Address (4th 32) 
+txd        3ffe0501         -- Dest Address (1st 32)
+txd        04100000         -- Dest Address (2nd 32)
+txd        02c0dfff         -- Dest Address (3rd 32)
+txd        fe47033e         -- Dest Address (4th 32)
+txd        a075829b         -- UDP: Source and Destination Port
+txd        0014828b         -- UDP: Length, CheckSum
+txd        01010000         -- UDP: Data
+txd        f9c8e736         -- UDP: Data
+txd        f5ed0800         -- UDP: Data
+txd        cf4ed31a         -- CRC
+
+
+dma_wr 5555551c 8000804a -- write used bit
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "TX Frame 4 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- check TX status register - transmit complete
+apbwr      14 00000028  -- clear TX status register
+
+
+--******************************************************************************
+-- TX Frame 5 : TCP/SSH Frame 19 of v6.pcap
+--******************************************************************************
+
+dma_rd 55555524   00008065 -- end of frame, 
+dma_rd 55555520   98765000 -- dma reads pointer of 98765000
+
+dma_rd 98765000   05860000
+dma_rd 98765004   6000da80
+dma_rd 98765008   ea690797
+dma_rd 9876500c   0060dd86
+dma_rd 98765010   2f000000
+dma_rd 98765014   fe3f3d06
+dma_rd 98765018   10040105
+dma_rd 9876501c   c0020000
+dma_rd 98765020   47feffdf
+dma_rd 98765024   fe3f3e03
+dma_rd 98765028   00000705
+dma_rd 9876502c   00020100
+dma_rd 98765030   05feff86
+dma_rd 98765034   1600da80
+dma_rd 98765038   7a0cfe03
+dma_rd 9876503c   76d6e405
+dma_rd 98765040   188022f3
+dma_rd 98765044   0f265c21
+dma_rd 98765048   01010000
+dma_rd 9876504c   01000a08
+dma_rd 98765050   08002569
+dma_rd 98765054   535357ca
+dma_rd 98765058   2e312d48
+dma_rd 9876505c   2e312d35
+dma_rd 98765060   36322e32
+dma_rd 98765064   0000000a
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        0000860580da     -- MAC DA
+txd        0060970769ea     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        60000000         -- Version, Traffic Class, Flow Label
+txd        002f             -- Payload length  (==47)
+txd        063d             -- Next Header=TCP, Hop Limit= 61
+txd        3ffe0501         -- Source Address (1st 32)
+txd        04100000         -- Source Address (2nd 32) 
+txd        02c0dfff         -- Source Address (3rd 32)
+txd        fe47033e         -- Source Address (4th 32) 
+txd        3ffe0507         -- Dest Address (1st 32)
+txd        00000001         -- Dest Address (2nd 32)
+txd        020086ff         -- Dest Address (3rd 32)
+txd        fe0580da         -- Dest Address (4th 32)
+txd        001603fe         -- TCP: Source port, Dest port
+txd        0c7a05e4         -- TCP: Sequence number
+txd        d676f322         -- TCP: Acknowledgement number
+txd        8018215c         -- TCP: Header length, Flags, Widow size
+txd        260f             -- TCP: Checksum
+txd        00000101         -- TCP: Option
+txd        080a0001         -- TCP: Option
+txd        69250008         -- TCP: Option
+txd        ca57             -- TCP: Option
+txd        5353482d         -- SSH Protocol
+txd        312e352d         -- SSH Protocol
+txd        312e322e         -- SSH Protocol
+txd        32360a           -- SSH Protocol
+txd        d3d58bbb         -- CRC
+
+
+dma_wr 55555524 80008065 -- write used bit
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "TX Frame 5 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd(int) 24 00000008  "TX Frame 5 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000008  -- clear interrupt status register
+apbrd      14 00000021  -- check TX status register - transmit complete
+apbwr      14 00000021  -- clear TX status register
+
+
+dma_rd 5555552c 80008062 -- used bit set
+dma_rd 55555528 98765000 -- dma reads pointer of 98765000
+
+--******************************************************************************
+-- Receive Frames
+--******************************************************************************
+
+apbwr      04 01080011  -- enable RX TCP offload engine.
+apbrd      04 01080011  -- verify write to network config register.
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      18 fffff000  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+
+
+--******************************************************************************
+-- RX Frame 1 :  UDP/DNS Frame 1 of v6.pcap
+--******************************************************************************
+
+apbrdf     20 00000000  "RX Frame 1 : UDP/DNS frame"
+                        -- trigger reception of frame
+
+
+rxd(apb)   5555555555d5     -- preamble & SDF
+rxd        0060970769ea     -- MAC DA
+rxd        0000860580da     -- MAC SA
+rxd        86dd             -- IPV6 type
+rxd        60000000         -- Version, Traffic Class, Flow Label  
+rxd        0024             -- Payload length  (==36)                
+rxd        1140             -- Next Header=UDP, Hop Limit=64
+rxd        3ffe0507         -- Source Address (1st 32)
+rxd        00000001         -- Source Address (2nd 32) 
+rxd        020086ff         -- Source Address (3rd 32)
+rxd        fe0580da         -- Source Address (4th 32) 
+rxd        3ffe0501         -- Dest Address (1st 32)
+rxd        48190000         -- Dest Address (2nd 32)
+rxd        00000000         -- Dest Address (3rd 32)
+rxd        00000042         -- Dest Address (4th 32)
+rxd        095c0035         -- UDP: Source and Destination Port
+rxd        0024f009         -- UDP: Length, CheckSum
+rxd        0006             -- DNS: Transaction ID
+rxd        0100             -- DNS: Flags
+rxd        0001             -- DNS: Questions
+rxd        0000             -- DNS: Answers
+rxd        00000000         -- DNS: Authority, Additional
+rxd        0669746f         -- DNS: Queries
+rxd        6a756e03         -- DNS: Queries
+rxd        6f726700         -- DNS: Queries
+rxd        00ff0001         -- DNS: Queries
+rxd        gggggggg         -- CRC
+
+
+-- supply the receive buffer location
+dma_rd fffff000 98765000 -- dma reads pointer of 98765000
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 98765000   07976000
+dma_wr 98765004   0000ea69
+dma_wr 98765008   da800586
+dma_wr 9876500c   0060dd86
+dma_wr 98765010   24000000
+dma_wr 98765014   fe3f4011
+dma_wr 98765018   00000705
+dma_wr 9876501c   00020100
+dma_wr 98765020   05feff86
+dma_wr 98765024   fe3fda80
+dma_wr 98765028   19480105
+dma_wr 9876502c   00000000
+dma_wr 98765030   00000000
+dma_wr 98765034   5c094200
+dma_wr 98765038   24003500
+dma_wr 9876503c   060009f0
+dma_wr 98765040   01000001
+dma_wr 98765044   00000000
+dma_wr 98765048   69060000
+dma_wr 9876504c   756a6f74
+dma_wr 98765050   726f036e
+dma_wr 98765054   ff000067
+dma_wr 98765058   83400100
+dma_wr 9876505c   00004955
+
+
+dma_wr fffff004 00c0c05e -- dma writes rx status
+dma_wr fffff000 98765001 -- dma writes ownership bit
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "RX Frame 1 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+--******************************************************************************
+-- RX Frame 2 : UDP Frame 82 of v6.pcap
+--******************************************************************************
+
+apbrdf     20 00000000  "RX Frame 2 : UDP frame"
+                        -- trigger reception of frame
+
+
+rxd(apb)   5555555555d5     -- preamble & SDF
+rxd        0060970769ea     -- MAC DA
+rxd        0000860580da     -- MAC SA
+rxd        86dd             -- IPV6 type
+rxd        60000000         -- Version, Traffic Class, Flow Label  
+rxd        0014             -- Payload length  (==20)                
+rxd        1101             -- Next Header=UDP, Hop Limit=1
+rxd        3ffe0507         -- Source Address (1st 32)
+rxd        00000001         -- Source Address (2nd 32) 
+rxd        020086ff         -- Source Address (3rd 32)
+rxd        fe0580da         -- Source Address (4th 32) 
+rxd        3ffe0501         -- Dest Address (1st 32)
+rxd        04100000         -- Dest Address (2nd 32)
+rxd        02c0dfff         -- Dest Address (3rd 32)
+rxd        fe47033e         -- Dest Address (4th 32)
+rxd        a075829b         -- UDP: Source and Destination Port
+rxd        0014828b         -- UDP: Length, CheckSum
+rxd        01010000         -- UDP: Data
+rxd        f9c8e736         -- UDP: Data
+rxd        f5ed0800         -- UDP: Data
+rxd        gggggggg         -- CRC
+
+
+-- supply the receive buffer location
+dma_rd fffff008 98768000 -- dma reads pointer of 98768000
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 98768000   07976000
+dma_wr 98768004   0000ea69
+dma_wr 98768008   da800586
+dma_wr 9876800c   0060dd86
+dma_wr 98768010   14000000
+dma_wr 98768014   fe3f0111
+dma_wr 98768018   00000705
+dma_wr 9876801c   00020100
+dma_wr 98768020   05feff86
+dma_wr 98768024   fe3fda80
+dma_wr 98768028   10040105
+dma_wr 9876802c   c0020000
+dma_wr 98768030   47feffdf
+dma_wr 98768034   75a03e03
+dma_wr 98768038   14009b82
+dma_wr 9876803c   01018b82
+dma_wr 98768040   c8f90000
+dma_wr 98768044   edf536e7
+dma_wr 98768048   4ecf0008
+dma_wr 9876804c   00001ad3
+
+
+dma_wr fffff00c 00c0c04e -- dma writes start of frame status
+dma_wr fffff008 98768001 -- dma writes ownership bit
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "RX Frame 2 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+--******************************************************************************
+-- RX Frame 3 : TCP Frame 16 of v6.pcap
+--******************************************************************************
+
+apbrdf     20 00000000  "RX Frame 3 : TCP frame"
+                        -- trigger reception of frame
+
+
+rxd(apb)   5555555555d5     -- preamble & SDF
+rxd        0060970769ea     -- MAC DA
+rxd        0000860580da     -- MAC SA
+rxd        86dd             -- IPV6 type
+rxd        60000000         -- Version, Traffic Class, Flow Label  
+rxd        0028             -- Payload length  (==40)                
+rxd        0640             -- Next Header=TCP, Hop Limit=64
+rxd        3ffe0507         -- Source Address (1st 32)
+rxd        00000001         -- Source Address (2nd 32) 
+rxd        020086ff         -- Source Address (3rd 32)
+rxd        fe0580da         -- Source Address (4th 32) 
+rxd        3ffe0501         -- Dest Address (1st 32)
+rxd        04100000         -- Dest Address (2nd 32)
+rxd        02c0dfff         -- Dest Address (3rd 32)
+rxd        fe47033e         -- Dest Address (4th 32)
+rxd        03fe0016         -- TCP: Source and Destination Port
+rxd        d676f321         -- TCP: Sequence number
+rxd        00000000         -- TCP: Sequence number
+rxd        a0022000         -- TCP: Header length, Flags, Window size
+rxd        18d5             -- TCP: Checksum
+rxd        00000204         -- TCP: Options
+rxd        05a00103         -- TCP: Options
+rxd        03000101         -- TCP: Options
+rxd        080a0008         -- TCP: Options
+rxd        ca570000         -- TCP: Options
+rxd        0000             -- TCP: Options
+rxd        gggggggg         -- CRC
+
+
+-- supply the receive buffer location
+dma_rd fffff010 98767000 -- dma reads pointer of 98767000
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 98767000   07976000
+dma_wr 98767004   0000ea69
+dma_wr 98767008   da800586
+dma_wr 9876700c   0060dd86
+dma_wr 98767010   28000000
+dma_wr 98767014   fe3f4006
+dma_wr 98767018   00000705
+dma_wr 9876701c   00020100
+dma_wr 98767020   05feff86
+dma_wr 98767024   fe3fda80
+dma_wr 98767028   10040105
+dma_wr 9876702c   c0020000
+dma_wr 98767030   47feffdf
+dma_wr 98767034   fe033e03
+dma_wr 98767038   76d61600
+dma_wr 9876703c   000021f3
+dma_wr 98767040   02a00000
+dma_wr 98767044   d5180020
+dma_wr 98767048   04020000
+dma_wr 9876704c   0301a005
+dma_wr 98767050   01010003
+dma_wr 98767054   08000a08
+dma_wr 98767058   000057ca
+dma_wr 9876705c   dc480000
+dma_wr 98767060   0000e449
+
+
+dma_wr fffff014 0080c062 -- dma writes rx status
+dma_wr fffff010 98767001 -- dma writes ownership bit
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "RX Frame 3 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+--******************************************************************************
+-- RX Frame 4 : TCP/SSH Frame 19 of v6.pcap
+--******************************************************************************
+
+apbrdf     20 00000000  "RX Frame 4 : TCP/SSH frame"
+                        -- trigger reception of frame
+
+
+rxd(apb)   5555555555d5     -- preamble & SDF
+rxd        0000860580da     -- MAC DA
+rxd        0060970769ea     -- MAC SA
+rxd        86dd             -- IPV6 type
+rxd        60000000         -- Version, Traffic Class, Flow Label
+rxd        002f             -- Payload length  (==47)
+rxd        063d             -- Next Header=TCP, Hop Limit= 61
+rxd        3ffe0501         -- Source Address (1st 32)
+rxd        04100000         -- Source Address (2nd 32) 
+rxd        02c0dfff         -- Source Address (3rd 32)
+rxd        fe47033e         -- Source Address (4th 32) 
+rxd        3ffe0507         -- Dest Address (1st 32)
+rxd        00000001         -- Dest Address (2nd 32)
+rxd        020086ff         -- Dest Address (3rd 32)
+rxd        fe0580da         -- Dest Address (4th 32)
+rxd        001603fe         -- TCP: Source port, Dest port
+rxd        0c7a05e4         -- TCP: Sequence number
+rxd        d676f322         -- TCP: Acknowledgement number
+rxd        8018215c         -- TCP: Header length, Flags, Widow size
+rxd        260f             -- TCP: Checksum
+rxd        00000101         -- TCP: Option
+rxd        080a0001         -- TCP: Option
+rxd        69250008         -- TCP: Option
+rxd        ca57             -- TCP: Option
+rxd        5353482d         -- SSH Protocol
+rxd        312e352d         -- SSH Protocol
+rxd        312e322e         -- SSH Protocol
+rxd        32360a           -- SSH Protocol
+rxd        gggggggg         -- CRC
+
+
+-- supply the receive buffer location
+dma_rd fffff018 98769000 -- dma reads pointer of 98769000
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 98769000   05860000
+dma_wr 98769004   6000da80
+dma_wr 98769008   ea690797
+dma_wr 9876900c   0060dd86
+dma_wr 98769010   2f000000
+dma_wr 98769014   fe3f3d06
+dma_wr 98769018   10040105
+dma_wr 9876901c   c0020000
+dma_wr 98769020   47feffdf
+dma_wr 98769024   fe3f3e03
+dma_wr 98769028   00000705
+dma_wr 9876902c   00020100
+dma_wr 98769030   05feff86
+dma_wr 98769034   1600da80
+dma_wr 98769038   7a0cfe03
+dma_wr 9876903c   76d6e405
+dma_wr 98769040   188022f3
+dma_wr 98769044   0f265c21
+dma_wr 98769048   01010000
+dma_wr 9876904c   01000a08
+dma_wr 98769050   08002569
+dma_wr 98769054   535357ca
+dma_wr 98769058   2e312d48
+dma_wr 9876905c   2e312d35
+dma_wr 98769060   36322e32
+dma_wr 98769064   8bd5d30a
+dma_wr 98769068   000000bb
+
+
+dma_wr fffff01c 0080c069 -- dma writes rx status
+dma_wr fffff018 98769001 -- dma writes ownership bit
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "RX Frame 4 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+--******************************************************************************
+-- RX Frame 5 : ICMPv6 Frame 3 of v6.pcap
+--******************************************************************************
+
+apbrdf     20 00000000  "RX Frame 5 : ICMPv6 frame"
+                        -- trigger reception of frame
+
+
+rxd(apb)   5555555555d5     -- preamble & SDF
+rxd        0060970769ea     -- MAC DA
+rxd        0000860580da     -- MAC SA
+rxd        86dd             -- IPV6 type
+rxd        60000000         -- Version, Traffic Class, Flow Label
+rxd        0020             -- Payload length  (==32)
+rxd        3aff             -- Next Header=ICMPv6, Hop Limit= 255
+rxd        fe800000         -- Source Address (1st 32)
+rxd        00000000         -- Source Address (2nd 32) 
+rxd        020086ff         -- Source Address (3rd 32)
+rxd        fe0580da         -- Source Address (4th 32) 
+rxd        fe800000         -- Dest Address (1st 32)
+rxd        00000000         -- Dest Address (2nd 32)
+rxd        026097ff         -- Dest Address (3rd 32)
+rxd        fe0769ea         -- Dest Address (4th 32)
+rxd        870068bd         -- ICMPv6: Type, Code, CheckSum
+rxd        00000000         -- ICMPv6: Option
+rxd        fe800000         -- ICMPv6: Target
+rxd        00000000         -- ICMPv6: Target
+rxd        026097ff         -- ICMPv6: Target
+rxd        fe0769ea         -- ICMPv6: Target
+rxd        01010000         -- ICMPv6: Option
+rxd        860580da         -- ICMPv6: Option
+rxd        gggggggg         -- CRC
+
+
+-- supply the receive buffer location
+dma_rd fffff020 98766000 -- dma reads pointer of 98766000
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 98766000   07976000
+dma_wr 98766004   0000ea69
+dma_wr 98766008   da800586
+dma_wr 9876600c   0060dd86
+dma_wr 98766010   20000000
+dma_wr 98766014   80feff3a
+dma_wr 98766018   00000000
+dma_wr 9876601c   00020000
+dma_wr 98766020   05feff86
+dma_wr 98766024   80feda80
+dma_wr 98766028   00000000
+dma_wr 9876602c   60020000
+dma_wr 98766030   07feff97
+dma_wr 98766034   0087ea69
+dma_wr 98766038   0000bd68
+dma_wr 9876603c   80fe0000
+dma_wr 98766040   00000000
+dma_wr 98766044   60020000
+dma_wr 98766048   07feff97
+dma_wr 9876604c   0101ea69
+dma_wr 98766050   05860000
+dma_wr 98766054   54c3da80
+dma_wr 98766058   0000b5fa
+
+
+dma_wr fffff024 0000c05a -- dma writes start of frame status
+dma_wr fffff020 98766001 -- dma writes ownership bit
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "RX Frame 5 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+-- supply the receive buffer location
+dma_rd fffff028 98761000 -- dma reads pointer of 98761000
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(11000)
+

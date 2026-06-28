@@ -1,0 +1,242 @@
+-------------------------------------------------
+-- basic_tx test scenario for the Ethernet MAC --
+-------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+-- Written by Steven Ho
+--
+-- 21st Mar 2002     Steven started it..
+--
+-- Inputs a TCP frame which is split into 2 frames by the TCP offload
+-- functionality
+-- IPv6 encapsulation with 2 8 byte header extensions
+--  - results in both extension headers being in same stripe
+--
+-- ************************************************************************** --
+
+wait_states 2
+bus_grant_delay 1
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00680000  -- set DMA bus width to 128 bit
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 10000000  -- write address of transmit buffer descriptor in memory
+apbrd      1c 10000000  -- check transmit queue pointer
+apbwr      10 00020c04  -- little endian, tx checksums enabled
+apbwr      00 00000208  -- write tx_go and enable tx
+
+-- FRAME 1
+-- Header and payload in separate buffers with separate descriptors
+
+-- Header Descriptor
+dma_rd tx_descr 10000000 20000000 -- header buffer base address
+dma_rd tx_descr 10000004 0004005a -- hardware CRC, TSO enable, seq num from header, stream 0, 90 bytes
+-- Payload Descriptor
+dma_rd tx_descr 10000008 30000000 -- payload buffer base address
+dma_rd tx_descr 1000000C 0032805a -- MSS of 50 bytes, last bit set, length 90 bytes
+-- Used Descriptor
+dma_rd tx_descr 10000010 00000000
+dma_rd tx_descr 10000014 80000000 -- Used Bit
+
+
+-- Header buffer read
+dma_rd 20000000 11111111    --  DA3     / DA2     / DA1   / DA0
+dma_rd 20000004 22221111    --  SA1     / SA0     / DA5   / DA4
+dma_rd 20000008 22222222    --  SA5     / SA4     / SA3   / SA2
+dma_rd 2000000c 0060dd86    --  TC FL   / VER TC  / ET0   / ET1   --  ET = IPV6 = 86dd
+dma_rd 20000010 00000000    --  PL0     / PL1     / FL    / FL
+dma_rd 20000014 11110000    --  SA      / SA      / HL    / NH    --  NH = 00 = not TCP so therefore IPv6 extension
+dma_rd 20000018 11111111    --  SA      / SA      / SA    / SA
+dma_rd 2000001c 11111111    --  SA      / SA      / SA    / SA 
+dma_rd 20000020 11111111    --  SA      / SA      / SA    / SA   
+dma_rd 20000024 22221111    --  DA      / DA      / SA    / SA 
+dma_rd 20000028 22222222    --  DA      / DA      / DA    / DA 
+dma_rd 2000002c 22222222    --  DA      / DA      / DA    / DA 
+dma_rd 20000030 22222222    --  DA      / DA      / DA    / DA 
+dma_rd 20000034 00002222    --  NH      / EHL     / DA    / DA    -- NH = 00 = not TCP, EHL = 00 = 8 octets
+dma_rd 20000038 cccccccc    --  EH      / EH      / EH    / EH
+dma_rd 2000003c 0006cccc    --  NH      / EHL     / EH    / EH    -- NH = 06 = TCP, EHL = 00 = 8 octets
+dma_rd 20000040 dddddddd    --  EH      / EH      / EH    / EH
+dma_rd 20000044 3333dddd    --  SP      / SP      / EH    / EH 
+dma_rd 20000048 34124444    --  SN2     / SN3     / DP    / DP 
+dma_rd 2000004c 55557856    --  AN2     / AN3     / SN0   / SN1
+dma_rd 20000050 00005555    --  FLAGS   / DO      / AN0   / AN1
+dma_rd 20000054 00000000    --  CS0     / CS1     / WS0   / WS1 
+dma_rd 20000058 baad0000    --          /         / UP0   / UP1 
+dma_rd 2000005c baadbaad    --  PAD
+
+
+-- Data buffer read - 50 bytes
+dma_rd 30000000 aaaaaaaa
+dma_rd 30000004 aaaaaaaa
+dma_rd 30000008 aaaaaaaa
+dma_rd 3000000c aaaaaaaa
+dma_rd 30000010 aaaaaaaa 
+dma_rd 30000014 aaaaaaaa 
+dma_rd 30000018 aaaaaaaa 
+dma_rd 3000001c aaaaaaaa 
+dma_rd 30000020 aaaaaaaa 
+dma_rd 30000024 aaaaaaaa
+dma_rd 30000028 aaaaaaaa 
+dma_rd 3000002c aaaaaaaa 
+dma_rd 30000030 bbbbaaaa 
+dma_rd 30000034 bbbbbbbb
+dma_rd 30000038 bbbbbbbb
+dma_rd 3000003c bbbbbbbb
+
+-- Header buffer read
+dma_rd 20000000 11111111    --  DA3     / DA2     / DA1   / DA0
+dma_rd 20000004 22221111    --  SA1     / SA0     / DA5   / DA4
+dma_rd 20000008 22222222    --  SA5     / SA4     / SA3   / SA2
+dma_rd 2000000c 0060dd86    --  TC FL   / VER TC  / ET0   / ET1   --  ET = IPV6 = 86dd
+dma_rd 20000010 00000000    --  PL0     / PL1     / FL    / FL
+dma_rd 20000014 11110000    --  SA      / SA      / HL    / NH    --  NH = 00 = not TCP so therefore IPv6 extension
+dma_rd 20000018 11111111    --  SA      / SA      / SA    / SA
+dma_rd 2000001c 11111111    --  SA      / SA      / SA    / SA 
+dma_rd 20000020 11111111    --  SA      / SA      / SA    / SA   
+dma_rd 20000024 22221111    --  DA      / DA      / SA    / SA 
+dma_rd 20000028 22222222    --  DA      / DA      / DA    / DA 
+dma_rd 2000002c 22222222    --  DA      / DA      / DA    / DA 
+dma_rd 20000030 22222222    --  DA      / DA      / DA    / DA 
+dma_rd 20000034 00002222    --  NH      / EHL     / DA    / DA    -- NH = 00 = not TCP, EHL = 00 = 8 octets
+dma_rd 20000038 cccccccc    --  EH      / EH      / EH    / EH
+dma_rd 2000003c 0006cccc    --  NH      / EHL     / EH    / EH    -- NH = 06 = TCP, EHL = 00 = 8 octets
+dma_rd 20000040 dddddddd    --  EH      / EH      / EH    / EH
+dma_rd 20000044 3333dddd    --  SP      / SP      / EH    / EH 
+dma_rd 20000048 34124444    --  SN2     / SN3     / DP    / DP 
+dma_rd 2000004c 55557856    --  AN2     / AN3     / SN0   / SN1
+dma_rd 20000050 00005555    --  FLAGS   / DO      / AN0   / AN1
+dma_rd 20000054 00000000    --  CS0     / CS1     / WS0   / WS1 
+dma_rd 20000058 baad0000    --          /         / UP0   / UP1 
+dma_rd 2000005c baadbaad    --  PAD
+
+-- Data buffer read - 40 bytes - starting from end of first small frame
+dma_rd 30000030 bbbbaaaa
+dma_rd 30000034 bbbbbbbb
+dma_rd 30000038 bbbbbbbb
+dma_rd 3000003c bbbbbbbb
+dma_rd 30000040 bbbbbbbb 
+dma_rd 30000044 bbbbbbbb 
+dma_rd 30000048 bbbbbbbb 
+dma_rd 3000004c bbbbbbbb 
+dma_rd 30000050 bbbbbbbb 
+dma_rd 30000054 bbbbbbbb
+dma_rd 30000058 ccccbbbb 
+dma_rd 3000005c cccccccc 
+
+
+-- Segmented frame 1
+
+txd    55555555555555d5   -- preamble
+txd    111111111111       -- ethernet header - destination address
+txd    222222222222       -- ethernet header - source address
+txd    86dd               -- ethernet header - ethertype
+
+txd    60                 -- IPv6 header - version, traffic class 
+txd    00                 -- IPv6 header - traffic class, flow label
+txd    0000               -- IPv6 header - flow label
+txd    0056               -- IPv6 header - payload length - 86 bytes - 2 x IPv6 extension + TCP header + 50 payload
+txd    00                 -- IPv6 header - next header - non-TCP
+txd    00                 -- IPv6 header - hop limit
+txd    11111111           -- IPv6 header - source address
+txd    11111111           -- IPv6 header - source address
+txd    11111111           -- IPv6 header - source address
+txd    11111111           -- IPv6 header - source address
+txd    22222222           -- IPv6 header - destination address
+txd    22222222           -- IPv6 header - destination address
+txd    22222222           -- IPv6 header - destination address
+txd    22222222           -- IPv6 header - destination address
+
+txd    00                 -- IPv6 ext header - next header = 00 = non-TCP
+txd    00                 -- IPv6 ext header - extension header length = 00 = 8 octets
+txd    cccccccccccc       -- IPv6 ext header
+
+txd    06                 -- IPv6 ext header - next header = 06 = TCP
+txd    00                 -- IPv6 ext header - extension header length = 00 = 8 octets
+txd    dddddddddddd       -- IPv6 ext header
+
+txd    3333               -- TCP header  - Source Port
+txd    4444               -- TCP header  - Destination Port
+txd    12345678           -- TCP header  - Sequence Number
+txd    55555555           -- TCP header  - Acknowledgement Number
+txd    0000               -- TCP header  - Data Offset, Flags
+txd    0000               -- TCP header  - Window Size
+txd    30a1               -- TCP header  - Checksum
+txd    0000               -- TCP header  - Urgent Pointer
+
+txd    aaaaaaaaaaaaaaaaaaaa
+txd    aaaaaaaaaaaaaaaaaaaa
+txd    aaaaaaaaaaaaaaaaaaaa
+txd    aaaaaaaaaaaaaaaaaaaa
+txd    aaaaaaaaaaaaaaaaaaaa
+txd    d9ff8983
+
+
+
+-- Segmented frame 2
+
+txd    55555555555555d5   -- preamble
+txd    111111111111       -- ethernet header - destination address
+txd    222222222222       -- ethernet header - source address
+txd    86dd               -- ethernet header - ethertype
+
+txd    60                 -- IPv6 header - version, traffic class 
+txd    00                 -- IPv6 header - traffic class, flow label
+txd    0000               -- IPv6 header - flow label
+txd    004c               -- IPv6 header - payload length - 68 bytes - 2 x IPv6 extension + TCP header + 40 payload
+txd    00                 -- IPv6 header - next header - non-TCP
+txd    00                 -- IPv6 header - hop limit
+txd    11111111           -- IPv6 header - source address
+txd    11111111           -- IPv6 header - source address
+txd    11111111           -- IPv6 header - source address
+txd    11111111           -- IPv6 header - source address
+txd    22222222           -- IPv6 header - destination address
+txd    22222222           -- IPv6 header - destination address
+txd    22222222           -- IPv6 header - destination address
+txd    22222222           -- IPv6 header - destination address
+
+txd    00                 -- IPv6 ext header - next header = 00 = non-TCP
+txd    00                 -- IPv6 ext header - extension header length = 00 = 8 octets
+txd    cccccccccccc       -- IPv6 ext header
+
+txd    06                 -- IPv6 ext header - next header = 06 = TCP
+txd    00                 -- IPv6 ext header - extension header length = 00 = 8 octets
+txd    dddddddddddd       -- IPv6 ext header
+
+txd    3333               -- TCP header  - Source Port
+txd    4444               -- TCP header  - Destination Port
+txd    123456aa           -- TCP header  - Sequence Number
+txd    55555555           -- TCP header  - Acknowledgement Number
+txd    0000               -- TCP header  - Data Offset, Flags
+txd    0000               -- TCP header  - Window Size
+txd    3079               -- TCP header  - Checksum
+txd    0000               -- TCP header  - Urgent Pointer
+
+txd    bbbbbbbbbbbbbbbbbbbb
+txd    bbbbbbbbbbbbbbbbbbbb
+txd    bbbbbbbbbbbbbbbbbbbb
+txd    bbbbbbbbbbbbbbbbbbbb
+txd    f669382d
+
+-- write transmit complete status for frame
+dma_wr 10000004 8004005a -- write used bit
+
+-- check frame completion interrupts
+
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete, stop bit
+apbwr       24 00000088  -- clear interrupt status
+apbrd	    14 00000021  -- tx status - frame transmitted, stop bit
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(10000)
+

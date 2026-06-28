@@ -1,0 +1,439 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2003
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_overflow2
+--
+--   Authors        : Martin James (martinj@tality.com)
+--
+--   Date           : 24th April 2003
+--
+--------------------------------------------------------------------------------
+-- Test Description
+-- This test introduces long periods of DMA bus activity, by stopping hready,
+-- such that it causes overflows on receive.
+-- 
+-- Functional Coverage  																																																																											  tion.
+-- * Checks the overflow indication of the RX MAC
+-- * Checks the overflow indication of the FIFO
+-- * Checks the detection of overflow on EOP writes
+-- * Checks the detection of overflow on SOP writes
+-- * Checks DMA buffer recovery after detection of overflow
+-- 
+-- Detailed Test Description
+-- 1. Setup DMA wait states for the test.
+-- 2. Initialise the GEM for 100Mbits/s 32-bit DMA mode.
+-- 3. Enable all interrupts, and then enable receive.
+-- 4. Receive a frame that is 256 bytes long. Stop hready near the end of 
+--    the frame such that the receive FIFO overflows on the final write.
+--    Check that an overflow status is indicated and that the next frame
+--    recovers the current buffer.
+-- 5. Receive a frame that is 256 bytes long. Ensure that hready is still
+--    stopped from the end of the last test such that overflow is still
+--    indicated when about to do the SOP write.
+--    Check that an overflow status is indicated and that no DMA activity
+--    is seen. Check that the next frame recovers the same buffer
+-- 6. Receive a frame that is 256 bytes long. Stop hready near the end of the
+--    first buffer such that the receive FIFO overflows momentarily.
+--    Check that an overflow status is generated and that the final buffer
+--    is recovered.
+-- 7. Receive a good frame of 64 bytes.
+-- 8. check statistic registers
+-- 
+--------------------------------------------------------------------------------
+
+
+-- *****************************************************************************
+-- 1. Setup DMA wait states for the test.
+-- *****************************************************************************
+wait_states     1
+bus_grant_delay 0
+
+
+-- *****************************************************************************
+-- 2. Initialise the GEM for 100Mbits/s 32-bit DMA mode.
+-- 3. Enable all interrupts, and then enable receive.
+-- *****************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00080000  -- 32 bit AHB
+apbrd      04 00080000  -- check new value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 66660000  -- write receive queue pointer
+apbrd      18 66660000  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      20 00000000  -- check contents of the receive status register
+
+
+
+-- *****************************************************************************
+-- 4. Receive a frame that is 256 bytes long. Stop hready near the end of 
+--    the frame such that the receive FIFO overflows on the final write.
+--    Check that an overflow status is indicated and that the next frame
+--    recovers the current buffer.
+-- *****************************************************************************
+apbrdf     20 00000000  "Test 1 : overflow at EOP write"
+
+
+rxd(apb)     d578563412111111112222222233333333   -- 256 bytes
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            444444445555555566666666gggggggg
+
+-- descriptor operation
+dma_rd 66660000 55550000 -- dma reads pointer of 55550000
+
+dma_wr 55550000 12345678 -- store frame to memory
+dma_wr 55550004 11111111
+dma_wr 55550008 22222222
+dma_wr 5555000c 33333333
+dma_wr 55550010 44444444
+dma_wr 55550014 55555555
+dma_wr 55550018 66666666
+dma_wr 5555001c 77777777
+dma_wr 55550020 44444444
+dma_wr 55550024 55555555
+dma_wr 55550028 66666666
+dma_wr 5555002c 77777777
+dma_wr 55550030 44444444
+dma_wr 55550034 55555555
+dma_wr 55550038 66666666
+dma_wr 5555003c 77777777
+dma_wr 55550040 44444444
+dma_wr 55550044 55555555
+dma_wr 55550048 66666666
+dma_wr 5555004c 77777777
+dma_wr 55550050 44444444
+dma_wr 55550054 55555555
+dma_wr 55550058 66666666
+dma_wr 5555005c 77777777
+dma_wr 55550060 44444444
+dma_wr 55550064 55555555
+dma_wr 55550068 66666666
+dma_wr 5555006c 77777777
+dma_wr 55550070 44444444
+dma_wr 55550074 55555555
+dma_wr 55550078 66666666
+dma_wr 5555007c 77777777
+
+-- descriptor operation
+dma_wr 66660004 00004000 -- SOF
+dma_wr 66660000 55550001 -- owned
+dma_rd 66660008 55550080 -- next buffer pointer
+
+dma_wr 55550080 44444444
+dma_wr 55550084 55555555
+dma_wr 55550088 66666666
+dma_wr 5555008c 77777777
+dma_wr 55550090 44444444
+dma_wr 55550094 55555555
+dma_wr 55550098 66666666
+dma_wr 5555009c 77777777
+dma_wr 555500a0 44444444
+dma_wr 555500a4 55555555
+dma_wr 555500a8 66666666
+dma_wr 555500ac 77777777
+dma_wr 555500b0 44444444
+dma_wr 555500b4 55555555
+dma_wr 555500b8 66666666
+dma_wr 555500bc 77777777
+dma_wr 555500c0 44444444
+dma_wr 555500c4 55555555
+dma_wr 555500c8 66666666
+dma_wr 555500cc 77777777
+dma_wr 555500d0 44444444
+dma_wr 555500d4 55555555
+dma_wr 555500d8 66666666
+dma_wr 555500dc 77777777
+dma_wr 555500e0 44444444
+dma_wr 555500e4 55555555
+dma_wr 555500e8 66666666
+dma_wr 555500ec 77777777
+dma_wr 555500f0 44444444
+dma_wr 555500f4 55555555
+--dma_wr 555500f8 66666666
+--dma_wr 555500fc 8d596821
+
+-- stop hready here to create an overflow on the last EOP write
+hready_stop 581 150
+
+
+
+
+-- check status
+apbrd(int) 24 00000400  "Test 1 Complete"
+                        -- check interrupt status - overrun
+apbrd      20 00000004  -- check contents of the rx status register- overrun
+apbwr      20 00000004  -- clear it
+
+
+
+-- *****************************************************************************
+-- 5. Receive a frame that is 256 bytes long. Ensure that hready is still
+--    stopped from the end of the last test such that overflow is still
+--    indicated when about to do the SOP write.
+--    Check that an overflow status is indicated and that no DMA activity
+--    is seen. Check that the next frame recovers the same buffer
+-- *****************************************************************************
+apbrd     20 00000000  "Test 2 : overflow at SOP write"
+
+
+rxd(gap)     d578563412111111112222222233333333   -- 256 bytes
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            444444445555555566666666gggggggg
+
+
+-- no DMA because of overflow on SOP write
+
+
+-- check status
+apbrd(int) 24 00000400  "Test 2 Complete"
+                        -- check interrupt status - overrun
+apbrd      20 00000004  -- check contents of the rx status register- overrun
+apbwr      20 00000004  -- clear it
+
+
+
+-- *****************************************************************************
+-- 6. Receive a frame that is 256 bytes long. Stop hready near the end of the
+--    first buffer such that the receive FIFO overflows momentarily.
+--    Check that an overflow status is generated and that the final buffer
+--    is recovered.
+-- *****************************************************************************
+apbrdf     20 00000000  "Test 3 : overflow at end of first buffer"
+
+
+
+rxd(apb)     d578563412111111112222222233333333   -- 256 bytes
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            444444445555555566666666gggggggg
+
+dma_wr 55550080 12345678 -- recover buffer
+dma_wr 55550084 11111111
+dma_wr 55550088 22222222
+dma_wr 5555008c 33333333
+dma_wr 55550090 44444444
+dma_wr 55550094 55555555
+dma_wr 55550098 66666666
+dma_wr 5555009c 77777777
+dma_wr 555500a0 44444444
+dma_wr 555500a4 55555555
+dma_wr 555500a8 66666666
+dma_wr 555500ac 77777777
+dma_wr 555500b0 44444444
+dma_wr 555500b4 55555555
+dma_wr 555500b8 66666666
+dma_wr 555500bc 77777777
+dma_wr 555500c0 44444444
+dma_wr 555500c4 55555555
+dma_wr 555500c8 66666666
+dma_wr 555500cc 77777777
+dma_wr 555500d0 44444444
+dma_wr 555500d4 55555555
+dma_wr 555500d8 66666666
+dma_wr 555500dc 77777777
+dma_wr 555500e0 44444444
+dma_wr 555500e4 55555555
+dma_wr 555500e8 66666666
+dma_wr 555500ec 77777777
+dma_wr 555500f0 44444444
+dma_wr 555500f4 55555555
+dma_wr 555500f8 66666666
+dma_wr 555500fc 77777777
+
+-- stop hready here to create an overflow
+hready_stop 740 60
+
+
+-- descriptor operation
+dma_wr 6666000c 00004000 -- SOF
+dma_wr 66660008 55550081 -- owned
+dma_rd 66660010 55550100 -- next buffer pointer
+
+dma_wr 55550100 44444444
+dma_wr 55550104 55555555
+dma_wr 55550108 66666666
+dma_wr 5555010c 77777777
+dma_wr 55550110 44444444
+dma_wr 55550114 55555555
+dma_wr 55550118 44444444 -- missing data because of overflow = 66666666
+dma_wr 5555011c 55555555 -- missing data because of overflow = 77777777
+dma_wr 55550120 66666666
+dma_wr 55550124 77777777
+dma_wr 55550128 44444444
+dma_wr 5555012c 55555555
+dma_wr 55550130 66666666
+dma_wr 55550134 77777777
+dma_wr 55550138 44444444
+dma_wr 5555013c 55555555
+dma_wr 55550140 66666666
+dma_wr 55550144 77777777
+dma_wr 55550148 44444444
+dma_wr 5555014c 55555555
+dma_wr 55550150 66666666
+dma_wr 55550154 77777777
+dma_wr 55550158 44444444
+dma_wr 5555015c 55555555
+dma_wr 55550160 66666666
+dma_wr 55550164 77777777
+dma_wr 55550168 44444444
+dma_wr 5555016c 55555555
+dma_wr 55550170 66666666 -- shorter than expected because of missing data
+
+
+-- check status
+apbrd(int) 24 00000400  "Test 3 Complete"
+                        -- check interrupt status - overrun
+apbrd      20 00000004  -- check contents of the rx status register- overrun
+apbwr      20 00000004  -- clear it
+
+
+
+
+-- *****************************************************************************
+-- 7. Receive a good frame of 64 bytes.
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Test 4 : Good 64 byte frame"
+
+rxd(apb)     d578563412111111112222222233333333   -- 64 bytes
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            444444445555555566666666gggggggg
+
+dma_wr 55550100 12345678 -- buffer recovered
+dma_wr 55550104 11111111
+dma_wr 55550108 22222222
+dma_wr 5555010c 33333333
+dma_wr 55550110 44444444
+dma_wr 55550114 55555555
+dma_wr 55550118 66666666
+dma_wr 5555011c 77777777
+dma_wr 55550120 44444444
+dma_wr 55550124 55555555
+dma_wr 55550128 66666666
+dma_wr 5555012c 77777777
+dma_wr 55550130 44444444
+dma_wr 55550134 55555555
+dma_wr 55550138 66666666
+dma_wr 5555013c 2008fa4d
+
+-- descriptor operation
+dma_wr 66660014 0800c040 -- EOF, 256 bytes and address 1 match
+dma_wr 66660010 55550101 -- owned
+dma_rd 66660018 55550180 -- next buffer pointer
+
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4 Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+
+
+
+
+--******************************************************************************
+-- 8. check statistic registers
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000040  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000001  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000001  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000003  -- check receive overrun errors
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(7000)
+

@@ -1,0 +1,361 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_disable
+--
+--   Authors        : Mike MacGillis (mikema@tality.com)
+--
+--   Date           : 9 April, 2002
+--
+--------------------------------------------------------------------------------
+-- Test Description
+-- This tests ensures the gem_dma_rx module state machine exits out of each
+-- state when the receive is disabled in the GEM.
+-- 
+-- Functional Coverage  																																																																											  tion.
+-- · Ensures the state machine in gem_dma_rx exits out of each state when
+--   receive is disabled in the GEM.
+-- · Ensures proper code coverage results. 
+-- 
+-- Detailed Test Description
+-- 1. Initialise GEM.
+-- 2. Enable the GEM. Start receiving a minimum sized frame. However,
+--    a used bit is read in the rx buffer descriptor.  This will cause the 
+--    GEM to stay in state one in the gem_dma_rx state machine. Now, disable
+--    receive and this will cause the state machine to go back to idle.
+-- 3. Reenable receive and disable it again immediately. The state machine
+--    in gem_dma_rx should be in state two when receive is disabled. This will
+--    cause the state machine to return to the idle state. 
+-- 4. Reenable receive several times and then disable it. The state machine
+--    in gem_dma_rx should be in state three when receive is disabled. This will
+--    cause the state machine to return to the idle state.
+-- 5. Reenable receive and receive a minimum length frame. Half way through reception
+--    of the frame disable receive. The state machine in the gem_dma_rx should be in state
+--    four when receive is disabled. This will cause the state machine to return to the idle state.
+-- 6. Check the statistic registers.
+-- 
+-- 
+--------------------------------------------------------------------------------
+
+-- basic_rx test scenario for the Ethernet MAC --
+randomize_hready -descr_min 0 -descr_max 5 -data_min 0 -data_max 3 -read_max 5 -write_max 5
+bus_grant_delay 0
+--------------------------------------------------------------------------------
+-- 1. Initialise GEM.
+-- 2. Enable the GEM. Start receiving a minimum sized frame. However,
+--    a used bit is read in the rx buffer descriptor.  This will cause the 
+--    GEM to stay in state one in the gem_dma_rx state machine. Now, disable
+--    receive and this will cause the state machine to go back to idle.
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(80)  00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      10 000207c8  -- DMA configuration reg - set burst length to 8
+apbwr      18 fffffff0  -- write receive queue pointer
+apbrd      18 fffffff0  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 00080001  -- indicate 100M operation, will check pin l8r.
+apbwr      00 00000000  -- disable receive 
+apbrd      04 00080001  -- verify write to speed register..
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+-- drive the receive frame data into the GMII interface
+rxd(apb)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- supply the receive buffer location
+--dma_rd rx_descr fffffff0 22222005 -- dma reads pointer of 22222005
+
+--------------------------------------------------------------------------------
+-- 3. Reenable receive and disable it again immediately. The state machine
+--    in gem_dma_rx should be in idle state when receive is disabled. This will
+--    cause the state machine to return to the idle state. 
+--------------------------------------------------------------------------------
+
+apbwr      00 00000004  -- enable receive
+apbwr      00 00000000  -- disable receive
+
+-- supply the receive buffer location
+--dma_rd rx_descr fffffff0 22222004 -- dma reads pointer of 22222004
+
+
+--------------------------------------------------------------------------------
+-- 4. Reenable receive and receive a minimum length frame. Half way through reception
+--    of the frame disable receive. The state machine in the gem_dma_rx should be in state
+--    1 when receive is disabled. This will cause the state machine to return to the idle state.
+--------------------------------------------------------------------------------
+
+-- setup the dma interface
+apbwr(1000)     18  21c4a8a4    -- set address of the receive queue descriptor
+apbwr           00  00000004    -- enable receive
+
+-- add the destination address to a local address match register
+apbwr           88  12345678    -- specific address register 1 bottom
+apbwrf          8c  00001111    -- specific address register 1 top
+apbwr(1318)     00  00000000    -- disable receive
+
+-- receive a 64 (0x40) byte frame:
+-- preamble: '0x5555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x111112345678' unicast
+-- srcaddr:  '0xb42d8eebaaa6' 
+-- idfield:  '0xd143'  typeid field
+-- data:      46 bytes
+-- crc:       autogenerated
+
+rxd(apb)         5555d5785634121111a6aaeb8e2db4d14367db
+rxd               d29f2aec82a857b8773fea7ab766f38f
+rxd               93e6275b14c771e198c3da3c11c34225
+rxd               5c7ffe9451facfbd9186c69agggggggg
+
+-- check the 64 (0x40) byte frame as it is recieved:
+-- rxdqd:     '0x21c4a8a4' 
+-- dmawr buf: '0xec8eefc0' 128 bytes
+-- preamble:  '0x5555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x111112345678' unicast
+-- srcaddr:   '0xb42d8eebaaa6' 
+-- idfield:   '0xd143'  typeid field
+-- data:       46 bytes
+-- crc:       '0xd53e8790' 
+--
+-- check the recieve data as it is written
+
+-- read the first receive queue descriptor
+
+
+--------------------------------------------------------------------------------
+-- 5. Drop enable through the AXI data fetch. ensure it remains active for the duration
+--------------------------------------------------------------------------------
+
+-- setup the dma interface
+apbwr(2000)     18  21c4a8a4    -- set address of the receive queue descriptor
+apbwr           00  00000004    -- enable receive
+
+-- add the destination address to a local address match register
+apbwr           88  12345678    -- specific address register 1 bottom
+apbwrf          8c  00001111    -- specific address register 1 top
+apbwr(2397)     00  00000000    -- disable receive
+
+-- receive a 64 (0x40) byte frame:
+-- preamble: '0x5555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x111112345678' unicast
+-- srcaddr:  '0xb42d8eebaaa6' 
+-- idfield:  '0xd143'  typeid field
+-- data:      46 bytes
+-- crc:       autogenerated
+
+rxd(apb)         5555d5785634121111a6aaeb8e2db4d14367db
+rxd               d29f2aec82a857b8773fea7ab766f38f
+rxd               93e6275b14c771e198c3da3c11c34225
+rxd               5c7ffe9451facfbd9186c69agggggggg
+
+-- check the 64 (0x40) byte frame as it is recieved:
+-- rxdqd:     '0x21c4a8a4' 
+-- dmawr buf: '0xec8eefc0' 128 bytes
+-- preamble:  '0x5555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x111112345678' unicast
+-- srcaddr:   '0xb42d8eebaaa6' 
+-- idfield:   '0xd143'  typeid field
+-- data:       46 bytes
+-- crc:       '0xd53e8790' 
+--
+-- check the recieve data as it is written
+
+-- read the first receive queue descriptor
+dma_rd          21c4a8a4    ec8eefc0
+dma_rd          21c4a8ac    ababab00 
+
+dma_wr          ec8eefc0    zzzzzzzz
+dma_wr          ec8eefc4    zzzzzzzz
+dma_wr          ec8eefc8    zzzzzzzz
+dma_wr          ec8eefcc    zzzzzzzz
+dma_wr          ec8eefd0    zzzzzzzz
+dma_wr          ec8eefd4    zzzzzzzz
+dma_wr          ec8eefd8    zzzzzzzz
+dma_wr          ec8eefdc    zzzzzzzz
+
+
+--------------------------------------------------------------------------------
+-- 6. Drop enable through the AXI write request (data). Still needs to complete it !
+--------------------------------------------------------------------------------
+
+-- setup the dma interface
+apbwr(3000)     18  21c4a8a4    -- set address of the receive queue descriptor
+apbwr           00  00000004    -- enable receive
+
+-- add the destination address to a local address match register
+apbwr           88  12345678    -- specific address register 1 bottom
+apbwrf          8c  00001111    -- specific address register 1 top
+apbwr(3356)     00  00000000    -- disable receive
+
+-- receive a 64 (0x40) byte frame:
+-- preamble: '0x5555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x111112345678' unicast
+-- srcaddr:  '0xb42d8eebaaa6' 
+-- idfield:  '0xd143'  typeid field
+-- data:      46 bytes
+-- crc:       autogenerated
+
+rxd(apb)         5555d5785634121111a6aaeb8e2db4d14367db
+rxd               d29f2aec82a857b8773fea7ab766f38f
+rxd               93e6275b14c771e198c3da3c11c34225
+rxd               5c7ffe9451facfbd9186c69agggggggg
+
+-- check the 64 (0x40) byte frame as it is recieved:
+-- rxdqd:     '0x21c4a8a4' 
+-- dmawr buf: '0xec8eefc0' 128 bytes
+-- preamble:  '0x5555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x111112345678' unicast
+-- srcaddr:   '0xb42d8eebaaa6' 
+-- idfield:   '0xd143'  typeid field
+-- data:       46 bytes
+-- crc:       '0xd53e8790' 
+--
+-- check the recieve data as it is written
+
+-- read the first receive queue descriptor
+dma_rd          21c4a8a4    ec8eefc0
+dma_rd          21c4a8ac    ababab00 
+
+dma_wr          ec8eefc0    zzzzzzzz
+dma_wr          ec8eefc4    zzzzzzzz
+dma_wr          ec8eefc8    zzzzzzzz
+dma_wr          ec8eefcc    zzzzzzzz
+dma_wr          ec8eefd0    zzzzzzzz
+dma_wr          ec8eefd4    zzzzzzzz
+dma_wr          ec8eefd8    zzzzzzzz
+dma_wr          ec8eefdc    zzzzzzzz
+
+
+--------------------------------------------------------------------------------
+-- 6. Drop enable through the AXI write request(descriptor). Still needs to complete it !
+--------------------------------------------------------------------------------
+
+-- setup the dma interface
+apbwr(4000)     18  21c4a8a4    -- set address of the receive queue descriptor
+apbwr           00  00000004    -- enable receive
+
+-- add the destination address to a local address match register
+apbwr           88  12345678    -- specific address register 1 bottom
+apbwrf          8c  00001111    -- specific address register 1 top
+apbwr(4498)     00  00000000    -- disable receive
+
+-- receive a 64 (0x40) byte frame:
+-- preamble: '0x5555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x111112345678' unicast
+-- srcaddr:  '0xb42d8eebaaa6' 
+-- idfield:  '0xd143'  typeid field
+-- data:      46 bytes
+-- crc:       autogenerated
+
+rxd(apb)         5555d5785634121111a6aaeb8e2db4d14367db
+rxd               d29f2aec82a857b8773fea7ab766f38f
+rxd               93e6275b14c771e198c3da3c11c34225
+rxd               5c7ffe9451facfbd9186c69agggggggg
+
+-- check the 64 (0x40) byte frame as it is recieved:
+-- rxdqd:     '0x21c4a8a4' 
+-- dmawr buf: '0xec8eefc0' 128 bytes
+-- preamble:  '0x5555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x111112345678' unicast
+-- srcaddr:   '0xb42d8eebaaa6' 
+-- idfield:   '0xd143'  typeid field
+-- data:       46 bytes
+-- crc:       '0xd53e8790' 
+--
+-- check the recieve data as it is written
+
+-- read the first receive queue descriptor
+dma_rd          21c4a8a4    ec8eefc0
+dma_rd          21c4a8ac    ababab00 -- dummy descriptor
+
+dma_wr          ec8eefc0    zzzzzzzz
+dma_wr          ec8eefc4    zzzzzzzz
+dma_wr          ec8eefc8    zzzzzzzz
+dma_wr          ec8eefcc    zzzzzzzz
+dma_wr          ec8eefd0    zzzzzzzz
+dma_wr          ec8eefd4    zzzzzzzz
+dma_wr          ec8eefd8    zzzzzzzz
+dma_wr          ec8eefdc    zzzzzzzz
+dma_wr          ec8eefe0    zzzzzzzz
+dma_wr          ec8eefe4    zzzzzzzz
+dma_wr          ec8eefe8    zzzzzzzz
+dma_wr          ec8eefec    zzzzzzzz
+dma_wr          ec8eeff0    zzzzzzzz
+dma_wr          ec8eeff4    zzzzzzzz
+dma_wr          ec8eeff8    zzzzzzzz
+dma_wr          ec8eeffc    zzzzzzzz
+
+-- descriptor
+dma_wr          21c4a8a8    zzzzzzzz
+
+--------------------------------------------------------------------------------
+-- 6. Drop enable through the AXI read request(descriptor). Still needs to complete it !
+--------------------------------------------------------------------------------
+
+-- setup the dma interface
+apbrd(5020)     18  21c4a8ac    -- set address of the receive queue descriptor
+apbwr           00  00000004    -- enable receive
+
+-- add the destination address to a local address match register
+apbwr           88  12345678    -- specific address register 1 bottom
+apbwrf          8c  00001111    -- specific address register 1 top
+apbwr(5359)     00  00000000    -- disable receive
+
+-- receive a 64 (0x40) byte frame:
+-- preamble: '0x5555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x111112345678' unicast
+-- srcaddr:  '0xb42d8eebaaa6' 
+-- idfield:  '0xd143'  typeid field
+-- data:      46 bytes
+-- crc:       autogenerated
+
+rxd(apb)         5555d5785634121111a6aaeb8e2db4d14367db
+rxd               d29f2aec82a857b8773fea7ab766f38f
+rxd               93e6275b14c771e198c3da3c11c34225
+rxd               5c7ffe9451facfbd9186c69agggggggg
+
+-- check the 64 (0x40) byte frame as it is recieved:
+-- rxdqd:     '0x21c4a8a4' 
+-- dmawr buf: '0xec8eefc0' 128 bytes
+-- preamble:  '0x5555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x111112345678' unicast
+-- srcaddr:   '0xb42d8eebaaa6' 
+-- idfield:   '0xd143'  typeid field
+-- data:       46 bytes
+-- crc:       '0xd53e8790' 
+--
+-- check the recieve data as it is written
+
+-- read the first receive queue descriptor
+dma_rd          21c4a8ac    ec8eefc0
+
+end(6000)
+

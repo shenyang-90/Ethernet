@@ -1,0 +1,119 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : sched_rnd_queue
+--
+--   Author         : Ewan McCulloch
+--
+--   Date           : 25 Feb 2008
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Random TX and RX operating together - all RX packets accepted, to maximize
+-- AHB B/W - also operating at gigabit speeds
+--
+--
+-- 
+--------------------------------------------------------------------------------
+
+check_txlinerate
+bus_grant_delay 0 -- This sets hgrant to 1 always
+
+set_random_seed 94;
+
+-- Set AHB clock freq to 250MHz
+-- At 32bit, this means we have maximum bandwidth of 8Gbit/s shared between
+-- TX and RX. Randomize hready, keeping the maximum to 5 (averages around 2.5)
+-- to ensure no RX overflows occur, and max line rate is acheivable on TX
+sel_ahb_freq 3 
+randomize_hready -descr_max 5 -data_max 5 
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+-- setup 64b addressing, tx_ext_bd and rx_ext_bd in ms nibble of dma config register (address 10)
+-- ms nibble = 
+-- 7 for 64b addressing enabled and tx and rx ext_bd enabled 
+-- 4 for 64b addressing enabled
+-- 3 for tx and rx ext_bd enabled
+              |
+              |
+apbwr      10 79a00710  -- enable mode (see above for ms nibble definition)
+apbwr     4c8 98abcdef  -- MSB BD base addr tx
+apbwr     4d4 98abcdef  -- MSB BD base addr rx
+apbwr     4cc 00000036  -- tx_bd_control_reg  -- tx_bd_control_reg  where last 6 bits are: ts_mode, bd_size_words
+apbwr     4d0 00000036  -- rx_bd_control_reg  -- rx_bd_control_reg  where last 6 bits are: ts_mode, bd_size_words
+
+apbwr      28 fffffffd  -- enable all interrupts
+apbwr      04 0028040a  -- 64bit enable, gigabit mode, full duplex
+apbrd      04 0028040a  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 11111100  -- write address of transmit buffer q0 descriptor in memory
+apbrd      1c 11111100  -- check transmit queue pointer
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      90 abababab  -- specific address register 2 bottom (multicast)
+apbwr      94 0000abab  -- specific address register 2 top
+apbwr      98 abcdef10  -- specific address register 3 bottom (unicast)
+apbwr      9C 0000a5a5  -- specific address register 3 top
+apbwr      a0 cccccccc  -- specific address register 3 bottom (unicast)
+apbwr      a4 00005a5a  -- specific address register 3 top
+apbwr      18 ffff0000  -- write receive queue pointer
+apbwr      00 0000020c  -- write tx_go and enable tx, enable rx
+-- delay for enable rx to propagate though design
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+rx_frame (apb)  1
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      data_size      16 
+      data           random
+      auto_gen_int   0
+      resource_err   0
+      fcs            good
+
+rx_frame (gap)  250
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      data_size      64-2000 
+      data           random
+      auto_gen_int   0
+      resource_err   0
+      fcs            good
+
+tx_frame  250
+      number_of_bufs 1-3
+      auto_gen_int   1
+      buffer_size    64-2000
+      data           random
+      fcs            YES
+
+
+dma_rd rx_q_ptr ddddd000 
+
+-- force end of test in case it doesn't stop of its own accord
+end(300000)
+

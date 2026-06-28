@@ -1,0 +1,128 @@
+-------------------------------------------------
+-- This test attempts to fill Q0 up, then try to get lots of
+-- used bit read all's which push 2 words to the SRAM
+-- A bug was identified in late 2012 that causes packet corruption
+-- and possible lockup when Q) buffer is full and used bit read alls
+-- occur.  used bit read alls cause 2 words to be written to the Q0 region of SRAM
+-- these writes were not back pressured when Q0 buffer was full.
+-- this tests the FIFO wont overflow
+-- in 3qs dir, Q0 is 4KB
+
+-- Some other notes on this issue ...
+--  Q0 is probably getting frozen out, so it gets full quickly.  this can happen if there is traffic to send on Q2/Q1/Q0
+--  but Q0 never gets sent, or is sent rarely.
+--  single frame descriptors are being made available to upper queues, one at a time.
+--  What we mean by this is that the FW is clearing the used bit of an upper descriptor in Q2 or Q1 and setting the
+--  start bit of GEM DMA.hitting the start bit will cause the DMA to load that frame into SRAM, and then attempt to
+--  read another frame from memory - it is probable that there is no more packet data to read (used bits for all queues 
+--  == 1, so we get a used bit read all.  This then causes 2 words to be written to SRAM region 0, which is already full
+--  This is a realistic way the issue above can be hit.
+--  
+--  this was fixed by qualifying 'new_write_allowed' with buffer_full_q0
+
+-- The effect of this fix is that if Q0 buffer gets full, 
+
+
+-- ************************************************************************** --
+
+
+ten_meg_bit  -- 10Mbit/s operation (2.5Mhz tx_clk and rx_clk, 50MHz Pclk and Hclk)
+wait_states 0
+bus_grant_delay 0
+set_random_seed 1;
+
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 0000ffff  -- enable all interrupts
+apbwr      440 88000000  -- write transmit queue pointer 1
+apbwr      444 99000000  -- write transmit queue pointer 2
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      00 00000208  -- write tx_go and enable tx
+
+
+
+-- test 25 frames of random number of buffers with random data at random buffer locations
+tx_frame  4
+      number_of_bufs 1
+      buffer_size    1000
+      data           random
+      auto_gen_int   0
+      num_dma_queues 3
+      fix_queue_num  0
+      fcs            YES
+
+-- Keep writing to the start bit. this will cause used bit read alls to happen
+apbwr(1500)   00 00000208  -- write tx_go and enable tx
+dma_rd tx_descr 99000004 ffffffff -- dma reads pointer for Queue 2
+dma_rd tx_descr 99000000 ffffffff -- dma reads pointer for Queue 2
+dma_rd tx_descr 88000004 ffffffff -- dma reads pointer for Queue 1
+dma_rd tx_descr 88000000 ffffffff -- dma reads pointer for Queue 1
+dma_rd tx_descr 55555504 ffffffff -- start of frame
+dma_rd tx_descr 55555500 ffffffff -- reads used on all queues
+
+apbwr(1550)   00 00000208  -- write tx_go and enable tx
+dma_rd tx_descr 99000004 ffffffff -- dma reads pointer for Queue 2
+dma_rd tx_descr 99000000 ffffffff -- dma reads pointer for Queue 2
+dma_rd tx_descr 88000004 ffffffff -- dma reads pointer for Queue 1
+dma_rd tx_descr 88000000 ffffffff -- dma reads pointer for Queue 1
+dma_rd tx_descr 55555504 ffffffff -- start of frame
+dma_rd tx_descr 55555500 ffffffff -- reads used on all queues
+
+-- Unless there is some logic to stop the Q0 from overflowing,
+-- it will have overflowed at this point, as the fill level will 
+-- have breached the top with the last used_bit_read_all
+-- the following used bit read alls cause some more data to be written to
+-- the SRAM in the failing case, which would cause the original packet
+-- data to error in the log.  Only with the fix applied to the RTL
+-- will this test pass
+
+apbwr(1600)   00 00000208  -- write tx_go and enable tx
+dma_rd tx_descr 99000004 ffffffff -- dma reads pointer for Queue 2
+dma_rd tx_descr 99000000 ffffffff -- dma reads pointer for Queue 2
+dma_rd tx_descr 88000004 ffffffff -- dma reads pointer for Queue 1
+dma_rd tx_descr 88000000 ffffffff -- dma reads pointer for Queue 1
+dma_rd tx_descr 55555504 ffffffff -- start of frame
+dma_rd tx_descr 55555500 ffffffff -- reads used on all queues
+
+apbwr(1650)   00 00000208  -- write tx_go and enable tx
+dma_rd tx_descr 99000004 ffffffff -- dma reads pointer for Queue 2
+dma_rd tx_descr 99000000 ffffffff -- dma reads pointer for Queue 2
+dma_rd tx_descr 88000004 ffffffff -- dma reads pointer for Queue 1
+dma_rd tx_descr 88000000 ffffffff -- dma reads pointer for Queue 1
+dma_rd tx_descr 55555504 ffffffff -- start of frame
+dma_rd tx_descr 55555500 ffffffff -- reads used on all queues
+
+apbwr(1700)   00 00000208  -- write tx_go and enable tx
+dma_rd tx_descr 99000004 ffffffff -- dma reads pointer for Queue 2
+dma_rd tx_descr 99000000 ffffffff -- dma reads pointer for Queue 2
+dma_rd tx_descr 88000004 ffffffff -- dma reads pointer for Queue 1
+dma_rd tx_descr 88000000 ffffffff -- dma reads pointer for Queue 1
+dma_rd tx_descr 55555504 ffffffff -- start of frame
+dma_rd tx_descr 55555500 ffffffff -- reads used on all queues
+
+apbwr(1750)   00 00000208  -- write tx_go and enable tx
+dma_rd tx_descr 99000004 ffffffff -- dma reads pointer for Queue 2
+dma_rd tx_descr 99000000 ffffffff -- dma reads pointer for Queue 2
+dma_rd tx_descr 88000004 ffffffff -- dma reads pointer for Queue 1
+dma_rd tx_descr 88000000 ffffffff -- dma reads pointer for Queue 1
+dma_rd tx_descr 55555504 ffffffff -- start of frame
+dma_rd tx_descr 55555500 ffffffff -- reads used on all queues
+
+-- This is needed for the passing case to , as the above writes to the DMA start bit
+-- will be ignored when pbuf Q0 is full
+apbwr(170000)   00 00000208  -- write tx_go and enable tx
+apbwr(170050)   00 00000208  -- write tx_go and enable tx
+apbwr(170100)   00 00000208  -- write tx_go and enable tx
+apbwr(170150)   00 00000208  -- write tx_go and enable tx
+apbwr(170200)   00 00000208  -- write tx_go and enable tx
+
+-- delay to make sure the test waits until the SRAM empties
+apbrd(179000)   08 00000006  -- check reset value of network status register
+
+-- force end of test in case it doesn't stop of its own accord
+end(180000)
+

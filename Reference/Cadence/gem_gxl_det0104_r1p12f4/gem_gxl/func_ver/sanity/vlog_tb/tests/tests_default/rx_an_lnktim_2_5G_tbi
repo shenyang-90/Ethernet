@@ -1,0 +1,96 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_an_lnktim_tbi
+--
+--   Author         : Mike MacGillis (mikema@tality.com)
+--
+--   Date           : May 22, 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--   The purpose of this test is to verify that the implemented link_timer is 
+--   within 10ms to 20ms.
+--
+-- Detailed Test Description
+----------------------------
+-- 1. Initialise the GEM for Gigabit Operation with PCS enabled. Furthermore, Auto-Negotiation is 
+--    enabled.
+-- 2. The GEM should transmit alternating /C/ codes with the Config_Reg field all zeros.  The GEM
+--    will continue to do this until the link timer counts up to 0x98968 (this value will give 
+--    a link counter time of 10ms   0x98968 (625000 dec.) times 16ns per clock cycle equalling
+--    10ms)
+-- 3. After the link timer in the GEM reaches 0x98968, the GEM should then transmit alternating /C/
+--    codes with the Conf_Reg field incdicating the same values that are in the PCS auto-negotiation 
+--    advertisement register.
+-- 4. Check the PCS registers.
+
+--------------------------------------------------------------------------------
+
+pinsd(20) tb_mode_2_5g 1
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- ********************************************************************************************* --
+-- 1. Initialise the GEM for Gigabit Operation with PCS enabled. Furthermore, Auto-Negotiation is 
+--    enabled.
+-- ********************************************************************************************* --
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd     200 00009040  -- check value of pcs control register
+apbwr      04 00080c00  -- Put MAC into gigabit mode with TBI. 
+apbrd      04 00080c00  -- Check value of network config register
+apbwr      00 20000004  -- enable receive and also set 2.5G mode
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 03020100  -- specific address register 1 bottom
+apbwr      8C 00000504  -- specific address register 1 top
+apbrd     200 00001040  -- check value of pcs control register
+apbrd     204 00000109  -- check pcs status register
+apbwr     210 00000060  -- pcs auto-nego. HD and FD
+apbrdf     20 00000000  -- check receive status register and trigger reception
+
+dma_rd 00000000 22222004 -- dma reads pointer of 22222004
+
+-- ********************************************************************************************* --
+-- 2. The GEM should transmit alternating /C/ codes with the Config_Reg field all zeros.  The GEM
+--    will continue to do this until the link timer counts up to 0x98968 (this value will give 
+--    a link counter time of 10ms   0x98968 (625000 dec.) times 16ns per clock cycle equalling
+--    10ms)
+-- ********************************************************************************************* --
+
+pcs_an_tx             0000  
+
+-- ********************************************************************************************* --
+-- 3. After the link timer in the GEM reaches 0x98968, the GEM should then transmit alternating /C/
+--    codes with the Conf_Reg field indicating the same values that are in the PCS auto-negotiation 
+--    advertisement register.
+-- ********************************************************************************************* --
+
+pcs_an_tx             6000 
+
+-- ********************************************************************************************* --
+-- 4. Check the PCS registers.
+-- *********************************************************************************************
+
+apbrd(510000)  204 00000109  -- check pcs status register
+apbrd          200 00001040  -- check pcs control register 
+apbrd          200 00001040  -- check pcs control register 
+apbrd          200 00001040  -- check pcs control register 
+apbrd          210 00000060  -- check pcs auto-neg. advertisment register
+apbrd          214 00000000  -- check pcs auto-neg. link partner advertisment register
+apbrd          218 00000004  -- check pcs auto-neg. expansion register 
+apbrd          21c 00000000  -- check pcs auto-neg. next page register
+apbrd          220 00000000  -- check pcs auto-neg. link partner next page register
+apbrd          23C 00008000  -- check pcs auto-neg. extended status register
+end(550000)

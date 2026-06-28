@@ -1,0 +1,651 @@
+
+
+--- PAGE 89 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+89
+Figure 16 shows a frame on the external FIFO interface (MAC receive) with frame error.
+Figure 16: External FIFO Interface Timing (6) 
+6.1.4 Additional Low-Latency TX FIFO Interface for DMA Configurations
+When the design is configured to include the SRAM-based packet buffer DMA, it is possible for you to additionally add an 
+extra low latency FIFO TX host interface to inject high priority fixed latency traffic directly into the transmit path of the MAC 
+bypassing the DMA altogether. This additional TX FIFO host interface is optionally included by defining `gem_tx_add_fifo_if 
+verilog define. Packets that are injected into the MAC via the low latency FIFO interface have the same latency as the 
+external fifo_interface mode, plus one tx_clk clock cycle, when no DMA frame is being sent or from the end of the current 
+DMA frame ends, and is useful if particular packets needing a fixed transmit latency are required. DMA and low latency TX 
+frames are dynamically arbitrated with low latency TX FIFO interface frames being highest priority. If a frame from the DMA 
+is being transmitted to the MAC, it will complete before the Low Latency TX frame is sent but following DMA frames will be 
+delayed if required.
+As there is no RX FIFO interface in this mode, all received frames are passed to the RX DMA.
+When using the additional low latency transmit fifo the following restrictions apply:
+• Half duplex is not supported
+• No register status updating for packet complete for fifo frames
+Underflow errors that occur when packets are being fetched via the external FIFO interface are not reported in the status 
+registers or interrupts. Underflow status will still get reported via the FIFO interface outputs.
+6.1.5 Host Interface Soft Select Configuration External FIFO / DMA Interfaces
+The design can be configured to have both external FIFO interface and the SRAM packet buffer DMA interfaces. This can 
+optionally be built by defining `define gem_host_if_soft_select.
+In this mode, either the external FIFO interface or the DMA interface can be selected. They cannot be used together. The 
+interface selection is a static programming option that should be setup before enabling the RX and TX paths.
+6.1.6 MAC Transmit Block
+The MAC transmitter operates in either half duplex or full duplex, and transmits frames in accordance with the Ethernet 
+IEEE 802.3 standard. In half-duplex mode, the CSMA/CD protocol of the IEEE 802.3 specification is followed.
+A small input buffer receives data through the external FIFO interface (from either the DMA module or external to the IP 
+Core) which, depending on the dma_bus_width control bits in the network configuration register, will extract data in either 
+32, 64, or 128-bit form. All subsequent processing prior to the final output is performed in bytes.
+rx_w_clk
+rx_w_wr
+rx_w_data
+rx_w_sop
+rx_w_eop
+rx_w_mod
+rx_w_err
+D0
+D1
+D2
+X
+0
+X
+X
+
+
+--- PAGE 90 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+90
+Transmit data can be output using the GMII/MII interface or through the TBI.
+If the TBI is selected (gigabit and SGMII modes only), then the MAC transmitter passes 8-bit data to the PCS for further 
+processing prior to output on the TBI. In 10 and 100Mbps SGMII mode, the MAC is clocked slower than the PCS which has 
+the effect of the PCS sampling the same 8-bit data 10 or 100 times.
+Frame assembly starts by adding preamble and the start frame delimiter. Data is taken from the transmit FIFO interface a 
+word at a time. When GEM is configured for gigabit operation, the data output to the PHY uses all 8 bits of the txd[7:0] 
+output. In 10/100M mode, transmit data to the PHY is nibble wide and least significant nibble first using txd[3:0] with txd[7:4] 
+tied to logic 0.
+If necessary, padding is added to take the frame length to 60 bytes. CRC is calculated using an order 32-bit polynomial. 
+This is inverted and appended to the end of the frame taking the frame length to a minimum of 64 bytes. If the no CRC bit 
+is set in the second word of the last buffer descriptor of a transmit frame, neither pad nor CRC are appended. The no CRC 
+bit can also be set through the FIFO interface.
+In full-duplex mode (at all data rates), frames are transmitted immediately. Back to back frames are transmitted at least 96 
+bit times apart to guarantee the interframe gap.
+In half-duplex mode, the transmitter checks carrier sense. If asserted, the transmitter waits for the signal to become 
+inactive, and then starts transmission after the interframe gap of 96 bit times. If the collision signal is asserted during 
+transmission, the transmitter will transmit a jam sequence of 32 bits taken from the data register and then retry 
+transmission after the back-off time has elapsed. If the collision occurs during either the preamble or start frame delimiter 
+(SFD), then these fields will be completed prior to generation of the jam sequence.
+The back-off time is based on an XOR of the 10 least significant bits of the data coming from the transmit FIFO interface 
+and a 10-bit pseudo random number generator. The number of bits used depends on the number of collisions seen. After 
+the first collision 1 bit is used, then the second 2 bits, and so on up to the maximum of 10 bits. All 10 bits are used above 
+ten collisions. An error will be indicated and no further attempts will be made if 16 consecutive attempts cause collision. 
+This operation is compliant with the description in Clause 4.2.3.2.5 of the IEEE 802.3 standard, which refers to the 
+truncated binary exponential back-off algorithm.
+In 10/100M mode, both collisions and late collisions are treated identically, and back off and retry will be performed up to 16 
+times. When operating in gigabit mode, late collisions are treated as an exception and transmission is aborted, without 
+retry. This condition is reported in the transmit buffer descriptor word 1 (late collision, bit 26) and also in the transmit status 
+register (late collision, bit 7). An interrupt can also be generated (if enabled) when this exception occurs, and bit 5 in the 
+interrupt status register will be set.
+In all modes of operation, if the transmit DMA underruns, a bad CRC is automatically appended using the same 
+mechanism as jam insertion and the tx_er signal is asserted. For a properly configured system, this should never happen, 
+and also it is impossible if configured to use the DMA with packet buffers as the complete frame is buffered in local packet 
+buffer memory.
+By setting when bit 28 is set in the network configuration register, the Inter Packet Gap (IPG) may be stretched beyond 96 
+bits depending on the length of the previously transmitted frame and the value written to the IPG_STRETCH register. The 
+least significant 8 bits of the IPG_STRETCH register multiply the previous frame length (including preamble) the next 
+significant 8 bits (+1 so as not to get a divide by zero) divide the frame length to generate the IPG. IPG stretch only works 
+in full-duplex mode and when bit 28 is set in the network configuration register. The IPG_STRETCH register cannot be 
+used to shrink the IPG below 96 bits.
+If the back pressure bit is set in the network control register or if the half_duplex_flow_control_en input is set in 10/100M 
+half-duplex mode, the transmit block transmits 64 bits of data, which can consist of 16 nibbles of 1011 or in bit rate mode 64 
+1s, whenever it sees an incoming frame to force a collision. This provides a way of implementing flow control in half-duplex 
+mode. Note: This feature is not available in gigabit half-duplex mode.
+
+
+--- PAGE 91 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+91
+6.1.7 Transmit Scheduling Algorithm
+When multiple priority queues have been selected, the transmit scheduler is automatically included in the design and is 
+responsible for selecting the next queue to be serviced either from the attached DMA or from the external FIFO interface 
+when the DMA is not included. There are three scheduling algorithms available to the user and, with some exceptions 
+detailed further below, you can select one of the four modes for each queue.
+6.1.7.1 IEEE 802.1Qav Support – Credit Based Shaping
+A credit-based shaping algorithm is available on the two highest priority active queues and is defined in IEEE 802.1Qav: 
+Forwarding and Queuing Enhancements for Time-Sensitive Streams. Traffic shaping is enabled via the CBS (Credit Based 
+Shaping) Control register (0x4bc) or the general transmit scheduling control register (offset 0x580). These two registers are 
+aliased, so updating one register will automatically update the other. Note: It is permitted to enable CBS only on the second 
+highest priority queue and not on the highest, in which case the highest priority queue would always take precedence. Also 
+if the highest priority queues are disabled by writing 1 to the disable bit in the transmit queue pointer registers, then IEEE 
+802.1Qav (CBS) applies to the two highest enabled queues.
+Enabling CBS on a queue will enable a counter which stores the amount of transmit ‘credit’, measured in bytes that a 
+particular queue has. A queue may only transmit if it has non-negative credit. If a queue has data to send, but is held off 
+from doing as another queue is transmitting, then credit will accumulate in the credit counter at the rate defined in the 
+IdleSlope register for that queue. IdleSlope is the rate of change of credit when waiting to transmit and must be less than 
+the value of the portTransmitRate. When this queue is transmitting the credit counter is decremented at the rate of 
+sendSlope which is defined as the portTransmitRate – IdleSlope. A queue can accumulate negative credit when 
+transmitting which will hold off any other transfers from that queue until credit returns to a non-negative value. No transfers 
+are halted when a queue’s credit becomes negative, it will accumulate negative credit until the transfer completes.
+To ensure that the CBS scheduling is completely accurate a single transmit buffer should be used per Ethernet frame 
+(rather than multi-buffer transmit frames).
+6.1.7.2 Fixed Priority
+Any of the active queues can be selected as fixed priority and this is the default mode of operation for all queues. The 
+queue index is used as the priority, where a higher index will have a higher priority than a lower index. The scheduler will 
+always attempt to transmit from fixed priority queues with the highest priority. I.e. A fixed priority queue with a high queue 
+index will always take precedence over a priority queue with a lower index. 
+6.1.7.3 Deficit Weighted Round Robin (DWRR)
+Any of the active queues can be selected as DWRR. If DWRR is required, then at least two of the active queues should be 
+selected as DWRR. It should not be used in conjunction with Enhanced Transmission Selection (ETS), as both algorithms 
+operating together would make little practical sense. A DWRR enabled queue has lower priority than a CBS enabled queue 
+or a fixed priority queue with a higher index.
+The DWRR algorithm works by scanning all non-empty queues in sequence. Each queue is allocated a ‘deficit counter’ and 
+an 8-bit weighting (or quantum) value. The value of the deficit counter is the maximum number of bytes that can be sent at 
+the current time.
+• If the deficit counter of the scanned queue is greater than the length of the packet waiting for transmission, then the 
+packet will be transmitted and the value of the deficit counter is decremented by the packet size. If it is not greater, the 
+scheduler will skip to the next DWRR enabled queue. 
+• If there is insufficient credit to transmit, the queue is simply skipped. 
+• If the queue is empty, the value of the deficit counter is reset to 0. 
+• If all queues have insufficient credit then each tx_clk cycle every queue’s deficit counter is incremented by its quantum 
+value until a queue’s deficit counter obtains sufficient credit to transmit its first queued frame. The higher the quantum 
+value chosen the quicker deficit counter will reach the required value. 
+
+
+--- PAGE 92 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+92
+• If all DWRR queues have the same weighting, then all queues will be granted the same overall bandwidth. The weight-
+ing value is stored in four programmable registers starting at offset 0x590. Since the design supports up to 16 priority 
+queues, four physical registers are required. Refer to Section 11 Registers on page 146 for further details.
+Note: If fixed priority queues are to be used in conjunction with DWRR, the fixed priority queues must be at a higher index 
+value than the DWRR queues. A consequence of this is that the enabled DWRR queues shall form a contiguous set of 
+queues starting from queue 0.
+If CBS is also used in conjunction with DWRR, the DWRR queues will share the remaining bandwidth after the CBS 
+allocation has been deducted.
+Note: Transmit cut-thru should not be enabled if the transmit scheduler is used.
+6.1.7.4 Enhanced Transmission Selection (ETS)
+The ETS algorithm is defined in IEEE 802.1Qaz: Enhanced Transmission Selection for Bandwidth Sharing between Traffic 
+and allows traffic on specific queues to be bandwidth-limited. Any of the active queues can be selected as ETS. If ETS is 
+required, then at least two of the active queues should be selected as ETS. It should not be used in conjunction with DWRR 
+as both algorithms operating together would make little practical sense. An ETS-enabled queue has lower priority than a 
+CBS-enabled queue or a fixed priority queue with a higher index.
+For each ETS-enabled queue, you should program the bandwidth requirement for each queue as a percentage of total 
+bandwidth (an 8-bit register is used and the sum of values programmed should not exceed decimal 100). This will be the 
+maximum bandwidth to be granted to that queue. The actual scheduling algorithm operates in a round-robin style from 
+lowest indexed queues up to the highest indexed queue in sequence. The bandwidth allocation percentage is stored in four 
+programmable registers starting at offset 0x590 – these are the same registers used for DWRR. Since the design supports 
+up to 16 priority queues, four physical registers are required. Refer to the register descriptions for further details.
+If CBS is also used in conjunction with ETS, the sum of the ETS queue percentages should equal the remaining bandwidth 
+after the CBS allocation has been deducted.
+Note: Transmit cut-thru should not be enabled if the transmit scheduler is used.
+6.1.7.5 Enhancement for Scheduled Traffic (EnST)
+IEEE 802.1Qbv is a TSN (Time Sensitive Networking) standard for “Enhancements for Scheduled Traffic" and specifies 
+“time-aware queue-draining procedures” based on “timing derived from IEEE 802.1AS”. It adds transmission gates to the 
+eight priority queues which allow low-priority queues to be shut down at specific times to allow higher-priority queues 
+immediate access to the network at specific times.
+EnST operation is explained in detail in Section 6.1.16 IEEE 802.1Qbv: Enhancement for Scheduled Traffic (EnST) on 
+page 112.
+6.1.8 MAC Receive Block
+The control bits described in the following subclause are static and should not be updated without disabling the RX path by 
+clearing bit[2], enable receive, of the network control register first.
+All processing within the MAC receive block is implemented using 16-bit datapath. The MAC receive block checks for valid 
+preamble, FCS, alignment and length, presents received frames to the external FIFO interface (to either the DMA module 
+or external to the IP core) and stores the frames destination address for use by the address checking block.
+When the TBI is selected, 16-bit words are passed directly from the PCS layer to the MAC receiver, except in 10 and 
+100Mpbs SGMII modes when 8 bits are read. In 10 and 100Mpbs SGMII modes, the MAC rx_clk runs more slowly than the 
+PCS receive datapath clock and the same 8 bits of data is read 5 or 50 times.
+If, during frame reception, the frame is found to be too long, a bad frame indication is sent to the external FIFO interface. 
+The receiver logic ceases to send data to memory as soon as this condition occurs.
+
+
+--- PAGE 93 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+93
+At end of frame reception, the receive block indicates to the DMA block whether the frame is good or bad. The DMA block 
+will recover the current receive buffer if the frame was bad.
+Ethernet frames are normally stored in DMA memory or to the external FIFO interface complete with the FCS. Setting the 
+FCS remove bit in the network configuration (bit 17) causes frames to be stored without their corresponding FCS. The 
+reported frame length field is reduced by four bytes to reflect this operation.
+The receive block signals to the register block to increment the alignment, CRC (FCS), short frame, long frame, jabber or 
+receive symbol errors when any of these exception conditions occur. 
+If bit 26 is set in the network configuration CRC errors is ignored and CRC errored frames are not discarded, the Frame 
+Check Sequence Errors statistic register will still be incremented. Additionally, if configured to use the DMA and not 
+enabled for jumbo frames mode, then bit[13] of the receiver descriptor word 1 will be updated to indicate the FCS validity 
+for the particular frame. This is useful for applications such as EtherCAT whereby individual frames with FCS errors must 
+be identified.
+Received frames can be checked for length field error by setting the length field error frame discard bit of the network 
+configuration register (bit-16). When this bit is set, the receiver compares a frame’s measured length with the length field 
+(bytes 13 and 14) extracted from the frame. The frame is discarded if the measured length is shorter. This checking 
+procedure is for received frames between 64 bytes and 1518 bytes in length.
+Each discarded frame is counted in the 10 bit length field error statistics register. Frames where the length field is greater 
+than or equal to 0x0600 hex will not be checked.
+When operating in gigabit mode (half duplex), the receiver will discard frames which do not meet the minimal slot time of 
+512 bytes. If a burst is detected, the first frame is checked to ensure it meets the slot time, but all subsequent frames of the 
+burst are checked to ensure they meet the minimum frame size of 64 bytes.
+6.1.9 MAC Filtering Block
+The filter block determines which frames should be written to the external FIFO interface and on to the optional DMA.
+Whether a frame is passed depends on what is enabled in the network configuration register, the state of the external 
+matching pins, the contents of the specific address, type and hash registers, and the frame’s destination address and type 
+field.
+If bit 25 of the network configuration register is not set, a frame will not be copied to memory if GEM is transmitting in half-
+duplex mode at the time a destination address is received.
+Ethernet frames are transmitted a byte at a time, least significant bit first. The first six bytes (48 bits) of an Ethernet frame 
+make up the destination address. The first bit of the destination address, which is the LSB of the first byte of the frame, is 
+the group or individual bit. This is one for multicast addresses and zero for unicast. The all ones address is the broadcast 
+address and a special case of multicast.
+GEM supports recognition of specific source or destination addresses. The number of specific source or destination 
+address filters is configurable and can range from zero to 36. Each specific address filter requires two registers:
+• Specific address register bottom − Stores the first four bytes of the compared source or destination address. 
+• Specific address register top − Contains the last two bytes of this address, a control bit to select between source or 
+destination address filtering and a 6-bit byte mask field to allow the user to mask bytes during the comparison. 
+The first filter (Filter 1) is slightly different to all other filters in that there is no byte mask. Instead address comparison 
+against individual bits of specific address register 1 can be masked using the unique specific address mask register. The 
+addresses stored in all filters can be specific (unicast), group (multicast), local or universal. 
+The destination or source address of received frames is compared against the data stored in the specific address registers 
+once they have been activated. The addresses are deactivated at reset or when their corresponding specific address 
+register bottom is written. They are activated when specific address register top is written. If a receive frame address 
+matches an active address, the frame is written to the external FIFO interface and on to DMA memory if used. 
+
+
+--- PAGE 94 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+94
+Frames may be filtered using the type ID field for matching. Four type ID registers exist in the register address space and 
+each can be enabled for matching by writing a one to the MSB (bit 31) of the respective register. When a frame is received, 
+the matching is implemented as an OR function of the various types of match.
+The contents of each type ID registers (when enabled) are compared against the length/type ID of the frame being received 
+(e.g. bytes 13 and 14 in non-VLAN and non-SNAP encapsulated frames) and copied to memory if a match is found. The 
+encoded type ID match bits (Word 0, Bit 22 and Bit 23) in the receive buffer descriptor status are set indicating which type 
+ID register generated the match, if the receive checksum offload is disabled.
+The reset state of the type ID registers is zero, hence each is initially disabled.
+The following example in Table 38 illustrates the use of the address and type ID match registers for a MAC address of 
+21:43:65:87:A9:CB:
+Note:* - contains the address of the transmitting device.
+The sequence above shows the beginning of an Ethernet frame. Byte order of transmission is from top to bottom as shown. 
+For a successful match to specific address 1, the following address matching registers must be set up:
+• Specific address 1 bottom (Address 0x088)0x87654321
+• Specific address 1 top (Address 0x08C)0x0000CBA9
+And for a successful match to the type ID, the following type ID match 1 register must be set up:
+• Type ID Match 1 (Address 0x0A8)0x80004321
+6.1.9.1 Broadcast Address
+Frames with the broadcast address of 0xFFFFFFFFFFFF are stored to memory only if the ‘no broadcast’ bit in the network 
+configuration register is set to zero.
+6.1.9.2 Hash Addressing
+The hash address register is 64-bit long and takes up two locations in the memory map. The least significant bits are stored 
+in hash register bottom and the most significant bits in hash register top.
+The unicast hash enable and the multicast hash enable bits in the network configuration register enable the reception of 
+hash matched frames. The destination address is reduced to a 6-bit index into the 6- bit hash register using the following 
+hash function. The hash function is an XOR of every sixth bit of the destination address.
+hash_index[05] = da[05] ^ da[11] ^ da[17] ^ da[23] ^ da[29] ^ da[35] ^ da[41] ^ da[47]
+Table 38: Address and Type ID Match Register (Example)
+Field
+Value Checked
+Preamble
+55
+SFD
+D5
+DA (Octet 0 - LSB)
+21
+DA (Octet 1)
+43
+DA (Octet 2)
+65
+DA (Octet 3)
+87
+DA (Octet 4)
+A9
+DA (Octet 5 - MSB)
+CB
+SA (LSB)
+00*
+SA
+00*
+SA
+00*
+SA
+00*
+SA 
+00*
+SA (MSB)
+0
+Type ID (MSB)
+43
+Type ID (LSB)
+21
+
+
+--- PAGE 95 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+95
+hash_index[04] = da[04] ^ da[10] ^ da[16] ^ da[22] ^ da[28] ^ da[34] ^ da[40] ^ da[46]
+hash_index[03] = da[03] ^ da[09] ^ da[15] ^ da[21] ^ da[27] ^ da[33] ^ da[39] ^ da[45]
+hash_index[02] = da[02] ^ da[08] ^ da[14] ^ da[20] ^ da[26] ^ da[32] ^ da[38] ^ da[44]
+hash_index[01] = da[01] ^ da[07] ^ da[13] ^ da[19] ^ da[25] ^ da[31] ^ da[37] ^ da[43]
+hash_index[00] = da[00] ^ da[06] ^ da[12] ^ da[18] ^ da[24] ^ da[30] ^ da[36] ^ da[42]
+da[0] represents the least significant bit of the first byte received, that is, the multicast/unicast indicator, and da[47] 
+represents the most significant bit of the last byte received.
+If the hash index points to a bit that is set in the hash register, then the frame will be matched according to whether the 
+frame is multicast or unicast.
+A multicast match will be signaled if the multicast hash enable bit is set, da[0] is logic 1 and the hash index points to a bit 
+set in the hash register.
+A unicast match will be signaled if the unicast hash enable bit is set, da[0] is logic 0 and the hash index points to a bit set in 
+the hash register.
+To receive all multicast frames, the hash register should be set with all ones and the multicast hash enable bit should be set 
+in the network configuration register.
+6.1.9.3 External Address Matching
+In applications where the internal address matching circuitry of GEM is not sufficient, an external address matching 
+interface is provided. Matches can be performed on source address, destination address, type or VLAN ID. Each field is 
+provided as an output (ext_sa, ext_da, ext_type and ext_vid output pins) with a validating strobe signal (ext_sa_stb, 
+ext_da_stb, ext_type_stb and ext_vid_stb output pins). The strobes for each field are asserted high for one cycle at the 
+point the field becomes valid within the frame reception.
+IP source and destination addresses along with UDP/TCP port numbers are also available for external address matching. 
+These fields are provided as the ext_ip_sa, ext_ip_da, ext_source_port  and ext_dest_port outputs, and are validated by 
+the ext_ip_sa_stb, ext_ip_da_stb, ext_sp_stb and ext_dp_stb outputs.
+The external filter interface is enabled by setting bit 9 in the network configuration register.
+External logic connected to the filter interface should return the ext_match1, ext_match2, ext_match3, or ext_match4 
+inputs when a match is found. Any one of the four match inputs can indicate a filter match as the inputs are logically ORed 
+within the MAC. 
+The time at which the output strobes for the various fields are valid is fixed relative to the time of frame reception and 
+depends on the type of frame being decoded. Destination address, source address, and VLAN ID are always fixed relative 
+to the start of the frame. Type ID and the IP address, however, depend on whether the frame has a VLAN tag and/or a valid 
+SNAP encapsulation.
+The number of rx_clk cycles available to make the comparison is design specific, depending on the parameterizable depth 
+of the MAC receive pipeline. The ‘gem_rx_pipeline_delay define in gem_gxl_defs.v defines the depth of the receive 
+pipeline. A decision as to whether the frame should be stored to memory is made when the destination address reaches 
+the end of the pipeline.
+Timings from each strobe becoming valid until the internal match takes place are shown below for the default receive 
+pipeline of ten. 
+These timings also demonstrate the worst case of TBI gigabit mode, where 16 bits of data are processed every rx_clk 
+cycle. For demonstration (see Table 39), the frame received has a VLAN tag. The type ID field, therefore, presented to the 
+external filter interface is delayed until after the VLAN ID is presented so that the real type ID field is captured.
+Table 39: External Address Match Timing
+Strobe Signal
+No. of rx_clk for a Match
+ext_da_stb (destination address)
+7
+
+
+--- PAGE 96 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+96
+The interface assumes the connecting signals are synchronous to rx_clk as shown Figure 17.
+Figure 17: External Address Matching Timing
+The depth of the default receive pipeline is insufficient for external matching of the extracted IP addresses. To cope with 
+both VLAN and SNAP frames, the pipeline must be at least 25 deep when matching on the extracted IP destination 
+address. SNAP and IP frames are only identified if the receive checksum offload is enable in the network configuration 
+register.
+6.1.9.4 Copy All Frames (or Promiscuous Mode)
+If the copy all frames bit is set in the network configuration register, then all frames (except those that are too long, too 
+short, have FCS errors or have rx_er asserted during reception) will be copied to memory. Frames with FCS errors will be 
+copied if bit 26 is set in the network configuration register.
+6.1.9.5 Disable Copy of Pause Frames
+Pause frames can be prevented from being written to memory by setting the disable copying of pause frames control bit 23 
+in the network configuration register. When set, pause frames are not copied to memory regardless of the copy all frames 
+bit, whether a hash match is found, a type ID match is identified, or a destination address match is found.
+6.1.9.6 VLAN Support
+ext_sa_stb (source address)
+4
+ext_type_stb (type field)
+1
+ext_vid_stb (VLAN ID)
+2
+Table 39: External Address Match Timing (Continued)
+Strobe Signal
+No. of rx_clk for a Match
+rx_clk
+ext_da_stb
+ext_da[47:0]
+ext_sa_stb
+ext_sa[47:0]
+ext_type_stb
+ext_type[15:0]
+Valid
+Valid
+Valid
+ext_vid_stb
+ext_vid[15:0]
+Valid
+2 clks
+4 clks
+7 clks
+ext_match must be 
+seen before here for 
+copying to memory
+1 clk
+
+
+--- PAGE 97 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+97
+Table 40 depicts an Ethernet encoded 802.1Q VLAN tag.
+The VLAN tag is inserted at the 13th byte of the frame, adding an extra four bytes to the frame. To support these extra four 
+bytes, GEM can accept frame lengths up to 1536 bytes by setting bit 8 in the network configuration register.
+If the VID (VLAN identifier) is null (0x000), this indicates a priority-tagged frame.
+The following bits in the receive buffer descriptor status word give information about VLAN tagged frames:
+• Bit 21 set if receive frame is VLAN tagged (i.e. type id of 0x8100).
+• Bit 20 set if receive frame is priority tagged (i.e. type id of 0x8100 and null VID). (If bit 20 is set bit 21 will be set also.).
+• Bit 19, 18 and 17 set to priority if bit 21 is set.
+• Bit 16 set to CFI if bit 21 is set.
+GEM can be configured to reject all frames except VLAN tagged frames by setting the discard non-VLAN frames bit in the 
+network configuration register.
+6.1.9.7 Wake-on-LAN Support
+The receive block supports Wake on LAN by detecting the following events on incoming receive frames:
+• Magic packet
+• ARP request to the device IP address
+• Specific address 1 filter match
+• Multicast hash filter match 
+If one of these events occurs, Wake-on-LAN detection is indicated by asserting the wol output pin for 64 rx_clk cycles. 
+These events can be individually enabled through bits[19:16] of the Wake on LAN register. Also, for Wake-on-LAN 
+detection to occur receive enable must be set in the network control register, however a receive buffer does not have to be 
+available. In addition to the wol output pin, an optional wol interrupt is generated for software purposes. If only the MAC 
+receive clock is running at the time of the Wake-on-LAN event (and not the APB clock), the wol interrupt will not occur.
+wol assertion due to ARP request, specific address 1 or multicast filter events will occur even if the frame is errored. For 
+magic packet events, the frame must be correctly formed and error free.
+A magic packet event is detected if all of the following are true:
+• Magic packet events are enabled through bit 16 of the Wake-on-LAN register
+• The frame's destination address matches specific address 1
+• The frame is correctly formed with no errors
+• The frame contains at least 6 bytes of 0xFF for synchronization
+• There are 16 repetitions of the contents of specific address 1 register immediately following the synchronization
+An ARP request event is detected if all of the following are true:
+• ARP request events are enabled through bit 17 of the Wake-on-LAN register
+• Broadcasts are allowed by bit 5 in the network configuration register
+• The frame has a broadcast destination address (bytes 1 to 6)
+• The frame has a typeID field of 0x0806 (bytes 13 and 14)
+• The frame has an ARP operation field of 0x0001 (bytes 21 and 22)
+Table 40: VLAN Tag
+TPID (Tag Protocol Identifier) 16 Bits
+TCI (Tag Control Information) 16 Bits
+0x8100
+First 3 bits priority, then CFI bit, last 12 bits VID
+
+
+--- PAGE 98 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+98
+• The least significant 16 bits of the frame's ARP target protocol address (bytes 41 and 42) match the value programmed 
+in bits[15:0] of the Wake-on-LAN register
+The decoding of the ARP fields adjusts automatically if a VLAN tag is detected within the frame. The reserved value of 
+0x0000 for the Wake-on-LAN target address value will not cause an ARP request event, even if matched by the frame.
+A specific address 1 filter match event will occur if all of the following are true:
+• Specific address 1 events are enabled through bit 18 of the Wake on LAN register
+• The frame's destination address matches the value programmed in the specific address 1 registers
+A multicast filter match event will occur if all of the following are true:
+• Multicast hash events are enabled through bit 19 of the Wake on LAN register
+• Multicast hash filtering is enabled through bit 6 of the network configuration register
+• The frame destination address matches against the multicast hash filter
+• The frame destination address is not a broadcast
+6.1.9.8 Frame Screening
+Frames matched by the frame filtering functionality can undergo further screening and be sent to individual receive queues. 
+This screening functionality has the ability to inspect deep into a receive frame and from release 1p11 has the ability to 
+discard frames in addition to directing them to a specified receive queue.
+For configurations using the FIFO interface, rx_w_queue[3:0] indicates the priority queue selected by the screener 
+registers.
+For configurations using the DMA interface, there is an independent set of receive buffers for each queue. Every received 
+packet will pass through a programmable screening algorithm which will allocate to that frame a particular queue to route it 
+to. The user interface to the screeners is via two banks of programmable registers, screener type 1 match registers and 
+screener type 2 match registers.
+6.1.9.8.1 Screener Type 1 and Type 2 Match Registers
+Screener type 1 match registers allow the user to route received frames based on particular IP and UDP fields extracted 
+from the received frames. Specifically, these fields are DS (Differentiated Services field of IPv4 frames), TC (Traffic class 
+field of IPv6 frames), and/or the UDP destination port. These fields are compared against the values stored in each of the 
+screener type 1 match registers. If the result of this comparison is positive, then the received frame is routed to the priority 
+queue specified in that screener type 1 match register. The number of type 1 screeners is determined by a define in the 
+GEM defines file. Up to 16 screener type 1 registers are allocated address space in the default GEM address map, 
+although this could be increased if necessary by redistributing other GEM registers. For further programming details, refer 
+to the type 1 screening register descriptions in Section 11  Registers.
+Screener type 2 match registers operate independently of screener type 1 match registers and offer additional match 
+capabilities, extending the capabilities into vendor-specific protocols. The type 2 screening allows a screen to be configured 
+that is the combination of all or any of the following comparisons:
+1. An Enabled VLAN Priority. A VLAN Priority match will be performed if the VLAN priority enable is set. The extracted 
+priority field in the VLAN header is compared against 3 bits within the screener type 2 register itself. 
+2. An Enabled EtherType. The ethertype field inside the screener type 2 register maps to one of 8 ethertype match regis-
+ters. The extracted ethertype is compared against the ethertype register designated by this ethertype field. The number 
+of ethertype registers is configurable (up to 8) via the GEM defines file.
+3. An Enabled Field Compare A 
+4. An Enabled Field Compare B
+5. An Enabled Field Compare C
+Compare A, B, and C fields of the screener type 2 match register are pointers to a pool of up to 32 compare registers. If 
+enabled, the compare is true if the data at the OFFSET into the frame, ANDed with the MASK Value if the mask is enabled, 
+is equal to the COMPARE Value. Either a 16-bit comparison or a 32-bit comparison is done. This selection is made via a 
+control bit in the associated compare word1:
+
+
+--- PAGE 99 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+99
+• If a 16-bit comparison is selected, then a 16-bit mask is also available to you for selecting which bits should be com-
+pared
+• If the 32-bit compare option is selected, then no mask is available
+The byte at the OFFSET number of bytes from the index start is compared through bits 7:0 of the configured VALUE. The 
+byte at the OFFSET number of bytes + 1 from the index start is compared through bits 15:8 of the configured VALUE and 
+so on. The OFFSET can be configured to be from 0 to 127 bytes from either the start of the frame, the byte following the 
+ethertype field, the byte following the end of the IP header (IPv4 or IPv6) or the byte following the end of the TCP/UDP 
+header. Note: The logic to decode the IP header or the TCP/UDP header is reused from the TCP/UDP/IP checksum offload 
+logic and therefore has the same restrictions on use (the main limitation is that IP fragmentation is not supported). For 
+further details, refer to Section 6.1.10 Checksum Offload for IP, TCP, and UDP on page 100. The Compare Register field 
+points to a single pool of 32 compare Registers. Compare A, Compare B, and Compare C use a common set of compare 
+registers. The number of compare registers is configurable (up to 32) via the in gem_gxl_defs.v file.
+Note: Compare A, B and C together allow matching against an arbitrary 48 bits of data and so can be used to match 
+against a MAC address.
+All enabled comparisons are ANDed together to form the overall type 2 screener match. 
+For programming details, refer to the type 2 screening register descriptions in Section 11  Registers.
+The number of type 2 screeners is determined by a define in the in gem_gxl_defs.v file. Up to 16 screener type 2 match 
+registers are allocated address space in the default GEM address map, although this could be increased if necessary by 
+redistributing other GEM registers. 
+The following summarizes the available configurations that the GEM core can support with regards to priority queuing:
+• There can be between one and 16 priority queues configured
+• When the number of priority queues is greater than 1, the user has the option of including up to 16 type 1 screeners, 
+which allow the user to select the queue a receive packet will be routed to based on its UDP and/or TOS/TC fields
+• When the number of priority queues is greater than 1, the user has the option of including up to 16 type 2 screeners, 
+which allow the user to select the queue a receive packet will be routed to based on its VLAN, ethertype compare, or 
+user-programmed compare fields
+• When the number of type 2 screeners defined is greater than 0, the user has the option of including from zero up to 8 
+ethertype compare registers
+• When the number of type 2 screeners defined is greater than 0, the user has the option of including from zero up to 32 
+user programmable field compare registers
+Each screener register is programmable via the APB interface. Although this is not recommended, it is possible that more 
+than one screener register will be programmed to match against a single frame. If this happens there are 2 cases to 
+consider:
+1. If a received frame matches against multiple screeners of the same type, then the frame will route to the queue mapped 
+by the screener located at the lowest numeric APB address. E.g. if screener type 2 #0 and screener type 2 #1 both 
+match, then the frame will route to the queue identified in bits [3:0] of the screener type 2 #0 register. 
+2. If a received frame matches against a type 2 screener and a type 1 screener, then the type 1 screener will take prece-
+dence
+When a screener is matched, the received frame will be routed to a queue defined inside bits 3:0 of the screener register. 
+Unmatched frames are routed to queue 0.
+When the priority queuing feature is enabled, the number of interrupt outputs from the GEM core is increased to match the 
+number of supported queues. The number of interrupt status registers are increased by the same number. Only DMA 
+related events are reported using the individual interrupt outputs, as GEM can relate these events to specific queues. All 
+other events generated within GEM are reported in the interrupt associated with the lowest priority queue. For the lowest 
+priority queue (or the only queue when only 1 queue is selected), the interrupt status register is located at address 0x24. 
+For all other queues, the interrupt status register is located at sequential addresses starting at address 0x400.
+
+
+--- PAGE 100 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+100
+6.1.10 Checksum Offload for IP, TCP, and UDP
+GEM can be programmed to perform IP, TCP, and UDP checksum offloading in both the receive and transmit direction 
+which is enabled by setting: 
+• Bit 24 in the network configuration register for receive and
+• Bit 11 in the DMA configuration register for transmit.
+IPv4 packets contain a 16-bit checksum field, which is the 16-bit 1’s complement of the 1’s complement sum of all 16-bit 
+words in the header. TCP and UDP packets contain a 16-bit checksum field, which is the 16-bit 1’s complement of the 1’s 
+complement sum of all 16-bit words in the header, the data and a conceptual IP pseudo header.
+To calculate these checksums in software requires each byte of the packet to be processed. For TCP and UDP, this can 
+use a large amount of processing power. Offloading the checksum calculation to hardware can result in significant 
+performance improvements.
+For IP, TCP, or UDP checksum offload to be useful, the operating system containing the protocol stack must be aware that 
+this offload is available so that it can make use of the fact that the hardware can either generate or verify the checksum.
+6.1.10.1 Receiver Checksum Offload
+When receive checksum offloading is enabled in GEM, the IPv4 header checksum is checked as per RFC 791, where the 
+packet meets the following criteria:
+• If present, the VLAN header must be four octets long and the CFI bit must not be set. (Also for receive one stacked 
+VLAN is supported.)
+• Encapsulation must be RFC 894 Ethernet Type Encoding or RFC 1042 SNAP Encoding or PPPoE Encoding
+• IPv4 packet
+• IP header is of a valid length
+• IP options are supported
+GEM also checks the TCP checksum as per RFC 793, or the UDP checksum as per RFC 768, if the following criteria are 
+met:
+• IPv4 or IPv6 packet
+• IP options and all IPv6 extension headers (i.e. hop-by-hop, routing and destination) are supported (except for fragmen-
+tation headers) 
+• Good IP header checksum (if IPv4)
+• IP fragmentation is not supported (If a packet is fragmented, then the checksum will not be checked)
+• Reserved bit must not be set in the IPv4 header flags field
+• TCP or UDP packet
+When an IP, TCP, or UDP frame is received, the receive buffer descriptor gives an indication if GEM was able to verify the 
+checksums. There is also an indication if the frame had SNAP encapsulation. These indication bits will replace the type ID 
+match indication bits when the receive checksum offload is enabled. For details of these indication bits, please refer to the 
+table Table 26 Receive Buffer Descriptor Entry on page 62.
+If any of the checksums are verified incorrect by GEM, the packet is discarded and the appropriate statistics counter 
+incremented.
+6.1.10.2 Transmitter Checksum Offload
+The transmitter checksum offload is only available if GEM is configured to use the DMA in packet buffer mode and full store 
+and forward mode is enabled. This is because the complete frame to be transmitted must be read into the packet buffer 
+memory before the checksum can be calculated and written back into the headers at the beginning of the frame.

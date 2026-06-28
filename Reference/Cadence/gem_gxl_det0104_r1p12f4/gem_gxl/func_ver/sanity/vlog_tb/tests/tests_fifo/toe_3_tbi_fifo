@@ -1,0 +1,1235 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : toe_3_tbi_fifo
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 5 October 2002
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- This test checks the operation of the RX TCP offload engine, with IP frames
+-- with SNAP and ethernet encapsulation, which have bad IP, UDP or TCP checksums
+-- This test is run in gigabit TBI FIFO mode.
+-- 
+-- Functional Coverage
+-- * Checks that the TOE recognises that these are TCP or UDP frames
+--   and therefore checks the TCP/UDP checksum.
+-- * Checks that the TOE can detect bad IP, TCP and UDP checksums for both 
+--   odd and even length frames.
+-- * Checks that the GEM discards frames with bad checksums.
+-- 
+-- Detailed Test Description
+--  1. Initialise suitable wait states for the test.
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in TBI mode into a 32-bit FIFO data bus.
+--  3. Send several IP frames with either SNAP or ethernet encapsulation, which
+--     have bad IP, TCP or UDP checksums.
+--
+-- Test 3.1
+--    Broadcast frame, Min length IP, no VLAN or SNAP, no IP options, TCP,
+--    incorrect IP checksum.
+--    The frame should be discarded, with bad status, and a bad IP checksum
+--    recorded in the statistics registers.
+-- Test 3.2
+--    Broadcast frame, IP packet, no VLAN or SNAP, with IP options, no TCP or
+--    UDP, incorrect IP checksum.
+--    The frame should be discarded, with bad status, and a bad IP checksum
+--    recorded in the statistics registers.
+-- Test 3.3
+--    Broadcast frame, IP packet, no VLAN or SNAP, no IP options, correct IP
+--    checksum, TCP, incorrect TCP checksum.
+--    The frame should be discarded, with bad status, and a bad TCP checksum
+--    recorded in the statistics registers.
+-- Test 3.4
+--    Broadcast frame, IP packet, VLAN and SNAP, IP options, correct IP
+--    checksum, UDP, incorrect UDP checksum.
+--    The frame should be discarded, with bad status, and a bad UDP checksum
+--    recorded in the statistics registers.
+-- Test 3.5
+--    Broadcast frame, Otherwise valid IP packet where the end of Ethernet
+--    data comes before the expected end of the IP header.
+--    The frame should be discarded, with bad status, and a bad IP checksum
+--    recorded in the statistics registers.
+-- Test 3.6
+--    Broadcast frame, Otherwise valid UDP packet where the end of Ethernet
+--    data comes before the expected end of the UDP data.
+--    The frame should be discarded, with bad status, and a bad UDP checksum
+--    recorded in the statistics registers.
+-- Test 3.7
+--    Broadcast frame, Max length (1518 octets including CRC) TCP packet with
+--    incorrect TCP checksum.
+--    The frame should be discarded, with bad status, and a bad TCP checksum
+--    recorded in the statistics registers.
+-- Test 3.8
+--    Broadcast frame, Min length IP, VLAN, SNAP, no IP options, UDP,
+--    incorrect IP checksum.
+--    The frame should be discarded, with bad status, and a bad IP checksum
+--    recorded in the statistics registers.
+--
+--  4. Receive a good frame to trigger an interrupt and check stats.
+--  5. Check statistics for correct values from above tests.
+--
+--------------------------------------------------------------------------------
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 0
+bus_grant_delay 0
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in TBI mode into a 32-bit FIFO data bus.
+--******************************************************************************
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd     200 00009040  -- check value of pcs control register
+apbwr     200 00000040  -- disable autonegotioation
+apbrd     200 00008040  -- check autoneg disabled
+apbwr      04 01080c01  -- enable RX TCP offload engine. and TBI mode, 32 bit.
+apbrd      04 01080c01  -- verify write to network config register.
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      00 00000004  -- enable receive
+
+apbrd(int) 24 00000200  -- check link status change interrupt
+
+
+--******************************************************************************
+--  3. Send several IP frames with either SNAP or ethernet encapsulation, which
+--     have bad IP, TCP or UDP checksums.
+--******************************************************************************
+
+
+
+--******************************************************************************
+-- Test 3.1
+--    Broadcast frame, Min length IP, no VLAN or SNAP, no IP options, TCP,
+--    incorrect IP checksum.
+--    The frame should be discarded, with bad status, and a bad IP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+apbrd      20 00000000  -- dummy read to delay testbench and sync up
+apbrdf     20 00000000  "Test 3.1 to 3.8 : various frames, all with bad checksums"
+                        -- trigger reception of frame
+
+pcs_rxd(apb_r) 55d5         -- preamble & SDF
+pcs_rxd        FFFFFFFFFFFF -- MAC DA
+pcs_rxd        080039123456 -- MAC SA
+pcs_rxd        0800         -- Length/typeID
+pcs_rxd        4500         -- Version, IHL, type of service
+pcs_rxd        0028         -- total length
+pcs_rxd        DFFA         -- ID
+pcs_rxd        4000         -- flags & fragmentation
+pcs_rxd        8006         -- time to live and protocol
+pcs_rxd        98E2         -- IP Header checksum
+pcs_rxd        C0A80001     -- IP SA
+pcs_rxd        C0A80091     -- IP DA
+pcs_rxd        0015         -- TCP source port
+pcs_rxd        048A         -- TCP destination port
+pcs_rxd        3DBB5C60     -- Sequence number
+pcs_rxd        EA224D76     -- Acknowledgement Number
+pcs_rxd        50104428     -- Flags and window
+pcs_rxd        1376         -- TCP checksum
+pcs_rxd        0000         -- TCP urgent pointer
+pcs_rxd        BA9876543210 -- data
+pcs_rxd        gggggggg     -- FCS
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 ipsa 0100A8C0 ipda 9100A8C0
+
+
+-- check the receive data as it is written out on the FIFO interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    FFFFFFFF
+fifo_wr      1000     0   xxxxxxxxxx    0008FFFF
+fifo_wr      1000     0   xxxxxxxxxx    56341239
+fifo_wr      1000     0   xxxxxxxxxx    00450008
+fifo_wr      1000     0   xxxxxxxxxx    FADF2800
+fifo_wr      1000     0   xxxxxxxxxx    06800040
+fifo_wr      1000     0   xxxxxxxxxx    A8C0E298
+fifo_wr      1000     0   xxxxxxxxxx    A8C00100
+fifo_wr      1000     0   xxxxxxxxxx    15009100
+fifo_wr      1000     0   xxxxxxxxxx    BB3D8A04
+fifo_wr      1000     0   xxxxxxxxxx    22EA605C
+fifo_wr      1000     0   xxxxxxxxxx    1050764D
+fifo_wr      1000     0   xxxxxxxxxx    76132844
+fifo_wr      1000     0   xxxxxxxxxx    98BA0000
+fifo_wr      1000     0   xxxxxxxxxx    10325476
+fifo_wr      1101     0   0000204040    6BCEE197 -- ERROR
+                         -- bad frame
+                         -- broadcast match
+                         -- IP, TCP and UDP checksums not OK
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 64 bytes received
+
+
+
+
+--******************************************************************************
+-- Test 3.2
+--    Broadcast frame, IP packet, no VLAN or SNAP, with IP options, no TCP or
+--    UDP, incorrect IP checksum.
+--    The frame should be discarded, with bad status, and a bad IP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+
+pcs_rxd(gap_r) 55d5         -- preamble & SDF
+pcs_rxd        FFFFFFFFFFFF -- MAC DA
+pcs_rxd        080039123456 -- MAC SA
+pcs_rxd        0800         -- Length/typeID
+pcs_rxd        4800         -- Version, IHL, type of service
+pcs_rxd        002E         -- total length
+pcs_rxd        0000         -- ID
+pcs_rxd        0000         -- flags & fragmentation
+pcs_rxd        0A01         -- time to live and protocol
+pcs_rxd        FE1F         -- IP Header checksum
+pcs_rxd        86BF0B52     -- IP SA
+pcs_rxd        86BF1622     -- IP DA
+pcs_rxd        FACECAFF     -- IP options
+pcs_rxd        ABCDB1B1     -- IP options
+pcs_rxd        B0B0BABE     -- IP options
+pcs_rxd        0800BA8F     -- data
+pcs_rxd        00010001     -- data
+pcs_rxd        01234567     -- data
+pcs_rxd        89ABCDEF     -- data
+pcs_rxd        01234567     -- data
+pcs_rxd        89ABCDEF     -- data
+pcs_rxd        0123         -- data
+pcs_rxd        gggggggg     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 ipsa 520BBF86 ipda 2216BF86
+
+-- check the receive data as it is written out on the FIFO interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    FFFFFFFF
+fifo_wr      1000     0   xxxxxxxxxx    0008FFFF
+fifo_wr      1000     0   xxxxxxxxxx    56341239
+fifo_wr      1000     0   xxxxxxxxxx    00480008
+fifo_wr      1000     0   xxxxxxxxxx    00002E00
+fifo_wr      1000     0   xxxxxxxxxx    010A0000
+fifo_wr      1000     0   xxxxxxxxxx    BF861FFE
+fifo_wr      1000     0   xxxxxxxxxx    BF86520B
+fifo_wr      1000     0   xxxxxxxxxx    CEFA2216
+fifo_wr      1000     0   xxxxxxxxxx    CDABFFCA
+fifo_wr      1000     0   xxxxxxxxxx    B0B0B1B1
+fifo_wr      1000     0   xxxxxxxxxx    0008BEBA
+fifo_wr      1000     0   xxxxxxxxxx    01008FBA
+fifo_wr      1000     0   xxxxxxxxxx    23010100
+fifo_wr      1000     0   xxxxxxxxxx    AB896745
+fifo_wr      1000     0   xxxxxxxxxx    2301EFCD
+fifo_wr      1000     0   xxxxxxxxxx    AB896745
+fifo_wr      1000     0   xxxxxxxxxx    2301EFCD
+fifo_wr      1101     0   000020404c    0B44FAAE -- ERROR
+                         -- bad frame
+                         -- broadcast match
+                         -- IP, TCP and UDP checksums not OK
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 68 bytes received
+
+
+
+
+--******************************************************************************
+-- Test 3.3
+--    Broadcast frame, IP packet, no VLAN or SNAP, no IP options, correct IP
+--    checksum, TCP, incorrect TCP checksum.
+--    The frame should be discarded, with bad status, and a bad TCP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+pcs_rxd(gap_r) 55d5         -- preamble & SDF
+pcs_rxd        FFFFFFFFFFFF -- MAC DA
+pcs_rxd        080039123456 -- MAC SA
+pcs_rxd        0800         -- Length/typeID
+pcs_rxd        4500         -- Version, IHL, type of service
+pcs_rxd        0028         -- total length
+pcs_rxd        DFFA         -- ID
+pcs_rxd        4000         -- flags & fragmentation
+pcs_rxd        8006         -- time to live and protocol
+pcs_rxd        98F2         -- IP Header checksum
+pcs_rxd        C0A80001     -- IP SA
+pcs_rxd        C0A80091     -- IP DA
+pcs_rxd        0015         -- TCP source port
+pcs_rxd        048A         -- TCP destination port
+pcs_rxd        3DBB5C60     -- Sequence number
+pcs_rxd        EA224D76     -- Acknowledgement Number
+pcs_rxd        50104428     -- Flags and window
+pcs_rxd        1396         -- TCP checksum
+pcs_rxd        0000         -- TCP urgent pointer
+pcs_rxd        66668888FFFF -- data
+pcs_rxd        gggggggg     -- FCS
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 ipsa 0100A8C0 ipda 9100A8C0
+
+-- check the receive data as it is written out on the FIFO interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    FFFFFFFF
+fifo_wr      1000     0   xxxxxxxxxx    0008FFFF
+fifo_wr      1000     0   xxxxxxxxxx    56341239
+fifo_wr      1000     0   xxxxxxxxxx    00450008
+fifo_wr      1000     0   xxxxxxxxxx    FADF2800
+fifo_wr      1000     0   xxxxxxxxxx    06800040
+fifo_wr      1000     0   xxxxxxxxxx    A8C0F298
+fifo_wr      1000     0   xxxxxxxxxx    A8C00100
+fifo_wr      1000     0   xxxxxxxxxx    15009100
+fifo_wr      1000     0   xxxxxxxxxx    BB3D8A04
+fifo_wr      1000     0   xxxxxxxxxx    22EA605C
+fifo_wr      1000     0   xxxxxxxxxx    1050764D
+fifo_wr      1000     0   xxxxxxxxxx    96132844
+fifo_wr      1000     0   xxxxxxxxxx    66660000
+fifo_wr      1000     0   xxxxxxxxxx    FFFF8888
+fifo_wr      1101     0   1000204040    2031ED75 -- ERROR
+                         -- bad frame
+                         -- broadcast match
+                         -- IP checksum OK, TCP and UDP checksums not OK
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 64 bytes received
+
+
+
+
+--******************************************************************************
+-- Test 3.4
+--    Broadcast frame, IP packet, VLAN and SNAP, IP options, correct IP
+--    checksum, UDP, incorrect UDP checksum.
+--    The frame should be discarded, with bad status, and a bad UDP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+pcs_rxd(gap_r) 55d5         -- preamble & SDF
+pcs_rxd        FFFFFFFFFFFF -- MAC DA
+pcs_rxd        080039123456 -- MAC SA
+pcs_rxd        8100         -- Length/typeID
+pcs_rxd        0001         -- VLAN tag
+pcs_rxd        0024         -- Length/typeID
+pcs_rxd        AAAA         -- DSAP and SSAP
+pcs_rxd        0300         -- Control / Protocol ID[7:0]
+pcs_rxd        0000         -- Protocol ID [23:8]
+pcs_rxd        0800         -- Length/typeID
+pcs_rxd        4500         -- Version, IHL, type of service
+pcs_rxd        001C         -- total length
+pcs_rxd        0000         -- ID
+pcs_rxd        0000         -- flags & fragmentation
+pcs_rxd        0A11         -- time to live and protocol
+pcs_rxd        81DF         -- IP Header checksum
+pcs_rxd        86BF0B52     -- IP SA
+pcs_rxd        86BF1622     -- IP DA
+pcs_rxd        0000         -- UDP source port
+pcs_rxd        0000         -- UDP destination port
+pcs_rxd        0008         -- UDP length
+pcs_rxd        D5EB         -- UDP checksum
+pcs_rxd        00000000     -- UDP data
+pcs_rxd        00000000     -- UDP data
+pcs_rxd        0000         -- UDP data
+pcs_rxd        gggggggg     -- Good FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 vid 0001 ipsa 520BBF86 ipda 2216BF86
+
+
+-- check the receive data as it is written out on the FIFO interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    FFFFFFFF
+fifo_wr      1000     0   xxxxxxxxxx    0008FFFF
+fifo_wr      1000     0   xxxxxxxxxx    56341239
+fifo_wr      1000     0   xxxxxxxxxx    01000081
+fifo_wr      1000     0   xxxxxxxxxx    AAAA2400
+fifo_wr      1000     0   xxxxxxxxxx    00000003
+fifo_wr      1000     0   xxxxxxxxxx    00450008
+fifo_wr      1000     0   xxxxxxxxxx    00001C00
+fifo_wr      1000     0   xxxxxxxxxx    110A0000
+fifo_wr      1000     0   xxxxxxxxxx    BF86DF81
+fifo_wr      1000     0   xxxxxxxxxx    BF86520B
+fifo_wr      1000     0   xxxxxxxxxx    00002216
+fifo_wr      1000     0   xxxxxxxxxx    08000000
+fifo_wr      1000     0   xxxxxxxxxx    0000EBD5
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1101     0   900020c044    05675284 -- ERROR
+                         -- bad frame
+                         -- broadcast match
+                         -- IP checksum OK, TCP and UDP checksums not OK
+                         -- SNAP detected
+                         -- VLAN tag detected, no priority or CFI
+                         -- 68 bytes received
+
+
+
+
+--******************************************************************************
+-- Test 3.5
+--    Broadcast frame, Otherwise valid IP packet where the end of Ethernet
+--    data comes before the expected end of the IP header.
+--    The frame should be discarded, with bad status, and a bad IP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+pcs_rxd(gap_r) 55d5         -- preamble & SDF
+pcs_rxd        FFFFFFFFFFFF -- MAC DA
+pcs_rxd        080039123456 -- MAC SA
+pcs_rxd        8100         -- Length/typeID
+pcs_rxd        0001         -- VLAN tag
+pcs_rxd        0800         -- Length/typeID
+pcs_rxd        4F00         -- Version, IHL, type of service
+pcs_rxd        0050         -- total length
+pcs_rxd        DFFA         -- ID
+pcs_rxd        4000         -- flags & fragmentation
+pcs_rxd        8006         -- time to live and protocol
+pcs_rxd        8ECA         -- IP Header checksum
+pcs_rxd        C0A80001     -- IP SA
+pcs_rxd        C0A80091     -- IP DA
+pcs_rxd        11112222     -- IP options
+pcs_rxd        33334444     -- IP options
+pcs_rxd        55556666     -- IP options
+pcs_rxd        77778888     -- IP options
+pcs_rxd        9999AAAA     -- IP options
+pcs_rxd        BBBBCCCC     -- IP options
+pcs_rxd        DDDDEEEE     -- IP options
+pcs_rxd        FFFF1111     -- IP options
+pcs_rxd        22223333     -- IP options
+pcs_rxd        gggggggg     -- Good FCS
+
+
+-- check the correct DA, SA, type, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 vid 0001 type 0800 ipsa 0100A8C0 ipda 9100A8C0
+
+
+-- check the receive data as it is written out on the FIFO interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    FFFFFFFF
+fifo_wr      1000     0   xxxxxxxxxx    0008FFFF
+fifo_wr      1000     0   xxxxxxxxxx    56341239
+fifo_wr      1000     0   xxxxxxxxxx    01000081
+fifo_wr      1000     0   xxxxxxxxxx    004F0008
+fifo_wr      1000     0   xxxxxxxxxx    FADF5000
+fifo_wr      1000     0   xxxxxxxxxx    06800040
+fifo_wr      1000     0   xxxxxxxxxx    A8C0CA8E
+fifo_wr      1000     0   xxxxxxxxxx    A8C00100
+fifo_wr      1000     0   xxxxxxxxxx    11119100
+fifo_wr      1000     0   xxxxxxxxxx    33332222
+fifo_wr      1000     0   xxxxxxxxxx    55554444
+fifo_wr      1000     0   xxxxxxxxxx    77776666
+fifo_wr      1000     0   xxxxxxxxxx    99998888
+fifo_wr      1000     0   xxxxxxxxxx    BBBBAAAA
+fifo_wr      1000     0   xxxxxxxxxx    DDDDCCCC
+fifo_wr      1000     0   xxxxxxxxxx    FFFFEEEE
+fifo_wr      1000     0   xxxxxxxxxx    22221111
+fifo_wr      1000     0   xxxxxxxxxx    0A7D3333
+fifo_wr      1101     2   000020c04e    00007C1E -- ERROR
+                         -- bad frame
+                         -- broadcast match
+                         -- IP, TCP and UDP checksums not OK
+                         -- no SNAP detected
+                         -- VLAN tag detected, no priority or CFI
+                         -- 78 bytes received
+
+
+
+
+--******************************************************************************
+-- Test 3.6
+--    Broadcast frame, Otherwise valid UDP packet where the end of Ethernet
+--    data comes before the expected end of the UDP data.
+--    The frame should be discarded, with bad status, and a bad UDP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+
+pcs_rxd(gap_r) 55d5         -- preamble & SDF
+pcs_rxd        FFFFFFFFFFFF -- MAC DA
+pcs_rxd        080039123456 -- MAC SA
+pcs_rxd        8100         -- Length/typeID
+pcs_rxd        0001         -- VLAN tag
+pcs_rxd        0024         -- Length/typeID
+pcs_rxd        AAAA         -- DSAP and SSAP
+pcs_rxd        0300         -- Control / Protocol ID[7:0]
+pcs_rxd        0000         -- Protocol ID [23:8]
+pcs_rxd        0800         -- Length/typeID
+pcs_rxd        4500         -- Version, IHL, type of service
+pcs_rxd        003C         -- total length
+pcs_rxd        0000         -- ID
+pcs_rxd        0000         -- flags & fragmentation
+pcs_rxd        0A11         -- time to live and protocol
+pcs_rxd        81BF         -- IP Header checksum
+pcs_rxd        86BF0B52     -- IP SA
+pcs_rxd        86BF1622     -- IP DA
+pcs_rxd        0000         -- UDP source port
+pcs_rxd        0000         -- UDP destination port
+pcs_rxd        0008         -- UDP length
+pcs_rxd        CA7E         -- UDP checksum
+pcs_rxd        00001234     -- UDP data
+pcs_rxd        56783333     -- UDP data
+pcs_rxd        44445555     -- UDP data
+pcs_rxd        gggggggg     -- Good FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 vid 0001 ipsa 520BBF86 ipda 2216BF86
+
+
+-- check the receive data as it is written out on the FIFO interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    FFFFFFFF
+fifo_wr      1000     0   xxxxxxxxxx    0008FFFF
+fifo_wr      1000     0   xxxxxxxxxx    56341239
+fifo_wr      1000     0   xxxxxxxxxx    01000081
+fifo_wr      1000     0   xxxxxxxxxx    AAAA2400
+fifo_wr      1000     0   xxxxxxxxxx    00000003
+fifo_wr      1000     0   xxxxxxxxxx    00450008
+fifo_wr      1000     0   xxxxxxxxxx    00003C00
+fifo_wr      1000     0   xxxxxxxxxx    110A0000
+fifo_wr      1000     0   xxxxxxxxxx    BF86BF81
+fifo_wr      1000     0   xxxxxxxxxx    BF86520B
+fifo_wr      1000     0   xxxxxxxxxx    00002216
+fifo_wr      1000     0   xxxxxxxxxx    08000000
+fifo_wr      1000     0   xxxxxxxxxx    00007ECA
+fifo_wr      1000     0   xxxxxxxxxx    78563412
+fifo_wr      1000     0   xxxxxxxxxx    44443333
+fifo_wr      1000     0   xxxxxxxxxx    ACE25555
+fifo_wr      1101     2   900020c046    00000111 -- ERROR
+                         -- bad frame
+                         -- broadcast match
+                         -- IP checksum OK, TCP and UDP checksums not OK
+                         -- SNAP detected
+                         -- VLAN tag detected, no priority or CFI
+                         -- 70 bytes received
+
+
+
+--******************************************************************************
+-- Test 3.7
+--    Broadcast frame, Max length (1518 octets including CRC) TCP packet with
+--    incorrect TCP checksum.
+--    The frame should be discarded, with bad status, and a bad TCP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+pcs_rxd(gap_r) 55d5         -- preamble & SDF
+pcs_rxd        FFFFFFFFFFFF -- MAC DA
+pcs_rxd        080039123456 -- MAC SA
+pcs_rxd        0800         -- Length/typeID
+pcs_rxd        4500         -- Version, IHL, type of service
+pcs_rxd        05DC         -- total length
+pcs_rxd        DFFA         -- ID
+pcs_rxd        4000         -- flags & fragmentation
+pcs_rxd        8006         -- time to live and protocol
+pcs_rxd        933E         -- IP Header checksum
+pcs_rxd        C0A80001     -- IP SA
+pcs_rxd        C0A80091     -- IP DA
+pcs_rxd        0015         -- TCP source port
+pcs_rxd        048A         -- TCP destination port
+pcs_rxd        3DBB5C60     -- Sequence number
+pcs_rxd        EA224D76     -- Acknowledgement Number
+pcs_rxd        50104428     -- Flags and window
+pcs_rxd        9CF6         -- TCP checksum
+pcs_rxd        0000         -- TCP urgent pointer
+
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE -- Data
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FFBABB000FB000873401853829
+pcs_rxd        3333781944439999FAFFBACEBEBBBABE
+pcs_rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+pcs_rxd        B0008734018538293333781944439999
+pcs_rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+pcs_rxd        F000F1FF                         -- last data
+
+pcs_rxd        gggggggg     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 ipsa 0100A8C0 ipda 9100A8C0
+
+
+-- check the receive data as it is written out on the AHB interface
+fifo_wr      1010     0   xxxxxxxxxx    FFFFFFFF
+fifo_wr      1000     0   xxxxxxxxxx    0008FFFF
+fifo_wr      1000     0   xxxxxxxxxx    56341239
+fifo_wr      1000     0   xxxxxxxxxx    00450008
+fifo_wr      1000     0   xxxxxxxxxx    FADFDC05
+fifo_wr      1000     0   xxxxxxxxxx    06800040
+fifo_wr      1000     0   xxxxxxxxxx    A8C03E93
+fifo_wr      1000     0   xxxxxxxxxx    A8C00100
+fifo_wr      1000     0   xxxxxxxxxx    15009100
+fifo_wr      1000     0   xxxxxxxxxx    BB3D8A04
+fifo_wr      1000     0   xxxxxxxxxx    22EA605C
+fifo_wr      1000     0   xxxxxxxxxx    1050764D
+fifo_wr      1000     0   xxxxxxxxxx    F69C2844
+fifo_wr      1000     0   xxxxxxxxxx    FFFA0000
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    BBBAFFF1
+fifo_wr      1000     0   xxxxxxxxxx    00B00F00
+fifo_wr      1000     0   xxxxxxxxxx    85013487
+fifo_wr      1000     0   xxxxxxxxxx    33332938
+fifo_wr      1000     0   xxxxxxxxxx    43441978
+fifo_wr      1000     0   xxxxxxxxxx    FFFA9999
+fifo_wr      1000     0   xxxxxxxxxx    BBBECEBA
+fifo_wr      1000     0   xxxxxxxxxx    BBFABEBA
+fifo_wr      1000     0   xxxxxxxxxx    CEFAFECA
+fifo_wr      1000     0   xxxxxxxxxx    00F0FEEF
+fifo_wr      1000     0   xxxxxxxxxx    D373FFF1
+fifo_wr      1101     2   10002045ee    000073E4 -- ERROR
+                         -- bad frame
+                         -- broadcast match
+                         -- IP checksum OK, TCP and UDP checksums not OK
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 70 bytes received
+
+
+
+
+--******************************************************************************
+-- Test 3.8
+--    Broadcast frame, Min length IP, VLAN, SNAP, no IP options, UDP,
+--    incorrect IP checksum.
+--    The frame should be discarded, with bad status, and a bad IP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+pcs_rxd(gap_r) 55d5         -- preamble & SDF
+pcs_rxd        FFFFFFFFFFFF -- MAC DA
+pcs_rxd        080039123456 -- MAC SA
+pcs_rxd        8100         -- Length/typeID
+pcs_rxd        0001         -- VLAN tag
+pcs_rxd        0024         -- Length/typeID
+pcs_rxd        AAAA         -- DSAP and SSAP
+pcs_rxd        0300         -- Control / Protocol ID[7:0]
+pcs_rxd        0000         -- Protocol ID [23:8]
+pcs_rxd        0800         -- Length/typeID
+pcs_rxd        4500         -- Version, IHL, type of service
+pcs_rxd        001C         -- total length
+pcs_rxd        0000         -- ID
+pcs_rxd        0000         -- flags & fragmentation
+pcs_rxd        0A11         -- time to live and protocol
+pcs_rxd        81DE         -- IP Header checksum
+pcs_rxd        86BF0B52     -- IP SA
+pcs_rxd        86BF1622     -- IP DA
+pcs_rxd        0000         -- UDP source port
+pcs_rxd        0000         -- UDP destination port
+pcs_rxd        0008         -- UDP length
+pcs_rxd        D5EB         -- UDP checksum
+pcs_rxd        00000000     -- UDP data
+pcs_rxd        00000000     -- UDP data
+pcs_rxd        0000         -- UDP data
+pcs_rxd        gggggggg     -- Good FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 vid 0001 ipsa 520BBF86 ipda 2216BF86
+
+
+-- check the receive data as it is written out on the AHB interface
+fifo_wr      1010     0   xxxxxxxxxx    FFFFFFFF
+fifo_wr      1000     0   xxxxxxxxxx    0008FFFF
+fifo_wr      1000     0   xxxxxxxxxx    56341239
+fifo_wr      1000     0   xxxxxxxxxx    01000081
+fifo_wr      1000     0   xxxxxxxxxx    AAAA2400
+fifo_wr      1000     0   xxxxxxxxxx    00000003
+fifo_wr      1000     0   xxxxxxxxxx    00450008
+fifo_wr      1000     0   xxxxxxxxxx    00001C00
+fifo_wr      1000     0   xxxxxxxxxx    110A0000
+fifo_wr      1000     0   xxxxxxxxxx    BF86DE81
+fifo_wr      1000     0   xxxxxxxxxx    BF86520B
+fifo_wr      1000     0   xxxxxxxxxx    00002216
+fifo_wr      1000     0   xxxxxxxxxx    08000000
+fifo_wr      1000     0   xxxxxxxxxx    0000EBD5
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1101     0   800020c044    6BEB49C5 -- ERROR
+                         -- bad frame
+                         -- broadcast match
+                         -- IP checksum not OK, TCP and UDP checksums not checked
+                         -- SNAP detected
+                         -- VLAN tag detected, no priority or CFI
+                         -- 68 bytes received
+
+
+--******************************************************************************
+--  4. Receive a good frame to trigger an interrupt and check stats.
+--******************************************************************************
+
+pcs_rxd(gap_r) 55d5         -- preamble & SDF
+pcs_rxd        FFFFFFFFFFFF -- MAC DA
+pcs_rxd        080039123456 -- MAC SA
+pcs_rxd        0800         -- Length/typeID
+pcs_rxd        4500         -- Version, IHL, type of service
+pcs_rxd        0028         -- total length
+pcs_rxd        DFFA         -- ID
+pcs_rxd        4000         -- flags & fragmentation
+pcs_rxd        8006         -- time to live and protocol
+pcs_rxd        98F2         -- IP Header checksum
+pcs_rxd        C0A80001     -- IP SA
+pcs_rxd        C0A80091     -- IP DA
+pcs_rxd        0015         -- TCP source port
+pcs_rxd        048A         -- TCP destination port
+pcs_rxd        3DBB5C60     -- Sequence number
+pcs_rxd        EA224D76     -- Acknowledgement Number
+pcs_rxd        50104428     -- Flags and window
+pcs_rxd        1376         -- TCP checksum
+pcs_rxd        0000         -- TCP urgent pointer
+pcs_rxd        ACACDBDBB0B0 -- options or padding
+pcs_rxd        gggggggg     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 ipsa 0100A8C0 ipda 9100A8C0
+
+
+-- check the receive data as it is written out on the AHB interface
+fifo_wr      1010     0   xxxxxxxxxx    FFFFFFFF
+fifo_wr      1000     0   xxxxxxxxxx    0008FFFF
+fifo_wr      1000     0   xxxxxxxxxx    56341239
+fifo_wr      1000     0   xxxxxxxxxx    00450008
+fifo_wr      1000     0   xxxxxxxxxx    FADF2800
+fifo_wr      1000     0   xxxxxxxxxx    06800040
+fifo_wr      1000     0   xxxxxxxxxx    A8C0F298
+fifo_wr      1000     0   xxxxxxxxxx    A8C00100
+fifo_wr      1000     0   xxxxxxxxxx    15009100
+fifo_wr      1000     0   xxxxxxxxxx    BB3D8A04
+fifo_wr      1000     0   xxxxxxxxxx    22EA605C
+fifo_wr      1000     0   xxxxxxxxxx    1050764D
+fifo_wr      1000     0   xxxxxxxxxx    76132844
+fifo_wr      1000     0   xxxxxxxxxx    ACAC0000
+fifo_wr      1000     0   xxxxxxxxxx    B0B0DBDB
+fifo_wr      1001     0   3000200040    2F119E58
+                         -- broadcast match
+                         -- IP & TCP checksums OK
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 64 bytes received
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 3.1 to 3.8 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+--  5. Check statistics for correct values from above tests.
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000040  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000001  -- check frames received ok
+apbrd     15C 00000001  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000001  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+apbrd     1A8 00000004  -- check receive IP checksum errors
+apbrd     1AC 00000002  -- check receive TCP checksum errors
+apbrd     1B0 00000002  -- check receive UDP checksum errors
+
+end(10000)
+
+

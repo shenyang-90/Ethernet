@@ -1,0 +1,331 @@
+
+--------------------------------------------------------------------------------
+--
+--                                       Copyright (c) 2002
+--            CADENCE                    Cadence Design Systems
+--                                       All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : pfc_negotiate2_fifo
+--
+--   Authors        : Christine Lin (htlin@cadence.com)
+--
+--   Date           : 12 November 2009
+--
+--   Description    : The tests checks that after a PFC pause frame has been
+--                    negotiated, any 802.3 pause frame will not affect any
+--                    pause timer. Same tests as pfc_negotiate_fifo but only
+--                    gap time between received frames.
+--
+--------------------------------------------------------------------------------
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- ************************************************************************** --
+-- Initialize
+-- ************************************************************************** --
+apbwr(60)  4c 00000001  -- enable soft config fifo port bit when available
+apbrd      4c 00000001  -- check enable soft config bit when available
+
+apbrd(100) 00 00000000  -- check reset value of receive control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      00 0001020C  -- start transmission
+                        -- enable receive/transmit and PFC pause frame reception
+apbwrf     04 00083003 -- dsiable copy of pause frame bit(23) = 0,
+                         -- reset retry test bit(12) = 1, 
+                         -- keep enable pause time bit(13) = 1,
+                         -- copy all frames bit(4) = 0
+                         -- full-duplex bit(1) = 1,
+                         -- 100Mbps speed bit(0) = 1
+                        
+
+apbwr      88 76543210  -- set exact match reg 1
+apbwr      8c 0000dcba  -- set exact match reg 1
+apbwr      90 11111111  -- set exact match reg 2
+apbwr      94 00001111  -- set exact match reg 2
+apbwr      98 11111111  -- set exact match reg 3
+apbwr      9c 00001111  -- set exact match reg 3
+apbwr      a0 11111111  -- set exact match reg 4
+apbwr      a4 00001111  -- set exact match reg 4
+apbrd      88 76543210  -- 
+apbrdf     8c 0000dcba  -- 
+
+
+-- ************************************************************************** --
+-- #1
+-- receive a classic frame with DA matching exact match 1
+-- 802.3 timer counter is loaded with 16'h2ff and starts to decrement
+-- transmission is halted
+-- ************************************************************************** --
+rxd(apb)       55d5
+rxd            10325476badc22222222333388080001
+rxd            02ff4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    76543210   -- store frame to memory 
+fifo_wr      1000     0   xxxxxxxxxx    2222dcba
+fifo_wr      1000     0   xxxxxxxxxx    33332222
+fifo_wr      1000     0   xxxxxxxxxx    01000888
+fifo_wr      1000     0   xxxxxxxxxx    4444ff02
+fifo_wr      1000     0   xxxxxxxxxx    55555555
+fifo_wr      1000     0   xxxxxxxxxx    66666666
+fifo_wr      1000     0   xxxxxxxxxx    77777777
+fifo_wr      1000     0   xxxxxxxxxx    88888888
+fifo_wr      1000     0   xxxxxxxxxx    99999999
+fifo_wr      1000     0   xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1001     0   0010000040    a6b5fcc2
+
+
+apbrd(int) 24 00001002  -- check interrupt status - pause and frame received
+apbrd      38 000002ff  -- check pause counter loaded with 2ff
+apbrd      38 000002ff  -- check pause counter 
+apbrd      38 000002ff  -- check pause counter 
+apbrd      38 000002fa  -- check pause counter decremented
+
+pinsc(int) pfc_negotiate 0 rx_pfc_paused 0000000
+
+apbwr(442) 00 0001020c  -- start transmission
+                        -- enable receive/transmit and PFC pause frame reception
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+
+
+-- Supply the transmit data to the FIFO interface while transmission is halt 
+-- preamble ins disabled
+-- DA[0] = 1 therefore frames are multicast
+
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd(int)    00001010   0   00000000      67452301
+fifo_rd         00000000   0   00000000      1111ab89
+fifo_rd         00000000   0   00000000      22222222
+fifo_rd         00000000   0   00000000      33333333
+fifo_rd         00000000   0   00000000      44444444
+fifo_rd         00000000   0   00000000      55555555
+fifo_rd         00000000   0   00000000      66666666
+fifo_rd         00000000   0   00000000      77777777
+fifo_rd         00000000   0   00000000      88888888
+fifo_rd         00000000   0   00000000      99999999
+fifo_rd         00000000   0   00000000      aaaaaaaa
+fifo_rd         00000000   0   00000000      bbbbbbbb
+fifo_rd         00001001   0   00000000      cccccccc
+
+apbrdf      24 00000000  -- check interrupt status
+
+
+-- ************************************************************************** --
+-- #2
+-- receive a PFC frame with DA matching exact match 1
+-- PFC timer counter are loaded, but 802.3 timer counter not overloaded
+-- pfc_negotiate is set high and rx_pfc_paused to 8'hff
+-- ************************************************************************** --
+
+rxd(apb)       55d5
+rxd            10325476badc22222222333388080101
+rxd            00ff123456789abcdef0123456789abc
+rxd            def0888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    76543210   -- store frame to memory 
+fifo_wr      1000     0   xxxxxxxxxx    2222dcba
+fifo_wr      1000     0   xxxxxxxxxx    33332222
+fifo_wr      1000     0   xxxxxxxxxx    01010888
+fifo_wr      1000     0   xxxxxxxxxx    3412ff00
+fifo_wr      1000     0   xxxxxxxxxx    bc9a7856
+fifo_wr      1000     0   xxxxxxxxxx    3412f0de
+fifo_wr      1000     0   xxxxxxxxxx    bc9a7856
+fifo_wr      1000     0   xxxxxxxxxx    8888f0de
+fifo_wr      1000     0   xxxxxxxxxx    99999999
+fifo_wr      1000     0   xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1001     0   0010000040    6459e932
+
+
+apbrd(int)   24 00001002 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001002 -- Clear it 
+apbrd        38 00000250 -- check pause counter not overloaded
+apbrd       158 00000002 -- check frames rxed OK (register 1 match)
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+pinsc(int)  pfc_negotiate 1 rx_pfc_paused 11111111
+
+
+-- ************************************************************************** --
+-- #3
+-- receive a classic frame with DA matching exact match 1
+-- no timer counter is overloaded
+-- ************************************************************************** --
+rxd(gap)       55d5
+rxd            10325476badc22222222333388080001
+rxd            00ff0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    76543210   -- store frame to memory 
+fifo_wr      1000     0   xxxxxxxxxx    2222dcba
+fifo_wr      1000     0   xxxxxxxxxx    33332222
+fifo_wr      1000     0   xxxxxxxxxx    01000888
+fifo_wr      1000     0   xxxxxxxxxx    0000ff00
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    88880000
+fifo_wr      1000     0   xxxxxxxxxx    99999999
+fifo_wr      1000     0   xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1001     0   0010000040    503ad7f7
+
+
+apbrd(int)   24 00000002 -- check interrupt status - frame received
+apbwr        24 00000002 -- Clear it 
+
+apbrd        38 000001b0  -- check pause counter not loaded with 00
+apbrd        38 000001b0  -- 
+apbrd        38 000001b0  -- 
+apbrd        38 000001ab  -- check pause counter decremented
+apbrd        08 00000046  -- check pfc_negotiate = 1
+
+pinsc(int) pfc_negotiate 1 rx_pfc_paused 11111111
+
+-- ************************************************************************** --
+-- #4
+-- receive a classic frame with DA matching multicast address
+-- no timer counter is overloaded with 8'h00
+-- ************************************************************************** --
+rxd(gap)       55d5
+rxd            0180c200000122222222333388080001
+rxd            00000000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+apbrd(1420) 24 00000000  -- check interrupt status - no interrupt
+apbrdf      38 00000115  -- check pause counter not loaded with 00
+
+pinsc(1422) pfc_negotiate 1 rx_pfc_paused 11111111
+
+-- ************************************************************************** --
+-- #5
+-- receive a PFC frame with DA matching exact match 1
+-- PFC timer counter are loaded with 8'h00, but 802.3 timer counter not overloaded
+-- pfc_negotiate is set high and rx_pfc_paused to 8'h00
+-- ************************************************************************** --
+
+rxd(apb)       55d5
+rxd            10325476badc22222222333388080101
+rxd            00ff0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    76543210   -- store frame to memory 
+fifo_wr      1000     0   xxxxxxxxxx    2222dcba
+fifo_wr      1000     0   xxxxxxxxxx    33332222
+fifo_wr      1000     0   xxxxxxxxxx    01010888
+fifo_wr      1000     0   xxxxxxxxxx    0000ff00
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    88880000
+fifo_wr      1000     0   xxxxxxxxxx    99999999
+fifo_wr      1000     0   xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1001     0   0010000040    2ff34c64
+
+
+apbrd(int)   24 00001002 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001002 -- Clear it 
+apbrd        38 00000070  -- check pause counter not overloaded
+apbrd       108 00000000  -- check frame transmitted status
+
+pinsc(int) pfc_negotiate 1 rx_pfc_paused 00000000 -- PFC counters are loaded with 0x0000
+
+
+-- ************************************************************************** --
+-- #6
+-- wait until 802.3 timer counter is decremented to zero
+-- transmission is not halted anymore and the frame from #1 is transmitted
+-- the frame transmitted statistics will be incremented
+-- ************************************************************************** --
+
+apbrd(int) 24 00002000  -- check interrupt status - pause count = 0
+apbwr      24 00002000  -- clear it
+apbrd      38 00000000  -- check pause counter
+apbrd     108 00000000  -- check frame transmitted statistics
+apbrd(int) 24 00000080  -- check interrupt status - frame transmitted
+apbrdf    108 00000001  -- check frame transmitted statistics
+
+
+-- Verify the 1st transmit frame data on the MII interface
+txd            55555555555555d5
+txd            0123456789ab11112222222233333333
+txd            44444444555555556666666677777777
+txd            8888888899999999aaaaaaaabbbbbbbb
+txd            cccccccc0000000000000000a3e2b1ad
+
+
+-- ************************************************************************** --
+-- #7
+-- receive a classic frame with DA matching exact match 1
+-- 802.3 timer counter is not loaded with 8'h1f
+-- ************************************************************************** --
+rxd(apb)       55d5
+rxd            10325476badc22222222333388080001
+rxd            001f4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    76543210   -- store frame to memory 
+fifo_wr      1000     0   xxxxxxxxxx    2222dcba
+fifo_wr      1000     0   xxxxxxxxxx    33332222
+fifo_wr      1000     0   xxxxxxxxxx    01000888
+fifo_wr      1000     0   xxxxxxxxxx    44441f00
+fifo_wr      1000     0   xxxxxxxxxx    55555555
+fifo_wr      1000     0   xxxxxxxxxx    66666666
+fifo_wr      1000     0   xxxxxxxxxx    77777777
+fifo_wr      1000     0   xxxxxxxxxx    88888888
+fifo_wr      1000     0   xxxxxxxxxx    99999999
+fifo_wr      1000     0   xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1001     0   0010000040    e8cc5e47
+
+
+apbrd(int) 24 00000002  -- check interrupt status - frame received
+apbrd      38 00000000  -- check pause counter not loaded with 1f
+
+pinsc(2590) pfc_negotiate 1 rx_pfc_paused 0000000
+
+
+end(10000)

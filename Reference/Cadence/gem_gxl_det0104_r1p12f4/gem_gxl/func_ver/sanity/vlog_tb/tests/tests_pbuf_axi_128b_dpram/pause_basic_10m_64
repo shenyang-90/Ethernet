@@ -1,0 +1,914 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : pause_basic_10m_64
+--
+--   Authors        : Mike MacGillis (mikema@tality.com)/Adam Walker (awalker@tality.com/
+--		      Martin James
+--
+--   Date           : 22 January 2002
+--
+--------------------------------------------------------------------------------
+-- Test Description
+-- This test ensures the proper use of pause frames by the GEM in both transmission and reception.
+--
+-- Functional Coverage
+-- � Check the pause frame is able to be recognised by the GEM, then check the
+--   system counts down and issues all relevant interrupts.
+-- � Check all four valid addresses, only register 1 hit shall cause valid
+--   RX received OK and associated interrupt, plus DMA activity.
+-- � Check that when pause is disabled the frame is treated as a normal 
+--   data frame.
+-- � Check that when pause disabled it correctly handles frame destination 
+--   address.
+-- � Re-enable pause and check that a new incoming pause value overwrites
+--   an existing one.
+-- � Overwrite an existing pause time with a zero pause time. 
+-- � Receive a non-zero pause time with wrong OPCODE. (should be ignored)
+-- � Receive a non-zero pause time with wrong TYPE-ID and proper pause frame destination address.
+-- � Receive a non-zero pause time with wrong TYPE-ID and local 1 
+--   destination address. (should be copied to memory)
+-- � Receive a non-zero pause time with everything right except pause frame 
+--   destination address. (should be ignored)
+-- � Receive a non-zero pause time with everything right but give it
+--   a CRC error (should be set pause timer)
+-- � Test the interrupt mask for bit 13 of interrupt status (pause zero)
+-- � Test the interrupt mask for bit 12 of interrupt status (pause received)
+-- � Check full range pause count (0xffff)
+-- � Test that pause frames are not copied when the do not copy pause frames bit
+--   is set in the network configuration register.
+--
+-- Detailed test description
+-- Note:  The retry test pin is set in the network configuration register to change the decrementer time from 512 bit period to 1 bit period to make the test quicker.
+--
+-- Pause time frame structure: 
+-- Destination address	Source address	Type (GEM control frame)	Pause opcode 	Pause time
+-- 0x0180C2000001	6 bytes	0x8808	0x0001	2 bytes
+-- 
+-- 1. Initialise the GEM for 10 mode operation.
+-- 2. Set pause enable in the network configuration register
+-- 3. Check reset state of loopback, half_duplex and extint pins.
+-- 4. Check reset state of registers.
+-- 5. Enable receive buffer and all interrupts.
+-- 6. Set pause enable bit in the network configuration register
+-- 7. Reset retry test pin in the network configuration register.
+-- 8. Receive a pause frame where the destination address matches register 1,
+--    type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x0005.  
+--    (Frame should be copied to memory)
+-- 9. Receive a pause frame where the destination address matches pause frame address 
+--    0x0180C2000001, type field = 0x8808, Pause op-code = 0x0001 and pause time 
+--    to be set is 0x00FF. (Frame should not be copied to memory)
+-- 10. Receive a pause frame where the destination address matches register 1, 
+--     type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x00FF. 
+--     (Pause frames should be treated as a normal data frame.  In this particular 
+--     case the pause frame should be written to memory since the destination address 
+--     matches the address in specific address register one.)
+-- 11. Receive a pause frame where the destination address matches the pause frame 
+--     address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 and 
+--     pause time to be set is 0x0055. (Since the destination address matches the 
+--     pause frame address, the frame should not be written to memory)
+-- 12. Receive a pause frame where the destination address matches the pause frame 
+--     address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 and 
+--     pause time to be set is 0x00AA.  However, shortly afterwards, receive a 
+--     pause frame with the length counter equal to zero.  
+--     (This should disable the pause functionality immediately)
+-- 13. Receive a pause frame where the destination address matches pause frame 
+--     address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0002  and 
+--     pause time to be set is 0x00FF.  (The wrong opcode value is received. 
+--     Therefore, the pause frame should be ignored)
+-- 14. Receive a pause frame where the destination address matches the pause 
+--     frame address 0x0180C2000001, type field = 0x8807, pause op-code = 0x0001 
+--     and pause time to be set is 0x00FF. (The wrong type-id value is received. 
+--     Therefore, the pause frame should be ignored)
+-- 15. Receive a pause frame where the destination address matches register 1, 
+--     type field = 0x8807, pause op-code = 0x0001 and pause time to be set is 0x0005.  
+--     (The wrong type-id value was received but the destination address matched the 
+--     local address.  Therefore, the frame should be written to memory)
+-- 16. Receive a pause frame where the destination address matches the pause frame address
+--     0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 and
+--     pause time to be set is 0x00FF. (The wrong destination address value was received.
+--     Therefore, the frame should not be written to memory)
+-- 17. Receive a pause frame where the destination address matches the pause frame 
+--     address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 and 
+--     pause time to be set is 0x00FF.  However, there is a crc error.  
+--     (The pause frame should be ignored)
+-- 18. Disable pause received interrupt (bit 12).
+-- 19. Receive a pause frame where the destination address matches the pause frame 
+--     address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 and 
+--     pause time to be set is 0x00FF.  (There should be no pause frame received 
+--     interrupt set in the interrupt status register)
+-- 20. Enable pause received interrupt (bit 12).
+-- 21. Disable pause time zero interrupt (bit 13).
+-- 22. Receive a pause frame where the destination address matches the pause 
+--     frame address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 
+--     and pause time to be set is 0x00FF.  (There should be no pause time zero 
+--     interrupt set in the interrupt status register)
+-- 23. Enable pause zero interrupt (bit 13).
+-- 24. Receive a pause frame where the destination address matches pause 
+--     frame address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 
+--     and pause time to be set is 0x0FFF. 
+-- 25. Disable pause enable interrupt and retry test bit. 
+-- 26. Receive a pause frame where the destination address matches register 1, 
+--     type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x00FF. 
+--     (Pause frames should be treated as a normal data frame.  In this particular 
+--     case the pause frame should be written to memory since the destination address 
+--     matches the address in specific address register one. Also, the pause counter
+--     should not be set since the enable pause frame bit is reset.)
+-- 27. Enable the pause time bit, copy all frames bit, do not copy pause
+--     frames bit, external address match enable bit and pause enable bit.
+-- 28. Receive a pause frame where the destination address matches register 1,
+--     type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x0005.  
+--     Try matching on specific address, a broadcast frame, a hash match, a type match 
+--     and external match. However, the frame should not be copied to memory because 
+--     bit (23) the do not copy puase frame bit is set)
+-- 29. Check the status and statistics registers and ensure that the above operations 
+--     were handled properly
+-- 30. Receive a pause frame where the destination address matches the pause frame 
+--     address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 and 
+--     pause time to be set is 0x0020.  Once the pause timer is about to decrement to
+--     zero, receive a zero length pause frame (tests the hanshaking logic).  
+--     This should cause only one pause time zero interrupt to be received.
+--------------------------------------------------------------------------------
+ten_meg_bit  -- 10Mbit/s operation (2.5Mhz tx_clk and rx_clk, 50MHz Pclk and Hclk)
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 ffffff00  -- write address of receive buffer descriptor in memory
+apbrd      18 ffffff00  -- check receive queue pointerapbrd     
+apbrd      24 00000000  -- check interrupt status
+apbwr      00 0000000C  -- enable receive and transmit
+apbrd      00 0000000C  -- check receive and transmit
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      04 00282002  -- set enable pause time bit(13)
+apbrd      04 00282002  -- check network configuration register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      38 00000000  -- check the value of the pause time register
+
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches register 1,
+-- type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x0005.  
+-- (Frame should be copied to memory)
+-- ************************************************************************** --
+
+rxd(apb)     d578563412111111112222222288080001
+rxd            00054444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- supply the receive buffer location
+dma_rd rx_descr ffffff00 22222000 -- dma reads pointer of 22222000
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c 01000888
+dma_wr 22222010 44440500
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 00000000
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 3ff2aa48
+
+
+dma_wr rx_descr ffffff00 22222001 -- dma writes ownership bit
+dma_wr rx_descr ffffff04 0800c040 -- checks for local address match, 64 bytes (start and end set)
+dma_rd rx_descr ffffff08 22222200 -- reads locations of next rx buffer
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received & frame rx'ed
+apbwr        24 00001000 -- 
+apbrd(int)   24 00000002 -- check interrupt status - non-zero pause frame received & frame rx'ed
+apbwr        24 00000002 -- 
+apbrd       158 00000001 -- check frames rxed OK (register 1 match)
+apbrd        38 00000005 -- check the value of the pause time register
+                         -- This will be updated in PCLK by the time we get an interrupt
+                         -- as we have to wait for the DMA to complete.
+apbwr        04 00283002 -- set retry test bit(12) to speed things up a bit
+                         -- keep enable pause time(13) set
+
+apbrd(int)   24 00002000 -- check interrupt status - pause timer zero
+apbwr        24 00002000 -- Clear it
+apbrd        38 00000000 -- check the value of the pause time register
+
+
+
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches pause frame address 
+-- 0x0180C2000001, type field = 0x8808, Pause op-code = 0x0001 and pause time 
+-- to be set is 0x00FF. (Frame should not be copied to memory)
+-- ************************************************************************** --
+
+
+apbwrf       04 00282002 -- reset retry test bit(12)
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it
+apbrd(8000)  38 000000FF -- check the value of the pause time register
+                         -- This will NOT be updated in PCLK by the time we get an interrupt
+                         -- as we don not have to wait for the DMA to complete.
+                         -- Therefore trigger on a time after the interrupt occurs.
+apbwr        04 00283002 -- set retry test bit(12) to speed things up a bit
+                         -- keep enable pause time(13) set
+
+apbrd(int)   24 00002000 -- check interrupt status - pause timer zero
+apbwr        24 00002000 -- Clear it
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       158 00000000 -- check no frames rxed OK (no register 1 match)
+apbrd       164 00000002 -- check pause frames rxed
+
+
+-- ************************************************************************** --
+-- Disable pause time bit and check that pause frames are treated as a 
+-- normal data frame.
+-- ************************************************************************** --
+
+apbwrf     04 00282002  -- reset retry test bit(12)
+
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches register 1, 
+-- type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x00FF. 
+-- (Pause frames should be treated as a normal data frame.  In this particular 
+-- case the pause frame should be written to memory since the destination address 
+-- matches the address in specific address register one.)
+-- ************************************************************************** --
+
+rxd(apb)     d578563412111111112222222288080001
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222200 12345678 -- store frame to memory
+dma_wr 22222204 11111111
+dma_wr 22222208 22222222
+dma_wr 2222220c 01000888
+dma_wr 22222210 4444FF00
+dma_wr 22222214 55555555
+dma_wr 22222218 66666666
+dma_wr 2222221c 77777777
+dma_wr 22222220 88888888
+dma_wr 22222224 99999999
+dma_wr 22222228 aaaaaaaa
+dma_wr 2222222c bbbbbbbb
+dma_wr 22222230 00000000
+dma_wr 22222234 00000000
+dma_wr 22222238 00000000
+dma_wr 2222223c 54e952d2
+
+dma_wr rx_descr ffffff08 22222201 -- dma writes ownership bit
+dma_wr rx_descr ffffff0C 0800c040 -- checks for local address match, 64 bytes (start and end set)
+dma_rd rx_descr ffffff10 22222400 -- reads locations of next rx buffer
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received & frame rx'ed
+apbwr        24 00001000 -- Clear it
+apbrd(int)   24 00000002 -- check interrupt status - non-zero pause frame received & frame rx'ed
+apbwr        24 00000002 -- Clear it
+apbrd       158 00000001 -- check frames rxed OK (register 1 match)
+apbrd        38 000000FF -- check the value of the pause time register (had DMA so up to date)
+apbrd        38 000000FF -- check pause time register
+apbrd        38 000000FF -- check pause time register
+apbrd(18879) 38 000000FF -- check pause time register has now changed
+apbrd        38 000000FE -- check pause time register has now changed
+apbrd        38 000000FE -- check the value of the pause time register (had DMA so up to date)
+apbwr        04 00283002 -- set retry test bit(12) to speed things up a bit
+                         -- keep enable pause time(13) set
+apbrd(int)   24 00002000 -- check interrupt status - pause timer zero
+apbwr        24 00002000 -- Clear it
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       164 00000001 -- check pause frames rxed
+
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches the pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 and 
+-- pause time to be set is 0x0055. 
+-- ************************************************************************** --
+
+apbwrf       04 00282002 -- reset retry test bit(12)
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00554444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data is written out on the AHB interface
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it
+--apbrd        38 00000055 -- check the value of the pause time register
+-- although the interrupt is in it takes a while for the pause time register to
+-- be updated at 10Meg
+
+apbrd(29719) 38 00000055 -- check the value of the pause time register to make
+                         -- sure it hasn't decremented yet
+apbrd        38 00000054 -- check pause time register has now changed
+apbrd        38 00000054 -- check pause time register has now changed
+apbrdf       38 00000054 -- check pause time register has now changed
+ 
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches the pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 and 
+-- pause time to be set is 0x00AA.  However, shortly afterwards, receive a 
+-- pause frame with the length counter equal to zero.  
+-- (This should disable the pause functionality immediately)
+-- ************************************************************************** --
+
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00AA4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        24 00000000 -- waste time to allow pause time register to update
+apbrd        38 000000AA -- check overwriting of the pause time register
+apbrdf       38 000000AA -- check overwriting of the pause time register and trigger zero pause frame
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00004444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+apbrd(int)   24 00002000 -- check interrupt status - pause timer zero (new zero quantum pause frame)
+apbwr        24 00002000 -- Clear it
+apbrd        38 00000000 -- check overwriting of the pause time register
+apbrd(36520)  164 00000003 -- check three pause frames rxed
+
+apbrdf      158 00000000 -- check no frames rxed OK (no register 1 match)
+ 
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0002  and 
+-- pause time to be set is 0x00FF.  (The wrong opcode value is received. 
+-- Therefore, the pause frame should be ignored)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080002
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(40000) 24 00000000 -- check interrupt status - No pause frame received
+apbrd        38 00000000 -- check overwriting of the pause time register
+apbrd       164 00000000 -- check no pause frames rxed
+apbrdf      158 00000000 -- check no frames rxed OK (no register 1 match)
+ 
+ 
+ 
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches the pause 
+-- frame address 0x0180C2000001, type field = 0x8807, pause op-code = 0x0001 
+-- and pause time to be set is 0x00FF. (The wrong type-id value is received. 
+-- Therefore, the pause frame should be ignored)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288070001
+rxd            00ff4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(44000) 24 00000000 -- check interrupt status - No pause frame received
+apbrd        38 00000000 -- check overwriting of the pause time register
+apbrd       164 00000000 -- check no pause frames rxed
+apbrdf      158 00000000 -- check no frames rxed OK (no register 1 match)
+
+
+
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches register 1, 
+-- type field = 0x8807, pause op-code = 0x0001 and pause time to be set is 0x0005.  
+-- (The wrong type-id value was received but the destination address matched the 
+-- local address.  Therefore, the frame should be written to memory)
+-- ************************************************************************** --
+
+rxd(apb)     d578563412111111112222222288070001
+rxd            00054444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222400 12345678 -- store frame to memory
+dma_wr 22222404 11111111
+dma_wr 22222408 22222222
+dma_wr 2222240c 01000788
+dma_wr 22222410 44440500
+dma_wr 22222414 55555555
+dma_wr 22222418 66666666
+dma_wr 2222240c 77777777
+dma_wr 22222420 88888888
+dma_wr 22222424 99999999
+dma_wr 22222428 aaaaaaaa
+dma_wr 2222242c bbbbbbbb
+dma_wr 22222430 00000000
+dma_wr 22222434 00000000
+dma_wr 22222438 00000000
+dma_wr 2222243c 07c6cb98
+
+
+dma_wr rx_descr ffffff10 22222401 -- dma writes ownership bit
+dma_wr rx_descr ffffff14 0800c040 -- checks for local address match, 64 bytes (start and end set)
+dma_rd rx_descr ffffff18 22222200 -- reads locations of next rx buffer
+
+apbrd(int)   24 00000002 -- check interrupt status - frame rx'ed
+apbwr        24 00000002 -- Clear it
+apbrd       158 00000001 -- check frames rxed OK (register 1 match)
+apbrd       164 00000000 -- check no pause frames rxed
+apbrdf       38 00000000 -- check the value of the pause time register
+
+
+
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address is 0x0480C2000001 (i.e.
+-- it doesn't match pause address), type field = 0x8808, pause op-code = 0x0001 and
+-- pause time to be set is 0x00FF. (The wrong destination address value was received.
+-- Therefore, the frame should not be written to memory and no interrupts will be 
+-- received)
+-- ************************************************************************** --
+
+rxd(apb)     d50480C200000111112222222288080001
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(51000) 24 00000000 -- check interrupt status - No pause frame received
+apbrd        38 00000000 -- check overwriting of the pause time register
+apbrd       164 00000000 -- check no pause frames rxed
+apbrdf      158 00000000 -- check no frames rxed OK (no register 1 match)
+
+
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches the pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 and 
+-- pause time to be set is 0x00FF.  However, there is a crc error.  
+-- (The pause frame should be ignored)
+-- ************************************************************************** --
+
+rxd(apb)     d5010000C2800111112222222288080001
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000cccccccc -- CRC error
+
+
+-- check the receive data is NOT written out on the AHB interface
+apbrd(54500) 24 00000000 -- check interrupt status - no pause frame received
+
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       164 00000000 -- check no pause frames rxed
+apbrd       158 00000000 -- check no frames rxed OK (no register 1 match)
+apbwr        04 00283002 -- set retry test bit(12) for next test
+
+-- ************************************************************************** --
+-- Disable pause received interrupt (bit 12).
+-- ************************************************************************** --
+
+apbwrf       2c 00001000 -- disable pause received interrupt (bit 12)
+
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches the pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 and 
+-- pause time to be set is 0x00FF.  (There should be no pause frame received 
+-- interrupt set in the interrupt status register)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            01FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+-- this time pause frame received interrupt doesn't happen (masked out)
+
+-- check that we get pause timer zero interrupt
+apbrd(int)   24 00002000 -- check interrupt status - pause timer zero
+apbwr        24 00002000 -- Clear it
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       164 00000001 -- check 1 pause frame rxed
+apbrd       158 00000000 -- check no frames rxed OK (no register 1 match)
+
+-- ************************************************************************** --
+-- Enable pause received interrupt (bit 12) and disable pause time zero 
+-- interrupt (bit 13).
+-- ************************************************************************** --
+
+apbwr        04 00282002 -- reset retry test bit(12)
+apbwr        28 00001000 -- enable pause received interrupt (bit 12)
+apbwrf       2c 00002000 -- disable pause zero interrupt (bit 13)
+
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches the pause 
+-- frame address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 
+-- and pause time to be set is 0x00FF.  (There should be no pause time zero 
+-- interrupt set in the interrupt status register)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            01FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it
+apbrd       164 00000001 -- check 1 pause frame rxed
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time
+apbrd       164 00000000 -- waste time -- pause time should now be visible
+                                       -- in PCLK domain
+apbrd        38 000001FF -- check the value of the pause time register
+apbwr        04 00283002 -- set retry test bit(12) to speed things up a bit
+                         -- keep enable pause time(13) set
+
+-- this time pause timer zero interrupt doesn't happen (masked out)
+
+-- wait till pause timer is zero
+apbrd(83400) 24 00000000 -- check interrupt status - pause timer zero NOT set
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       158 00000000 -- check no frames rxed OK (no register 1 match)
+
+-- ************************************************************************** --
+-- Enable pause zero interrupt (bit 13).
+-- ************************************************************************** --
+
+apbwr        28 00002000 -- enable pause zero interrupt (bit 13)
+apbwrf       04 00282002 -- set enable pause time bit(13),
+                         -- retry test bit(12) still low
+
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches pause 
+-- frame address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 
+-- and pause time to be set is 0x0FFF. 
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            0FFF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it
+apbrd       164 00000001 -- check 1 pause frame rxed
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        24 00000000 -- Delay for pause time to be updated
+apbrd        38 00000FFF -- check pause time register
+apbwr        04 00283002 -- set retry test bit(12) to speed things up
+
+apbrd(int) 24 00002000  -- check interrupt status - pause timer zero
+apbwr      24 00002000 -- Clear it
+apbrd      38 00000000  -- check rx pause time
+
+-- ************************************************************************** --
+-- disable pause time bit and check that pause frames are treated as a 
+-- normal data frame
+-- ************************************************************************** --
+
+apbwrf     04 00280002  -- reset enable pause time bit(13) and retry_test bit(12)
+
+-- ************************************************************************** --
+-- drive the receive frame data into the MII interface, destination address
+-- matches register 1, type field = 0x8808, Pause op-code = 0x0001 and
+-- pause time to be set is 0x00FF.
+-- ************************************************************************** --
+
+
+rxd(apb)     d578563412111111112222222288080001
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222200 12345678 -- store frame to memory
+dma_wr 22222204 11111111
+dma_wr 22222208 22222222
+dma_wr 2222220c 01000888
+dma_wr 22222210 4444FF00
+dma_wr 22222214 55555555
+dma_wr 22222218 66666666
+dma_wr 2222221c 77777777
+dma_wr 22222220 88888888
+dma_wr 22222224 99999999
+dma_wr 22222228 aaaaaaaa
+dma_wr 2222222c bbbbbbbb
+dma_wr 22222230 00000000
+dma_wr 22222234 00000000
+dma_wr 22222238 00000000
+dma_wr 2222223c 54e952d2
+
+dma_wr rx_descr ffffff18 22222201 -- dma writes ownership bit
+dma_wr rx_descr ffffff1C 0800c040 -- checks for local address match, 64 bytes (start and end set)
+dma_rd rx_descr ffffff20 22222400 -- reads locations of next rx buffer
+
+apbrd(int)   24 00000002 -- check interrupt status - frame rx'ed
+apbwr        24 00000002 -- Clear it
+apbrd       158 00000001 -- check frames rxed OK (register 1 match)
+apbrd       164 00000001 -- check 1 pause frame rxed. Still see pause frame stat,
+                         -- even though disabled, but no pause interrupt.
+apbrd        38 00000000 -- check the value of the pause time register
+
+
+-- ************************************************************************** --
+-- enable pause time bit, enable copy all frames, enable do not copy pause
+-- frames , enable external address match enable and enable pause enable
+-- ************************************************************************** --
+
+-- set one of the external address match pins
+filterd(int)   ext_match1 1 ext_match2 0 ext_match3 0 ext_match4 0
+
+apbwr      04 00a83252  -- set enable pause time bit(13) and retry_test bit(12)
+                        -- and copy all frames bit (4) and do not copy pause
+                        -- frames bit (23) and external address match bit (9) and
+                        -- multicast hash enable bit (6)
+apbwr      88 ffffffff  -- specific address register 1 bottom
+apbwr      8C 0000ffff  -- specific address register 1 top
+apbwr      80 ffffffff  -- hash register bottom
+apbwr      84 ffffffff  -- hash register top
+apbwrf     A8 80008808  -- type id check register 1
+-- 
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches the pause frame 
+-- type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x0012.  
+-- Try matching on specific address, a broadcast frame, a hash match, a type match 
+-- and external match. However, the frame should not be copied to memory because 
+-- bit (23) the do not copy pause frame bit is set)
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00124444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it
+
+apbrd(int)   24 00002000 -- check interrupt status - pause time zero
+apbwr        24 00002000 -- Clear it
+apbrd        38 00000000 -- check pause time register
+
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000100  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000001  -- check pause frames received
+apbrd     168 00000004  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000001  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+apbwr      04 00282002  -- set enable pause time bit(13)
+apbwr      A8 00000000  -- type id check register 1
+apbrdf     04 00282002  -- check network configuration register
+                       
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches the pause frame 
+-- address 0x0180C2000001, type field = 0x8808, pause op-code = 0x0001 and 
+-- pause time to be set is 0x0020.  Once the pause timer is about to decrement to
+-- zero, receive a zero length pause frame (tests the handshaking logic).  
+-- This should cause only one pause time zero interrupt to be received.
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00204444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it
+
+rxd(200000) d50180C200000111112222222288080001
+rxd        00004444555555556666666677777777
+rxd        8888888899999999aaaaaaaabbbbbbbb
+rxd        000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+apbrd(int)   24 00002000 -- check interrupt status - pause timer zero (new zero quantum pause frame)
+apbwr        24 00002000 -- Clear it
+apbrd        38 00000000 -- check overwriting of the pause time register
+apbrd(250000) 164 00000002 -- check two pause frames rxed
+apbrd 24 00000000 -- check no more interrupts
+
+-- ************************************************************************** --
+-- force end of test in case it doesn't stop of its own accord
+dma_rd rx_descr ffffff28 12345678 -- Supply final descriptor - this is not used for any data buffers, but the EDMA tries to keep its buffer full so it reads it
+end(300000)
+
+bus_grant_delay 0

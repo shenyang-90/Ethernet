@@ -1,0 +1,2804 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : col_1gm_fifo
+--
+--   Author         : Stewart Penman (spenman@tality.com)
+--
+--   Date           : 04 February 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+-- 
+-- This tests ensures that the GEM deals with collisions properly in 
+-- both normal gigabit mode and burst gigabit mode.
+-- 
+-- Functional coverage
+-- -------------------
+-- � Ensures that early collisions are detected in both normal gigabit 
+--     mode and burst gigabit mode.  
+--     i.e. Tests for collisions during preamble and SFD in normal 
+--           gigabit mode.
+--          Tests for collisions during preamble and SFD within a burst 
+--           of frames in burst gigabit mode.
+--          Tests for collisions during crc in both normal gigabit 
+--           mode and burst gigabit mode
+-- � Tests for collisions during carrier extension in normal gigabit mode.
+-- � Tests for collisions during inter-packet gap (IPG) within a burst.
+-- � Tests for late collisions during carrier extension in burst gigabit mode.
+-- � Tests for collisions during padding in both normal gigabit mode and 
+--     burst gigabit mode.
+-- 
+-- Detailed Test Description
+-- -------------------------
+-- 
+-- In Normal Gigabit Mode:
+-- 1. Initialise the GEM for gigabit operation.
+-- 2. Transmit a minimum sized frame plus extension with a collision at 
+--     the beginning of preamble (2nd byte).
+-- 3. Transmit a minimum sized frame plus extension with a collision 
+--     towards the end of preamble (6th byte).
+-- 4. Transmit a minimum sized frame plus extension with a collision 
+--     in the  (8th byte) start of frame delimiter (SFD). 
+-- 5. Transmit a minimum sized frame plus extension with a collision 
+--     at the start of the carrier extension (64th byte).
+-- 6. Transmit a minimum sized frame plus extension with a collision 
+--     at the start of the carrier extension (65th byte).
+-- 7. Transmit a minimum sized frame plus extension with a collision 
+--     towards the end of the carrier extension (512th byte).
+-- 8. Transmit a minimum sized frame plus extension with a collision 
+--     in the beginning of the data portion of the frame (24th byte).
+-- 9. Transmit a minimum sized frame plus extension with a collision 
+--     towards the end of the data portion of the frame (58th byte).
+-- 10. Transmit a minimum sized frame with padding plus extension with 
+--      a collision at the start of the padding (36th byte).
+-- 11. Transmit a minimum sized frame with padding plus extension with 
+--      a collision towards the end of the padding (50th byte).
+-- 12. Transmit a minimum sized frame with extension with a collision at 
+--      the start of crc (61st byte).
+-- 13. Transmit a minimum sized frame with extension with a collision 
+--      towards the end the crc (63rd byte).
+--      
+-- In Burst Gigabit Mode:
+-- 14. In burst mode, transmit a minimum sized frame plus extension.  
+--      Then, transmit a minimum sized frame with a collision at the 
+--      beginning of preamble (2nd byte).
+-- 15. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision towards 
+--      the end of preamble (6th byte).
+-- 16. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision in the  
+--      (8th byte) start of frame delimiter (SFD).
+-- 17  In burst mode, transmit a minimum sized frame plus extension.
+--      Then, transmit a minimum sized frame plus extension with a collision 
+--      just before the start of the interframe gap (64th byte)
+-- 18. In burst mode, transmit a minimum sized frame plus extension 
+--      with a collision at the start of the interframe gap (65th byte).
+-- 19. In burst mode, transmit a minimum sized frame plus extension with 
+--      a collision towards the end of the frame extension (512th byte).
+-- 20. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision in the 
+--      beginning of the data portion of the frame (24th byte).
+-- 21. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision towards 
+--      the end of the data portion of the frame (58th byte).
+-- 22. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with padding with a collision 
+--      at the start of the padding (36th byte).
+-- 23. In burst mode, transmit a minimum sized frame. 
+--      Then, transmit a minimum sized frame with padding with a collision 
+--      towards the end of the padding (50th byte).
+-- 24. In burst mode, transmit a minimum sized frame with extension. 
+--      Then, transmit a minimum sized frame with a collision at the start 
+--      of crc (61st byte).
+-- 25. In burst mode, transmit a minimum sized frame with extension. 
+--      Then, transmit a minimum sized frame with a collision towards the 
+--      end the crc (63rd byte).
+-- 26. In burst mode, transmit a minimum sized frame with extension. 
+--      Then, transmit a collision between the first frame and second 
+--      frame (IFG). Finally, Transmit a minimum sized frame.
+-- 27. Check statistics
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+--******************************************************************************
+-- 1. Initialise the GEM for gigabit operation.
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00080400  -- network config register - 1gig mode
+apbwr      00 00000008  -- write enable tx
+apbrdf     00 00000008  -- confirm tx enable (apb trigger to trigger FIFO)
+
+
+--******************************************************************************
+-- NORMAL OPERATION
+--******************************************************************************
+
+--******************************************************************************
+-- 2. Transmit a minimum sized frame plus extension with a collision at 
+--     the beginning of preamble (2nd byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0xffffffffffff' broadcast frame
+-- srcaddr:  '0xf78a5d8e7cd4'
+-- typeid:   '0xf95b'
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000100    ffffffff
+fifo_rd         00001000      0   00000000    7cd4ffff
+fifo_rd         00001000      0   00000000    f78a5d8e
+fifo_rd         00001000      0   00000000    3ab65bf9
+fifo_rd         00001000      0   00000000    4ddfebb7
+fifo_rd         00001000      0   00000000    f45cf7c4
+fifo_rd         00001000      0   00000000    e733a592
+fifo_rd         00001000      0   00000000    867e72bd
+fifo_rd         00001000      0   00000000    b2c4cf95
+fifo_rd         00001000      0   00000000    c5f12f54
+fifo_rd         00001000      0   00000000    11666a3a
+fifo_rd         00001000      0   00000000    398fb2e8
+fifo_rd         00001000      0   00000000    32dfba22
+fifo_rd         00001000      0   00000000    26e568b3
+fifo_rd         00001001      0   00000000    9b366af1
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0xffffffffffff' broadcast frame
+-- srcaddr:  '0xf78a5d8e7cd4'
+-- typeid:   '0xf95b'
+-- data:      46 bytes
+-- crc:      '0x36881536'
+
+txd         55x555555555555d5ffffffff
+
+-- SCENARIO 2 COMPLETE - no interrupt is generated as transmission is halted
+--                       by a collision
+
+--******************************************************************************
+-- 3. Transmit a minimum sized frame plus extension with a collision 
+--     towards the end of preamble (6th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x8d39a8a897f2' unicast frame
+-- srcaddr:  '0xc9f72fce28c7'
+-- typeid:   '0x85c5'
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000100    a8a897f2
+fifo_rd         00001000      0   00000000    28c78d39
+fifo_rd         00001000      0   00000000    c9f72fce
+fifo_rd         00001000      0   00000000    9544c585
+fifo_rd         00001000      0   00000000    917bddef
+fifo_rd         00001000      0   00000000    de55cf33
+fifo_rd         00001000      0   00000000    ea43333c
+fifo_rd         00001000      0   00000000    79fc23a4
+fifo_rd         00001000      0   00000000    f3c5a8d9
+fifo_rd         00001000      0   00000000    56c6b922
+fifo_rd         00001000      0   00000000    d7f52357
+fifo_rd         00001000      0   00000000    a8d8c2fd
+fifo_rd         00001000      0   00000000    d4c6da99
+fifo_rd         00001000      0   00000000    9483a3d5
+fifo_rd         00001001      0   00000000    68c8fbfe
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x8d39a8a897f2' unicast frame
+-- srcaddr:  '0xc9f72fce28c7'
+-- typeid:   '0x85c5'
+-- data:      46 bytes
+-- crc:      '0xeefc47b6'
+
+txd         555555x55555555d5f2f2f2f2 -- must allow for delay in col sync
+
+--******************************************************************************
+-- 4. Transmit a minimum sized frame plus extension with a collision 
+--     in the  (8th byte) start of frame delimiter (SFD). 
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x4b8b716f3cec' unicast frame
+-- srcaddr:  '0xea4cf895429a'
+-- typeid:   '0x4968'
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000100    716f3cec
+fifo_rd         00001000      0   00000000    429a4b8b
+fifo_rd         00001000      0   00000000    ea4cf895
+fifo_rd         00001000      0   00000000    9aec6849
+fifo_rd         00001000      0   00000000    d1687167
+fifo_rd         00001000      0   00000000    d95d32f3
+fifo_rd         00001000      0   00000000    ea17468e
+fifo_rd         00001000      0   00000000    f644a42b
+fifo_rd         00001000      0   00000000    f1f48f6e
+fifo_rd         00001000      0   00000000    fdc66b79
+fifo_rd         00001000      0   00000000    64af77e5
+fifo_rd         00001000      0   00000000    3a898481
+fifo_rd         00001000      0   00000000    de5fef76
+fifo_rd         00001000      0   00000000    f68d99cf
+fifo_rd         00001001      0   00000000    68211141
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x4b8b716f3cec' unicast frame
+-- srcaddr:  '0xea4cf895429a'
+-- typeid:   '0x4968'
+-- data:      46 bytes
+-- crc:      '0x253f0ab2'
+
+txd         55555555x555555d5ecececec -- must allow for delay in col sync
+
+--******************************************************************************
+-- 5. Transmit a minimum sized frame plus extension with a collision 
+--     just before the start of the carrier extension (64th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xc2ce29a28d42' unicast
+-- srcaddr:  '0xa9e5d58cbfd9' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    29a28d42
+fifo_rd         00000000      0   00000000    bfd9c2ce
+fifo_rd         00000000      0   00000000    a9e5d58c
+fifo_rd         00000000      0   00000000    62552e00
+fifo_rd         00000000      0   00000000    e7b166c5
+fifo_rd         00000000      0   00000000    3d48d525
+fifo_rd         00000000      0   00000000    6fe914ca
+fifo_rd         00000000      0   00000000    1b6ac4bc
+fifo_rd         00000000      0   00000000    f3d19bf8
+fifo_rd         00000000      0   00000000    7d82135f
+fifo_rd         00000000      0   00000000    9ec27c98
+fifo_rd         00000000      0   00000000    1bf94137
+fifo_rd         00000000      0   00000000    d159ede8
+fifo_rd         00000000      0   00000000    b41b32dc
+fifo_rd         00001001      0   00000000    96f78fcf
+
+fifo_rd         00001010      0   00000100    8d294a22
+fifo_rd         00001000      0   00000000    bc29fdce
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xc2ce29a28d42' unicast
+-- srcaddr:  '0xa9e5d58cbfd9' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x74af1f02'
+
+txd(60x)    55555555555555d5428da229cec2d9bf8cd5e5a9002e5562
+txd                         c566b1e725d5483dca14e96fbcc46a1b
+txd                         f89bd1f35f13827d987cc29e3741f91b
+txd                         e8ed59d1dc321bb4cf8ff79620f1fa47
+txd                         22222222 -- jam sequence
+
+--******************************************************************************
+-- 6. Transmit a minimum sized frame plus extension with a collision 
+--     at the start of the carrier extension (65th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x5d354c8fef54' unicast frame
+-- srcaddr:  '0x323b47bf796a'
+-- typeid:   '0x6484'
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(gap)    00001010      0   00000000    4c8fef54
+fifo_rd         00000000      0   00000000    796a5d35
+fifo_rd         00000000      0   00000000    323b47bf
+fifo_rd         00000000      0   00000000    3d9e8464
+fifo_rd         00000000      0   00000000    15f72d8e
+fifo_rd         00000000      0   00000000    37bc49dc
+fifo_rd         00000000      0   00000000    827d29b3
+fifo_rd         00000000      0   00000000    9f95f835
+fifo_rd         00000000      0   00000000    3e7f17a3
+fifo_rd         00000000      0   00000000    66c75519
+fifo_rd         00000000      0   00000000    e365ce81
+fifo_rd         00000000      0   00000000    d5f1bac1
+fifo_rd         00000000      0   00000000    dcb95dbf
+fifo_rd         00000000      0   00000000    4957f73f
+fifo_rd         00001001      0   00000000    9c72fb23
+
+fifo_rd         00001010      0   00000100    17fe1eb5
+fifo_rd         00001000      0   00000000    db95565b
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x5d354c8fef54' unicast frame
+-- srcaddr:  '0x323b47bf796a'
+-- typeid:   '0x6484'
+-- data:      46 bytes
+-- crc:      '0x57be0827'
+
+-- Tell testbench to assert a collision at byte 61. Due to delay in syncing
+-- col signal this will be seen by the MACB on the 65th byte.
+txd(61x)    55555555555555d554ef8f4c355d6a79bf473b3264849e3d
+txd                         8e2df715dc49bc37b3297d8235f8959f
+txd                         a3177f3e1955c76681ce65e3c1baf1d5
+txd                         bf5db9dc3ff7574923fb729c7280eb75
+
+--******************************************************************************
+-- 6a. Transmit a good minimum sized frame to and then check status on int
+--     to clear tx status reg bit 1 (Collision Occurred), so that it is not
+--     active at the same time as a late collision generated in 7.
+--------------------------------------------------------------------------------
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x5bdbf1eeb175' multicast
+-- srcaddr:  '0xb2e5cd429655' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000100    f1eeb175
+fifo_rd         00000000      0   00000000    96555bdb
+fifo_rd         00000000      0   00000000    b2e5cd42
+fifo_rd         00000000      0   00000000    dea82e00
+fifo_rd         00000000      0   00000000    d7861de2
+fifo_rd         00000000      0   00000000    bf5c8745
+fifo_rd         00000000      0   00000000    7436c936
+fifo_rd         00000000      0   00000000    75b71192
+fifo_rd         00000000      0   00000000    3f5fbd2e
+fifo_rd         00000000      0   00000000    91d71488
+fifo_rd         00000000      0   00000000    d9dbbbd7
+fifo_rd         00000000      0   00000000    87347a54
+fifo_rd         00000000      0   00000000    b47c39ca
+fifo_rd         00000000      0   00000000    fb3e3113
+fifo_rd         00000001      0   00000000    d8e9e5fa
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x5bdbf1eeb175' multicast
+-- srcaddr:  '0xb2e5cd429655' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x0a64fbb8'
+
+txd         55555555555555d575b1eef1db5b559642cde5b2002ea8de
+txd                         e21d86d745875cbf36c936749211b775
+txd                         2ebd5f3f8814d791d7bbdbd9547a3487
+txd                         ca397cb413313efbfae5e9d88bbf46a0
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 6a. COMPLETE - TRANSMITTED a minimum length frame"
+                        -- check interrupt status - receive complete
+apbrd      14 0000002a  -- tx status - frame transmitted, always enabled
+apbwr      14 0000002a  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 7. Transmit a minimum sized frame plus extension with a collision 
+--     at the last byte of the carrier extension (512th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xd342145c9e81' multicast
+-- srcaddr:  '0x9bbd7f748498' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    145c9e81
+fifo_rd         00000000      0   00000000    8498d342
+fifo_rd         00000000      0   00000000    9bbd7f74
+fifo_rd         00000000      0   00000000    f1ce2e00
+fifo_rd         00000000      0   00000000    22abac74
+fifo_rd         00000000      0   00000000    cc643f34
+fifo_rd         00000000      0   00000000    b7851bad
+fifo_rd         00000000      0   00000000    d99a2842
+fifo_rd         00000000      0   00000000    e3b29bfe
+fifo_rd         00000000      0   00000000    fdf44acd
+fifo_rd         00000000      0   00000000    447b2dcf
+fifo_rd         00000000      0   00000000    257cf6df
+fifo_rd         00000000      0   00000000    f8f2ac2b
+fifo_rd         00000000      0   00000000    28dcd677
+fifo_rd         00001001      0   00000000    b2f9fce7
+
+fifo_rd         00001010      0   00000010    bde3f5d2
+fifo_rd         00001001      0   00000000    5db3def2
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xd342145c9e81' multicast
+-- srcaddr:  '0x9bbd7f748498' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x537fe5ed'
+
+txd(504x)   55555555555555d5819e5c1442d39884747fbd9b002ecef1
+txd                         74acab22343f64ccad1b85b742289ad9
+txd                         fe9bb2e3cd4af4fdcf2d7b44dff67c25
+txd                         2bacf2f877d6dc28e7fcf9b2de5ef735
+
+-- check status on reception of late collision interrupt
+apbrd(int) 24 00000020  "SCENARIO 7. COMPLETE - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000088  -- tx status - frame transmitted, always enabled
+apbwrf     14 00000088  -- clear it
+
+--******************************************************************************
+-- 7a. Transmit a good minimum sized frame plus extension to check statistics.
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xa3eab35ddef2' unicast
+-- srcaddr:  '0x746ad7b1fcd6' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    b35ddef2
+fifo_rd         00000000      0   00000000    fcd6a3ea
+fifo_rd         00000000      0   00000000    746ad7b1
+fifo_rd         00000000      0   00000000    dc542e00
+fifo_rd         00000000      0   00000000    d51d5acb
+fifo_rd         00000000      0   00000000    dd887e9f
+fifo_rd         00000000      0   00000000    b2e1e225
+fifo_rd         00000000      0   00000000    f131dd9c
+fifo_rd         00000000      0   00000000    9a11bf7a
+fifo_rd         00000000      0   00000000    6d9b17f4
+fifo_rd         00000000      0   00000000    3ec2ab14
+fifo_rd         00000000      0   00000000    bbfbd1cb
+fifo_rd         00000000      0   00000000    f1d135b2
+fifo_rd         00000000      0   00000000    7e862129
+fifo_rd         00000001      0   00000000    2fac2961
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xa3eab35ddef2' unicast
+-- srcaddr:  '0x746ad7b1fcd6' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xa9cb6af6'
+
+txd         55555555555555d5f2de5db3eaa3d6fcb1d76a74002e54dc
+txd                         cb5a1dd59f7e88dd25e2e1b29cdd31f1
+txd                         7abf119af4179b6d14abc23ecbd1fbbb
+txd                         b235d1f12921867e6129ac2f6fa6bc9a
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 7a. COMPLETE - transmitted minimum sized frame"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwrf     14 00000028  -- clear it
+
+
+--******************************************************************************
+-- 8. Transmit a minimum sized frame plus extension with a collision 
+--     in the beginning of the data portion of the frame (24th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xd7aceefe1bd8' unicast
+-- srcaddr:  '0x23d5ed1b21d3' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    eefe1bd8
+fifo_rd         00000000      0   00000000    21d3d7ac
+fifo_rd         00000000      0   00000000    23d5ed1b
+fifo_rd         00000000      0   00000000    b1ea2e00
+fifo_rd         00000000      0   00000000    9bd8ba5e
+fifo_rd         00000000      0   00000000    93db8ca3
+fifo_rd         00001000      0   00000100    ec94ea5e
+fifo_rd         00001000      0   00000000    58da7fee
+fifo_rd         00001000      0   00000000    a89ad83a
+fifo_rd         00001000      0   00000000    d6915399
+fifo_rd         00001000      0   00000000    155ba7ad
+fifo_rd         00001000      0   00000000    4f954afe
+fifo_rd         00001000      0   00000000    4c3cd3de
+fifo_rd         00001000      0   00000000    f7b716f8
+fifo_rd         00001001      0   00000000    a2a1ba14
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xd7aceefe1bd8' unicast
+-- srcaddr:  '0x23d5ed1b21d3' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xfb1772d1'
+
+txd(20x)    55555555555555d5d81bfeeeacd7d3211bedd523002eeab1
+txd                         5ebad89ba38cdb935e5e5e5e
+
+
+--******************************************************************************
+-- 9. Transmit a minimum sized frame plus extension with a collision 
+--     towards the end of the data portion of the frame (58th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xfe7d4e8cf9e6' unicast
+-- srcaddr:  '0x7ff4e2247c7a' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    4e8cf9e6
+fifo_rd         00000000      0   00000000    7c7afe7d
+fifo_rd         00000000      0   00000000    7ff4e224
+fifo_rd         00000000      0   00000000    bb722e00
+fifo_rd         00000000      0   00000000    af1b3676
+fifo_rd         00000000      0   00000000    9761da4f
+fifo_rd         00000000      0   00000000    28a3567c
+fifo_rd         00000000      0   00000000    418c872f
+fifo_rd         00000000      0   00000000    1c6c6987
+fifo_rd         00000000      0   00000000    9831d322
+fifo_rd         00000000      0   00000000    e4157321
+fifo_rd         00000000      0   00000000    21e52379
+fifo_rd         00000000      0   00000000    88e14f21
+fifo_rd         00000000      0   00000000    16583de2
+fifo_rd         00001001      0   00000000    345fd1f1
+
+fifo_rd         00001010      0   00000100    e64ef98c
+fifo_rd         00001000      0   00000000    e77afc7d
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xfe7d4e8cf9e6' unicast
+-- srcaddr:  '0x7ff4e2247c7a' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xe57a4b12'
+
+txd(54x)    55555555555555d5e6f98c4e7dfe7a7c24e2f47f002e72bb
+txd                         76361baf4fda61977c56a3282f878c41
+txd                         87696c1c22d33198217315e47923e521
+txd                         214fe188e23d5816f1d15f5f8c8c
+
+--******************************************************************************
+-- 10. Transmit a minimum sized frame with padding plus extension with 
+--      a collision at the start of the padding (36th byte).
+
+-- transmit a 36 (0x24) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xbcfc448c2f66' unicast
+-- srcaddr:  '0xa37762f13e7f' 
+-- idfield:  '0x0012'  length field
+-- data:      18 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    448c2f66
+fifo_rd         00000000      0   00000000    3e7fbcfc
+fifo_rd         00000000      0   00000000    a37762f1
+fifo_rd         00000000      0   00000000    32191200
+fifo_rd         00000000      0   00000000    686ba48d
+fifo_rd         00000000      0   00000000    759d8a92
+fifo_rd         00000000      0   00000000    6711933d
+fifo_rd         00000000      0   00000000    7edbe532
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00001000      0   00000100    00000000
+fifo_rd         00001000      0   00000000    00000000
+fifo_rd         00001000      0   00000000    00000000
+fifo_rd         00001000      0   00000000    00000000
+fifo_rd         00001000      0   00000000    00000000
+fifo_rd         00001001      0   00000000    00000000
+
+-- check the 36 (0x24) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xbcfc448c2f66' unicast
+-- srcaddr:  '0xa37762f13e7f' 
+-- idfield:  '0x0012'  length field
+-- data:      18 bytes
+-- crc:      '0x4f223ad3'
+
+txd(32x)    55555555555555d5662f8c44fcbc7f3ef16277a300121932
+txd                         8da46b68928a9d753d93116732e5db7e
+txd                         0000000000000000
+
+--******************************************************************************
+-- 11. Transmit a minimum sized frame with padding plus extension with 
+--      a collision towards the end of the padding (50th byte).
+
+-- transmit a 40 (0x28) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x1547a41818e4' unicast
+-- srcaddr:  '0x4f3d335de273' 
+-- idfield:  '0x0016'  length field
+-- data:      22 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    a41818e4
+fifo_rd         00000000      0   00000000    e2731547
+fifo_rd         00000000      0   00000000    4f3d335d
+fifo_rd         00000000      0   00000000    dd751600
+fifo_rd         00000000      0   00000000    d7df29fa
+fifo_rd         00000000      0   00000000    d54f6241
+fifo_rd         00000000      0   00000000    471d1768
+fifo_rd         00000000      0   00000000    9fbca81f
+fifo_rd         00000000      0   00000000    8a9aa3c9
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00001000      0   00000100    00000000
+fifo_rd         00001001      0   00000000    00000000
+
+-- check the 40 (0x28) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x1547a41818e4' unicast
+-- srcaddr:  '0x4f3d335de273' 
+-- idfield:  '0x0016'  length field
+-- data:      22 bytes
+-- crc:      '0x6a01e7be'
+
+txd(46x)    55555555555555d5e41818a4471573e25d333d4f001675dd
+txd                         fa29dfd741624fd568171d471fa8bc9f
+txd                         c9a39a8a000000000000000000000000
+txd                         000000000000
+
+--******************************************************************************
+-- 11a. Transmit a minimum sized frame with extension and check transmit stats
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x87aa15accdd2' unicast
+-- srcaddr:  '0x2b463d8ff8de' 
+-- idfield:  '0x5fba'  typeid field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    15accdd2
+fifo_rd         00000000      0   00000000    f8de87aa
+fifo_rd         00000000      0   00000000    2b463d8f
+fifo_rd         00000000      0   00000000    da47ba5f
+fifo_rd         00000000      0   00000000    a8b33286
+fifo_rd         00000000      0   00000000    9e332e16
+fifo_rd         00000000      0   00000000    665ddeef
+fifo_rd         00000000      0   00000000    aa22a853
+fifo_rd         00000000      0   00000000    de839974
+fifo_rd         00000000      0   00000000    a6519954
+fifo_rd         00000000      0   00000000    da52f19b
+fifo_rd         00000000      0   00000000    c373b879
+fifo_rd         00000000      0   00000000    86a4f857
+fifo_rd         00000000      0   00000000    3a558df8
+fifo_rd         00000001      0   00000000    d8d33618
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x87aa15accdd2' unicast
+-- srcaddr:  '0x2b463d8ff8de' 
+-- idfield:  '0x5fba'  typeid field
+-- data:      46 bytes
+-- crc:      '0xa5e8727c'
+
+txd         55555555555555d5d2cdac15aa87def88f3d462b5fba47da
+txd                         8632b3a8162e339eefde5d6653a822aa
+txd                         749983de549951a69bf152da79b873c3
+txd                         57f8a486f88d553a1836d3d8c7278e5a
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 11a. COMPLETE - transmitted minimum sized frame"
+                        -- check interrupt status - receive complete
+apbrd      14 0000002a  -- tx status - frame transmitted, always enabled
+apbwrf     14 00000028  -- clear it
+
+--******************************************************************************
+-- 12. Transmit a minimum sized frame with extension with a collision at 
+--      the start of crc (61st byte).
+
+-- transmit a 52 (0x34) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x828c8dbd27ae' unicast
+-- srcaddr:  '0x187de244ef66' 
+-- idfield:  '0x0022'  length field
+-- data:      34 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    8dbd27ae
+fifo_rd         00000000      0   00000000    ef66828c
+fifo_rd         00000000      0   00000000    187de244
+fifo_rd         00000000      0   00000000    3b7b2200
+fifo_rd         00000000      0   00000000    7a712b15
+fifo_rd         00000000      0   00000000    a44b3187
+fifo_rd         00000000      0   00000000    1a31d59b
+fifo_rd         00000000      0   00000000    7faddf17
+fifo_rd         00000000      0   00000000    2279c9ac
+fifo_rd         00000000      0   00000000    929bc34d
+fifo_rd         00000000      0   00000000    79df285d
+fifo_rd         00000000      0   00000000    bb5efd24
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00001001      0   00000000    00000000
+
+-- start a dummy frame to flush the fifo
+fifo_rd         00001010      0   00000100    d2633458
+fifo_rd         00001000      0   00000000    8ea8fbe8
+fifo_rd         00001000      0   00000000    7ace19e7
+fifo_rd         00001000      0   00000000    251f51fb
+
+-- check the 52 (0x34) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x828c8dbd27ae' unicast
+-- srcaddr:  '0x187de244ef66' 
+-- idfield:  '0x0022'  length field
+-- data:      34 bytes
+-- crc:      '0xb3701329'
+
+txd(57x)    55555555555555d5ae27bd8d8c8266ef44e27d1800227b3b
+txd                         152b717a87314ba49bd5311a17dfad7f
+txd                         acc979224dc39b925d28df7924fd5ebb
+txd                         0000000000000000000000009258585858
+
+--******************************************************************************
+-- 13. Transmit a minimum sized frame with extension with a collision 
+--      towards the end the crc (63rd byte).
+
+-- transmit a 52 (0x34) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xffffffffffff' broadcast
+-- srcaddr:  '0xcfc67d5b8c75' 
+-- idfield:  '0x0022'  length field
+-- data:      34 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    ffffffff
+fifo_rd         00000000      0   00000000    8c75ffff
+fifo_rd         00000000      0   00000000    cfc67d5b
+fifo_rd         00000000      0   00000000    a23c2200
+fifo_rd         00000000      0   00000000    c153143d
+fifo_rd         00000000      0   00000000    4b6bbd2a
+fifo_rd         00000000      0   00000000    e1258f8f
+fifo_rd         00000000      0   00000000    dfcbdfc5
+fifo_rd         00000000      0   00000000    5594d78b
+fifo_rd         00000000      0   00000000    e841fc18
+fifo_rd         00000000      0   00000000    1bf3f7da
+fifo_rd         00000000      0   00000000    ea78c6ec
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00001001      0   00000000    00000000
+
+-- start a dummy frame to flush the fifo and check the status
+fifo_rd         00001010      0   00000100    cc71175a
+fifo_rd         00001000      0   00000000    812eb15f
+fifo_rd         00001000      0   00000000    8cd8413a
+fifo_rd         00001000      0   00000000    785d2e00
+
+
+-- check the 52 (0x34) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xffffffffffff' broadcast
+-- srcaddr:  '0xcfc67d5b8c75' 
+-- idfield:  '0x0022'  length field
+-- data:      34 bytes
+-- crc:      '0xa8f1cf39'
+
+txd(59x)    55555555555555d5ffffffffffff758c5b7dc6cf00223ca2
+txd                         3d1453c12abd6b4b8f8f25e1c5dfcbdf
+txd                         8bd7945518fc41e8daf7f31becc678ea
+txd                         00000000000000000000000093fc1f5a5a5a5a
+
+--******************************************************************************
+-- 13a. Transmit a normal length frame and check the statistics
+
+-- transmit a 1127 (0x467) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xff71fa47f6c2' unicast
+-- srcaddr:  '0x4e212831abd2' 
+-- idfield:  '0x0455'  length field
+-- data:      1109 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    fa47f6c2
+fifo_rd         00000000      0   00000000    abd2ff71
+fifo_rd         00000000      0   00000000    4e212831
+fifo_rd         00000000      0   00000000    feee5504
+fifo_rd         00000000      0   00000000    5b14d367
+fifo_rd         00000000      0   00000000    9511d33d
+fifo_rd         00000000      0   00000000    47e9ed34
+fifo_rd         00000000      0   00000000    7854d45b
+fifo_rd         00000000      0   00000000    dbe945b2
+fifo_rd         00000000      0   00000000    656ba128
+fifo_rd         00000000      0   00000000    231877be
+fifo_rd         00000000      0   00000000    aaa18ce1
+fifo_rd         00000000      0   00000000    6771a824
+fifo_rd         00000000      0   00000000    a617963f
+fifo_rd         00000000      0   00000000    67cb141c
+fifo_rd         00000000      0   00000000    db798acd
+fifo_rd         00000000      0   00000000    1ec6b7f1
+fifo_rd         00000000      0   00000000    e1558438
+fifo_rd         00000000      0   00000000    7d3aaba3
+fifo_rd         00000000      0   00000000    7c5bea3f
+fifo_rd         00000000      0   00000000    64c3c4d8
+fifo_rd         00000000      0   00000000    9ebeacdc
+fifo_rd         00000000      0   00000000    9b4f3ca2
+fifo_rd         00000000      0   00000000    7dd68ca9
+fifo_rd         00000000      0   00000000    ab12ba29
+fifo_rd         00000000      0   00000000    15b162ff
+fifo_rd         00000000      0   00000000    a4d3d176
+fifo_rd         00000000      0   00000000    4f2ff42e
+fifo_rd         00000000      0   00000000    a12d1a86
+fifo_rd         00000000      0   00000000    81a3b9ea
+fifo_rd         00000000      0   00000000    f45b6acf
+fifo_rd         00000000      0   00000000    c373b2e7
+fifo_rd         00000000      0   00000000    eba537d9
+fifo_rd         00000000      0   00000000    768c493a
+fifo_rd         00000000      0   00000000    2edce984
+fifo_rd         00000000      0   00000000    1f9e3acb
+fifo_rd         00000000      0   00000000    24624b6e
+fifo_rd         00000000      0   00000000    712cff3d
+fifo_rd         00000000      0   00000000    ec84d522
+fifo_rd         00000000      0   00000000    d68dbcd1
+fifo_rd         00000000      0   00000000    769a3a3f
+fifo_rd         00000000      0   00000000    96734433
+fifo_rd         00000000      0   00000000    46a29427
+fifo_rd         00000000      0   00000000    c3b2c2ac
+fifo_rd         00000000      0   00000000    aa714348
+fifo_rd         00000000      0   00000000    8a3c9eb9
+fifo_rd         00000000      0   00000000    d8664a39
+fifo_rd         00000000      0   00000000    8a8d9ceb
+fifo_rd         00000000      0   00000000    3152b15a
+fifo_rd         00000000      0   00000000    18462ae4
+fifo_rd         00000000      0   00000000    83891b75
+fifo_rd         00000000      0   00000000    9525a387
+fifo_rd         00000000      0   00000000    5352952c
+fifo_rd         00000000      0   00000000    47136228
+fifo_rd         00000000      0   00000000    9fe49c3b
+fifo_rd         00000000      0   00000000    4f763afa
+fifo_rd         00000000      0   00000000    2aadfc28
+fifo_rd         00000000      0   00000000    292eb297
+fifo_rd         00000000      0   00000000    4e961b96
+fifo_rd         00000000      0   00000000    de6eaabb
+fifo_rd         00000000      0   00000000    524cd83f
+fifo_rd         00000000      0   00000000    887379f2
+fifo_rd         00000000      0   00000000    48ff675e
+fifo_rd         00000000      0   00000000    369e314b
+fifo_rd         00000000      0   00000000    31a85a75
+fifo_rd         00000000      0   00000000    9148682a
+fifo_rd         00000000      0   00000000    d5ffe3eb
+fifo_rd         00000000      0   00000000    834c247f
+fifo_rd         00000000      0   00000000    267a34eb
+fifo_rd         00000000      0   00000000    5851fbc5
+fifo_rd         00000000      0   00000000    c66c7a11
+fifo_rd         00000000      0   00000000    87df7889
+fifo_rd         00000000      0   00000000    aacd2ae6
+fifo_rd         00000000      0   00000000    ecad6938
+fifo_rd         00000000      0   00000000    5567c484
+fifo_rd         00000000      0   00000000    f443f513
+fifo_rd         00000000      0   00000000    a6f7187e
+fifo_rd         00000000      0   00000000    fafe3afc
+fifo_rd         00000000      0   00000000    1e4b361b
+fifo_rd         00000000      0   00000000    7eaf3f6e
+fifo_rd         00000000      0   00000000    3597ae15
+fifo_rd         00000000      0   00000000    888acf37
+fifo_rd         00000000      0   00000000    f6fda153
+fifo_rd         00000000      0   00000000    47f76a35
+fifo_rd         00000000      0   00000000    bcb8e23c
+fifo_rd         00000000      0   00000000    8655fce4
+fifo_rd         00000000      0   00000000    91af7bf1
+fifo_rd         00000000      0   00000000    ccddefdc
+fifo_rd         00000000      0   00000000    cffcde5e
+fifo_rd         00000000      0   00000000    153d5926
+fifo_rd         00000000      0   00000000    712aefa3
+fifo_rd         00000000      0   00000000    7d1f22dc
+fifo_rd         00000000      0   00000000    17c8adb7
+fifo_rd         00000000      0   00000000    aa215518
+fifo_rd         00000000      0   00000000    ab6d82ab
+fifo_rd         00000000      0   00000000    38552458
+fifo_rd         00000000      0   00000000    94ca2b11
+fifo_rd         00000000      0   00000000    c948aaa7
+fifo_rd         00000000      0   00000000    bd1ca15f
+fifo_rd         00000000      0   00000000    35688838
+fifo_rd         00000000      0   00000000    16131be8
+fifo_rd         00000000      0   00000000    57297dfb
+fifo_rd         00000000      0   00000000    76d463a3
+fifo_rd         00000000      0   00000000    f9288f8b
+fifo_rd         00000000      0   00000000    fe666bae
+fifo_rd         00000000      0   00000000    1de5da75
+fifo_rd         00000000      0   00000000    f31aeb44
+fifo_rd         00000000      0   00000000    b742aec3
+fifo_rd         00000000      0   00000000    6c3d738c
+fifo_rd         00000000      0   00000000    45a65156
+fifo_rd         00000000      0   00000000    39c832cf
+fifo_rd         00000000      0   00000000    2fe69df7
+fifo_rd         00000000      0   00000000    1aa457fb
+fifo_rd         00000000      0   00000000    359e5351
+fifo_rd         00000000      0   00000000    f387ba5c
+fifo_rd         00000000      0   00000000    c1f4d421
+fifo_rd         00000000      0   00000000    47668c6d
+fifo_rd         00000000      0   00000000    1559e9f4
+fifo_rd         00000000      0   00000000    3275537c
+fifo_rd         00000000      0   00000000    7d3c13ac
+fifo_rd         00000000      0   00000000    7d5a5ea4
+fifo_rd         00000000      0   00000000    74ff5161
+fifo_rd         00000000      0   00000000    27a2728a
+fifo_rd         00000000      0   00000000    7b15eb66
+fifo_rd         00000000      0   00000000    4836e8b1
+fifo_rd         00000000      0   00000000    47f1cdd2
+fifo_rd         00000000      0   00000000    cf72cb5e
+fifo_rd         00000000      0   00000000    8b7bf2b7
+fifo_rd         00000000      0   00000000    c554ca54
+fifo_rd         00000000      0   00000000    7be3cc2a
+fifo_rd         00000000      0   00000000    cd3655fe
+fifo_rd         00000000      0   00000000    2be59168
+fifo_rd         00000000      0   00000000    81993846
+fifo_rd         00000000      0   00000000    f9f91e8d
+fifo_rd         00000000      0   00000000    e2735f3f
+fifo_rd         00000000      0   00000000    bffa1691
+fifo_rd         00000000      0   00000000    876fb893
+fifo_rd         00000000      0   00000000    b1b754c8
+fifo_rd         00000000      0   00000000    ab61a2f7
+fifo_rd         00000000      0   00000000    d2264abb
+fifo_rd         00000000      0   00000000    fc38f826
+fifo_rd         00000000      0   00000000    5bd35b49
+fifo_rd         00000000      0   00000000    9c7e2a72
+fifo_rd         00000000      0   00000000    c161818f
+fifo_rd         00000000      0   00000000    92438be6
+fifo_rd         00000000      0   00000000    6a2a7727
+fifo_rd         00000000      0   00000000    9f74ae53
+fifo_rd         00000000      0   00000000    51d6337d
+fifo_rd         00000000      0   00000000    bd199144
+fifo_rd         00000000      0   00000000    97914261
+fifo_rd         00000000      0   00000000    bf15533c
+fifo_rd         00000000      0   00000000    f8fd8ae5
+fifo_rd         00000000      0   00000000    bcd34bf3
+fifo_rd         00000000      0   00000000    8be6ee65
+fifo_rd         00000000      0   00000000    7fdb21d1
+fifo_rd         00000000      0   00000000    78a1ed9a
+fifo_rd         00000000      0   00000000    ef9c9a84
+fifo_rd         00000000      0   00000000    37452ed5
+fifo_rd         00000000      0   00000000    23593149
+fifo_rd         00000000      0   00000000    66be6985
+fifo_rd         00000000      0   00000000    da94cc3b
+fifo_rd         00000000      0   00000000    1523cf2c
+fifo_rd         00000000      0   00000000    7146ce5f
+fifo_rd         00000000      0   00000000    82ea7154
+fifo_rd         00000000      0   00000000    fe3db684
+fifo_rd         00000000      0   00000000    7aa579ea
+fifo_rd         00000000      0   00000000    428654de
+fifo_rd         00000000      0   00000000    eb115b36
+fifo_rd         00000000      0   00000000    d2296775
+fifo_rd         00000000      0   00000000    cf69e856
+fifo_rd         00000000      0   00000000    8e6a6f8a
+fifo_rd         00000000      0   00000000    a4ef5f14
+fifo_rd         00000000      0   00000000    93246a5e
+fifo_rd         00000000      0   00000000    f46fa151
+fifo_rd         00000000      0   00000000    466a511c
+fifo_rd         00000000      0   00000000    fe889188
+fifo_rd         00000000      0   00000000    2e97b91c
+fifo_rd         00000000      0   00000000    d78edb3a
+fifo_rd         00000000      0   00000000    fca8d977
+fifo_rd         00000000      0   00000000    7476abe5
+fifo_rd         00000000      0   00000000    6aa8aed9
+fifo_rd         00000000      0   00000000    d32aa971
+fifo_rd         00000000      0   00000000    455b75f1
+fifo_rd         00000000      0   00000000    574b323b
+fifo_rd         00000000      0   00000000    496ea61c
+fifo_rd         00000000      0   00000000    1d7fa5b2
+fifo_rd         00000000      0   00000000    e139b31d
+fifo_rd         00000000      0   00000000    b7d265aa
+fifo_rd         00000000      0   00000000    c26258ff
+fifo_rd         00000000      0   00000000    6ec256e3
+fifo_rd         00000000      0   00000000    45638bc5
+fifo_rd         00000000      0   00000000    c46ad32a
+fifo_rd         00000000      0   00000000    e4f9ddbf
+fifo_rd         00000000      0   00000000    dc662498
+fifo_rd         00000000      0   00000000    c12459d3
+fifo_rd         00000000      0   00000000    d9e5c36f
+fifo_rd         00000000      0   00000000    c4c4e957
+fifo_rd         00000000      0   00000000    53c78e83
+fifo_rd         00000000      0   00000000    96ce714e
+fifo_rd         00000000      0   00000000    91d82b5c
+fifo_rd         00000000      0   00000000    ee895675
+fifo_rd         00000000      0   00000000    54198eb7
+fifo_rd         00000000      0   00000000    633b8f44
+fifo_rd         00000000      0   00000000    e5456418
+fifo_rd         00000000      0   00000000    9c147234
+fifo_rd         00000000      0   00000000    b5bd181a
+fifo_rd         00000000      0   00000000    5a838988
+fifo_rd         00000000      0   00000000    55ded969
+fifo_rd         00000000      0   00000000    e2911a99
+fifo_rd         00000000      0   00000000    af68f6b4
+fifo_rd         00000000      0   00000000    6437ebbb
+fifo_rd         00000000      0   00000000    8426c7ba
+fifo_rd         00000000      0   00000000    ed488287
+fifo_rd         00000000      0   00000000    79914da5
+fifo_rd         00000000      0   00000000    653358be
+fifo_rd         00000000      0   00000000    c14dfb1f
+fifo_rd         00000000      0   00000000    a5d65cb2
+fifo_rd         00000000      0   00000000    717ae53d
+fifo_rd         00000000      0   00000000    34b9487d
+fifo_rd         00000000      0   00000000    aafa4461
+fifo_rd         00000000      0   00000000    e88a7699
+fifo_rd         00000000      0   00000000    2e8b318e
+fifo_rd         00000000      0   00000000    6451cdbe
+fifo_rd         00000000      0   00000000    f39b4d32
+fifo_rd         00000000      0   00000000    5b34ea5e
+fifo_rd         00000000      0   00000000    e78cac46
+fifo_rd         00000000      0   00000000    6a9eedf1
+fifo_rd         00000000      0   00000000    a9a24fe2
+fifo_rd         00000000      0   00000000    eff69822
+fifo_rd         00000000      0   00000000    ad4efe79
+fifo_rd         00000000      0   00000000    4d8329fa
+fifo_rd         00000000      0   00000000    aec77f89
+fifo_rd         00000000      0   00000000    348cba6d
+fifo_rd         00000000      0   00000000    6968a5e7
+fifo_rd         00000000      0   00000000    23e2fcab
+fifo_rd         00000000      0   00000000    ca14da7b
+fifo_rd         00000000      0   00000000    461456e5
+fifo_rd         00000000      0   00000000    bb67b5fe
+fifo_rd         00000000      0   00000000    8585ebbd
+fifo_rd         00000000      0   00000000    3b21f272
+fifo_rd         00000000      0   00000000    bfa69675
+fifo_rd         00000000      0   00000000    3f3d89a2
+fifo_rd         00000000      0   00000000    d9bd7b83
+fifo_rd         00000000      0   00000000    b9354e9c
+fifo_rd         00000000      0   00000000    3829a429
+fifo_rd         00000000      0   00000000    4f6bb9f8
+fifo_rd         00000000      0   00000000    748454aa
+fifo_rd         00000000      0   00000000    1eca696d
+fifo_rd         00000000      0   00000000    75dc5ffb
+fifo_rd         00000000      0   00000000    e7e19c4e
+fifo_rd         00000000      0   00000000    3b292d24
+fifo_rd         00000000      0   00000000    8b4ad46a
+fifo_rd         00000000      0   00000000    247eee8c
+fifo_rd         00000000      0   00000000    d1365796
+fifo_rd         00000000      0   00000000    def2a84d
+fifo_rd         00000000      0   00000000    27e152d5
+fifo_rd         00000000      0   00000000    a3b947af
+fifo_rd         00000000      0   00000000    49e6d953
+fifo_rd         00000000      0   00000000    4c37257a
+fifo_rd         00000000      0   00000000    bf35e735
+fifo_rd         00000000      0   00000000    89feb55e
+fifo_rd         00000000      0   00000000    f221b195
+fifo_rd         00000000      0   00000000    df81dd19
+fifo_rd         00000000      0   00000000    bc56cbf2
+fifo_rd         00000000      0   00000000    ab948366
+fifo_rd         00000000      0   00000000    3a118c59
+fifo_rd         00000000      0   00000000    312fe4a2
+fifo_rd         00000000      0   00000000    d23335e4
+fifo_rd         00000000      0   00000000    1829f7cd
+fifo_rd         00000000      0   00000000    1581edea
+fifo_rd         00000000      0   00000000    ecca2393
+fifo_rd         00000000      0   00000000    553546d9
+fifo_rd         00000000      0   00000000    3cda1f47
+fifo_rd         00000000      0   00000000    4562bc7e
+fifo_rd         00000000      0   00000000    bb3415c2
+fifo_rd         00000000      0   00000000    abcd1d91
+fifo_rd         00000000      0   00000000    7fdaaebd
+fifo_rd         00000000      0   00000000    e55e61ae
+fifo_rd         00000000      0   00000000    6b53863f
+fifo_rd         00000000      0   00000000    f934f41b
+fifo_rd         00000001      3   00000000    00b7a284
+
+-- check the 1127 (0x467) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xff71fa47f6c2' unicast
+-- srcaddr:  '0x4e212831abd2' 
+-- idfield:  '0x0455'  length field
+-- data:      1109 bytes
+-- crc:      '0x1e208a15'
+
+txd         55555555555555d5c2f647fa71ffd2ab3128214e0455eefe
+txd                         67d3145b3dd3119534ede9475bd45478
+txd                         b245e9db28a16b65be771823e18ca1aa
+txd                         24a871673f9617a61c14cb67cd8a79db
+txd                         f1b7c61e388455e1a3ab3a7d3fea5b7c
+txd                         d8c4c364dcacbe9ea23c4f9ba98cd67d
+txd                         29ba12abff62b11576d1d3a42ef42f4f
+txd                         861a2da1eab9a381cf6a5bf4e7b273c3
+txd                         d937a5eb3a498c7684e9dc2ecb3a9e1f
+txd                         6e4b62243dff2c7122d584ecd1bc8dd6
+txd                         3f3a9a76334473962794a246acc2b2c3
+txd                         484371aab99e3c8a394a66d8eb9c8d8a
+txd                         5ab15231e42a4618751b898387a32595
+txd                         2c955253286213473b9ce49ffa3a764f
+txd                         28fcad2a97b22e29961b964ebbaa6ede
+txd                         3fd84c52f27973885e67ff484b319e36
+txd                         755aa8312a684891ebe3ffd57f244c83
+txd                         eb347a26c5fb5158117a6cc68978df87
+txd                         e62acdaa3869adec84c4675513f543f4
+txd                         7e18f7a6fc3afefa1b364b1e6e3faf7e
+txd                         15ae973537cf8a8853a1fdf6356af747
+txd                         3ce2b8bce4fc5586f17baf91dcefddcc
+txd                         5edefccf26593d15a3ef2a71dc221f7d
+txd                         b7adc817185521aaab826dab58245538
+txd                         112bca94a7aa48c95fa11cbd38886835
+txd                         e81b1316fb7d2957a363d4768b8f28f9
+txd                         ae6b66fe75dae51d44eb1af3c3ae42b7
+txd                         8c733d6c5651a645cf32c839f79de62f
+txd                         fb57a41a51539e355cba87f321d4f4c1
+txd                         6d8c6647f4e959157c537532ac133c7d
+txd                         a45e5a7d6151ff748a72a22766eb157b
+txd                         b1e83648d2cdf1475ecb72cfb7f27b8b
+txd                         54ca54c52acce37bfe5536cd6891e52b
+txd                         463899818d1ef9f93f5f73e29116fabf
+txd                         93b86f87c854b7b1f7a261abbb4a26d2
+txd                         26f838fc495bd35b722a7e9c8f8161c1
+txd                         e68b439227772a6a53ae749f7d33d651
+txd                         449119bd614291973c5315bfe58afdf8
+txd                         f34bd3bc65eee68bd121db7f9aeda178
+txd                         849a9cefd52e4537493159238569be66
+txd                         3bcc94da2ccf23155fce46715471ea82
+txd                         84b63dfeea79a57ade548642365b11eb
+txd                         756729d256e869cf8a6f6a8e145fefa4
+txd                         5e6a249351a16ff41c516a46889188fe
+txd                         1cb9972e3adb8ed777d9a8fce5ab7674
+txd                         d9aea86a71a92ad3f1755b453b324b57
+txd                         1ca66e49b2a57f1d1db339e1aa65d2b7
+txd                         ff5862c2e356c26ec58b63452ad36ac4
+txd                         bfddf9e4982466dcd35924c16fc3e5d9
+txd                         57e9c4c4838ec7534e71ce965c2bd891
+txd                         755689eeb78e1954448f3b63186445e5
+txd                         3472149c1a18bdb58889835a69d9de55
+txd                         991a91e2b4f668afbbeb3764bac72684
+txd                         878248eda54d9179be5833651ffb4dc1
+txd                         b25cd6a53de57a717d48b9346144faaa
+txd                         99768ae88e318b2ebecd5164324d9bf3
+txd                         5eea345b46ac8ce7f1ed9e6ae24fa2a9
+txd                         2298f6ef79fe4eadfa29834d897fc7ae
+txd                         6dba8c34e7a56869abfce2237bda14ca
+txd                         e5561446feb567bbbdeb858572f2213b
+txd                         7596a6bfa2893d3f837bbdd99c4e35b9
+txd                         29a42938f8b96b4faa5484746d69ca1e
+txd                         fb5fdc754e9ce1e7242d293b6ad44a8b
+txd                         8cee7e24965736d14da8f2ded552e127
+txd                         af47b9a353d9e6497a25374c35e735bf
+txd                         5eb5fe8995b121f219dd81dff2cb56bc
+txd                         668394ab598c113aa2e42f31e43533d2
+txd                         cdf72918eaed81159323caecd9463555
+txd                         471fda3c7ebc6245c21534bb911dcdab
+txd                         bdaeda7fae615ee53f86536b1bf434f9
+txd                         84a2b751a802e1
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 13a. COMPLETE - transmitted a normal frame"
+                        -- check interrupt status - receive complete
+apbrd      14 0000002a  -- tx status - frame transmitted, always enabled
+apbwr      14 0000002a  -- clear it
+
+-- check transmit statistics
+apbrd     100 00000527  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000004  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000003  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000001  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000003  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000001  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrdf    1A4 00000000  -- check receive overrun errors
+
+--******************************************************************************
+-- BURST OPERATION
+--******************************************************************************
+
+--******************************************************************************
+-- 14. In burst mode, transmit a minimum sized frame plus extension.  
+--      Then, transmit a minimum sized frame with a collision at the 
+--      beginning of preamble (2nd byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xe6fe4962e7c8' unicast
+-- srcaddr:  '0x3f8fa87b41f8' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    4962e7c8
+fifo_rd         00000000      0   00000000    41f8e6fe
+fifo_rd         00000000      0   00000000    3f8fa87b
+fifo_rd         00000000      0   00000000    7d522e00
+fifo_rd         00000000      0   00000000    bda5d6f5
+fifo_rd         00000000      0   00000000    44523735
+fifo_rd         00000000      0   00000000    38ac97d9
+fifo_rd         00000000      0   00000000    f4655b8b
+fifo_rd         00000000      0   00000000    6c32155b
+fifo_rd         00000000      0   00000000    fdd4c1cf
+fifo_rd         00000000      0   00000000    54c1d14d
+fifo_rd         00000000      0   00000000    c5327982
+fifo_rd         00000000      0   00000000    81a69ad8
+fifo_rd         00000000      0   00000000    f4f315f4
+fifo_rd         00001001      0   00000000    137d99de
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xe6fe4962e7c8' unicast
+-- srcaddr:  '0x3f8fa87b41f8' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xd1999988'
+
+txd(r)      55555555555555d5c8e76249fee6f8417ba88f3f002e527d
+txd                         f5d6a5bd35375244d997ac388b5b65f4
+txd                         5b15326ccfc1d4fd4dd1c154827932c5
+txd                         d89aa681f415f3f4de997d138899991d
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0xffffffffffff' broadcast frame
+-- srcaddr:  '0xf78a5d8e7cd4'
+-- typeid:   '0xf95b'
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    ffffffff
+fifo_rd(sta)    00001000      0   00000010    7cd4ffff
+--fifo_rd         00001000      0   00000000    f78a5d8e
+--fifo_rd         00001000      0   00000000    3ab65bf9
+--fifo_rd         00001000      0   00000000    4ddfebb7
+--fifo_rd         00001000      0   00000000    f45cf7c4
+--fifo_rd         00001000      0   00000000    e733a592
+--fifo_rd         00001000      0   00000000    867e72bd
+--fifo_rd         00001000      0   00000000    b2c4cf95
+--fifo_rd         00001000      0   00000000    c5f12f54
+--fifo_rd         00001000      0   00000000    11666a3a
+--fifo_rd         00001000      0   00000000    398fb2e8
+--fifo_rd         00001000      0   00000000    32dfba22
+--fifo_rd         00001000      0   00000000    26e568b3
+--fifo_rd         00000001      0   00000000    9b366af1
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0xffffffffffff' broadcast frame
+-- srcaddr:  '0xf78a5d8e7cd4'
+-- typeid:   '0xf95b'
+-- data:      46 bytes
+-- crc:      '0x36881536'
+
+txd         55x555555555555d5ffffffff
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 14. ONGOING - TRANSMITTED a minimum length frame"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+-- check status on reception of late collision interrupt
+apbrd(int) 24 00000020  "SCENARIO 14. COMPLETE - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000088  -- tx status - frame transmitted, always enabled
+apbwr      14 00000088  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 15. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision towards 
+--      the end of preamble (6th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xffffffffffff' broadcast
+-- srcaddr:  '0xfd5de663c886' 
+-- idfield:  '0x1761'  typeid field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    ffffffff
+fifo_rd         00000000      0   00000000    c886ffff
+fifo_rd         00000000      0   00000000    fd5de663
+fifo_rd         00000000      0   00000000    bd2f6117
+fifo_rd         00000000      0   00000000    9c758241
+fifo_rd         00000000      0   00000000    45836951
+fifo_rd         00000000      0   00000000    2a41ba23
+fifo_rd         00000000      0   00000000    147fb5aa
+fifo_rd         00000000      0   00000000    86f8688b
+fifo_rd         00000000      0   00000000    e6f82e28
+fifo_rd         00000000      0   00000000    5b839d4e
+fifo_rd         00000000      0   00000000    5df6219c
+fifo_rd         00000000      0   00000000    cc617a12
+fifo_rd         00000000      0   00000000    95399268
+fifo_rd         00001001      0   00000000    1c8b5fd3
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xffffffffffff' broadcast
+-- srcaddr:  '0xfd5de663c886' 
+-- idfield:  '0x1761'  typeid field
+-- data:      46 bytes
+-- crc:      '0xef2197b1'
+
+txd(r)      55555555555555d5ffffffffffff86c863e65dfd17612fbd
+txd                         4182759c5169834523ba412aaab57f14
+txd                         8b68f886282ef8e64e9d835b9c21f65d
+txd                         127a61cc68923995d35f8b1c1b7912fe
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x8d39a8a897f2' unicast frame
+-- srcaddr:  '0xc9f72fce28c7'
+-- typeid:   '0x85c5'
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    a8a897f2
+fifo_rd(sta)    00001000      0   00000010    28c78d39
+fifo_rd         00001000      0   00000000    c9f72fce
+fifo_rd         00001000      0   00000000    9544c585
+fifo_rd         00001000      0   00000000    917bddef
+fifo_rd         00001000      0   00000000    de55cf33
+fifo_rd         00001000      0   00000000    ea43333c
+fifo_rd         00001000      0   00000000    79fc23a4
+fifo_rd         00001000      0   00000000    f3c5a8d9
+fifo_rd         00001000      0   00000000    56c6b922
+fifo_rd         00001000      0   00000000    d7f52357
+fifo_rd         00001000      0   00000000    a8d8c2fd
+fifo_rd         00001000      0   00000000    d4c6da99
+fifo_rd         00001000      0   00000000    9483a3d5
+fifo_rd         00001001      0   00000000    68c8fbfe
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x8d39a8a897f2' unicast frame
+-- srcaddr:  '0xc9f72fce28c7'
+-- typeid:   '0x85c5'
+-- data:      46 bytes
+-- crc:      '0xeefc47b6'
+
+txd         555555x55555555d5f2f2f2f2 -- must allow for delay in col sync
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 15. ONGOING - TRANSMITTED a minimum length frame"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+-- check status on reception of late collision interrupt
+apbrd(int) 24 00000020  "SCENARIO 15. COMPLETE - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000088  -- tx status - frame transmitted, always enabled
+apbwr      14 00000088  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 16. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision in the  
+--      (8th byte) start of frame delimiter (SFD).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xc81ac16eea18' unicast
+-- srcaddr:  '0xc28832dcf9d7' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    c16eea18
+fifo_rd         00000000      0   00000000    f9d7c81a
+fifo_rd         00000000      0   00000000    c28832dc
+fifo_rd         00000000      0   00000000    e9282e00
+fifo_rd         00000000      0   00000000    115bccaf
+fifo_rd         00000000      0   00000000    c3e567d3
+fifo_rd         00000000      0   00000000    8ced372e
+fifo_rd         00000000      0   00000000    f49586b7
+fifo_rd         00000000      0   00000000    f57c7754
+fifo_rd         00000000      0   00000000    91216bd8
+fifo_rd         00000000      0   00000000    169a41cf
+fifo_rd         00000000      0   00000000    2e8a15ee
+fifo_rd         00000000      0   00000000    38d45f72
+fifo_rd         00000000      0   00000000    15e5bcb2
+fifo_rd         00001001      0   00000000    c3968f42
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xc81ac16eea18' unicast
+-- srcaddr:  '0xc28832dcf9d7' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xff20c496'
+
+txd(r)      55555555555555d518ea6ec11ac8d7f9dc3288c2002e28e9
+txd                         afcc5b11d367e5c32e37ed8cb78695f4
+txd                         54777cf5d86b2191cf419a16ee158a2e
+txd                         725fd438b2bce515428f96c3694c02ff
+
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x4b8b716f3cec' unicast frame
+-- srcaddr:  '0xea4cf895429a'
+-- typeid:   '0x4968'
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    716f3cec
+fifo_rd(sta)    00001000      0   00000010    429a4b8b
+fifo_rd         00001000      0   00000000    ea4cf895
+fifo_rd         00001000      0   00000000    9aec6849
+fifo_rd         00001000      0   00000000    d1687167
+fifo_rd         00001000      0   00000000    d95d32f3
+fifo_rd         00001000      0   00000000    ea17468e
+fifo_rd         00001000      0   00000000    f644a42b
+fifo_rd         00001000      0   00000000    f1f48f6e
+fifo_rd         00001000      0   00000000    fdc66b79
+fifo_rd         00001000      0   00000000    64af77e5
+fifo_rd         00001000      0   00000000    3a898481
+fifo_rd         00001000      0   00000000    de5fef76
+fifo_rd         00001000      0   00000000    f68d99cf
+fifo_rd         00001001      0   00000000    68211141
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x4b8b716f3cec' unicast frame
+-- srcaddr:  '0xea4cf895429a'
+-- typeid:   '0x4968'
+-- data:      46 bytes
+-- crc:      '0x253f0ab2'
+
+txd         55555555x555555d5ecececec -- must allow for delay in col sync
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 16. ONGOING - TRANSMITTED a minimum length frame"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+-- check status on reception of late collision interrupt
+apbrd(int) 24 00000020  "SCENARIO 16. COMPLETE - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000088  -- tx status - frame transmitted, always enabled
+apbwr      14 00000088  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 17  In burst mode, transmit a minimum sized frame plus extension.
+--      Then, transmit a minimum sized frame plus extension with a collision 
+--      just before the start of the interframe gap (64th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xf8675ffb9754' unicast
+-- srcaddr:  '0x5e494ea25352' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    5ffb9754
+fifo_rd         00000000      0   00000000    5352f867
+fifo_rd         00000000      0   00000000    5e494ea2
+fifo_rd         00000000      0   00000000    3fd12e00
+fifo_rd         00000000      0   00000000    e29ea32d
+fifo_rd         00000000      0   00000000    6856839c
+fifo_rd         00000000      0   00000000    1cd24917
+fifo_rd         00000000      0   00000000    69756b57
+fifo_rd         00000000      0   00000000    d19fcd2b
+fifo_rd         00000000      0   00000000    7bf2d93b
+fifo_rd         00000000      0   00000000    d5588c29
+fifo_rd         00000000      0   00000000    a5382ed6
+fifo_rd         00000000      0   00000000    2f385da8
+fifo_rd         00000000      0   00000000    d34d86f4
+fifo_rd         00001001      0   00000000    13891d8b
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xf8675ffb9754' unicast
+-- srcaddr:  '0x5e494ea25352' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x372273d6'
+
+txd(r)      55555555555555d55497fb5f67f85253a24e495e002ed13f
+txd                         2da39ee29c8356681749d21c576b7569
+txd                         2bcd9fd13bd9f27b298c58d5d62e38a5
+txd                         a85d382ff4864dd38b1d89136d372273
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x4521cd5dbe88' unicast
+-- srcaddr:  '0xb45eaea8bd84' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    cd5dbe88
+fifo_rd         00000000      0   00000000    bd844521
+fifo_rd         00000000      0   00000000    b45eaea8
+fifo_rd         00000000      0   00000000    f39e2e00
+fifo_rd         00000000      0   00000000    7d6a5616
+fifo_rd         00000000      0   00000000    3cdf5347
+fifo_rd         00000000      0   00000000    9c476343
+fifo_rd         00000000      0   00000000    9e44fbbc
+fifo_rd         00000000      0   00000000    b6f37f1a
+fifo_rd         00000000      0   00000000    2b6e91f6
+fifo_rd         00000000      0   00000000    3a4818d1
+fifo_rd         00000000      0   00000000    9bfbbfdd
+fifo_rd         00000000      0   00000000    a593822f
+fifo_rd         00000000      0   00000000    3782da6b
+fifo_rd         00000001      0   00000010    6d55735d
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x4521cd5dbe88' unicast
+-- srcaddr:  '0xb45eaea8bd84' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x8e95c36c'
+
+txd(60x)    55555555555555d588be5dcd214584bda8ae5eb4002e9ef3
+txd                         16566a7d4753df3c4363479cbcfb449e
+txd                         1a7ff3b6f6916e2bd118483addbffb9b
+txd                         2f8293a56bda82375d73556dc63c59e800000000
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 17. ONGOING - TRANSMITTED a minimum length frame"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+-- check status on reception of late collision interrupt
+apbrd(int) 24 00000020  "SCENARIO 17. COMPLETE - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000088  -- tx status - frame transmitted, always enabled
+apbwr      14 00000088  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 18. In burst mode, transmit a minimum sized frame plus extension 
+--      with a collision at the start of the interframe gap (65th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xfdce7719baa4' unicast
+-- srcaddr:  '0xa6521b574228' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    7719baa4
+fifo_rd         00000000      0   00000000    4228fdce
+fifo_rd         00000000      0   00000000    a6521b57
+fifo_rd         00000000      0   00000000    ad232e00
+fifo_rd         00000000      0   00000000    b72bc455
+fifo_rd         00000000      0   00000000    2dac5fd9
+fifo_rd         00000000      0   00000000    1b91f588
+fifo_rd         00000000      0   00000000    b375d4a8
+fifo_rd         00000000      0   00000000    89abb34f
+fifo_rd         00000000      0   00000000    797be6f8
+fifo_rd         00000000      0   00000000    257dca91
+fifo_rd         00000000      0   00000000    27f6f83a
+fifo_rd         00000000      0   00000000    c7429fe6
+fifo_rd         00000000      0   00000000    7b17aa87
+fifo_rd         00001001      0   00000000    6f8c3852
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xfdce7719baa4' unicast
+-- srcaddr:  '0xa6521b574228' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xc46609c3'
+
+txd(61x)    55555555555555d5a4ba1977cefd2842571b52a6002e23ad
+txd                         55c42bb7d95fac2d88f5911ba8d475b3
+txd                         4fb3ab89f8e67b7991ca7d253af8f627
+txd                         e69f42c787aa177b52388c6f3c90664c
+
+-- Start a new dummy frame. This will eventually be flushed,
+-- but it allows us to check status
+fifo_rd         00001010      0   00000100    4c8fef54
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xfdce7719baa4' unicast
+-- srcaddr:  '0xa6521b574228' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    7719baa4
+fifo_rd         00000000      0   00000000    4228fdce
+fifo_rd         00000000      0   00000000    a6521b57
+fifo_rd         00000000      0   00000000    ad232e00
+fifo_rd         00000000      0   00000000    b72bc455
+fifo_rd         00000000      0   00000000    2dac5fd9
+fifo_rd         00000000      0   00000000    1b91f588
+fifo_rd         00000000      0   00000000    b375d4a8
+fifo_rd         00000000      0   00000000    89abb34f
+fifo_rd         00000000      0   00000000    797be6f8
+fifo_rd         00000000      0   00000000    257dca91
+fifo_rd         00000000      0   00000000    27f6f83a
+fifo_rd         00000000      0   00000000    c7429fe6
+fifo_rd         00000000      0   00000000    7b17aa87
+fifo_rd         00001001      0   00000000    6f8c3852
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555'
+-- sfd:      '0xd5'
+-- destaddr: '0x5d354c8fef54' unicast frame
+-- srcaddr:  '0x323b47bf796a'
+-- typeid:   '0x6484'
+-- data:      46 bytes
+-- crc:      '0x57be0827'
+
+-- Frame is retransmitted
+txd(r)      55555555555555d5a4ba1977cefd2842571b52a6002e23ad
+txd                         55c42bb7d95fac2d88f5911ba8d475b3
+txd                         4fb3ab89f8e67b7991ca7d253af8f627
+txd                         e69f42c787aa177b52388c6f3c90664c
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 18. COMPLETE - TRANSMITTED a minimum length frame"
+                        -- check interrupt status - transmit complete
+apbrd      14 0000002a  -- tx status - frame transmitted, always enabled
+apbwr      14 0000002a  -- clear it
+
+--******************************************************************************
+-- 19. In burst mode, transmit a minimum sized frame plus extension with 
+--      a collision towards the end of the frame extension (512th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xcaf78c93b470' unicast
+-- srcaddr:  '0x2326915b4ff5' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    8c93b470
+fifo_rd         00000000      0   00000000    4ff5caf7
+fifo_rd         00000000      0   00000000    2326915b
+fifo_rd         00000000      0   00000000    dd1c2e00
+fifo_rd         00000000      0   00000000    af62893c
+fifo_rd         00000000      0   00000000    827225fb
+fifo_rd         00000000      0   00000000    e6975b3a
+fifo_rd         00000000      0   00000000    a9357323
+fifo_rd         00000000      0   00000000    bcd9c8f5
+fifo_rd         00000000      0   00000000    4e2e5b6c
+fifo_rd         00000000      0   00000000    8e5f23c6
+fifo_rd         00000000      0   00000000    7b7248c9
+fifo_rd         00000000      0   00000000    e7f9447a
+fifo_rd         00000000      0   00000000    85a56de1
+fifo_rd         00001001      0   00000000    8b86d1cd
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xcaf78c93b470' unicast
+-- srcaddr:  '0x2326915b4ff5' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x72f4e93d'
+
+txd(504xr)  55555555555555d570b4938cf7caf54f5b912623002e1cdd
+txd                         3c8962affb2572823a5b97e6237335a9
+txd                         f5c8d9bc6c5b2e4ec6235f8ec948727b
+txd                         7a44f9e7e16da585cdd1868bd39e4f27
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xd342145c9e81' multicast
+-- srcaddr:  '0x9bbd7f748498' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    145c9e81
+fifo_rd         00000000      0   00000000    8498d342
+fifo_rd         00000000      0   00000000    9bbd7f74
+fifo_rd         00000000      0   00000000    f1ce2e00
+fifo_rd         00000000      0   00000000    22abac74
+fifo_rd         00000000      0   00000000    cc643f34
+fifo_rd         00000000      0   00000000    b7851bad
+fifo_rd         00000000      0   00000000    d99a2842
+fifo_rd         00000000      0   00000000    e3b29bfe
+fifo_rd         00000000      0   00000000    fdf44acd
+fifo_rd         00000000      0   00000000    447b2dcf
+fifo_rd         00000000      0   00000000    257cf6df
+fifo_rd         00000000      0   00000000    f8f2ac2b
+fifo_rd         00000000      0   00000000    28dcd677
+fifo_rd         00000001      0   00000000    b2f9fce7
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xd342145c9e81' multicast
+-- srcaddr:  '0x9bbd7f748498' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x537fe5ed'
+
+txd         55555555555555d5819e5c1442d39884747fbd9b002ecef1
+txd                         74acab22343f64ccad1b85b742289ad9
+txd                         fe9bb2e3cd4af4fdcf2d7b44dff67c25
+txd                         2bacf2f877d6dc28e7fcf9b2de5ef735
+
+-- check status on reception of late collision interrupt
+apbrd(int) 24 00000080  "SCENARIO 19. ONGOING - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 19. COMPLETE - TRANSMITTED a minimum length frame"
+                     -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 20. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision in the 
+--      beginning of the data portion of the frame (24th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x2c7c568a173a' unicast
+-- srcaddr:  '0x62f752274b18' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    568a173a
+fifo_rd         00000000      0   00000000    4b182c7c
+fifo_rd         00000000      0   00000000    62f75227
+fifo_rd         00000000      0   00000000    db232e00
+fifo_rd         00000000      0   00000000    f2518379
+fifo_rd         00000000      0   00000000    ae17c81e
+fifo_rd         00000000      0   00000000    a3779969
+fifo_rd         00000000      0   00000000    af7c4abc
+fifo_rd         00000000      0   00000000    84f67531
+fifo_rd         00000000      0   00000000    ff76f549
+fifo_rd         00000000      0   00000000    3b4999a5
+fifo_rd         00000000      0   00000000    4688412a
+fifo_rd         00000000      0   00000000    47e29372
+fifo_rd         00000000      0   00000000    42aad897
+fifo_rd         00001001      0   00000000    1c65a8be
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x2c7c568a173a' unicast
+-- srcaddr:  '0x62f752274b18' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x9ba75782'
+
+txd(r)      55555555555555d53a178a567c2c184b2752f762002e23db
+txd                         798351f21ec817ae699977a3bc4a7caf
+txd                         3175f68449f576ffa599493b2a418846
+txd                         7293e24797d8aa42bea8651c28757ab9
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x3c2f3fa7afd8' unicast
+-- srcaddr:  '0xa2f293467b24' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    3fa7afd8
+fifo_rd         00000000      0   00000000    7b243c2f
+fifo_rd         00000000      0   00000000    a2f29346
+fifo_rd         00000000      0   00000000    11e12e00
+fifo_rd         00000000      0   00000000    99ba8da1
+fifo_rd         00000000      0   00000000    cd164a3e
+fifo_rd         00001000      0   00000010    e9c42ff4
+fifo_rd         00001000      0   00000000    69733839
+fifo_rd         00001000      0   00000000    81774d3c
+fifo_rd         00001000      0   00000000    11df1936
+fifo_rd         00001000      0   00000000    1a77d54b
+fifo_rd         00001000      0   00000000    8684484c
+fifo_rd         00001000      0   00000000    7e352bc2
+fifo_rd         00001000      0   00000000    e37587b1
+fifo_rd         00001001      0   00000000    2173df5e
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x3c2f3fa7afd8' unicast
+-- srcaddr:  '0xa2f293467b24' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x68179a79'
+
+txd(20x)    55555555555555d5d8afa73f2f3c247b4693f2a2002ee111
+txd                         a18dba993e4a16cdf4f4f4f4
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 20. ONGOING - TRANSMITTED a minimum length frame"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+-- check status on reception of late collision interrupt
+apbrd(int) 24 00000020  "SCENARIO 20. COMPLETE - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000088  -- tx status - frame transmitted, always enabled
+apbwr      14 00000088  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 21. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision towards 
+--      the end of the data portion of the frame (58th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xffffffffffff' broadcast
+-- srcaddr:  '0x43ad36cf679b' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    ffffffff
+fifo_rd         00000000      0   00000000    679bffff
+fifo_rd         00000000      0   00000000    43ad36cf
+fifo_rd         00000000      0   00000000    439d2e00
+fifo_rd         00000000      0   00000000    97876848
+fifo_rd         00000000      0   00000000    5dcfa726
+fifo_rd         00000000      0   00000000    976cebf7
+fifo_rd         00000000      0   00000000    79941b5b
+fifo_rd         00000000      0   00000000    c73a7a57
+fifo_rd         00000000      0   00000000    16d3f493
+fifo_rd         00000000      0   00000000    73f77653
+fifo_rd         00000000      0   00000000    ca15e4c2
+fifo_rd         00000000      0   00000000    da15a257
+fifo_rd         00000000      0   00000000    c8fa7916
+fifo_rd         00001001      0   00000000    dd291974
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xffffffffffff' broadcast
+-- srcaddr:  '0x43ad36cf679b' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x21fbf0dd'
+
+txd(r)      55555555555555d5ffffffffffff9b67cf36ad43002e9d43
+txd                         4868879726a7cf5df7eb6c975b1b9479
+txd                         577a3ac793f4d3165376f773c2e415ca
+txd                         57a215da1679fac8741929dddd0fbf12
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xe36d32bbf38e' unicast
+-- srcaddr:  '0x684d86cadd5f' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    32bbf38e
+fifo_rd         00000000      0   00000000    dd5fe36d
+fifo_rd         00000000      0   00000000    684d86ca
+fifo_rd         00000000      0   00000000    5fb32e00
+fifo_rd         00000000      0   00000000    d5316ea5
+fifo_rd         00000000      0   00000000    71d3dc5c
+fifo_rd         00000000      0   00000000    6c13d4ed
+fifo_rd         00000000      0   00000000    c4f24c76
+fifo_rd         00000000      0   00000000    e7757992
+fifo_rd         00000000      0   00000000    8d1f7332
+fifo_rd         00000000      0   00000000    58ffffe5
+fifo_rd         00000000      0   00000000    8a98edee
+fifo_rd         00000000      0   00000000    64127a14
+fifo_rd         00000000      0   00000000    6a53e1aa
+fifo_rd         00000001      0   00000010    5d2e87bf
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xe36d32bbf38e' unicast
+-- srcaddr:  '0x684d86cadd5f' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xeea56d1f'
+
+txd(54x)    55555555555555d58ef3bb326de35fddca864d68002eb35f
+txd                         a56e31d55cdcd371edd4136c764cf2c4
+txd                         927975e732731f8de5ffff58eeed988a
+txd                         147a1264aae1536abf872e2e2e2e
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 21. ONGOING - TRANSMITTED a minimum length frame"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+-- check status on reception of late collision interrupt
+apbrd(int) 24 00000020  "SCENARIO 21. COMPLETE - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000088  -- tx status - frame transmitted, always enabled
+apbwr      14 00000088  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 22. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with padding with a collision 
+--      at the start of the padding (36th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xe16a691c63c4' unicast
+-- srcaddr:  '0x598e8c56ef47' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    691c63c4
+fifo_rd         00000000      0   00000000    ef47e16a
+fifo_rd         00000000      0   00000000    598e8c56
+fifo_rd         00000000      0   00000000    9d142e00
+fifo_rd         00000000      0   00000000    4a9aa269
+fifo_rd         00000000      0   00000000    ab73e441
+fifo_rd         00000000      0   00000000    946bb22e
+fifo_rd         00000000      0   00000000    b66bfacd
+fifo_rd         00000000      0   00000000    3c98634c
+fifo_rd         00000000      0   00000000    478d425f
+fifo_rd         00000000      0   00000000    539f87e5
+fifo_rd         00000000      0   00000000    3b87afcb
+fifo_rd         00000000      0   00000000    4ec8f276
+fifo_rd         00000000      0   00000000    3af4a175
+fifo_rd         00001001      0   00000000    819ec657
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xe16a691c63c4' unicast
+-- srcaddr:  '0x598e8c56ef47' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x24761c23'
+
+txd(r)      55555555555555d5c4631c696ae147ef568c8e59002e149d
+txd                         69a29a4a41e473ab2eb26b94cdfa6bb6
+txd                         4c63983c5f428d47e5879f53cbaf873b
+txd                         76f2c84e75a1f43a57c69e8132c16742
+
+-- transmit a 36 (0x24) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x92f7764f2374' unicast
+-- srcaddr:  '0x75368fdcc5ac' 
+-- idfield:  '0x0012'  length field
+-- data:      18 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    764f2374
+fifo_rd         00000000      0   00000000    c5ac92f7
+fifo_rd         00000000      0   00000000    75368fdc
+fifo_rd         00000000      0   00000000    f6f31200
+fifo_rd         00000000      0   00000000    9515bdf1
+fifo_rd         00000000      0   00000000    48522f43
+fifo_rd         00000000      0   00000000    36b53d45
+fifo_rd         00000000      0   00000000    813ed3c1
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00001000      0   00000010    00000000
+fifo_rd         00001000      0   00000000    00000000
+fifo_rd         00001000      0   00000000    00000000
+fifo_rd         00001000      0   00000000    00000000
+fifo_rd         00001000      0   00000000    00000000
+fifo_rd         00001001      0   00000000    00000000
+
+-- check the 36 (0x24) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x92f7764f2374' unicast
+-- srcaddr:  '0x75368fdcc5ac' 
+-- idfield:  '0x0012'  length field
+-- data:      18 bytes
+-- crc:      '0xaca2b2b9'
+
+txd(32x)    55555555555555d574234f76f792acc5dc8f36750012f3f6
+txd                         f1bd1595432f5248453db536c1d33e81
+txd                         0000000000000000
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 22. ONGOING - TRANSMITTED a minimum length frame"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+-- check status on reception of late collision interrupt
+apbrd(int) 24 00000020  "SCENARIO 22. COMPLETE - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000088  -- tx status - frame transmitted, always enabled
+apbwr      14 00000088  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 23. In burst mode, transmit a minimum sized frame. 
+--      Then, transmit a minimum sized frame with padding with a collision 
+--      towards the end of the padding (50th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x626b49b3d940' unicast
+-- srcaddr:  '0xecafc56b3e5f' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    49b3d940
+fifo_rd         00000000      0   00000000    3e5f626b
+fifo_rd         00000000      0   00000000    ecafc56b
+fifo_rd         00000000      0   00000000    f4632e00
+fifo_rd         00000000      0   00000000    eea12afd
+fifo_rd         00000000      0   00000000    b5c4361f
+fifo_rd         00000000      0   00000000    5288cb63
+fifo_rd         00000000      0   00000000    66c575f1
+fifo_rd         00000000      0   00000000    7514ba41
+fifo_rd         00000000      0   00000000    b4cca4fc
+fifo_rd         00000000      0   00000000    39b39c3e
+fifo_rd         00000000      0   00000000    af2b76be
+fifo_rd         00000000      0   00000000    27989bdd
+fifo_rd         00000000      0   00000000    f26fba85
+fifo_rd         00001001      0   00000000    73861a1b
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x626b49b3d940' unicast
+-- srcaddr:  '0xecafc56b3e5f' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xa00f1060'
+
+txd(r)      55555555555555d540d9b3496b625f3e6bc5afec002e63f4
+txd                         fd2aa1ee1f36c4b563cb8852f175c566
+txd                         41ba1475fca4ccb43e9cb339be762baf
+txd                         dd9b982785ba6ff21b1a86730601f00a
+
+-- transmit a 36 (0x24) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x628cf23a12a4' unicast
+-- srcaddr:  '0xab896e12eb62' 
+-- idfield:  '0x0012'  length field
+-- data:      18 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    f23a12a4
+fifo_rd         00000000      0   00000000    eb62628c
+fifo_rd         00000000      0   00000000    ab896e12
+fifo_rd         00000000      0   00000000    58511200
+fifo_rd         00000000      0   00000000    75546477
+fifo_rd         00000000      0   00000000    27156de8
+fifo_rd         00000000      0   00000000    ee8e37be
+fifo_rd         00000000      0   00000000    7cfafae6
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00000000      0   00000000    00000000
+fifo_rd         00001000      0   00000010    00000000
+fifo_rd         00001001      0   00000000    00000000
+
+-- check the 36 (0x24) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x628cf23a12a4' unicast
+-- srcaddr:  '0xab896e12eb62' 
+-- idfield:  '0x0012'  length field
+-- data:      18 bytes
+-- crc:      '0xa8a49b99'
+
+txd(46x)    55555555555555d5a4123af28c6262eb126e89ab00125158
+txd                         77645475e86d1527be378eeee6fafa7c
+txd                         00000000000000000000000000000000
+txd                         000000000000
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 23. ONGOING - TRANSMITTED a minimum length frame"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+-- check status on reception of late collision interrupt
+apbrd(int) 24 00000020  "SCENARIO 23. COMPLETE - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000088  -- tx status - frame transmitted, always enabled
+apbwr      14 00000088  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 24. In burst mode, transmit a minimum sized frame with extension. 
+--      Then, transmit a minimum sized frame with a collision at the start 
+--      of crc (61st byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x8267dbd88f38' unicast
+-- srcaddr:  '0xb4fa5de85fa5' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    dbd88f38
+fifo_rd         00000000      0   00000000    5fa58267
+fifo_rd         00000000      0   00000000    b4fa5de8
+fifo_rd         00000000      0   00000000    83ca2e00
+fifo_rd         00000000      0   00000000    c5c5f5fc
+fifo_rd         00000000      0   00000000    63781619
+fifo_rd         00000000      0   00000000    3685c22d
+fifo_rd         00000000      0   00000000    3d57be1c
+fifo_rd         00000000      0   00000000    d24e486d
+fifo_rd         00000000      0   00000000    8ac7924d
+fifo_rd         00000000      0   00000000    65ef32df
+fifo_rd         00000000      0   00000000    47e54dbc
+fifo_rd         00000000      0   00000000    d5eef2bb
+fifo_rd         00000000      0   00000000    c683ca48
+fifo_rd         00001001      0   00000000    dff5d1b2
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x8267dbd88f38' unicast
+-- srcaddr:  '0xb4fa5de85fa5' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xa4cae0d8'
+
+txd(r)      55555555555555d5388fd8db6782a55fe85dfab4002eca83
+txd                         fcf5c5c5191678632dc285361cbe573d
+txd                         6d484ed24d92c78adf32ef65bc4de547
+txd                         bbf2eed548ca83c6b2d1f5df8d0eac4a
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xf5b1d543b1cc' unicast
+-- srcaddr:  '0x98ab71311f16' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    d543b1cc
+fifo_rd         00000000      0   00000000    1f16f5b1
+fifo_rd         00000000      0   00000000    98ab7131
+fifo_rd         00000000      0   00000000    735d2e00
+fifo_rd         00000000      0   00000000    61746d52
+fifo_rd         00000000      0   00000000    2d3ce119
+fifo_rd         00000000      0   00000000    ada2c682
+fifo_rd         00000000      0   00000000    5fc76e2e
+fifo_rd         00000000      0   00000000    543f9c4d
+fifo_rd         00000000      0   00000000    a65d6164
+fifo_rd         00000000      0   00000000    5db9a62c
+fifo_rd         00000000      0   00000000    b19289a5
+fifo_rd         00000000      0   00000000    e3f35cdd
+fifo_rd         00000000      0   00000000    9c2b5a45
+fifo_rd         00000001      0   00000010    cfd98b25
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xf5b1d543b1cc' unicast
+-- srcaddr:  '0x98ab71311f16' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x19a3030b'
+
+txd(57x)    55555555555555d5ccb143d5b1f5161f3171ab98002e5d73
+txd                         526d746119e13c2d82c6a2ad2e6ec75f
+txd                         4d9c3f5464615da62ca6b95da58992b1
+txd                         dd5cf3e3455a2b9c258bd9cfb000000000
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 24. ONGOING - TRANSMITTED a minimum length frame"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+-- check status on reception of late collision interrupt
+apbrd(int) 24 00000020  "SCENARIO 24. COMPLETE - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000088  -- tx status - frame transmitted, always enabled
+apbwr      14 00000088  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 25. In burst mode, transmit a minimum sized frame with extension. 
+--      Then, transmit a minimum sized frame with a collision towards the 
+--      end the crc (63rd byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x49e471daa314' unicast
+-- srcaddr:  '0xa18e7ad6a6a5' 
+-- idfield:  '0x6fa7'  typeid field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    71daa314
+fifo_rd         00000000      0   00000000    a6a549e4
+fifo_rd         00000000      0   00000000    a18e7ad6
+fifo_rd         00000000      0   00000000    116ca76f
+fifo_rd         00000000      0   00000000    db99cc6e
+fifo_rd         00000000      0   00000000    ff227e2e
+fifo_rd         00000000      0   00000000    b315d95f
+fifo_rd         00000000      0   00000000    27ed192a
+fifo_rd         00000000      0   00000000    df14e47a
+fifo_rd         00000000      0   00000000    a22a2b8e
+fifo_rd         00000000      0   00000000    f2bc19ae
+fifo_rd         00000000      0   00000000    75447e3b
+fifo_rd         00000000      0   00000000    a39c7446
+fifo_rd         00000000      0   00000000    228338bc
+fifo_rd         00001001      0   00000000    843d13e9
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x49e471daa314' unicast
+-- srcaddr:  '0xa18e7ad6a6a5' 
+-- idfield:  '0x6fa7'  typeid field
+-- data:      46 bytes
+-- crc:      '0x822982dc'
+
+txd(r)      55555555555555d514a3da71e449a5a6d67a8ea16fa76c11
+txd                         6ecc99db2e7e22ff5fd915b32a19ed27
+txd                         7ae414df8e2b2aa2ae19bcf23b7e4475
+txd                         46749ca3bc388322e9133d84cd289228
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x8cbe2c766af4' unicast
+-- srcaddr:  '0x5e51b26cab87' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd         00001010      0   00000000    2c766af4
+fifo_rd         00000000      0   00000000    ab878cbe
+fifo_rd         00000000      0   00000000    5e51b26c
+fifo_rd         00000000      0   00000000    fa992e00
+fifo_rd         00000000      0   00000000    a65d3529
+fifo_rd         00000000      0   00000000    fd29dd3e
+fifo_rd         00000000      0   00000000    e22b3b2b
+fifo_rd         00000000      0   00000000    a7d2787d
+fifo_rd         00000000      0   00000000    cd155889
+fifo_rd         00000000      0   00000000    1fa295b7
+fifo_rd         00000000      0   00000000    512b2c5e
+fifo_rd         00000000      0   00000000    68f22ea6
+fifo_rd         00000000      0   00000000    7a559283
+fifo_rd         00000000      0   00000000    393aa87a
+fifo_rd         00000001      0   00000010    1687f21e
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x8cbe2c766af4' unicast
+-- srcaddr:  '0x5e51b26cab87' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x215e2e1b'
+
+txd(59x)    55555555555555d5f46a762cbe8c87ab6cb2515e002e99fa
+txd                         29355da63edd29fd2b3b2be27d78d2a7
+txd                         895815cdb795a21f5e2c2b51a62ef268
+txd                         8392557a7aa83a391ef28716b1e2e500000000
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 25. ONGOING - TRANSMITTED a minimum length frame"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again - frame transmitted, always enabled
+
+-- check status on reception of late collision interrupt
+apbrd(int) 24 00000020  "SCENARIO 25. COMPLETE - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000088  -- tx status - frame transmitted, always enabled
+apbwr      14 00000088  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 26. In burst mode, transmit a minimum sized frame with extension. 
+--      Then, transmit a collision between the first frame and second 
+--      frame (IFG). Finally, Transmit a minimum sized frame.
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x322d1cd85424' unicast
+-- srcaddr:  '0x89d8c3c87283' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+
+fifo_rd(apb)    00001010      0   00000000    1cd85424
+fifo_rd         00000000      0   00000000    7283322d
+fifo_rd         00000000      0   00000000    89d8c3c8
+fifo_rd         00000000      0   00000000    5b2e2e00
+fifo_rd         00000000      0   00000000    21a19276
+fifo_rd         00000000      0   00000000    382e4425
+fifo_rd         00000000      0   00000000    dafd68d9
+fifo_rd         00000000      0   00000000    7a2466ff
+fifo_rd         00000000      0   00000000    93dc3ff4
+fifo_rd         00000000      0   00000000    6ae96a48
+fifo_rd         00000000      0   00000000    4cd47237
+fifo_rd         00000000      0   00000000    1388a5c1
+fifo_rd         00000000      0   00000000    396d7698
+fifo_rd         00000000      0   00000000    c37a14b1
+fifo_rd         00001001      0   00000000    6496451c
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x322d1cd85424' unicast
+-- srcaddr:  '0x89d8c3c87283' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x6cae7cf8'
+
+txd(512x)   55555555555555d52454d81c2d328372c8c3d889002e2e5b
+txd                         7692a12125442e38d968fddaff66247a
+txd                         f43fdc93486ae96a3772d44cc1a58813
+txd                         98766d39b1147ac31c4596648fc7eac6
+
+fifo_rd         00001010      0   00000000    2f4f711e
+fifo_rd(sta)    00001000      0   00000010    00000000
+
+-- transmit a 64 (0x40) byte frame:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x9c36f4271f1e' unicast
+-- srcaddr:  '0x4a4d23d54b84' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:       autogenerated
+--
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL     MOD   STATUS      DATA
+fifo_rd         00001010      0   00000000    f4271f1e
+fifo_rd         00000000      0   00000000    4b849c36
+fifo_rd         00000000      0   00000000    4a4d23d5
+fifo_rd         00000000      0   00000000    a8d62e00
+fifo_rd         00000000      0   00000000    b4e12d76
+fifo_rd         00000000      0   00000000    1f811abf
+fifo_rd         00000000      0   00000000    2d1d53c1
+fifo_rd         00000000      0   00000000    6eeaac8f
+fifo_rd         00000000      0   00000000    c1adafa7
+fifo_rd         00000000      0   00000000    518324f4
+fifo_rd         00000000      0   00000000    6564a45a
+fifo_rd         00000000      0   00000000    869bc697
+fifo_rd         00000000      0   00000000    d277359a
+fifo_rd         00000000      0   00000000    923c45e1
+fifo_rd         00000001      0   00000000    a3c8ff1f
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x9c36f4271f1e' unicast
+-- srcaddr:  '0x4a4d23d54b84' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xa2be91ea'
+
+txd         55555555555555d51e1f27f4369c844bd5234d4a002ed6a8
+txd                         762de1b4bf1a811fc1531d2d8facea6e
+txd                         a7afadc1f42483515aa4646597c69b86
+txd                         9a3577d2e1453c921fffc8a3ae19eb2a
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 26. ONGOING - TRANSMITTED a minimum length frame"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+-- check status on reception of late collision interrupt
+apbrd(int) 24 00000020  "SCENARIO 26. ONGOING - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000088  -- tx status - frame transmitted, always enabled
+apbwr      14 00000088  -- clear it
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 26. COMPLETE - TRANSMITTED a minimum length frame"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbrdf     14 00000008  -- check it again - frame transmitted, always enabled
+
+--******************************************************************************
+-- 27. Check statistics
+
+-- check transmit statistics
+apbrd     100 000003c0  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 0000000f  -- check frames transmitted ok
+apbrd     10C 00000002  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 0000000f  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000001  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 0000000b  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(30000)

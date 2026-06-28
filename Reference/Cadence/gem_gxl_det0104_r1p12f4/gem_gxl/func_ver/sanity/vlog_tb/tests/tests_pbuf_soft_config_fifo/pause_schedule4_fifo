@@ -1,0 +1,498 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2009
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : pause_schedule4_fifo
+--
+--   Author         : Andreas Bode (abode@cadence.com)
+--
+--   Date           : 25 February 2010
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This checks transmission of pause frames (PFC and classic) controlled by pins
+-- and register.
+-- A second and third pause frames are triggered while the first pause is
+-- transmitted. So only the third pause trigger is transmitted after the first
+-- pause frame.
+--
+--
+-- Functional Coverage
+----------------------
+-- 
+--
+-- Detailed Test Description
+----------------------------
+--
+-- Different combinations of zero, non zero and PFC pause frames.
+-- Only the first and last trigger will be used to transmit a pause frame.
+--
+-- ************************************************************************** --
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+pinsd(60) tx_pfc_sel        0         -- pause frame
+pinsd(61) tx_pfc_pause      11111111  -- priority_enable
+pinsd(62) tx_pfc_pause_zero 11111111  -- all timers zero
+
+apbwr(70)  4c 00000001  -- enable soft config fifo port bit when available
+apbrd      4c 00000001  -- check enable soft config bit when available
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      04 00080003  -- full duplex and 100M
+
+apbwr      00 00000208  -- write tx_go and enable tx (apb trigger to trigger FIFO)
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbwrf     3c 0000dead  -- write pause quantum register
+
+pinsd(apb) tx_pause 0   -- drive tx_pause low 
+
+------------------------------------------------------------------------------------
+-- scenario 1
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+-- drive tx_pause_zero high and toogle tx_pause to start zero pause frame
+pinsd(200) tx_pfc_sel 0 tx_pause_zero 1 tx_pause 1
+pinsd(208) tx_pfc_sel    1  -- drive tx_pfc_sel high
+pinsd(210) tx_pause      0  -- toggle tx_pause to start PFC pause frame
+pinsd(215) tx_pfc_sel    0  -- drive tx_pfc_sel low
+pinsd(217) tx_pause_zero 0  -- drive tx_pause_zero low
+-- write network control register to start non zero pause frame
+apbwr(218) 00 00000808      -- trigger non zero 
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+------------------------------------------------------------------------------------
+-- scenario 2
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(1190)   c4 000000ff  -- non zero for all timers and priority_enable = 0xff
+pinsd(1199) tx_pfc_sel    1  -- drive tx_pfc_sel high
+apbwr(1200) 00 00020008      -- trigger PFC
+pinsd(1210) tx_pfc_sel    0  -- drive tx_pfc_sel low
+pinsd(1212) tx_pause      1  -- toggle tx_pause to start non zero pause frame
+pinsd(1227) tx_pause_zero 1  -- drive tx_pause_zero high
+apbwr(1226) 00 00001008      -- trigger zero
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 3
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(2200) 00 00001008      -- trigger zero
+apbwr(2210) 00 00001008      -- trigger zero
+pinsd(2219) tx_pfc_sel    1  -- drive tx_pfc_sel high
+apbwr(2220) 00 00020008      -- trigger PFC
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 4
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+pinsd(3150) tx_pfc_pause_zero 00000000  -- no timer zero
+pinsd(3199) tx_pause_zero 0  -- drive tx_pause_zero low
+apbwr(3200) 00 00020008      -- trigger PFC
+pinsd(3240) tx_pause      0  -- toggle tx_pause to start PFC pause frame
+pinsd(3250) tx_pfc_sel    0  -- drive tx_pfc_sel
+apbwr(3270) 00 00000808      -- trigger non zero
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 5
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(4200) 00 00001008      -- trigger zero
+apbwr(4220) 00 00001008      -- trigger zero
+pinsd(4250) tx_pause_zero 0  -- drive tx_pause_zero low
+pinsd(4270) tx_pause      1  -- toggle tx_pause to start non zero pause frame
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 6
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+pinsd(5199) tx_pause_zero 1  -- drive tx_pause_zero high
+pinsd(5200) tx_pause      0  -- toggle tx_pause to start zero pause frame
+apbwr(5230) 00 00000808      -- trigger non zero
+apbwr(5250) 00 00001008      -- trigger zero
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 7
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(6200) 00 00001008      -- trigger zero
+pinsd(6230) tx_pfc_sel    1  -- drive tx_pfc_sel high
+pinsd(6240) tx_pause      1  -- toggle tx_pause to start PFC pause frame
+pinsd(6250) tx_pfc_sel    0  -- drive tx_pfc_sel low
+apbwr(6260) 00 00001008      -- trigger zero
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 8
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+pinsd(7199) tx_pause_zero 1  -- drive tx_pause_zero high
+pinsd(7200) tx_pause      0  -- toggle tx_pause to start zero pause frame
+apbwr(7220) 00 00000808      -- trigger non zero
+apbwr(7260) 00 00000808      -- trigger non zero
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 9
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(8200) 00 00001008      -- trigger zero
+apbwr(8215) 00 00020008      -- trigger PFC
+pinsd(8230) tx_pfc_sel    1  -- drive tx_pfc_sel high
+pinsd(8270) tx_pause      1  -- toggle tx_pause to start PFC pause frame
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 10
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(9200) 00 00001008      -- trigger zero
+apbwr(9240) 00 00000808      -- trigger non zero
+pinsd(9243) tx_pfc_sel    1  -- drive tx_pfc_sel high
+pinsd(9250) tx_pause      0  -- toggle tx_pause to start PFC pause frame
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 11
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(10200) 00 00000808      -- trigger non zero
+pinsd(10230) tx_pause_zero 0  -- drive tx_pause_zero low
+pinsd(10240) tx_pause      1  -- toggle tx_pause to start non zero pause frame
+apbwr(10300) 00 00001008      -- trigger zero
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 12
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+pinsd(11199) tx_pfc_sel    1  -- drive tx_pfc_sel high
+pinsd(11200) tx_pause      0  -- toggle tx_pause to start PFC pause frame
+pinsd(11222) tx_pfc_sel    0  -- drive tx_pfc_sel low
+pinsd(11224) tx_pause      0  -- toggle tx_pause to start zero pause frame
+apbwr(11300) 00 00001008      -- trigger zero
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 13
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+pinsd(12199) tx_pause_zero 0  -- drive tx_pause_zero low
+pinsd(12200) tx_pause      1  -- toggle tx_pause to start non zero pause frame
+apbwr(12230) 00 00001008      -- trigger zero
+apbwr(12235) 3c 0000fedc      -- write pause quantum register
+pinsd(12250) tx_pause      0  -- toggle tx_pause to start non zero pause frame
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  fedc0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000e0d1fe1f
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  fedc0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000e0d1fe1f
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 14
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(13200) 00 00020008      -- trigger PFC
+pinsd(13220) tx_pause_zero 1  -- drive tx_pause_zero high
+pinsd(13222) tx_pfc_sel    0  -- drive tx_pfc_sel low
+pinsd(13224) tx_pause      1  -- toggle tx_pause to start zero pause frame
+pinsd(13226) tx_pfc_sel    1  -- drive tx_pfc_sel high
+pinsd(13300) tx_pause      0  -- toggle tx_pause to start PFC pause frame
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00fffedcfedcfedcfedcfedcfedcfedc
+txd                  fedc0000000000000000000000000000
+txd                  000000000000000000000000459b186e
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00fffedcfedcfedcfedcfedcfedcfedc
+txd                  fedc0000000000000000000000000000
+txd                  000000000000000000000000459b186e
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 15
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(14200) 00 00000808      -- trigger non zero
+pinsd(14230) tx_pause_zero 1  -- drive tx_pause_zero high
+pinsd(14240) tx_pause      1  -- toggle tx_pause to start zero pause frame
+apbwr(14250) 00 00020008      -- trigger PFC
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  fedc0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000e0d1fe1f
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00fffedcfedcfedcfedcfedcfedcfedc
+txd                  fedc0000000000000000000000000000
+txd                  000000000000000000000000459b186e
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(20000)

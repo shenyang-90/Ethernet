@@ -1,0 +1,619 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_buf_col
+--
+--   Authors        : Mike MacGillis (mikema@tality.com)/Adam Walker (awalker@tality.com/
+		      Martin James (martinj@tality.com)
+--
+--   Date           : 7 March 2002
+--
+--------------------------------------------------------------------------------
+-- Test description
+-- This test is intended to cover  multibuffer frames with collisions 
+-- occurring at the beginning and end of varying length buffers. This will 
+-- test the ability of the transmit buffer management to recover from these 
+-- collisions and re-read the original start of the frame and try again.
+--
+-- Functional Coverage
+-- · Ensures the functionality of the transmit buffers works properly.
+-- · Ensures that the GEM responds properly to collisions during the 
+--   transmission of multibuffer frames.
+-- · Ensures the correct recovery of buffers that have had a collision 
+--   detected during buffer activity.
+--
+-- Detailed test description
+-- 1. Initialise GEM for 10 or 100 mode opeation.
+-- Note: All transmit buffer descriptors in this test has bit 16 set in 
+-- word zero. (No crc and padding to be added)
+--
+-- Frame One:  multibuffer frame- 5 buffers in total
+-- 2. Transmit the first buffer (32 bytes) of the multibuffer frame.  
+--    However, a collision is detected.  Therefore, a 32 bit jam 
+--    sequence should be transmitted.
+-- 3. Re-transmit the first buffer. However, a collision is detected.  
+--    Therefore, a 32-bit jam sequence should be transmitted.
+-- 4. Re-transmit the first buffer. Then, start transmitting the second 
+--    buffer (16 bytes).  However, a collision is detected. 
+--    Therefore, a 32-bit jam sequence should be transmitted.
+-- 5. Re-transmit the first and second buffers. Then, transmit 
+--    the third buffer (32 bytes) and the fourth buffer of (16 bytes). 
+--    Finally, start to transmit the fifth buffer (8 bytes). 
+--    However, a collision is detected. Therefore, a 32 bit jam 
+--    sequence should be transmitted.
+-- 6. Re-transmit all five frames correctly.
+-- 7. Check status and statistics registers and ensure the above 
+--     operations where handled properly.
+--
+-- Frame Two: multibuffer frame- 4 buffers in total
+-- 8. Transmit the first buffer (8 bytes) and second buffer (8 byte) of
+--    the multibuffer frame.  Then, start transmitting the third buffer 
+--    (8 bytes) of the multibuffer frame.  However, a collision is 
+--    detected (collision occurs during transmission of SFD with 
+--    respect to the GEM).  Therefore, preamble and SFD should be 
+--    completely transmitted. Then, a 32 bit jam sequence should be 
+--    transmitted.
+-- 9. Re-transmit the first three buffers. Then, start transmitting the 
+--    last buffer (8 bytes).  However, a collision is detected.  
+--    Therefore, a 32 bit jam sequence should be transmitted.
+-- 10. Re-transmit all four buffers correctly.
+-- 11. Check status and statistics registers and ensure the 
+--     above operations where handled properly.
+--
+-- Frame Three: multibuffer frame - 4 buffers in total
+-- 12. Transmit four 1-byte frames. Then start transmitting another
+--     1-byte frame.  However, a collision occurs during preamble. 
+--     Check collision during preamble cause the GEM to transmit all 
+--     of preamble , SFD and then a 32 bit jam sequence and the crc.
+-- 13. Retry transmitting four 1-byte frames. Then start transmitting 
+--     another 1-byte frame.  However, a collision occurs during preamble.  
+--     Check collision during crc cause the GEM to transmit all of preamble, 
+--     SFD and then a 32 bit jam sequence and the crc.
+-- 14. Retry transmitting four 1-byte frames. Then start transmitting 
+--     another 1-byte frame.  Check preamble, pad and crc are appended,
+--     good frame sixty four bytes long, four bytes data
+-- 15. Check status and statistics registers and ensure the above 
+--     operations where handled properly.
+--------------------------------------------------------------------------------
+
+-- ************************************************************************** --
+-- 1. Initialize GEM
+-- ************************************************************************** --
+wait_states 0
+bus_grant_delay 1
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      00 00000008  -- enable transmit
+apbwr      440 88000000  -- write transmit queue pointer 1
+apbwr      444 99000000  -- write transmit queue pointer 2
+apbrd      00 00000008  -- check network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+
+
+
+-- ************************************************************************** --
+-- Setup a multi-buffer transmit queue in memory
+
+apbwr      1c ffffff00  -- write address of transmit buffer descriptor in memory
+apbrd      1c ffffff00  -- check transmit queue pointer
+apbwr      00 00000208  -- Start the transmission by setting the go bit in network control register
+
+
+
+
+
+-- ************************************************************************** --
+--
+--                                 FRAME ONE
+--
+-- Collision testing: multi-buffer frame (5 buffers in total).
+-- 1st buffer: 32 bytes
+-- 2nd buffer: 16 bytes
+-- 3rd buffer: 32 bytes
+-- 4th buffer: 16 bytes
+-- 5th buffer: 8 bytes
+--
+-- Transmit first buffer. Collision on first buffer. Restart first buffer.
+-- Collision on first buffer. Restart first buffer.
+-- Transmit second buffer. Collision on second buffer. Restart first and second buffer.
+-- Transmit third buffer.
+-- Transmit fourth buffer.
+-- Transmit fifth buffer. Collision on fifth buffer.
+-- Retransmit all five buffers correctly.
+-- Check status and stats.
+--
+-- ************************************************************************** --
+
+
+-- ************************************************************************** --
+-- With the packet buffer included in the design, this test is redundant and
+-- also impossible to recreate. This is because as whole packet is read into 
+-- the buffer and retried from there.
+-- ************************************************************************** --
+
+
+-- descriptor reads for first buffer
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff04 00010020 -- length 32bytes
+dma_rd ffffff00 98765100 
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765100 12345678
+dma_rd 98765104 11111111
+dma_rd 98765108 22222222
+dma_rd 9876510c 33333333
+dma_rd 98765110 44444444
+dma_rd 98765114 55555555
+dma_rd 98765118 66666666
+dma_rd 9876511c 77777777
+
+dma_rd ffffff0c 00010010 -- length 16bytes
+dma_rd ffffff08 98765200 -- reads next buffer
+
+dma_rd 98765200 88888888
+dma_rd 98765204 99999999
+dma_rd 98765208 aaaaaaaa
+dma_rd 9876520c bbbbbbbb
+
+dma_rd ffffff14 00010020 -- length 32bytes
+dma_rd ffffff10 98765300 -- reads next buffer
+
+dma_rd 98765300 eeeeeeee
+dma_rd 98765304 11111111
+dma_rd 98765308 22222222
+dma_rd 9876530c 33333333
+dma_rd 98765310 44444444
+dma_rd 98765314 55555555
+dma_rd 98765318 66666666
+dma_rd 9876531c 77777777
+
+dma_rd ffffff1c 00010010 -- length 16bytes
+dma_rd ffffff18 98765400 -- reads next buffer
+
+dma_rd 98765400 12345678
+dma_rd 98765404 11111111
+dma_rd 98765408 22222222
+dma_rd 9876540c 33333333
+
+dma_rd ffffff24 00018008 -- length 8bytes
+dma_rd ffffff20 98765500 -- reads next buffer
+
+dma_rd 98765500 12345678
+dma_rd 98765504 1b1b1b1b
+
+
+
+
+
+-- ************************************************************************** --
+-- 2. Collision is detected during first buffer (32bytes)
+-- ************************************************************************** --
+
+txd	  55x555555555555d588888888
+
+
+
+-- ************************************************************************** --
+-- 3. First buffer is re-transmitted. Again collision is detected
+-- ************************************************************************** --
+
+-- Buffer transmitted, check that buffer 1 is not re-read
+txd	  555x55555555555d588888888
+
+
+-- ************************************************************************** --
+-- 4. First buffer is re-transmitted. No collisions during first buffer.
+--    Continues to second buffer (16bytes). Collision during second buffer
+-- ************************************************************************** --
+
+txd 55555555555555d57856341211111111222222223333333344x4444
+--txd 555555556666666677777777
+txd 44444444
+----txd 88x888888888888
+
+
+
+-- ************************************************************************** --
+-- 5. Re-transmit first and second buffer.
+--    Then transmit third buffer (32bytes) and fourth buffer (16bytes)
+--    Start transmitting fifth buffer (8bytes), but collision is detected
+-- ************************************************************************** --
+
+txd 55555555555555d57856341211111111222222223333333344444444
+txd                 5555555566666666777777778888888899999999
+txd                 aaaaaaaabbbbbbbbeeeeeeee1111111122222222
+txd                 3333333344444444555555556666x666677777777
+--txd 78563412111111112222222233333333
+--txd 78564534121b1b1b1b
+
+
+-- ************************************************************************** --
+-- 6. Re-transmit all 5 buffers correctly
+-- ************************************************************************** --
+
+-- collision detected in fifth buffer, check it re-reads buffer 1
+txd	    55555555555555d578563412111111112222222233333333
+txd                         44444444555555556666666677777777
+txd                         8888888899999999aaaaaaaabbbbbbbb
+txd                         eeeeeeee111111112222222233333333
+txd                         44444444555555556666666677777777
+txd                         78563412111111112222222233333333
+txd                         785634121b1b1b1b
+
+
+-- write used bit
+dma_wr ffffff04 80010020 -- end of frame, length 32 bytes
+
+
+-- ************************************************************************** --
+-- Statistics check frame 1
+-- ************************************************************************** --
+
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd	   14 0000002a  -- read transmit status register - frame tx & col
+apbwr	   14 0000002a  -- clear transmit status register
+
+apbrd      100 00000068  -- check value of octets_txed_bottom
+apbrd      104 00000000  -- check value of octets_txed_top
+apbrd      108 00000001  -- check value of frames_txed_ok
+apbrd      10c 00000000  -- check value of broadcast_txed
+apbrd      110 00000000  -- check value of multicast_txed
+apbrd      114 00000000  -- check value of pause_frames_txed
+apbrd      118 00000000  -- check value of frames_txed_64
+apbrd      11c 00000001  -- check value of frames_txed_65
+apbrd      120 00000000  -- check value of frames_txed_128
+apbrd      124 00000000  -- check value of frames_txed_256
+apbrd      128 00000000  -- check value of frames_txed_512
+apbrd      12c 00000000  -- check value of frames_txed_1024
+apbrd      130 00000000  -- check value of frames_txed_1519
+apbrd      134 00000000  -- check value of tx_underruns
+apbrd      138 00000000  -- check value of single_collisions
+apbrd      13c 00000001  -- check value of multiple_collisions
+apbrd      140 00000000  -- check value of excessive_collisions
+apbrd      144 00000001  -- check value of late_collisions
+apbrd      148 00000000  -- check value of deferred_frames
+apbrd      14c 00000000  -- check value of crs_errors
+apbrd      150 00000000  -- check value of octets_rxed_bottom
+apbrd      154 00000000  -- check value of octets_rxed_top
+apbrd      158 00000000  -- check value of frames_rxed_ok
+apbrd      15c 00000000  -- check value of broadcast_rxed
+apbrd      160 00000000  -- check value of multicast_rxed
+apbrd      164 00000000  -- check value of pause_frames_rxed
+apbrd      168 00000000  -- check value of frames_rxed_64
+apbrd      16c 00000000  -- check value of frames_rxed_65
+apbrd      170 00000000  -- check value of frames_rxed_128
+apbrd      174 00000000  -- check value of frames_rxed_256
+apbrd      178 00000000  -- check value of frames_rxed_512
+apbrd      17c 00000000  -- check value of frames_rxed_1024
+apbrd      180 00000000  -- check value of frames_rxed_1519
+apbrd      184 00000000  -- check value of undersize_frames
+apbrd      188 00000000  -- check value of excessive_rx_length
+apbrd      18c 00000000  -- check value of rx_jabbers
+apbrd      190 00000000  -- check value of fcs_errors
+apbrd      194 00000000  -- check value of rx_length_errors
+apbrd      198 00000000  -- check value of rx_symbol_errors
+apbrd      19c 00000000  -- check value of alignment_errors
+apbrd      1a0 00000000  -- check value of rx_resource_errors
+apbrd      1a4 00000000  -- check value of rx_overruns
+
+
+
+-- ************************************************************************** --
+--
+--                                 FRAME TWO
+--
+-- Collision testing: multi-buffer frame (4 buffers in total).
+-- 1st buffer: 8 bytes
+-- 2nd buffer: 8 bytes
+-- 3rd buffer: 8 bytes
+-- 4th buffer: 8 bytes
+--
+-- Transmit first buffer.
+-- Transmit second buffer.
+-- Transmit third buffer. Collision on third buffer during tx of SFD. Restart first three buffers.
+-- Transmit fourth buffer. Collision on fourth buffer.
+-- Retransmit all four buffers correctly.
+-- Check status and stats.
+--
+-- ************************************************************************** --
+
+
+-- ************************************************************************** --
+-- 8. Transmit first and second buffer.
+--    Start transmitting third buffer. Collision during SFD
+-- ************************************************************************** --
+
+
+-- ************************************************************************** --
+-- With the packet buffer included in the design, this test is redundant and
+-- also impossible to recreate. This is because as whole packet is read into 
+-- the buffer and retried from there.
+-- ************************************************************************** --
+
+
+-- descriptor reads for first buffer
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff2c 00010008 -- length 8bytes
+dma_rd ffffff28 11111000 
+
+dma_rd 11111000 12345678
+dma_rd 11111004 11111111
+
+
+-- descriptor reads for second buffer
+dma_rd ffffff34 00010008 -- length 8bytes
+dma_rd ffffff30 11111100 
+
+dma_rd 11111100 22222222
+dma_rd 11111104 33333333
+
+
+-- descriptor reads for third buffer
+dma_rd ffffff3c 00010008 -- length 8bytes
+dma_rd ffffff38 11111108 
+
+dma_rd 11111108 44444444
+dma_rd 1111110c 55555555
+
+
+-- descriptor reads for fourth buffer
+dma_rd ffffff44 00018008 -- length 8bytes
+dma_rd ffffff40 11111110 
+
+dma_rd 11111110 66666666
+dma_rd 11111114 77777777
+
+
+
+txd	    55555555555555dx57866666666
+
+-- ************************************************************************** --
+-- 9. Re-transmit first three buffers
+--    Start transmitting fourth buffer. Collision.
+-- ************************************************************************** --
+
+txd	    55555555555555d578563412111111112222222233333333
+txd	                    4444444455555555666666667777x7777
+txd                         88888888 -- JAM
+
+
+
+-- ************************************************************************** --
+-- 10. Re-transmit all four buffers correctly.
+-- ************************************************************************** --
+
+txd	    55555555555555d578563412111111112222222233333333
+txd	                    44444444555555556666666677777777
+
+
+
+
+-- write used bit
+dma_wr ffffff2c 80010008 -- end of frame, length 8 bytes
+
+
+
+-- ************************************************************************** --
+-- Statistics check frame 2
+-- ************************************************************************** --
+-- frame too short to be recorded in frames_txed_64
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd	   14 0000002a  -- read transmit status register - frame tx & col
+apbwr	   14 0000002a  -- clear transmit status register
+
+apbrd      100 00000020  -- check value of octets_txed_bottom
+apbrd      104 00000000  -- check value of octets_txed_top
+apbrd      108 00000001  -- check value of frames_txed_ok
+apbrd      10c 00000000  -- check value of broadcast_txed
+apbrd      110 00000000  -- check value of multicast_txed
+apbrd      114 00000000  -- check value of pause_frames_txed
+apbrd      118 00000000  -- check value of frames_txed_64
+apbrd      11c 00000000  -- check value of frames_txed_65
+apbrd      120 00000000  -- check value of frames_txed_128
+apbrd      124 00000000  -- check value of frames_txed_256
+apbrd      128 00000000  -- check value of frames_txed_512
+apbrd      12c 00000000  -- check value of frames_txed_1024
+apbrd      130 00000000  -- check value of frames_txed_1519
+apbrd      134 00000000  -- check value of tx_underruns
+apbrd      138 00000000  -- check value of single_collisions
+apbrd      13c 00000001  -- check value of multiple_collisions
+apbrd      140 00000000  -- check value of excessive_collisions
+apbrd      144 00000000  -- check value of late_collisions
+apbrd      148 00000000  -- check value of deferred_frames
+apbrd      14c 00000000  -- check value of crs_errors
+apbrd      150 00000000  -- check value of octets_rxed_bottom
+apbrd      154 00000000  -- check value of octets_rxed_top
+apbrd      158 00000000  -- check value of frames_rxed_ok
+apbrd      15c 00000000  -- check value of broadcast_rxed
+apbrd      160 00000000  -- check value of multicast_rxed
+apbrd      164 00000000  -- check value of pause_frames_rxed
+apbrd      168 00000000  -- check value of frames_rxed_64
+apbrd      16c 00000000  -- check value of frames_rxed_65
+apbrd      170 00000000  -- check value of frames_rxed_128
+apbrd      174 00000000  -- check value of frames_rxed_256
+apbrd      178 00000000  -- check value of frames_rxed_512
+apbrd      17c 00000000  -- check value of frames_rxed_1024
+apbrd      180 00000000  -- check value of frames_rxed_1519
+apbrd      184 00000000  -- check value of undersize_frames
+apbrd      188 00000000  -- check value of excessive_rx_length
+apbrd      18c 00000000  -- check value of rx_jabbers
+apbrd      190 00000000  -- check value of fcs_errors
+apbrd      194 00000000  -- check value of rx_length_errors
+apbrd      198 00000000  -- check value of rx_symbol_errors
+apbrd      19c 00000000  -- check value of alignment_errors
+apbrd      1a0 00000000  -- check value of rx_resource_errors
+apbrd      1a4 00000000  -- check value of rx_overruns
+
+
+
+-- ************************************************************************** --
+--
+--                                 FRAME THREE
+--
+-- Collision testing in each buffer of an six buffer frame checking to see
+-- if the buffer that is currently in use is recovered on detection of a 
+-- collision and that the first buffer is then re-read. This frame is to test
+-- collisions in the pad and ensure correct recovery to the first buffer.
+-- ************************************************************************** --
+
+
+
+-- ************************************************************************** --
+-- Collision occurs on the second nibble of the preamble, due to the four
+-- dma transaction read-ahead the collision is not detected until descriptor
+-- ffffff7c 00010001 is read. 
+--
+-- Check that once the collision is detected that
+-- the subsequent buffer is able to recover.
+-- ************************************************************************** --
+
+
+
+-- ************************************************************************** --
+-- With the packet buffer included in the design, this test is redundant and
+-- also impossible to recreate. This is because as whole packet is read into 
+-- the buffer and retried from there.
+-- ************************************************************************** --
+
+
+-- descriptor reads for first buffer
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff4c 00000001 -- length 1byte
+dma_rd ffffff48 22222000 
+
+dma_rd 22222000 12345678
+
+
+
+
+-- descriptor reads for second buffer
+dma_rd ffffff54 00010001 -- length 1byte
+dma_rd ffffff50 22222004 
+
+dma_rd 22222004 11111111
+
+
+
+
+-- descriptor reads for third buffer
+dma_rd ffffff5c 00010001 -- length 1byte
+dma_rd ffffff58 22222008 
+
+dma_rd 22222008 22222222
+
+
+
+
+-- descriptor reads for fourth buffer
+dma_rd ffffff64 00010001 -- length 1byte
+dma_rd ffffff60 2222200c 
+
+dma_rd 2222200c 33333333
+
+
+-- descriptor reads ahead
+dma_rd ffffff6c 00018001 -- length 1byte
+dma_rd ffffff68 2222200c 
+
+dma_rd 2222200c 44444444
+
+
+txd	    5x5555555555555d588888888  -- JAM
+
+
+txd	    55555555555555d578112233440000000000000000000000  
+txd	                    00000000000000000000000000000000
+txd	                    00000000000000000000000000000000
+txd                         0000000000000000000000004xde444444444 -- crc collision
+
+
+txd	    55555555555555d578112233440000000000000000000000  
+txd	                    00000000000000000000000000000000
+txd	                    00000000000000000000000000000000
+txd                         0000000000000000000000004de48530
+
+-- descriptor reads for next frame - used
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff74 80018020 -- used
+dma_rd ffffff70 2222200c 
+
+dma_wr ffffff4c 80000001 -- tx underrun length 1byte
+
+
+-- ************************************************************************** --
+-- Statistics check frame 3
+-- ************************************************************************** --
+
+apbrd(int) 24 00000088  -- check interrupt status - transmit complete & used
+apbwr      24 00000088  -- clear interrupt status
+apbrd	   14 00000023  -- read transmit status register - frame tx, col & used
+apbwr	   14 00000023  -- clear transmit status register
+
+apbrd      100 00000040  -- check value of octets_txed_bottom
+apbrd      104 00000000  -- check value of octets_txed_top
+apbrd      108 00000001  -- check value of frames_txed_ok
+apbrd      10c 00000000  -- check value of broadcast_txed
+apbrd      110 00000000  -- check value of multicast_txed
+apbrd      114 00000000  -- check value of pause_frames_txed
+apbrd      118 00000001  -- check value of frames_txed_64
+apbrd      11c 00000000  -- check value of frames_txed_65
+apbrd      120 00000000  -- check value of frames_txed_128
+apbrd      124 00000000  -- check value of frames_txed_256
+apbrd      128 00000000  -- check value of frames_txed_512
+apbrd      12c 00000000  -- check value of frames_txed_1024
+apbrd      130 00000000  -- check value of frames_txed_1519
+apbrd      134 00000000  -- check value of tx_underruns
+apbrd      138 00000000  -- check value of single_collisions
+apbrd      13c 00000001  -- check value of multiple_collisions
+apbrd      140 00000000  -- check value of excessive_collisions
+apbrd      144 00000001  -- check value of late_collisions
+apbrd      148 00000000  -- check value of deferred_frames
+apbrd      14c 00000000  -- check value of crs_errors
+apbrd      150 00000000  -- check value of octets_rxed_bottom
+apbrd      154 00000000  -- check value of octets_rxed_top
+apbrd      158 00000000  -- check value of frames_rxed_ok
+apbrd      15c 00000000  -- check value of broadcast_rxed
+apbrd      160 00000000  -- check value of multicast_rxed
+apbrd      164 00000000  -- check value of pause_frames_rxed
+apbrd      168 00000000  -- check value of frames_rxed_64
+apbrd      16c 00000000  -- check value of frames_rxed_65
+apbrd      170 00000000  -- check value of frames_rxed_128
+apbrd      174 00000000  -- check value of frames_rxed_256
+apbrd      178 00000000  -- check value of frames_rxed_512
+apbrd      17c 00000000  -- check value of frames_rxed_1024
+apbrd      180 00000000  -- check value of frames_rxed_1519
+apbrd      184 00000000  -- check value of undersize_frames
+apbrd      188 00000000  -- check value of excessive_rx_length
+apbrd      18c 00000000  -- check value of rx_jabbers
+apbrd      190 00000000  -- check value of fcs_errors
+apbrd      194 00000000  -- check value of rx_length_errors
+apbrd      198 00000000  -- check value of rx_symbol_errors
+apbrd      19c 00000000  -- check value of alignment_errors
+apbrd      1a0 00000000  -- check value of rx_resource_errors
+apbrd      1a4 00000000  -- check value of rx_overruns
+
+end(30000)

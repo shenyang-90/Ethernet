@@ -1,0 +1,110 @@
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- directed test to check behaviour when 2 faults occur on SRAM
+-- show that uncorrectable error is reported ...
+--
+--------------------------------------------------------------------------------
+
+-- define config compatibility (names are the verilog defines in the defs file without the IP prefix)
+requires ext_fifo_interface 0
+requires rx_pkt_buffer 1
+requires tx_pkt_buffer 1
+requires asf_enable 1
+requires axi 1
+
+-- Set the seed for the test ...
+#set_random_seed 1;
+
+
+-- enable automatic ifss Checker function !
+set_auto_fault_checker 1;
+-- double error injection to sram
+set_double_error_injection 1;
+set_single_error_injection 0;
+set_num_sram_errors_to_inject 500; 
+set_tx_data_check 0;
+
+-- Set AHB clock freq to 250MHz
+-- At 32bit, this means we have maximum bandwidth of 8Gbit/s shared between
+-- TX and RX. Randomize hready, keeping the maximum to 5 (averages around 2.5)
+-- to ensure no RX overflows occur, and max line rate is acheivable on TX
+sel_ahb_freq 3 
+randomize_hready -descr_max 5 -data_max 5 -read_max 5 -write_max 5
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+
+
+-- this is the event count that will initialize the scaler for event counts. it will cause any future scaling to only scale
+-- the counts after start_scale
+start_scale
+
+# Initialize the transmit and receive DMA queue pointers (random values but can add specifics if required)
+# use arg -rx_ptr_q<Q> and tx_ptr_q<Q> to set specific ptr values rather than the default random
+init_q_ptr  -num_tx_queues take_from_cfg   -num_rx_queues take_from_cfg
+
+
+# Initialize the screener type 1 registers (random values)
+# Note this will automatically force the transactor later on to
+# randomly create frames that match on these screeners, thus routing
+# frames to receive queues ..
+init_screener_type1 -num_type1_screeners take_from_cfg   -num_rx_queues take_from_cfg 
+
+
+# initialize the DMA specific options for random data xfers
+#   - RX DMA data buffer size
+#     If left without an argument, it will be completely random
+#     Set high to force single buffer descriptor testing eg 16320
+#     use -max_buf_size for max (multiple 64 bytes only)
+#     use -min_buf_size for min (multiple 64 bytes only)
+#
+#   - Burst Length (random by default)
+#     use -burst <num>, where num can be 1,2,4,8,16, random
+#        
+#   - address bus (random by default, or off if config doesnt allow)
+#     use -addr_bus <32|64|random|take_from_cfg>     
+#        
+#   - extended buffer descriptors (random by default, or off if config doesnt allow)
+#     use -ext_bd <1|0|random>     
+#        
+#   - force max burst mode (forces AXI to send max length bursts)
+#     use -force_max_burst_<tx|rx> <1|0|random>    default is 0 
+init_dma -ext_bd random -addr_bus random  -burst random -min_buf_size 16320
+
+
+# Enable the interrupts
+# This is per queue, 
+# Valid args are ..
+#    -num_queues <1-16|take_from_cfg>
+#    -vector <the actual interrupt vector as per userguide>
+enable_ints -num_queues take_from_cfg   -vector 00000082  # enable TX and RX complete
+
+
+
+# Initialize the network configuration register
+# Args are
+#   -eam      <1|0|random>, default = 0. This is external address matching
+#   -duplex   <full|half|random>, default = random
+#   -speed    <1g|100m|10m|random>, default = random
+#   -jumbo    <1|0|random>, default = random. This wont affect the RX transactor below, but will automatically cause jumbos to be dropped.
+#   -copy_all <1|0|random>, default = 0. If 0, ensure you initialize the dest_addr in the rx transactor to something that will match
+#   -databus  <32|64|128|take_from_cfg|random>, default = random, bus <= config.  The max value is the value set in dma_bus_width in gem_defs.v
+init_ncr -duplex full -speed 1g -jumbo random -databus take_from_cfg
+
+
+apbwr      e08 fffffffc -- enable ASF uncorr and corr interrupts (write to mask)
+apbwr      64 00800000  -- fatal or non fatal register
+apbwr      00 00000208  -- write tx_go and enable tx.
+
+-- The testbench is automatically running a sequence of enabling, inject error, check, disable, repeat
+
+apbwr(50000)      00 00000000  -- read network control register to make sure test lasts certain time
+apbrd             00 00000000  num=20 -- drain time
+
+-- force end of test in case it doesn't stop of its own accord
+end(60000)
+

@@ -1,0 +1,95 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : 
+--
+--   Author         : mlewis
+--
+--   Date           : 
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Packets sent to both queues that will allow queue A to retain ownership of 
+-- the transfer when it has positive credit.
+-- 
+--------------------------------------------------------------------------------
+
+bus_grant_delay 0 -- This sets hgrant to 1 always
+
+set_random_seed 94;
+randomize_hready -descr_max 5 -data_max 5 
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      10 09a00710
+apbwr      28 00000008  -- enable TX used bit read interrupt
+apbwr     440 88000000  -- write transmit queue pointer 1
+apbwr     444 99000000  -- write transmit queue pointer 2
+apbwr     480 f0010000  -- write receive queue pointer 1
+apbwr     484 f0020000  -- write receive queue pointer 2
+apbwr      04 00080001  -- 100M
+apbrd      04 00080001  -- 100M
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 11111100  -- write address of transmit buffer q0 descriptor in memory
+apbrd      1c 11111100  -- check transmit queue pointer
+apbwr     4bc 00000003  -- Enable both CBS queues
+apbwr     4c0 00aba950  -- IdleSlope for Queue A
+apbwr     4c4 00aba950  -- IdleSlope for Queue B
+apbrd     4bc 00000003  -- Enable both CBS queues
+apbrd     4c0 00aba950  -- IdleSlope for Queue A
+apbrd     4c4 00aba950  -- IdleSlope for Queue B
+
+
+-------------------------------------------
+-- Check Q0 ST0 @ 0x1FF and Q1 ST0 @ 0x200.
+-------------------------------------------
+apbwr      00 0000020c  -- write tx_go and enable tx, enable rx
+
+tx_frame  2
+      number_of_bufs              1
+      buffer_size                 256
+      data                        random
+      auto_gen_int                0
+      num_dma_queues              3
+      fix_queue_num               1
+      set_used_after_every_buffer NONE
+      fcs                         YES
+
+tx_frame  5
+      number_of_bufs              1
+      buffer_size                 10
+      data                        random
+      auto_gen_int                0
+      num_dma_queues              3
+      fix_queue_num               2
+      set_used_after_every_buffer NONE
+      fcs                         YES
+      
+tx_frame  1
+      number_of_bufs              1
+      buffer_size                 10
+      data                        random
+      auto_gen_int                0
+      num_dma_queues              3
+      fix_queue_num               0
+      set_used_after_every_buffer LAST
+      fcs                         YES
+
+apbrd(int) 24 00000008
+apbwr      24 ffffffff
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(900000)
+

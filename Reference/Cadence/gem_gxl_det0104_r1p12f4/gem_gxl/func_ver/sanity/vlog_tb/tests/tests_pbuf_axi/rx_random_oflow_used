@@ -1,0 +1,251 @@
+-------------------------------------------------
+-- Checks that used bit read when RX DPRAM is full doesnt lock up the RX DMA
+-- and it can still empty itself when the next packet is received and a new
+-- descr rd is triggered
+-------------------------------------------------
+-- 
+-- ************************************************************************** --
+
+wait_states 7
+bus_grant_delay 0
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      10 00a00010
+apbwr     4ec 0000000f  -- reduce freq of restart trigger
+apbwr      18 00000000  -- write receive queue pointer
+apbrd      18 00000000  -- check receive queue pointer
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 00000006  -- enable just rx done and used
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      90 abababab  -- specific address register 2 bottom (multicast)
+apbwr      94 0000abab  -- specific address register 2 top
+apbwr      98 abcdef10  -- specific address register 3 bottom (unicast)
+apbwr      9C 0000a5a5  -- specific address register 3 top
+apbwr      a0 cccccccc  -- specific address register 3 bottom (unicast)
+apbwr      a4 00005a5a  -- specific address register 3 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 00080402  -- gigabit
+apbrd      04 00080402  -- verify write to speed register..
+apbrd      20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+-- delay for enable rx to propagate though design
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbwr     00 00000004  -- enable receive
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrdf    20 00000000  
+
+hready_stop 10 2000
+---------------------------------------
+-- TEST 1: FRAME SIZE 64 BYTES (PADDED)
+---------------------------------------
+
+-- 1st descr rd has used bit read
+dma_rd rx_descr 00000000 f0000001
+
+dma_rd rx_descr 00000000 f0000000
+
+-- 64 byte frame
+rx_frame (apb)  1
+      preamble_size  14
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field 3333
+      includerxdma   0
+      auto_gen_int   0 
+      data_size      50 
+      data           random
+      fcs            good
+
+-- Data
+dma_wr(16) f0000000 zzzzzzzz -- not checking the data
+
+-- Writeback
+dma_wr rx_descr 00000004 8000c044
+dma_wr rx_descr 00000000 f0000001
+
+
+rx_frame (gap)  12
+      preamble_size  14
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field 3333
+      data_size      50
+      includerxdma   0
+      auto_gen_int   0 
+      data           random
+      fcs            good
+
+apbrd(int) 24 00000004
+apbwr      24 00000004
+
+-- descriptor reads 
+dma_rd rx_descr 00000008 f0000000
+dma_rd rx_descr 00000010 f0100000
+dma_rd rx_descr 00000018 f0200000
+dma_rd rx_descr 00000020 f0300000
+dma_rd rx_descr 00000028 f0400000
+dma_rd rx_descr 00000030 f0500000
+dma_rd rx_descr 00000038 f0600000           
+dma_rd rx_descr 00000040 f0700000           
+dma_rd rx_descr 00000048 f0800000           
+dma_rd rx_descr 00000050 f0900000           
+dma_rd rx_descr 00000058 f0a00000           
+
+dma_wr(16) f0000000 zzzzzzzz -- PKT 1
+dma_wr rx_descr 0000000c 8000c044
+dma_wr rx_descr 00000008 f0000001
+
+dma_wr(16) f0100000 zzzzzzzz -- PKT 2
+dma_wr rx_descr 00000014 8000c044
+dma_wr rx_descr 00000010 f0100001
+
+dma_wr(16) f0200000 zzzzzzzz -- PKT 3
+dma_wr rx_descr 0000001c 8000c044
+dma_wr rx_descr 00000018 f0200001
+
+dma_wr(16) f0300000 zzzzzzzz -- PKT 4
+dma_wr rx_descr 00000024 8000c044
+dma_wr rx_descr 00000020 f0300001
+
+dma_wr(16) f0400000 zzzzzzzz -- PKT 5
+dma_wr rx_descr 0000002c 8000c044
+dma_wr rx_descr 00000028 f0400001
+
+dma_wr(16) f0500000 zzzzzzzz -- PKT 6
+dma_wr rx_descr 00000034 8000c044
+dma_wr rx_descr 00000030 f0500001
+
+dma_wr(16) f0600000 zzzzzzzz -- PKT 7
+dma_wr rx_descr 0000003c 8000c044
+dma_wr rx_descr 00000038 f0600001
+
+dma_wr(16) f0700000 zzzzzzzz -- PKT 8
+dma_wr rx_descr 00000044 8000c044
+dma_wr rx_descr 00000040 f0700001
+
+dma_wr(16) f0800000 zzzzzzzz -- PKT 9
+dma_wr rx_descr 0000004c 8000c044
+dma_wr rx_descr 00000048 f0800001
+
+dma_wr(16) f0900000 zzzzzzzz -- PKT 10
+dma_wr rx_descr 00000054 8000c044
+dma_wr rx_descr 00000050 f0900001
+
+dma_wr(16) f0a00000 zzzzzzzz -- PKT 11
+dma_wr rx_descr 0000005c 8000c044
+dma_wr rx_descr 00000058 f0a00001
+
+
+--dma_wr(16) f0000000 zzzzzzzz -- PKT 12 is dropped due to overflow
+
+
+-- Now wait a while before receiving more traffic
+rx_frame (apb)  5
+      preamble_size  14
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field 3333
+      data_size      58
+      includerxdma   0
+      auto_gen_int   0 
+      data           random
+      fcs            good
+
+dma_rd rx_descr 00000060 f0000000
+
+dma_wr(18) f0000000 zzzzzzzz -- PKT 41
+dma_wr rx_descr 00000064 8000c04c
+dma_wr rx_descr 00000060 f0000001
+
+
+
+apbrdf     24 00000000
+
+-- Interrupts 
+apbrd(int) 24 00000002
+apbwr      24 00000002
+apbrd(int) 24 00000002
+apbwr      24 00000002
+apbrd(int) 24 00000002
+apbwr      24 00000002
+apbrd(int) 24 00000002
+apbwr      24 00000002
+apbrd(int) 24 00000002
+apbwr      24 00000002
+apbrd(int) 24 00000002
+apbwr      24 00000002
+apbrd(int) 24 00000002
+apbwr      24 00000002
+apbrd(int) 24 00000002
+apbwr      24 00000002
+apbrd(int) 24 00000002
+apbwr      24 00000002
+apbrd(int) 24 00000002
+apbwr      24 00000002
+apbrd(int) 24 00000002
+apbwr      24 00000002
+apbrd(int) 24 00000002
+apbwr      24 00000002
+apbrd(int) 24 00000002
+apbwr      24 00000002
+
+-- supply last dma read
+dma_rd rx_descr 00000068 ddddd000 -- reads location of next rx buffer
+
+
+
+
+
+-- check status 
+apbrd      24 00000000  -- check interrupt status - receive complete
+apbrd      20 00000007  -- check contents of the receive status register- frame received
+apbrd      20 00000007  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      38 00000000  -- check rx pause time
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+
+-- force end of test in case it doesn't stop of its own accord
+dma_rd rx_descr 00000070 12345678 -- Supply final descriptor - this is not used for any data buffers, but the EDMA tries to keep its buffer full so it reads it
+end(50000)
+

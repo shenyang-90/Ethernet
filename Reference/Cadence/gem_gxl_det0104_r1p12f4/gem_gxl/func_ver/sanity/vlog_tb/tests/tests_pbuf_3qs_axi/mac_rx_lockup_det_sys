@@ -1,0 +1,143 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2016
+--                                       Cadence Design Systems, Inc.
+--                                       All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : mac_rx_lockup_det_sys
+--
+--   Author         : Steven Ho
+--
+--   Date           : 29th Sept 2016
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Checks interrupt generation and recovery of MAC RX lockup detection for case
+-- where the MAC has not received a good frame from the system in a while.
+--
+--
+-- Detailed Test Description
+----------------------------
+--
+-- Use perl functions to auto generate frames including RX, DMA and APB activity.
+--  1. Setup MAC, only really interested in RX functions. 1G full duplex mode.
+--  2. Enable interrupts
+--  3. Setup gem_lockup_config2 register for 1024 tx_clk cycles.
+--  4. Enable RX lockup detection and automatic recovery.
+--  5. Enable RX and drive a frame of 500 bytes, this should be received OK.
+--  6. Receive bad frames only.
+--  7. Check interrupt to indicate lockup occurred.
+--  8. Check RX enable, should be disabled.
+--  9. Re-enable RX and receive a good frame.
+--
+--------------------------------------------------------------------------------
+
+
+wait_states 0
+
+-- Set AHB clock freq to 250MHz
+-- At 32bit, this means we have maximum bandwidth of 8Gbit/s shared between
+-- TX and RX. Randomize hready, keeping the maximum to 5 (averages around 2.5)
+-- to ensure no RX overflows occur, and max line rate is acheivable on TX
+sel_ahb_freq 3 
+set_random_seed 0
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      284 6ef13fff  -- check design cfg reg 2 - this sets AXI test parameter in trans.pl
+apbwr      10 01a00710  -- DMA config
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 10000000  -- write receive queue pointer
+apbrd      18 10000000  -- check receive queue pointer
+apbwr      480 f0010000 -- write receive queue pointer 1
+apbwr      484 f0020000 -- write receive queue pointer 2
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      00 00000004  -- enable receive
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 00280402  -- 64bit enable, gigabit mode, full duplex
+
+apbwr      6c 00000002  -- System timeout of 2 x 1k x tx_clk cycles = 16us
+apbwr      68 1fff0400  -- MAC RX lockup enable and recovery.
+
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+rx_frame (apb)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      src_addr          222233333333
+      type_len_field    random
+      data_size         482     -- 18 bytes for MAC addresses etc
+      data              random
+      num_dma_queues    3
+      fcs               good
+      
+-- check receive statistics and trigger next frames
+apbrdf    158 00000001  -- check frames received ok
+
+rx_frame (apb)  2
+      preamble_size     1-14
+      auto_gen_int      0
+      dest_addr         broadcast
+      src_addr          111122222222
+      src_addr          222233333333
+      type_len_field    random
+      data_size         502     -- 18 bytes for MAC addresses etc
+      data              random
+      num_dma_queues    3
+      fcs               bad
+
+apbrd(int)  24  40000000  -- Interrupt status - MAC RX lockup detected
+apbrd       24  40000000  -- Retain value
+apbwr       24  40000000  -- Write to clear
+apbrd       24  00000000  -- Cleared
+apbrd       00  00000000  -- Receive disabled      
+apbrd       20  00000012  -- Receive status - lockup detected (also frame rxed)
+apbwr       20  00000012  -- Write to clear
+apbrd       20  00000000  -- Receive status - lockup detected cleared
+apbrd      158  00000000  -- check frames received ok
+
+-- Re-enable RX and receive a good frame
+apbwr      18 10000000  -- write receive queue pointer
+apbrd      18 10000000  -- check receive queue pointer
+apbwrf     00 00000004  -- enable receive
+
+-- the deisng has prefecthed a couple of descriptors prior to the 
+-- reset
+-- these c2 lines atch them
+dma_rd rx_q_ptr ddddd000 
+dma_rd rx_q_ptr ddddd000 
+
+rx_frame (apb)  10
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      src_addr          222233333333
+      reset_descr_to_base 1
+      type_len_field    random
+      data_size         482     -- 18 bytes for MAC addresses etc
+      data              random
+      num_dma_queues    3
+      fcs               good
+      
+-- check receive statistics and trigger next frame
+apbrdf    158 0000000a  -- check frames received ok
+
+-- force end of test in case it doesn't stop of its own accord
+
+end(50000)

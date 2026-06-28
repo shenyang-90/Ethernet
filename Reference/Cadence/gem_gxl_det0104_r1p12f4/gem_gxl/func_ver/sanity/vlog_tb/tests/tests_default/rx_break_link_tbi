@@ -1,0 +1,417 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_break_link_tbi
+--
+--   Author         : Mike MacGillis (mikema@tality.com)
+--
+--   Date           : June 25, 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--  To verify that the GEM restarts auto-negotiation upon receipt of rx_Config_Reg<D15:D0>=0.
+--
+-- Detailed Test Description
+--
+--  Note: This is an overall description of the test below.  
+-- Procedure:
+--
+--     1.Initialize by restarting auto-negotiation by any means.
+--     2.Provide a link of /I/ codes such that the GEM enters the ABILITY_DETECT state.
+--     3.Provide a link of /C/ codes with a Config_Reg of zero
+--     4.Observe the GEM?s response.
+--     5.If necessary, restart auto-negotiation by any means.
+--     6.Repeat steps (2) through (5), causing the device in step (2) to enter the 
+--       ACKNOWLEDGE_DETECT, COMPLETE_ACKNOWLEDGE, NEXT_PAGE_WAIT,
+--       or IDLE_DETECT states. (COMPLETE_ACKNOWLEDGE break out tested in the ACK_TIMER state)
+--
+-- Note:
+--
+--        Acknowledge Detect can be entered by providing a link of /C/ codes with a non-zero 
+--        Config_Reg, with ACK=0.
+--        Complete Acknowledge can be entered by providing a link of /C/ codes with a non-zero 
+--        Config_Reg, with ACK=1.
+--        Next Page Wait can be entered by providing a link of /C/ codes with a non-zero Config_Reg
+--        with ACK=1 and NP=1 provided the NP bit in the GEM?s transmitted
+--        Config_Reg is 1.
+--        Idle Detect is entered link_timer after entrance into Complete Acknowledge, provided
+--        NP=0 in the Config_Reg sent to the GEM.
+--
+-- Observable Results:
+--
+--     a.Reception of a Config_Reg of all zero while the GEM is in the ABILITY_DETECT state
+--       should not restart auto-negotiation
+--     b.Reception of a Config_Reg of all zero while the GEM is in the ACKNOWLEDGE_DETECT, 
+--       COMPLETE_ACKNOWLEDGE, NEXT_PAGE_WAIT, or
+--       IDLE_DETECT states should restart auto-negotiation, causing the GEM to transmit a zero Config_Reg.
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+
+-- ********************************************************************************************* --
+-- 1. Initialise the GEM for Gigabit Operation with PCS enabled. Furthermore, Auto-Negotiation is 
+--    enabled.
+-- ********************************************************************************************* --
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd     200 00009040  -- check value of pcs control register
+apbrd     210 00000020  -- check reset value of pcs auto-nego. adv. register
+apbwr     210 00008060  -- pcs auto-nego. adv. register - enable next page bit 
+apbrd     210 00008060  -- check pcs auto-nego. adv. register
+apbrd     21c 00000000  -- check reset value of pcs auto-nego. next page register
+
+apbwr      04 00081c00  -- Put MAC into gigabit mode with TBI. Retry test enabled
+apbrd      04 00081c00  -- Check value of network config register
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 03020100  -- specific address register 1 bottom
+apbwr      8C 00000504  -- specific address register 1 top
+apbrd     200 00001040  -- check value of pcs control register
+apbrd     204 00000109  -- check pcs status register
+apbrdf     20 00000000  -- check receive status register and trigger reception
+
+
+-- ********************************************************************************************* --
+-- 2.  Once the GEM enters AN_ENABLE state, it should start transmitting alternating /C/ codes with 
+--     the Config_Reg field all zeros.
+--     Contents of TX_CONFIG Register = 0x0000 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      0      0      0     0      0      0     0      0        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+pcs_an_tx         0000
+
+-- ********************************************************************************************* --
+-- 3.  After the link timer in the GEM finishes counting, the GEM should then transmit alternating /C/
+--     codes with the Conf_Reg field incdicating the same values that are in the PCS auto-negotiation 
+--     advertisement register.  (Enter into ABILITY_DETECT state)
+--     Contents of TX_CONFIG Register = PCS Auto. Neg Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+pcs_an_tx(trx)         6080
+
+-- ********************************************************************************************* --
+-- 4.  Provide a link of /C/ codes with a Config_Reg of all zero.
+--     Contents of RX_CONFIG Register = 0x0000
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      0      0      0     0      0      0     0      0        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+pcs_an_rx(trx)        c10000c20000c10000c20000  4r
+
+-- ********************************************************************************************* --
+-- 5.  Provide a link of /C/ codes corresponding to the abilities of the link partner. 
+--     RX_CONFIG Register = 0x1f0e.
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      0      0      1     1      1      1     1      0        0       0      0       1        1      1      0 
+-- ********************************************************************************************* --
+
+pcs_an_rx             c11f0ec21f0ec11f0ec21f0e  4r
+
+
+-- ********************************************************************************************* --
+-- 6.  The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--     same values that are in the PCS auto-negotiation advertisement register plus bit 14 should be set high.
+--     This bit tells the link partner that the GEM has successfully received the link partner's base
+--     page information. (Enter into ACKNOWLEDGE_DETECT state)
+--     Once the GEM enters the ACKNOWLEDGE_DETECT state, restart auto-negotiation in the GEM
+--     Contents of TX_CONFIG Register = PCS Auto. Neg Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        1       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+pcs_an_tx(trx)           60c0
+
+-- ********************************************************************************************* --
+-- 7.  Provide a link of /C/ codes with a Config_Reg of all zero.  This should cause the GEM to
+--     restart autonegotiation.
+--     Contents of RX_CONFIG Register = 0x0000
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      0      0      0     0      0      0     0      0        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+pcs_an_rx(trx)        c10000c20000c10000c20000  
+
+-- ********************************************************************************************* --
+-- 8. Once the GEM enters AN_ENABLE state, it should start transmitting alternating /C/ codes with the Config_Reg field all zeros.
+-- ********************************************************************************************* --
+
+pcs_an_tx          6000  
+pcs_an_tx          0000  
+
+-- ********************************************************************************************* --
+-- 9. After the link timer in the GEM finishes counting, the GEM should then transmit alternating /C/
+--    codes with the Conf_Reg field incdicating the same values that are in the PCS auto-negotiation 
+--    advertisement register.  Bit 15 in the auto-negotiation advertisment register will be set to allow the 
+--    exchange of next pages between the GEM and the link partner. (Enter into ABILITY_DETECT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_tx(trx)        6080
+
+-- ********************************************************************************************* --
+-- 10. Provide a link of /C/ codes corresponding to the abilities of the link partner (Bits 6(HD) and 5(FD) set
+--    high in the Conf_Reg. and bit 15 (NP)).  The link partner must have the next page bit set
+--    when it transmits its base page abilities in order to allow the exchange next page information
+--    with the GEM. 
+--    Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c16080c26080c16080c26080  8r
+
+-- ********************************************************************************************* --
+-- 11. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--    same values that are in the PCS auto-negotiation advertisement register plus bit 14 should be set high.
+--    This bit tells the link partner that the GEM has successfully received the link partner's base
+--    page information. (Enter into ACKNOWLEDGE_DETECT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        1       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+
+pcs_an_tx(trx)        60c0  
+
+
+-- ********************************************************************************************* --
+-- 12.  Provide a link of /C/ codes which correspond to the link partner sending the contents of
+--     its Auto-Neg. Advertisment register.  Furthermore, bit 14 will be set to indicate that
+--     the link partner has successfully received the GEM's acknowledge. (Enter into COMPLETE_ACK.
+--     state) 
+--     Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        1       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c160c0c260c0c160c0c260c0c160c0  
+
+-- ********************************************************************************************* --
+-- 13.  Provide a link of /C/ codes with a Config_Reg of all zero.  This should cause the GEM to
+--     restart autonegotiation.
+--     Contents of RX_CONFIG Register = 0x0000
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      0      0      0     0      0      0     0      0        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+pcs_an_rx(l)               c10000c20000c10000c20000 
+
+apbrd(int)      24 00020000  -- check interrupt status register - PCS Next Page request interrupt set
+ 
+-- ********************************************************************************************* --
+-- 14. Once the GEM enters AN_ENABLE state, it should start transmitting alternating /C/ codes with the Config_Reg field all zeros.
+-- ********************************************************************************************* --
+
+pcs_an_tx          6000  
+pcs_an_tx          0000  
+
+-- ********************************************************************************************* --
+-- 15. After the link timer in the GEM finishes counting, the GEM should then transmit alternating /C/
+--    codes with the Conf_Reg field incdicating the same values that are in the PCS auto-negotiation 
+--    advertisement register.  Bit 15 in the auto-negotiation advertisment register will be set to allow the 
+--    exchange of next pages between the GEM and the link partner. (Enter into ABILITY_DETECT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_tx(trx)        6080
+
+-- ********************************************************************************************* --
+-- 16. Provide a link of /C/ codes corresponding to the abilities of the link partner (Bits 6(HD) and 5(FD) set
+--    high in the Conf_Reg. and bit 15 (NP)).  The link partner must have the next page bit set
+--    when it transmits its base page abilities in order to allow the exchange next page information
+--    with the GEM. 
+--    Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c16080c26080c16080c26080  8r
+pcs_an_rx             c16080c26080c16080c26080  8r
+pcs_an_rx             c16080c26080c16080c26080  8r
+
+-- ********************************************************************************************* --
+-- 17. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--    same values that are in the PCS auto-negotiation advertisement register plus bit 14 should be set high.
+--    This bit tells the link partner that the GEM has successfully received the link partner's base
+--    page information. (Enter into ACKNOWLEDGE_DETECT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        1       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+
+pcs_an_tx(trx)        60c0  
+
+
+-- ********************************************************************************************* --
+-- 18.  Provide a link of /C/ codes which correspond to the link partner sending the contents of
+--     its Auto-Neg. Advertisment register.  Furthermore, bit 14 will be set to indicate that
+--     the link partner has successfully received the GEM's acknowledge. (Enter into COMPLETE_ACK.
+--     state) 
+--     Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        1       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c160c0c260c0c160c0c260c0  2r  
+pcs_an_rx             c160c0c260c0c160c0c260c0  8r
+
+-- ********************************************************************************************* --
+-- 19. Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--    Then, load the PCS auto-nego. next page register with the desired value. Bit 15 should be set
+--    in the PCS Auto-Neg. Next Page register to tell the link partner it has next pages to exchange.
+--    Contents of PCS Auto. Neg Next Page  Register 
+--    15------14------13------12------11------10------9------8      7------6------5------4------3------2------1------0
+--    NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/  Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/
+--                                          Unfo10  Unfo9  Unfo8   Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0
+--    1       0       1        0       0        1      1      1     1      1      1      1     1      1      1     1
+-- ********************************************************************************************* --
+
+apbwr(int)     21c 0000a7ff  -- setup pcs auto-nego. next page register
+apbrd          21c 0000a7ff  -- check pcs auto-nego. next page register
+apbrd           24 00020000  -- check interrupt status register - PCS next page request interrupt set 
+apbrd          200 00001040  -- check pcs control register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          210 00008060  -- check pcs auto-neg. advertisment register
+apbrd          214 00008060  -- check pcs auto-neg. link partner advertisment register
+apbrd          218 00000006  -- check pcs auto-neg. expansion register
+apbrd          220 00000000  -- check pcs auto-neg. link partner next page register
+apbrd          23C 00008000  -- check pcs auto-neg. extended status register
+                             
+
+-- ********************************************************************************************* --
+-- 20.  The GEM should transmit the contents of the PCS Auto-Negotiation Next Page Register. 
+--     Note that the Link Partner has its NP bit set in it's base page advertisment register
+--     to allow the exchange of Next Pages with the GEM. (Enter NEXT_PAGE_WAIT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Next Page  Register 
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- TX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              1      1      1      1     1      1      1     1       1       0       1        0       1        1      1      1 
+-- ********************************************************************************************* --
+
+pcs_an_tx                    60af
+pcs_an_tx(trx)               ffaf
+
+
+-- ********************************************************************************************* --
+-- 21.  Provide a link of /C/ codes with a Config_Reg of all zero.  This should cause the GEM to
+--     restart autonegotiation.
+--     Contents of RX_CONFIG Register = 0x0000
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      0      0      0     0      0      0     0      0        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+pcs_an_rx(trx)        c10000c20000c10000c20000  4r
+
+-- ********************************************************************************************* --
+-- 22. Once the GEM enters AN_ENABLE state, it should start transmitting alternating /C/ codes with the Config_Reg field all zeros.
+-- ********************************************************************************************* --
+
+pcs_an_tx          ff00  
+pcs_an_tx          0000  
+
+-- ********************************************************************************************* --
+-- 23. After the link timer in the GEM finishes counting, the GEM should then transmit alternating /C/
+--    codes with the Conf_Reg field incdicating the same values that are in the PCS auto-negotiation 
+--    advertisement register.  Bit 15 in the auto-negotiation advertisment register will be set to allow the 
+--    exchange of next pages between the GEM and the link partner. (Enter into ABILITY_DETECT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_tx(trx)        6080
+
+-- ********************************************************************************************* --
+-- 24. Provide a link of /C/ codes corresponding to the abilities of the link partner (Bits 6(HD) and 5(FD) set
+--    high in the Conf_Reg. and bit 15 (NP)).  The link partner must have the next page bit set
+--    when it transmits its base page abilities in order to allow the exchange next page information
+--    with the GEM. 
+--    Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c16080c26080c16080c26080  8r
+
+-- ********************************************************************************************* --
+-- 25. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--    same values that are in the PCS auto-negotiation advertisement register plus bit 14 should be set high.
+--    This bit tells the link partner that the GEM has successfully received the link partner's base
+--    page information. (Enter into ACKNOWLEDGE_DETECT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        1       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+
+pcs_an_tx(trx)        60c0  
+
+
+-- ********************************************************************************************* --
+-- 26.  Provide a link of /C/ codes which correspond to the link partner sending the contents of
+--     its Auto-Neg. Advertisment register.  Furthermore, bit 14 will be set to indicate that
+--     the link partner has successfully received the GEM's acknowledge. (Enter into COMPLETE_ACK.
+--     state) 
+--     Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        1       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c160c0c260c0c160c0c260c0 8r  
+
+-- ********************************************************************************************* --
+-- 27.  Provide a link of /C/ codes with a Config_Reg of all zero.  This should cause the GEM to
+--     restart autonegotiation when it is in IDLE_DETECT state.
+--     Contents of RX_CONFIG Register = 0x0000
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      0      0      0     0      0      0     0      0        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+pcs_an_rx            c10000c20000c10000c20000  
+
+-- ********************************************************************************************* --
+-- 28. Once the GEM enters AN_ENABLE state, it should start transmitting alternating /C/ codes with the Config_Reg field all zeros.
+-- ********************************************************************************************* --
+
+pcs_an_tx          0000  
+
+dma_rd 00000000 12345678 -- DMA will read a single descriptor after RX is enabled
+
+end(3000)

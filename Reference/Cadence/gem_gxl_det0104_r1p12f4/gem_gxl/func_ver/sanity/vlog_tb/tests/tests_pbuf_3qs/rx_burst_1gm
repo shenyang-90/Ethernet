@@ -1,0 +1,476 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_burst_1gm
+--
+--   Author         : Stewart Penman (spenman@tality.com)
+--
+--   Date           : 11 January 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+--
+-- This test checks the receive functionality for gigabit burst mode.
+-- 
+-- Functional coverage
+-- -------------------
+-- · Ensures the proper implementation for the reception of frame bursts.
+-- · Ensures that the receive functionality of the GEM can handle break in and 
+--   break out of frame bursts. (i.e. The GEM can receive a frame burst. Then, 
+--   receive a normal sized frame. Finally, receive a new frame burst.) 
+-- 
+-- Detailed Test Description
+-- -------------------------
+-- 1. Initialise the GEM for gigabit operation.
+-- 2. In burst mode, receive a frame with minimum frame size plus extension. 
+--      Then, receive two minimum sized frames.  
+-- 3. In normal mode, receive a frame with minimum frame size plus extension.
+-- 4. In burst mode receive a frame with minimum frame size plus extension. 
+--      Then, receive two minimum sized frames.  
+-- 5. In normal mode, receive a frame with minimum frame size plus extension.
+-- 6. Check status registers and statistic registers and ensure that the above 
+--    operations did not result in any errors.
+-- 
+--------------------------------------------------------------------------------
+
+wait_states 0
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      18 fffffff0  -- write receive queue pointer
+apbrd      18 fffffff0  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbrd      30 00000000  -- check that all interrupts are now enabled
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00080401  -- indicate 1G operation
+apbrd      04 00080401  -- verify write to speed register..
+apbrd      20 00000000  -- check contents of the receive status register and trigger reception of frame
+apbwr      88 12345678  -- set the local address register to
+apbwr      8c 00001111  --   ensure the incoming frame is recieved
+apbwr      90 12345679  -- set the local address register to
+apbwr      94 00001111  --   ensure the incoming frame is recieved
+
+--******************************************************************************
+-- receive a Burst of 3 frames
+
+-- check the relevant registers
+apbrd      00 00000004  "BURST 1 - 3 FRAMES" -- check that receive is enabled
+apbrd      24 00000000  -- check interrupt status
+apbrd      30 00000000  -- check that all interrupts are enabled
+apbrd      24 00000000  -- check interrupt status
+apbrd      04 00080401  -- check value of network config register
+apbrd      08 00000006  -- check value of network status register
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+-- drive the first frame in the burst into the MII interface
+rxd(apb_r) 55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+
+
+-- supply the receive buffer location
+dma_rd fffffff0 00000000 -- dma reads pointer of 00000000
+
+
+-- write out the rx data
+dma_wr 00000000 12345678
+dma_wr 00000004 11111111
+dma_wr 00000008 22222222
+dma_wr 0000000c 33333333
+dma_wr 00000010 44444444
+dma_wr 00000014 55555555
+dma_wr 00000018 66666666
+dma_wr 0000001c 77777777
+dma_wr 00000020 88888888
+dma_wr 00000024 99999999
+dma_wr 00000028 aaaaaaaa
+dma_wr 0000002c bbbbbbbb
+dma_wr 00000030 00000000
+dma_wr 00000034 00000000
+dma_wr 00000038 00000000
+dma_wr 0000003c 9b303826
+
+dma_wr fffffff4 0800c040 -- dma writes rx status, local address match
+dma_wr fffffff0 00000001 -- dma writes ownership bit
+
+dma_rd fffffff8 00000000 -- reads locations of next rx buffer
+
+
+-- drive the second frame in the burst into the MII interface
+rxd(gap_r) 55d579563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- write out the rx data
+dma_wr 00000000 12345679
+dma_wr 00000004 11111111
+dma_wr 00000008 22222222
+dma_wr 0000000c 33333333
+dma_wr 00000010 44444444
+dma_wr 00000014 55555555
+dma_wr 00000018 66666666
+dma_wr 0000001c 77777777
+dma_wr 00000020 88888888
+dma_wr 00000024 99999999
+dma_wr 00000028 aaaaaaaa
+dma_wr 0000002c bbbbbbbb
+dma_wr 00000030 00000000
+dma_wr 00000034 00000000
+dma_wr 00000038 00000000
+dma_wr 0000003c 51e3b6a9
+
+
+dma_wr fffffffc 0a00c040 -- dma writes rx status, local address match
+dma_wr fffffff8 00000001 -- dma writes ownership bit
+
+dma_rd 00000000 00000000 -- reads locations of next rx buffer
+
+
+-- drive the third frame in the burst into the MII interface
+rxd(gap)   55d5ffffffffffff11112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- write out the rx data
+dma_wr 00000000 ffffffff
+dma_wr 00000004 1111ffff
+dma_wr 00000008 22222222
+dma_wr 0000000c 33333333
+dma_wr 00000010 44444444
+dma_wr 00000014 55555555
+dma_wr 00000018 66666666
+dma_wr 0000001c 77777777
+dma_wr 00000020 88888888
+dma_wr 00000024 99999999
+dma_wr 00000028 aaaaaaaa
+dma_wr 0000002c bbbbbbbb
+dma_wr 00000030 00000000
+dma_wr 00000034 00000000
+dma_wr 00000038 00000000
+dma_wr 0000003c 02580ce0
+
+dma_wr 00000004 8000c040 -- dma writes rx status, broadcast match
+dma_wr 00000000 00000001 -- dma writes ownership bit
+
+dma_rd 00000008 00000000 -- reads locations of next rx buffer
+
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "BURST 1 FRAME 1 RECEIVED"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "BURST 1 FRAME 2 RECEIVED"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "BURST 1 FRAME 3 RECEIVED"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+
+--******************************************************************************
+-- receive 1 normal frame
+
+-- check the relevant registers
+apbrd      00 00000004  "RECEIVING 1 NORMAL FRAME" -- check that receive is enabled
+apbrd      24 00000000  -- check interrupt status
+apbrd      30 00000000  -- check that all interrupts are enabled
+apbrd      24 00000000  -- check interrupt status
+apbrd      04 00080401  -- check value of network config register
+apbrd      08 00000006  -- check value of network status register
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb_x) 55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- write out the rx data
+dma_wr 00000000 12345678
+dma_wr 00000004 11111111
+dma_wr 00000008 22222222
+dma_wr 0000000c 33333333
+dma_wr 00000010 44444444
+dma_wr 00000014 55555555
+dma_wr 00000018 66666666
+dma_wr 0000001c 77777777
+dma_wr 00000020 88888888
+dma_wr 00000024 99999999
+dma_wr 00000028 aaaaaaaa
+dma_wr 0000002c bbbbbbbb
+dma_wr 00000030 00000000
+dma_wr 00000034 00000000
+dma_wr 00000038 00000000
+dma_wr 0000003c 9b303826
+
+
+dma_wr 0000000c 0800c040 -- dma writes rx status, local address match
+dma_wr 00000008 00000001 -- dma writes ownership bit
+
+dma_rd 00000010 00000000 -- reads locations of next rx buffer
+
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "RECEIVED NORMAL FRAME"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+
+--******************************************************************************
+-- Burst 3 frames
+
+-- check the relevant registers
+apbrd      00 00000004  "BURST 2 - 3 FRAMES" -- check that receive is enabled
+apbrd      24 00000000  -- check interrupt status
+apbrd      30 00000000  -- check that all interrupts are enabled
+apbrd      24 00000000  -- check interrupt status
+apbrd      04 00080401  -- check value of network config register
+apbrd      08 00000006  -- check value of network status register
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+-- drive a third burst sequence into the MII interface
+rxd(apb_r) 55d5ffffffffffff11112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- write out the rx data
+dma_wr 00000000 ffffffff
+dma_wr 00000004 1111ffff
+dma_wr 00000008 22222222
+dma_wr 0000000c 33333333
+dma_wr 00000010 44444444
+dma_wr 00000014 55555555
+dma_wr 00000018 66666666
+dma_wr 0000001c 77777777
+dma_wr 00000020 88888888
+dma_wr 00000024 99999999
+dma_wr 00000028 aaaaaaaa
+dma_wr 0000002c bbbbbbbb
+dma_wr 00000030 00000000
+dma_wr 00000034 00000000
+dma_wr 00000038 00000000
+dma_wr 0000003c 02580ce0
+
+
+dma_wr 00000014 8000c040 -- dma writes rx status, broadcast match
+dma_wr 00000010 00000001 -- dma writes ownership bit
+
+dma_rd 00000018 00000000 -- reads locations of next rx buffer
+
+
+
+-- drive the second frame in the burst into the MII interface
+rxd(gap_r) 55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- write out the rx data
+dma_wr 00000000 12345678
+dma_wr 00000004 11111111
+dma_wr 00000008 22222222
+dma_wr 0000000c 33333333
+dma_wr 00000010 44444444
+dma_wr 00000014 55555555
+dma_wr 00000018 66666666
+dma_wr 0000001c 77777777
+dma_wr 00000020 88888888
+dma_wr 00000024 99999999
+dma_wr 00000028 aaaaaaaa
+dma_wr 0000002c bbbbbbbb
+dma_wr 00000030 00000000
+dma_wr 00000034 00000000
+dma_wr 00000038 00000000
+dma_wr 0000003c 9b303826
+
+
+dma_wr 0000001c 0800c040 -- dma writes rx status, local address match
+dma_wr 00000018 00000001 -- dma writes ownership bit
+
+dma_rd 00000020 00000000 -- reads locations of next rx buffer
+
+
+-- drive the third frame in the burst into the MII interface
+rxd(gap)    55d579563412111111112222222233333333
+rxd             44444444555555556666666677777777
+rxd             8888888899999999aaaaaaaabbbbbbbb
+rxd             000000000000000000000000gggggggg
+
+
+-- write out the rx data
+dma_wr 00000000 12345679
+dma_wr 00000004 11111111
+dma_wr 00000008 22222222
+dma_wr 0000000c 33333333
+dma_wr 00000010 44444444
+dma_wr 00000014 55555555
+dma_wr 00000018 66666666
+dma_wr 0000001c 77777777
+dma_wr 00000020 88888888
+dma_wr 00000024 99999999
+dma_wr 00000028 aaaaaaaa
+dma_wr 0000002c bbbbbbbb
+dma_wr 00000030 00000000
+dma_wr 00000034 00000000
+dma_wr 00000038 00000000
+dma_wr 0000003c 51e3b6a9
+
+
+dma_wr 00000024 0a00c040 -- dma writes rx status, local address match
+dma_wr 00000020 00000001 -- dma writes ownership bit
+
+dma_rd 00000028 00000000 -- reads locations of next rx buffer
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "BURST 2 FRAME 1 RECEIVED"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "BURST 2 FRAME 2 RECEIVED"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "BURST 2 FRAME 3 RECEIVED"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+
+--******************************************************************************
+-- receive 1 normal frame
+
+-- check the relevant registers
+apbrd      00 00000004  "RECEVIVE 1 NORAMAL FRAME" -- check that receive is enabled
+apbrd      24 00000000  -- check interrupt status
+apbrd      30 00000000  -- check that all interrupts are enabled
+apbrd      24 00000000  -- check interrupt status
+apbrd      04 00080401  -- check value of network config register
+apbrd      08 00000006  -- check value of network status register
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb_x) 55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+
+-- write out the rx data
+dma_wr 00000000 12345678
+dma_wr 00000004 11111111
+dma_wr 00000008 22222222
+dma_wr 0000000c 33333333
+dma_wr 00000010 44444444
+dma_wr 00000014 55555555
+dma_wr 00000018 66666666
+dma_wr 0000001c 77777777
+dma_wr 00000020 88888888
+dma_wr 00000024 99999999
+dma_wr 00000028 aaaaaaaa
+dma_wr 0000002c bbbbbbbb
+dma_wr 00000030 00000000
+dma_wr 00000034 00000000
+dma_wr 00000038 00000000
+dma_wr 0000003c 9b303826
+
+
+dma_wr 0000002c 0800c040 -- dma writes rx status, local address match
+dma_wr 00000028 00000001 -- dma writes ownership bit
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "RECEIVED NORMAL FRAME"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000200  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000008  -- check frames received ok
+apbrd     15C 00000002  -- check broadcast frames received
+apbrd     160 00000002  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000008  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- check the external pins
+pinsc(2950) loopback 0 half_duplex 1 speed 1  -- check speed pin
+
+-- force end of test in case it doesn't stop of its own accord
+end(3500)
+
+bus_grant_delay 0

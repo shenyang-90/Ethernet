@@ -1,0 +1,621 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_type2_scrn_drop_on_match
+--
+--   Author         : fmalaspi@cadence.com
+--
+--   Date           : 06 April 2017
+--
+--------------------------------------------------------------------------------------
+--   Test Description                                                               --
+--   This test is composed in different phases:                                     --
+----------------------------- First Phase --------------------------------------------
+--   This is a simple test which shows that when a screener is programmed           --
+--   To drop a frame when matches it, then the frame is actually dropped.           --
+--   16 frames are received, one for each type1 screener and every screener is      --
+--   programmed to drop the frame in case of match, therefore all the frames will   --
+--   be dropped.                                                                    --
+---------------------------- Second Phase --------------------------------------------
+--   Here we want to make sure that, when a frame is matched by more than one       --
+--   screener, then if the screeners have a different setting on drop_on_match      --
+--   the frame must be dropped anyway since it is matched by at least one scrn      --
+--   with drop_on_match bit set. Reg0,2,4,6,8,10,12,14 will be tested as they       --
+--   will have drop_on_match set wheread Reg1,3,5,7,9,11,13,15 will have it unset   --
+---------------------------- Third Phase ---------------------------------------------
+--   Here we want to make sure that, when a frame is matched by more than one       --
+--   screener, then if the screeners have a different setting on drop_on_match      --
+--   the frame must be dropped anyway since it is matched by at least one scrn      --
+--   with drop_on_match bit set. Reg1,3,5,7,9,11,13,15 will be tested as they       --
+--   will have drop_on_match set wheread Reg0,2,4,6,8,10,12,14 will have it unset   --
+--------------------------------------------------------------------------------------
+two_pt_five_gig;
+
+sel_ahb_freq 0
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+
+
+-- *****************************************************************************
+-- Initialise the GEM for 2.5 Gbps operation.
+-- Check the receive status and control registers.
+-- Write an address to specific address register one.
+-- *****************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 f0000000  -- write receive queue pointer
+apbwr     480 f0010000  -- write receive queue pointer
+apbwr     484 f0020000  -- write receive queue pointer
+apbwr     488 f0030000  -- write receive queue pointer
+apbwr     48c f0040000  -- write receive queue pointer
+apbwr     490 f0050000  -- write receive queue pointer
+apbwr     494 f0060000  -- write receive queue pointer
+apbwr     498 f0070000  -- write receive queue pointer
+apbwr      04 000a041a  -- setting gigabit mode and fcs_remove
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      98 12345678  -- specific address register 3 bottom
+apbwr      9C 00001111  -- specific address register 3 top
+
+-- Programming the screeners
+-- Programming to match the VLAN tag
+apbwr 540 80000102 -- Type2 screener reg 0, vlan enabled, VLAN priority = 0, drop_on_match set
+apbwr 544 80000111 -- Type2 screener reg 1, vlan enabled, VLAN priority = 1, drop_on_match set
+apbwr 548 80000121 -- Type2 screener reg 2, vlan enabled, VLAN priority = 2, drop_on_match set
+apbwr 54c 80000131 -- Type2 screener reg 3, vlan enabled, VLAN priority = 3, drop_on_match set
+apbwr 550 80000141 -- Type2 screener reg 4, vlan enabled, VLAN priority = 4, drop_on_match set
+apbwr 554 80000151 -- Type2 screener reg 5, vlan enabled, VLAN priority = 5, drop_on_match set
+apbwr 558 80000160 -- Type2 screener reg 6, vlan enabled, VLAN priority = 6, drop_on_match set
+apbwr 55c 80000170 -- Type2 screener reg 7, vlan enabled, VLAN priority = 7, drop_on_match set
+
+-- Programming to match the Ethertype
+apbwr 560 80001000 -- Type2 screener reg 8,  ethertype match enabled, Ethertype register index = 0, drop_on_match set
+apbwr 564 80001200 -- Type2 screener reg 9,  ethertype match enabled, Ethertype register index = 1, drop_on_match set
+apbwr 568 80001400 -- Type2 screener reg 10, ethertype match enabled, Ethertype register index = 2, drop_on_match set
+apbwr 56c 80001600 -- Type2 screener reg 11, ethertype match enabled, Ethertype register index = 3, drop_on_match set
+apbwr 570 80001800 -- Type2 screener reg 12, ethertype match enabled, Ethertype register index = 4, drop_on_match set
+apbwr 574 80001a00 -- Type2 screener reg 13, ethertype match enabled, Ethertype register index = 5, drop_on_match set
+apbwr 578 80001c00 -- Type2 screener reg 14, ethertype match enabled, Ethertype register index = 6, drop_on_match set
+apbwr 57c 80001e00 -- Type2 screener reg 15, ethertype match enabled, Ethertype register index = 7, drop_on_match set
+
+-- Programming the Ethertype
+apbwr      6e0 00001111  -- Ethtype reg 0
+apbwr      6e4 00002222  -- Ethtype reg 1
+apbwr      6e8 00003333  -- Ethtype reg 2
+apbwr      6ec 00004444  -- Ethtype reg 3
+apbwr      6f0 00005555  -- Ethtype reg 4
+apbwr      6f4 00006666  -- Ethtype reg 5
+apbwr      6f8 00007777  -- Ethtype reg 6
+apbwr      6fc 00008888  -- Ethtype reg 7
+
+apbwr      00 20000004  -- enable receive and 2.5 Gbps
+apbwr      b7c 001e0001 -- limit set to 30 and interval_time set to 1
+
+apbrdf 20 00000000 
+
+-- All the frames will be dropped as drop_on_match is set on all the screeners
+
+-- *****************************************************************************
+-- Frame to type2 screener reg0
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 0 (first 3 bits after that)                     
+rxd(apb) 555555d5FFFFFFFFFFFF11112222222281000fffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg1
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 1 (first 3 bits after that)                     
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281003fffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg2
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 2 (first 3 bits after that)                     
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281004fffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg3
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 3 (first 3 bits after that)                     
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281006fffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg4
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 4 (first 3 bits after that)                     
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281008fffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg5
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 5 (first 3 bits after that)                     
+rxd(gap) 555555d5FFFFFFFFFFFF1111222222228100afffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg6
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 6 (first 3 bits after that)                     
+rxd(gap) 555555d5FFFFFFFFFFFF1111222222228100cfffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg7
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 7 (first 3 bits after that)                     
+rxd(gap) 555555d5FFFFFFFFFFFF1111222222228100efffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- The following will be matched because of their Ethertype
+
+-- *****************************************************************************
+-- Frame to type2 screener reg8
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x1111   
+
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              11114dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg9
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x2222        
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              22224dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg10
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x3333              
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              33334dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg11
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x4444                 
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              44444dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg12
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x5555       
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              55554dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg13
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x6666         
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              66664dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg14
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x7777           
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              77774dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg15
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x8888                
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              88884dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- Second Phase
+
+apbwr(500) 00 20000000  -- disabling receive because we want to reprogram the screeners
+
+-- Programming the screeners
+-- Programming to match the VLAN tag
+apbwr 540 80000102 -- Type2 screener reg 0, vlan enabled, VLAN priority = 0, drop_on_match set
+apbwr 544 00000102 -- Type2 screener reg 1, vlan enabled, VLAN priority = 0, drop_on_match unset
+apbwr 548 80000121 -- Type2 screener reg 2, vlan enabled, VLAN priority = 2, drop_on_match set
+apbwr 54c 00000121 -- Type2 screener reg 3, vlan enabled, VLAN priority = 2, drop_on_match unset
+apbwr 550 80000141 -- Type2 screener reg 4, vlan enabled, VLAN priority = 4, drop_on_match set
+apbwr 554 00000141 -- Type2 screener reg 5, vlan enabled, VLAN priority = 4, drop_on_match unset
+apbwr 558 80000160 -- Type2 screener reg 6, vlan enabled, VLAN priority = 6, drop_on_match set
+apbwr 55c 00000160 -- Type2 screener reg 7, vlan enabled, VLAN priority = 6, drop_on_match unset
+
+-- Programming to match the Ethertype
+apbwr 560 80001000 -- Type2 screener reg 8,  ethertype match enabled, Ethertype register index = 0, drop_on_match set
+apbwr 564 00001000 -- Type2 screener reg 9,  ethertype match enabled, Ethertype register index = 0, drop_on_match unset
+apbwr 568 80001400 -- Type2 screener reg 10, ethertype match enabled, Ethertype register index = 2, drop_on_match set
+apbwr 56c 00001400 -- Type2 screener reg 11, ethertype match enabled, Ethertype register index = 2, drop_on_match unset
+apbwr 570 80001800 -- Type2 screener reg 12, ethertype match enabled, Ethertype register index = 4, drop_on_match set
+apbwr 574 00001800 -- Type2 screener reg 13, ethertype match enabled, Ethertype register index = 4, drop_on_match unset
+apbwr 578 80001c00 -- Type2 screener reg 14, ethertype match enabled, Ethertype register index = 6, drop_on_match set
+apbwr 57c 00001c00 -- Type2 screener reg 15, ethertype match enabled, Ethertype register index = 6, drop_on_match unset
+
+-- Programming the Ethertype
+apbwr      6e0 00001111  -- Ethtype reg 0
+apbwr      6e4 00002222  -- Ethtype reg 1
+apbwr      6e8 00003333  -- Ethtype reg 2
+apbwr      6ec 00004444  -- Ethtype reg 3
+apbwr      6f0 00005555  -- Ethtype reg 4
+apbwr      6f4 00006666  -- Ethtype reg 5
+apbwr      6f8 00007777  -- Ethtype reg 6
+apbwr      6fc 00008888  -- Ethtype reg 7
+
+apbwr      00 20000004  -- enable receive now
+apbrd      00 20000004  -- giving the time for enable receive to propagate
+apbrd      00 20000004  -- giving the time for enable receive to propagate
+apbrd      00 20000004  -- giving the time for enable receive to propagate
+apbrd      00 20000004  -- giving the time for enable receive to propagate
+apbrd      00 20000004  -- giving the time for enable receive to propagate
+apbrd      00 20000004  -- giving the time for enable receive to propagate
+apbrdf     00 20000004  -- giving the time for enable receive to propagate
+
+
+-- *****************************************************************************
+-- Frame to type2 screener reg0
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 0 (first 3 bits after that)                     
+rxd(apb) 555555d5FFFFFFFFFFFF11112222222281000fffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg2
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 2 (first 3 bits after that)                     
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281004fffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg4
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 4 (first 3 bits after that)                     
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281008fffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg6
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 6 (first 3 bits after that)                     
+rxd(gap) 555555d5FFFFFFFFFFFF1111222222228100cfffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- The following will be matched because of their Ethertype
+
+-- *****************************************************************************
+-- Frame to type2 screener reg8
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x1111   
+
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              11114dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg10
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x3333              
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              33334dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg12
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x5555       
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              55554dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg14
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x7777           
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              77774dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame not mached by any screener
+-- *****************************************************************************
+-- This will pass through then
+
+rxd(gap) 555555d5FFFFFFFFFFFF1111222222228100ffffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333gggggggg
+
+dma_rd f0000000 88888004
+
+dma_wr 88888004 FFFFFFFF -- store frame to memory
+dma_wr 88888008 1111FFFF
+dma_wr 8888800c 22222222
+dma_wr 88888010 ffff0081
+dma_wr 88888014 4444ffff
+dma_wr 88888018 55554444
+dma_wr 8888801c 66665555
+dma_wr 88888020 77776666
+dma_wr 88888024 88887777
+dma_wr 88888028 99998888
+dma_wr 8888802c aaaa9999
+dma_wr 88888030 bbbbaaaa
+dma_wr 88888034 ccccbbbb
+dma_wr 88888038 11111111
+dma_wr 8888803c 22222222
+dma_wr 88888040 33333333
+
+dma_wr f0000004 802fc040
+dma_wr f0000000 88888005
+
+-- Third Phase
+
+apbwr(750) 00 20000000  -- disabling receive because we want to reprogram the screeners
+
+-- Programming the screeners
+-- Programming to match the VLAN tag
+apbwr 540 00000102 -- Type2 screener reg 0, vlan enabled, VLAN priority = 0, drop_on_match unset
+apbwr 544 80000102 -- Type2 screener reg 1, vlan enabled, VLAN priority = 0, drop_on_match set
+apbwr 548 00000121 -- Type2 screener reg 2, vlan enabled, VLAN priority = 2, drop_on_match unset
+apbwr 54c 80000121 -- Type2 screener reg 3, vlan enabled, VLAN priority = 2, drop_on_match set
+apbwr 550 00000141 -- Type2 screener reg 4, vlan enabled, VLAN priority = 4, drop_on_match unset
+apbwr 554 80000141 -- Type2 screener reg 5, vlan enabled, VLAN priority = 4, drop_on_match set
+apbwr 558 00000160 -- Type2 screener reg 6, vlan enabled, VLAN priority = 6, drop_on_match unset
+apbwr 55c 80000160 -- Type2 screener reg 7, vlan enabled, VLAN priority = 6, drop_on_match set
+
+-- Programming to match the Ethertype
+apbwr 560 00001000 -- Type2 screener reg 8,  ethertype match enabled, Ethertype register index = 0, drop_on_match unset
+apbwr 564 80001000 -- Type2 screener reg 9,  ethertype match enabled, Ethertype register index = 0, drop_on_match set
+apbwr 568 00001400 -- Type2 screener reg 10, ethertype match enabled, Ethertype register index = 2, drop_on_match unset
+apbwr 56c 80001400 -- Type2 screener reg 11, ethertype match enabled, Ethertype register index = 2, drop_on_match set
+apbwr 570 00001800 -- Type2 screener reg 12, ethertype match enabled, Ethertype register index = 4, drop_on_match unset
+apbwr 574 80001800 -- Type2 screener reg 13, ethertype match enabled, Ethertype register index = 4, drop_on_match set
+apbwr 578 00001c00 -- Type2 screener reg 14, ethertype match enabled, Ethertype register index = 6, drop_on_match unset
+apbwr 57c 80001c00 -- Type2 screener reg 15, ethertype match enabled, Ethertype register index = 6, drop_on_match set
+
+-- Programming the Ethertype
+apbwr      6e0 00001111  -- Ethtype reg 0
+apbwr      6e4 00002222  -- Ethtype reg 1
+apbwr      6e8 00003333  -- Ethtype reg 2
+apbwr      6ec 00004444  -- Ethtype reg 3
+apbwr      6f0 00005555  -- Ethtype reg 4
+apbwr      6f4 00006666  -- Ethtype reg 5
+apbwr      6f8 00007777  -- Ethtype reg 6
+apbwr      6fc 00008888  -- Ethtype reg 7
+
+apbwr      00 20000004  -- enable receive now
+apbrd      00 20000004  -- giving the time for enable receive to propagate
+apbrd      00 20000004  -- giving the time for enable receive to propagate
+apbrd      00 20000004  -- giving the time for enable receive to propagate
+apbrd      00 20000004  -- giving the time for enable receive to propagate
+apbrd      00 20000004  -- giving the time for enable receive to propagate
+apbrd      00 20000004  -- giving the time for enable receive to propagate
+apbrdf     00 20000004  -- giving the time for enable receive to propagate
+
+
+-- *****************************************************************************
+-- Frame to type2 screener reg0
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 0 (first 3 bits after that)                     
+rxd(apb) 555555d5FFFFFFFFFFFF11112222222281000fffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg2
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 2 (first 3 bits after that)                     
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281004fffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg4
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 4 (first 3 bits after that)                     
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281008fffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg6
+-- *****************************************************************************
+-- This is a VLAN tagged frame (0x8100) with VLAN priority = 6 (first 3 bits after that)                     
+rxd(gap) 555555d5FFFFFFFFFFFF1111222222228100cfffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444gggggggg
+
+-- The following will be matched because of their Ethertype
+
+-- *****************************************************************************
+-- Frame to type2 screener reg8
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x1111   
+
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              11114dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg10
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x3333              
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              33334dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg12
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x5555       
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              55554dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to type2 screener reg14
+-- *****************************************************************************
+-- This is a frame carrying an Ethertype of 0x7777           
+rxd(gap) 555555d5ffffffffffff111122222222
+rxd              77774dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame not mached by any screener
+-- *****************************************************************************
+-- This will pass through then
+
+rxd(gap) 555555d5FFFFFFFFFFFF1111222222228100ffffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333gggggggg
+
+dma_rd f0000008 88888004
+
+dma_wr 88888004 FFFFFFFF -- store frame to memory
+dma_wr 88888008 1111FFFF
+dma_wr 8888800c 22222222
+dma_wr 88888010 ffff0081
+dma_wr 88888014 4444ffff
+dma_wr 88888018 55554444
+dma_wr 8888801c 66665555
+dma_wr 88888020 77776666
+dma_wr 88888024 88887777
+dma_wr 88888028 99998888
+dma_wr 8888802c aaaa9999
+dma_wr 88888030 bbbbaaaa
+dma_wr 88888034 ccccbbbb
+dma_wr 88888038 11111111
+dma_wr 8888803c 22222222
+dma_wr 88888040 33333333
+
+dma_wr f000000c 802fc040
+dma_wr f0000008 88888005
+
+apbrd(1000) 00 20000004
+
+-- force end of test in case it doesn't stop of its own accord
+end(50000)

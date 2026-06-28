@@ -1,0 +1,257 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2007
+--                                       Cadence Design Systems, Inc.
+--            VCAD                       All rights reserved.
+--
+-- This work may not be copied, modified, re-published, uploaded, executed, or
+-- distributed in any way, in any medium, whether in whole or in part, without
+-- prior written permission from Cadence Design Systems, Inc.
+--------------------------------------------------------------------------------
+--
+-- Test Name      : rx_dma_err_tx
+--
+-- Author         : martinj@cadence.com
+--
+-- Date           : 01 Aug, 2007
+--
+-- Limitations    : 
+--
+--------------------------------------------------------------------------------
+-- Description    : DMA arbitration between RX and TX after late RX DMA enable
+--
+-- Functional Coverage :
+--   * Checks that DMA arbitrates successfully for RX DMA requesting from 
+--     the RX_DMA_WAIT_BUFF_REQ state.
+--
+-- Detailed Test Description:
+--     Transmits 2 frames in internal loopback mode.
+--     All 2 frames are received by the MAC.
+--     Enabling of RX is delay until after first TX descriptor read
+--     Once RX is enabled RX DMA will request access on the AHB
+--     whilst waiting in the RX_DMA_WAIT_BUFF_REQ state for the AHB to become 
+--     idle.
+--     This RX request is timed to occur in between TX DMA accesses such that
+--     re-arbitration is forced.
+--     This test is used to specifically verify a previous issue with the GEM
+--     whereby arbitration is corrupted after an RX DMA error or late RX 
+--     DMA enable.
+--
+--------------------------------------------------------------------------------
+
+-- Set wait states and hgrant delay
+wait_states 0
+bus_grant_delay 1
+
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 0001ffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00080001  -- Set for 100M
+apbrd      04 00080001  -- Verify write.
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      98 12345678  -- specific address register 3 bottom
+apbwr      9C 00001111  -- specific address register 3 top
+apbwr      18 01234000  -- write receive queue pointer
+apbwr      1c aaaaaa00  -- write address of transmit buffer descriptor
+apbrd      1c aaaaaa00  -- check transmit queue pointer
+apbwr      00 0000000a  -- enable transmit and internal loopback
+apbwr      00 0000020a  -- write tx_go and enable transmit and internal loopback
+apbwr      00 0000000a  -- delay for rx enable
+apbwr      00 0000000a  -- delay for rx enable
+apbwr      00 0000000a  -- delay for rx enable
+apbwr      00 0000000e  -- enable transmit, receive and internal loopback
+
+
+
+-- ****** TX-1 *********
+-- supply the first transmit buffer location
+dma_rd aaaaaa04 00008030 -- end of frame, length 48 bytes
+dma_rd aaaaaa00 11100000 -- dma reads tx buffer pointer
+-- ****** TX-1 *********
+
+-- ****** RX-1 *********
+-- supply the first receive buffer location
+dma_rd 01234000 00011100 -- rx buffer manager reads pointer of 00011100
+-- ****** RX-1 *********
+
+
+-- read first transmit data from memory
+dma_rd 11100000 12345678
+dma_rd 11100004 11111111
+dma_rd 11100008 22222222
+dma_rd 1110000c 33333333
+dma_rd 11100010 44444444 -- continue reading first TX frame
+dma_rd 11100014 55555555
+dma_rd 11100018 66666666
+dma_rd 1110001c 77777777
+dma_rd 11100020 88888888 -- continue reading first TX frame
+dma_rd 11100024 99999999
+dma_rd 11100028 aaaaaaaa
+dma_rd 1110002c bbbbbbbb
+
+
+-- ****** TX-2 *********
+-- supply the second transmit buffer location
+dma_rd aaaaaa0c 00008040 -- end of frame, length 64 bytes
+dma_rd aaaaaa08 22200000 -- dma reads tx buffer pointer
+-- ****** TX-2 *********
+
+
+-- read second transmit frame data from memory
+dma_rd 22200000 12345678
+dma_rd 22200004 11111111
+dma_rd 22200008 22222222
+dma_rd 2220000c 33333333
+dma_rd 22200010 44444444 -- continue reading second TX frame
+dma_rd 22200014 55555555
+dma_rd 22200018 66666666
+dma_rd 2220001c 77777777
+
+
+dma_wr 00011100 12345678 -- store first RX frame to memory
+dma_wr 00011104 11111111
+dma_wr 00011108 22222222
+dma_wr 0001110c 33333333
+dma_wr 00011110 44444444 -- continue writing first RX frame
+dma_wr 00011114 55555555
+dma_wr 00011118 66666666
+dma_wr 0001111c 77777777
+
+
+-- ****** TX-1 *********
+dma_wr aaaaaa04 80008030 -- writes tx used status for first TX frame
+-- ****** TX-1 *********
+
+
+dma_wr 00011120 88888888 -- continue writing first RX frame
+dma_wr 00011124 99999999
+dma_wr 00011128 aaaaaaaa
+dma_wr 0001112c bbbbbbbb
+dma_wr 00011130 00000000 -- continue writing first RX frame
+dma_wr 00011134 00000000
+dma_wr 00011138 00000000
+dma_wr 0001113c 9b303826
+
+
+
+-- ****** RX-1 *********
+-- first RX frame descriptor writeback
+dma_wr 01234004 0c00c040 -- dma writes rx status, local address 3 match and 64 bytes received
+dma_wr 01234000 00011101 -- dma writes ownership bit
+dma_rd 01234008 00022200 -- reads locations of second rx buffer
+-- ****** RX-1 *********
+
+
+dma_rd 22200020 88888888 -- continue reading second TX frame
+dma_rd 22200024 99999999
+dma_rd 22200028 aaaaaaaa
+dma_rd 2220002c bbbbbbbb
+dma_rd 22200030 88888888 -- continue reading second TX frame
+dma_rd 22200034 99999999
+dma_rd 22200038 aaaaaaaa
+dma_rd 2220003c bbbbbbbb
+
+
+
+-- ****** TX-3 *********
+-- third TX frame descriptor read
+dma_rd aaaaaa14 80008041 -- end of frame, length 65 bytes (USED)
+dma_rd aaaaaa10 33300000 -- dma reads tx buffer pointer for third frame
+-- ****** TX-3 *********
+
+-- write second receive frame data to memory (dropped as used bit read)
+dma_wr 00022200 12345678
+dma_wr 00022204 11111111
+dma_wr 00022208 22222222
+dma_wr 0002220c 33333333
+dma_wr 00022210 44444444 -- continue writing second RX frame
+dma_wr 00022214 55555555
+dma_wr 00022218 66666666
+dma_wr 0002221c 77777777
+
+
+-- ****** TX-2 *********
+dma_wr aaaaaa0c 80008040 -- writes tx used status for second frame
+-- ****** TX-2 *********
+
+
+dma_wr 00022220 88888888 -- continue writing second RX frame
+dma_wr 00022224 99999999
+dma_wr 00022228 aaaaaaaa
+dma_wr 0002222c bbbbbbbb
+dma_wr 00022230 88888888 -- continue writing second RX frame
+dma_wr 00022234 99999999
+dma_wr 00022238 aaaaaaaa
+dma_wr 0002223c bbbbbbbb
+dma_wr 00022240 d845891c -- continue writing second RX frame
+
+-- ****** RX-2 *********
+-- rx buffer manager activity
+dma_wr 0123400c 0c00c044 -- dma writes rx status, local address 3 match and 68 bytes received
+dma_wr 01234008 00022201 -- dma writes ownership bit
+dma_rd 01234010 00033300 -- reads locations of next rx buffer
+-- ****** RX-2 *********
+
+
+
+
+-- *****************************************************************************
+
+apbrd(2000) 24 0000008a -- check interrupt status
+                        --   tx and rx complete and tx used read
+apbrd       20 00000002 -- check contents of the receive status register-
+                        --  frame received
+
+
+-- check transmit statistics
+apbrd     100 00000084  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000002  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000001  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000084  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000002  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000001  -- check frames received 64
+apbrd     16C 00000001  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+end(5000)

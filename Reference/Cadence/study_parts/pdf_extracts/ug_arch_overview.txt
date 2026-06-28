@@ -1,0 +1,152 @@
+
+
+--- PAGE 13 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+13
+2 Architecture Overview
+2.1 Architectural Block Diagram
+Figure 2 depicts the GEM’s top-level block diagram.
+Figure 2: Top-Level Block Diagram
+GEM implements a 10/100/1000Mbps Ethernet MAC compatible with the IEEE 802.3 standard. GEM can operate in either 
+half or full duplex. The network configuration register is used to select the speed, duplex mode, and interface type (MII, 
+RMII, GMII, RGMII or SGMII).
+GEM comprises the following constituent components:
+• MAC controlling transmit, receive, address checking and loopback
+• Configuration registers (REG_TOP) providing control and status registers, statistics registers and synchronization logic
+• Physical Coding Sublayer (PCS) controlling 8B/10B encode/decode, PCS transmit, PCS receive, and PCS auto-nego-
+tiation
+• Direct Memory Access (DMA_TOP) controlling DMA transmit, DMA receive and AHB/AXI arbitration logic
+• Timestamp Unit (TSU) to calculate the IEEE 1588 timer values and containing the real time clock
+• Automotive Safety Features (ASF)
+
+
+--- PAGE 14 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+14
+In system applications where no DMA operation is required, the DMA_TOP module can be removed using a configuration 
+option and an external FIFO interface used to incorporate GEM into a SoC environment. GEM can also be configured to 
+expose the FIFO interface when DMA_TOP is present so that either the FIFO or the DMA interface of the GEM instance 
+may be used. GEM’s PCS module may also be removed using a configuration option.
+2.2 Top-Level Blocks
+2.2.1 MAC
+The MAC transmit block takes data from the external FIFO interface, adds preamble and, if necessary, pad and frame 
+check sequence (FCS). Both half-duplex and full-duplex Ethernet modes of operation are supported. When operating in 
+half-duplex mode, the MAC transmit block generates data according to the carrier sense multiple access with collision 
+detect (CSMA/CD) protocol. The start of transmission is deferred if carrier sense (crs) is active. If collision (col) becomes 
+active during transmission, a jam sequence is asserted and the transmission is re-tried after a random back off. The crs and 
+col signals have no effect in full-duplex mode. Refer to Section 6.1.6 MAC Transmit Block on page 89 for more details.
+The MAC receive block checks for valid preamble, FCS, alignment and length, and presents received frames to the MAC 
+address checking block and external FIFO interface. Software can configure GEM to receive jumbo frames up to 16,383 
+bytes. It can optionally strip FCS from the received frame prior to transfer to the external FIFO interface. Refer to 
+Section 6.1.8 MAC Receive Block on page 92 for more details.
+The address checker recognizes a configurable number of maskable source or destination specific 48-bit addresses, can 
+recognize four different type ID values, and contains a 64-bit hash register for matching multicast and unicast addresses as 
+required. It can recognize the broadcast address of all ones, copy all frames and act on external address matching signals. 
+The MAC can also reject all frames that are not VLAN tagged and recognize Wake-on-LAN events. Address comparison 
+against individual bits of Specific Address Register 1 can be masked by means of the Specific Address Mask Register. All 
+other specific address filters are byte maskable. Refer to Section 6.1.9 MAC Filtering Block on page 93 for more details.
+The MAC receive block supports offloading of IP, TCP, and UDP checksum calculations (both IPv4 and IPv6 packet types 
+supported), and can automatically discard frames with bad checksum.
+The MAC receive block can be set up to identify 802.1CB streams and automatically eliminate duplicate frames. Statistics 
+are provided to report counts of rogue and out-of-order frames, latent errors, and timer reset events.
+2.2.2 Physical Coding Sublayer (PCS)
+A PCS is incorporated for 1000BASE-X operation and provides a configurable interface to the PMA layer. A PCS transmit 
+module and 8B/10B encoder form the transmit path, and a PCS receiver and two 8B/10B decoders form the receive path, 
+which is expanded into 16 bits to simplify clocking. Auto-negotiation is also provided for network configuration. The PMA 
+interface may be configured to be 10 or 20-bits and appropriate gearboxes for data width conversion will be automatically 
+instantiated.
+The PCS can be configured through the network configuration register to support an SGMII interface between the MAC and 
+an external PHY. For a complete SGMII solution, a SerDes hard macro is also required.
+2.2.3 Configuration Registers (REG_TOP)
+Control registers drive the management data input/output (MDIO) interface, set up DMA activity, start frame transmission 
+and select modes of operation such as full-duplex, half-duplex, and 10/100/1000Mbps operation. The register interface is 
+compatible with AMBA APB interface standard, version 2.0. 
+The statistics register block contains registers for counting various types of event associated with transmit and receive 
+operation. These registers, along with the status words stored in the receive buffer list, enable software to generate net-
+work management statistics compatible with IEEE 802.3 Clause 30.
+
+
+--- PAGE 15 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+15
+2.2.4 Direct Memory Access (DMA_TOP)
+The DMA may be configured in either a low-latency buffering mode using internal transmit and receive FIFOs or a packet 
+buffering mode using external memories.
+Datapath bus widths of 32, 64, and 128 bit are supported at all data rates (Note that 128-bit datapath is not available when 
+an AHB interface is selected) although system designers should carefully consider the bandwidth requirements of the 
+external datapath being used — either external FIFO interface or AMBA AHB/AXI interface. The DMA block connects to 
+external memory through its AMBA AHB or AXI bus interface. The DMA gathers data to be transmitted from transmit data 
+buffers in system memory and scatters received data to receive data buffers in system memory. Receive data is not sent to 
+memory until the address checking logic has determined that the frame should be copied. 
+Receive or transmit frames are stored in one or more DMA buffers. The receive buffer size is programmable between 64 
+bytes and 16KB. Transmit buffers range in length between 1 and 16,383 bytes, and up to 128 buffers are permitted per 
+frame. The DMA block manages the transmit and receive frame buffer queues.
+For chip architecture where DMA is not required, GEM is supplied with an external transmit and receive external FIFO 
+interface, thus simplifying design complexity and reducing gate count.
+Note the DMA block does not use AMBA AHB split and retry operations. 
+2.2.5 Timestamp Unit (TSU)
+The IEEE 1588 timestamp unit (TSU) is a timer implemented as a 102-bit register, with the bits designated as follows:
+•  The 48 upper bits count seconds 
+• The next 30 lower bits count nanoseconds 
+• The lowest 24 bits count sub nanoseconds
+• The 54 lower bits roll over when they have counted to one second
+The timer increments by a programmable period (to approximately 59.6 attosecond resolution – 5.96E-17) with each PCLK 
+or TSU_CLK period and can also be adjusted in 1ns resolution (incremented or decremented) through APB register 
+accesses.
+An optional external TSU port can be built into the design using a configuration option. When the external TSU port is avail-
+able, the selection between internal or external TSU is performed using a programmable register. The default selection is 
+internal TSU. The external port is 94-bits wide, mapping to the most significant bits of the internal TSU count as defined 
+above.
+2.2.6 Automotive Safety Features
+The following automotive safety components are included:
+• Fault Logging and Reporting module
+• SRAM protection wrappers
+• Parity generators and checkers
+• Generic transaction timeout monitor
+2.2.6.1 Functional Safety
+A functional safety manual is provided as one of the deliverables. A representative configuration of the GEM core has 
+undergone Failure Modes, Effects, and Diagnostic Analysis (FMEDA) and achieved ASIL-B ready certification from SGS-
+TUV.
+The following configuration was used for the FMEDA analysis:
+• No PCS
+• No RGMII
+
+
+--- PAGE 16 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+16
+• Internal loopback
+• Statistics registers included
+• Four specific address filters
+• 64-bit data bus width
+• 32-bit addressing
+• AXI host interface
+• Dual-port SRAM (16KB each for transmit and receive)
+• Three priority queues
+• No cut-through
+• No LSO
+• Four type 1 screener registers
+• Four type 2 screener registers
+• 802.1Qav included
+• 802.1Qbv included
+• Twelve screener 2 compare registers
+• TSU included
+• tsu_clk included
+The provided safety manual should be referenced and the suggested external safety mechanisms should be, where possi-
+ble, implemented in order to meet the required ASIL safety level.

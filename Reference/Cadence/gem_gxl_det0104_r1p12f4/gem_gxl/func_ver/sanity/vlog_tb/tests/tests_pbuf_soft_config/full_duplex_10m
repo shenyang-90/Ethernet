@@ -1,0 +1,230 @@
+-------------------------------------------------
+-- full_duplex_10m test scenario for the Ethernet MAC --
+-------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+-- Written by Arthur Marris
+--
+-- 15May2001     awalker modified to HLAN specification
+-- 16Oct2001     mikema added extra stats registers
+-- 20Feb2002     Arthur finished it off
+--
+--
+-- This test tests the Ethernet MAC in full duplex mode.
+--
+-- CRS is set high throughout to check that it is ignored in full
+-- duplex mode.
+--
+-- The test checks the state of the half_duplex pin in half and
+-- full duplex modes.
+--
+-- The test shows that transmission and reception can occur simultaneously
+-- in full duplex mode. The received frame has a very long preamble to
+-- delay checking of the received frames destination address until
+-- transmission has started.
+--
+-- A second frame is transmitted and it is shown that collisions have
+-- no affect in full duplex mode.
+--
+-- ************************************************************************** --
+
+ten_meg_bit  -- 10Mbit/s operation (2.5Mhz tx_clk and rx_clk, 50MHz Pclk and Hclk)
+
+wait_states 2
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state (half duplex)
+pinsd(50) crs 1                              --  set to 1 to check that crs is ignored in full duplex
+
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 01234000  -- write receive queue pointer
+apbrd      18 01234000  -- check receive queue pointer
+apbwr	   1c ffffff00  -- write address of transmit buffer descriptor
+apbrd	   1c ffffff00  -- check transmit queue pointer
+apbwr      00 0000000C  -- enable transmit and receive
+apbwr      98 12345678  -- specific address register 3 bottom
+apbwr      9C 00001111  -- specific address register 3 top
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00080002  -- set to full duplex mode
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      14 00000000  -- read transmit status register
+
+-- Start the transmission by setting the go bit in network control register
+apbwr      00 0000020c  -- write transmit start bit and enable tx and rx
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+-- supply the transmit buffer location
+dma_rd ffffff04 00008030 -- dma reads end of frame and length of 48bytes
+dma_rd ffffff00 98765000 -- dma reads location of tx buffer
+
+
+pinsc(200) loopback 0 half_duplex 0  extint 0 --  check for full duplex state
+
+
+-- drive the receive frame data into the MII interface
+-- very long preamble to delay checking of destination address
+-- until transmission has started
+rxd(apb)       5555555555555555555555555555555555d5
+rxd            78563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+
+dma_rd ffffff0c 00008010 -- dma reads end of frame and length of 48bytes
+dma_rd ffffff08 98765030 -- dma reads location of next tx frame (second buffer)
+
+dma_rd 98765030 ffffffff -- read data for next transmit frame
+dma_rd 98765034 ffffffff
+dma_rd 98765038 ffffffff
+dma_rd 9876503c ffffffff
+
+dma_rd ffffff14 80000020 -- dma reads tx used bit this will stop transmission
+dma_rd ffffff10 98765040 -- dma reads location of third tx buffer (second buffer already read)
+
+dma_wr ffffff04 80008030 -- write transmit buffer used bit for first frame
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d57856x3412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    0000000000000000000000002638309b
+
+-- supply the receive buffer location
+dma_rd 01234000 22222004 -- dma reads pointer of 22222004
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+
+
+
+dma_wr 22222014 44444444 -- continue writing out received frame data
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888 -- continue writing out received frame data
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 9b303826
+
+
+dma_wr 01234004 0c00c040 -- dma writes rx status, spec addr 3 match and 64 bytes received
+dma_wr 01234000 22222005 -- rx dma writes ownership bit
+
+dma_rd 01234008 44440008 -- reads locations of next (second) rx buffer
+
+
+-- check for correct preamble, SFD, data, pad and crc of second transmit frame
+-- and assert plenty of collisions. These will have no affect
+txd    55555555555555d5ffffxfffffffffffffffxffffffffffxfff
+txd                    000000x000000000000x000000000x00000
+txd                    00000x00000000000000000000000x0000
+txd                    00000000000000x00000000006c196bed
+
+-- write used bit for second transmit buffer
+dma_wr ffffff0c 80008010
+
+
+-- check status after three interrupts have been received
+-- check for no deference or collision statistics
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete and tx used bit read
+apbwr      24 00000080  -- clear interrupt status
+apbrd(int) 24 00000008  -- check interrupt status - transmit complete and tx used bit read
+apbwr      24 00000008  -- clear interrupt status
+apbwr      00 0000040c  -- Halt the transmitter
+apbrd      04 00080002  -- check full duplex still set
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      14 00000021  -- read transmit status register - frame transmitted
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234008  -- check receive queue pointer
+
+-- check transmit statistics
+apbrd     100 00000080  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000002  -- check frames transmitted ok
+apbrd     10C 00000001  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000002  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000040  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000001  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000001  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(10000)
+
+bus_grant_delay 0

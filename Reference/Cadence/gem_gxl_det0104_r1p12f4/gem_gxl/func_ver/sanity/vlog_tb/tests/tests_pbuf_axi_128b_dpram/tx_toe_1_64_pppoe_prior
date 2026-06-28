@@ -1,0 +1,199 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_toe_1_64_pppoe_prior
+--
+--   Author         : Martin James
+--
+--   Date           : 28 August 2012
+--
+--------------------------------------------------------------------------------
+--
+-- Detailed Test Description
+--  1. Initialise suitable wait states for the test.
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 64-bit DMA data bus.
+--  3. Send several good IP PPPoE frames with IP length adjusted so that
+--     if could result in decode of IPv4/ipv6 field in two places
+--
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      04 00280000  -- check reset value of network config register
+apbrd      04 00280000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      10 00020c04  -- enable 4k ram and tcp offload
+apbwr      00 00000208  -- write tx_go and enable tx
+
+
+--******************************************************************************
+--    PPoE IPv4 VLAN frame with length = 0x21
+--******************************************************************************
+
+
+dma_rd tx_descr 55555500 22222900 -- dma reads pointer of 22222900
+dma_rd tx_descr 55555504 0000804e -- start of frame
+
+
+dma_rd 22222900 055a2600
+dma_rd 22222904 e0003180
+dma_rd 22222908 a5b83b1c
+dma_rd 2222290c 01000081
+dma_rd 22222910 00116488
+dma_rd 22222914 36000200
+dma_rd 22222918 00452100
+
+dma_rd 2222291c 64be2100 -- Make length 0x21 so that it looks like IPv4 format
+
+dma_rd 22222920 06400040
+dma_rd 22222924 a8c0FFFF
+dma_rd 22222928 a8c00b03
+dma_rd 2222292c a8b46403
+dma_rd 22222930 d21c1600
+dma_rd 22222934 2ba83f99
+dma_rd 22222938 1080aa0d
+dma_rd 2222293c FFFFb600
+dma_rd 22222940 01010000
+dma_rd 22222944 10000a08
+dma_rd 22222948 48015f27
+dma_rd 2222294c c66f0266
+
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        00265a058031 -- MAC DA
+txd        00e01c3bb8a5 -- MAC SA
+txd        8100         -- Length/typeID
+txd        0001         -- VLAN tag
+txd        8864         -- Length/typeID - PPPoE
+txd        1100         -- PPPoE stuff
+txd        0002         -- PPPoE stuff
+txd        0036         -- PPPoE stuff
+txd        0021         -- PPPoE stuff - IPv4
+txd        4500         -- Version, IHL, type of service
+txd        0021         -- total length
+txd        BE64         -- ID
+txd        4000         -- flags & fragmentation
+txd        4006         -- time to live and protocol
+txd        f4b2         -- IP Header checksum
+txd        C0A8030B     -- IP SA
+txd        c0a80364     -- IP DA
+txd        b4a8         -- TCP source port
+txd        0016         -- TCP destination port
+txd        1cd2993f     -- Sequence number
+txd        a82b0daa     -- Acknowledgement Number
+txd        801000b6     -- Flags and window
+txd        d785         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        0101         -- options or padding
+txd        080a0010275f
+txd        01486602
+txd        57e89f2e     -- FCS
+
+
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 8000804e -- write used bit, good TCP status
+
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+
+--******************************************************************************
+--    PPoE frame
+--******************************************************************************
+
+
+dma_rd tx_descr 55555508 22222800 -- dma reads pointer of 22222700
+dma_rd tx_descr 5555550c 0000804a -- start of frame
+
+
+
+dma_rd 22222800 055a2600 
+dma_rd 22222804 e0003180
+dma_rd 22222808 a5b83b1c
+dma_rd 2222280c 00116488
+dma_rd 22222810 36002100 -- change PPPoE field to make it look like IPv4 field
+dma_rd 22222814 00452100
+dma_rd 22222818 64be3400
+dma_rd 2222281c 06400040
+dma_rd 22222820 a8c0FFFF
+dma_rd 22222824 a8c00b03
+dma_rd 22222828 a8b46403
+dma_rd 2222282c d21c1600
+dma_rd 22222830 2ba83f99
+dma_rd 22222834 1080aa0d
+dma_rd 22222838 FFFFb600
+dma_rd 2222283c 01010000
+dma_rd 22222840 10000a08
+dma_rd 22222844 48015f27
+dma_rd 22222848 e06d0266
+dma_rd 2222284c 00004581
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        00265a058031 -- MAC DA
+txd        00e01c3bb8a5 -- MAC SA
+txd        8864         -- Length/typeID - PPPoE
+txd        1100         -- PPPoE stuff
+txd        0021         -- PPPoE stuff -- Made to look like IPv4 field
+txd        0036         -- PPPoE stuff
+txd        0021         -- PPPoE stuff - IPv4
+txd        4500         -- Version, IHL, type of service
+txd        0034         -- total length
+txd        BE64         -- ID
+txd        4000         -- flags & fragmentation
+txd        4006         -- time to live and protocol
+txd        F49F         -- IP Header checksum
+txd        C0A8030B     -- IP SA
+txd        c0a80364     -- IP DA
+txd        b4a8         -- TCP source port
+txd        0016         -- TCP destination port
+txd        1cd2993f     -- Sequence number
+txd        a82b0daa     -- Acknowledgement Number
+txd        801000b6     -- Flags and window
+txd        3ee8         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        0101         -- options or padding
+txd        080a0010275f
+txd        01486602
+txd        c3d6c6cf     -- FCS
+
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555550c 8000804a -- write used bit
+
+
+
+
+dma_rd tx_descr 55555510 98767000 -- 
+dma_rd tx_descr 55555514 80008062 -- used bit read
+
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete, used
+apbwr       24 00000088  -- check interrupt status - transmit complete, used
+apbrd	      14 00000021  -- tx status - frame transmitted,used
+
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(10000)
+
+
+bus_grant_delay 0

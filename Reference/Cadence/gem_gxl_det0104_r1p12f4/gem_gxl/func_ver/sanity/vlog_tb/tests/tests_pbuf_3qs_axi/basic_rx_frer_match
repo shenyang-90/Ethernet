@@ -1,0 +1,378 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2016
+--                                       Cadence Design Systems, Inc.
+--                                       All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : basic_rx_frer_match
+--
+--   Author         : Steven Ho
+--
+--   Date           : 15th July 2016
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This checks reception of duplicate frames for 802.1CB operation using 
+-- redundancy tag field.
+-- Stream will be setup to use Match Recovery algorithm.
+--
+--
+-- Functional Coverage
+----------------------
+-- · 
+-- 
+-- 
+--
+-- Detailed Test Description
+----------------------------
+--
+-- Use perl functions to auto generate frames including RX, DMA and APB activity.
+--
+-- 
+--------------------------------------------------------------------------------
+
+wait_states 0
+
+-- Set AHB clock freq to 250MHz
+-- At 32bit, this means we have maximum bandwidth of 8Gbit/s shared between
+-- TX and RX. Randomize hready, keeping the maximum to 5 (averages around 2.5)
+-- to ensure no RX overflows occur, and max line rate is acheivable on TX
+sel_ahb_freq 3 
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      10 01a00710  -- DMA config
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 10000000  -- write receive queue pointer
+apbrd      18 10000000  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 0028040a  -- 64bit enable, gigabit mode, full duplex
+
+-- Enable stacked vlan support as we may randomise the number and position of the
+-- vlan tags...
+apbwr     0c0 800088a8  -- Stacked VLAN support. Should match both this and 8100.
+
+-- Set up the screener registers
+-- Match against Source MAC address: 11:11:22:22:22:22 and VLAN ID 0x210
+-- First compare register set to compare 0x22221111 with no masking. Offset 6.
+-- Second compare register set to compare 0x2222 with mask of 0xffff. Offset 10.
+-- Third compare register set to compare 0x1002 with mask of 0xff0f. Offset 18.
+apbwr     700 22221111  -- Compare registers
+apbwr     704 00000206
+apbwr     708 2222ffff
+apbwr     70c 0000000a
+apbwr     710 2210ffff
+apbwr     714 00000400  -- Compare C-TAG
+
+-- Screener Type2 register 0.
+-- Enable Compare A=0, B=1, C=2,
+-- 0 1 00010 1 00001 1 00000 0000 00000 0000
+apbwr     540 450c0000  -- Screener type 2 setup
+
+-- A second set is also used to allow random selection of src address between the
+-- 11:11:22:22:22:22 and 22:22:33:33:33:33
+apbwr     718 33332222  -- Compare registers
+apbwr     71c 00000206
+apbwr     720 3333ffff
+apbwr     724 0000000a
+apbwr     728 2210ffff
+apbwr     72c 00000400  -- Compare C-TAG
+
+-- Screener Type2 register 1.
+-- A=3, B=4 C=5
+-- 0 1 00101 1 00100 1 00011 0000 00000 0000
+apbwr     544 4b246000  -- Screener type 2 setup
+
+-- Program the FRER registers
+apbwr     8a0 00000002  -- FRER Timeout value. This is 2x8192x8ns.
+apbrd     8a0 00000002
+apbwr     8a4 4000ffff  -- Don't strip redundancy tag and type set to 0xffff
+apbrd     8a4 4000ffff
+apbwr     8c0 b0000001  -- Stream 0 setup A. Enable, Vec, Timeout, RTag.
+apbrd     8c0 b0000001
+apbwr     8c4 00000000  -- Stream 0 setup B. Set to 16-bit sequence number.
+apbrd     8c4 00000000
+
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+-- The perl script is set such that when randomising the sequence number it will ensure that the new
+-- sequence number is not the same as previous (initially set to 0xffff) and not the same as previous + 1.
+-- This ensures that each 'random' sequence number (in match algorithm mode) should result in an increment
+-- of the out of order statistics register and should always be accepted.
+
+-- First frame to stream 0, this is not duplicated.
+rx_frame (apb)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      src_addr          222233333333
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_type        88a8        -- Stacked type
+      vlan1_field       3824
+      vlan2_en          1
+      vlan2_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  random
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+
+-- Follow by 10 frames these are duplicated and should be automatically discarded.
+rx_frame (gap)  10
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      src_addr          222233333333
+      vlan1_en          1
+      vlan1_field       2210
+      vlan2_en          0
+      frer_loc          random
+      frer_rtag_en      1
+      frer_auto_dup     1
+      frer_rtag_seqnum  random
+      type_len_field    random
+      data_size         42
+      data              random
+      fcs               good
+
+-- Duplicate of the last sequence number, this should be discarded as well.
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      0       -- No interrupt expected
+      dest_addr         broadcast
+      src_addr          111122222222
+      src_addr          222233333333
+      vlan1_en          1
+      vlan1_field       2210
+      vlan2_en          0
+      frer_loc          random
+      frer_rtag_en      1
+      frer_rtag_seqnum  dup     -- Duplicate last sequence number
+      frer_discard      true    -- Expect to be discarded.
+      includerxdma      0       -- No DMA activity expected
+      type_len_field    random
+      data_size         42
+      data              random
+      fcs               good
+
+-- Follow by 5 frames these are not duplicated.
+rx_frame (gap)  5
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      src_addr          222233333333
+      vlan1_en          1
+      vlan1_field       2210
+      vlan2_en          0
+      frer_loc          random
+      frer_rtag_en      1
+      frer_rtag_seqnum  random
+      includerxdma      1       -- Reset flag to expect DMA activity
+      type_len_field    random
+      data_size         42
+      data              random
+      fcs               good
+
+
+-- A further 64 frames with no redundancy tags. These should still be passed up the stack and not result
+-- in any changes to the CB statistics.
+rx_frame (gap)  64
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      src_addr          222233333333
+      vlan1_en          1
+      vlan1_field       2210
+      vlan2_en          0
+      type_len_field    random
+      data_size         42
+      data              random
+      fcs               good
+
+-- A single frame that is duplicated to allow above stats to filter through
+-- Since match recovery only remembers the last sequence number it does not require many packets to flush.
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      src_addr          222233333333
+      vlan1_en          1
+      vlan1_field       2210
+      vlan2_en          0
+      frer_loc          random
+      frer_rtag_en      1
+      frer_auto_dup     1
+      frer_rtag_seqnum  random
+      type_len_field    random
+      data_size         42
+      data              random
+      fcs               good
+
+-- Single non-FRER frame just to sequence the APB commands properly.
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      src_addr          222233333333
+      vlan1_en          1
+      vlan1_field       2210
+      vlan2_en          0
+      type_len_field    random
+      data_size         20-300
+      data              random
+      fcs               good
+
+-- check receive statistics
+apbrd     158 00000052  -- check frames received ok
+
+-- Check CB statistics
+apbrd     8c8 00000006  -- Stats A for CB function 0. 0 Rogue, 6 latent errors.
+apbrd     8cc 00000010  -- Stats B for CB function 0. 0 timeouts, 16 out of order frames.
+apbrd     8d8 00000000  -- Stats A for CB function 1. Not used in this test.
+apbrd     8dc 00000000  -- Stats B for CB function 1. Not used in this test.
+apbrd     8e8 00000000  -- Stats A for CB function 2. Not used in this test.
+apbrd     8ec 00000000  -- Stats B for CB function 2. Not used in this test.
+
+-- Stats should be cleared on read...
+apbrd     8c8 00000000  -- Stats A for CB function 0. 
+apbrd     8cc 00000000  -- Stats B for CB function 0. 
+apbrd     8d8 00000000  -- Stats A for CB function 1. 
+apbrd     8dc 00000000  -- Stats B for CB function 1. 
+apbrd     8e8 00000000  -- Stats A for CB function 2. 
+apbrd     8ec 00000000  -- Stats B for CB function 2. 
+
+
+-- Now additionally check to see if timeout mechanism works...
+-- The last FRER frame above should still be in the history vector so usually if we 
+-- receive any duplicates they should be discarded. Check this first.
+apbrdf    158 00000000  -- check frames received ok is reset and sequence frame generation
+
+-- Duplicate that should be dropped.
+rx_frame (apb)  1
+      preamble_size     1-14
+      auto_gen_int      0       -- No interrupt expected
+      dest_addr         broadcast
+      src_addr          111122222222
+      src_addr          222233333333
+      vlan1_en          1
+      vlan1_field       4372
+      vlan2_en          1
+      vlan2_field       2210
+      frer_loc          random
+      frer_rtag_en      1
+      frer_rtag_seqnum  dup     -- Duplicate last sequence number
+      frer_discard      true    -- Expect to be discarded.
+      includerxdma      0       -- No DMA activity expected
+      type_len_field    random
+      data_size         42
+      data              random
+      fcs               good
+
+-- Now do sufficient normal (non-FRER) frames to allow function to timeout...
+rx_frame (gap)  256
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      src_addr          222233333333
+      vlan1_en          1
+      vlan1_field       2210
+      vlan2_en          0
+      includerxdma      1       -- Reset flag
+      type_len_field    random
+      data_size         42
+      data              random
+      fcs               good
+
+apbrd     8cc 00010000  -- Stats B for CB function 0. 1 timeouts, 0 out of order frames.
+
+-- The following frame although is a duplicate of above but because a timeout had occurred
+-- the history has been cleared so this should be received.
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      src_addr          222233333333
+      vlan1_en          1
+      vlan1_field       2210
+      vlan2_en          0
+      frer_loc          random
+      frer_rtag_en      1
+      frer_rtag_seqnum  dup     -- Duplicate last sequence number
+      type_len_field    random
+      data_size         42
+      data              random
+      fcs               good
+
+-- A single frame that is duplicated to allow above stats to filter through
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      src_addr          222233333333
+      vlan1_en          1
+      vlan1_field       2210
+      vlan2_en          0
+      frer_loc          random
+      frer_rtag_en      1
+      frer_auto_dup     1
+      frer_rtag_seqnum  random
+      type_len_field    random
+      data_size         42
+      data              random
+      fcs               good
+
+-- Since the above duplicated sequence is no longer a duplicate, and we didn't send in a duplicate
+-- for it, it will be considered as a latent error when it is flushed out...
+
+-- check receive statistics
+apbrd     158 00000102  -- check frames received ok
+
+-- Check CB statistics
+apbrd     8c8 00000001  -- Stats A for CB function 0. 0 Rogue, 1 latent errors.
+apbrd     8cc 00000001  -- Stats B for CB function 0. 0 timeouts, 1 out of order frames.
+apbrd     8d8 00000000  -- Stats A for CB function 1. Not used in this test.
+apbrd     8dc 00000000  -- Stats B for CB function 1. Not used in this test.
+apbrd     8e8 00000000  -- Stats A for CB function 2. Not used in this test.
+apbrd     8ec 00000000  -- Stats B for CB function 2. Not used in this test.
+
+-- Stats should be cleared on read...
+apbrd     8c8 00000000  -- Stats A for CB function 0. 
+apbrd     8cc 00000000  -- Stats B for CB function 0. 
+apbrd     8d8 00000000  -- Stats A for CB function 1. 
+apbrd     8dc 00000000  -- Stats B for CB function 1. 
+apbrd     8e8 00000000  -- Stats A for CB function 2. 
+apbrd     8ec 00000000  -- Stats B for CB function 2. 
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+
+end(50000)
+

@@ -1,0 +1,2605 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_1_64
+--
+--   Author         : Arthur Marris (arthurm@tality.com)
+--
+--   Date           : 3 March 2002
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- The purpose of this test is to ensure the transmit functionality of the 
+-- GEM works properly with the dma.
+-- 
+-- Functional Coverage
+-- � Ensures the dma block can transmit frames of various lengths starting
+--   at differing addresses.
+-- � Ensures that the dma block reads words at a time and cannot roll over 
+--   a 16-byte boundary. 
+-- � Ensures that the dma block behaves properly for all possible 
+--   combinations of start and stop addresses for the transmit buffers. 
+-- � Ensures that the various transmit control and status registers are 
+--   working properly.
+-- � Ensures the back pressure functionality of the GEM works properly.
+-- 
+-- 
+-- Detailed Test Description
+-- 
+--  1. Initialise suitable wait states for the test.
+--  2. enable transmit to force transition in INTERFRAME_GAP_INIT for 
+--     code coverage
+--  3. Initialise GEM for 10 or 100-mode operation and for transmitting frames.
+--  4. Check status registers.
+--  5. Queue up a 48-byte frame with bit 16 set in word one of the transmit
+--     buffer. Therefore, the GEM should just transmit the 48-byte frame without
+--     appending any padding and crc.
+--  6. Queue up a 2047 byte (85 byte for 10 mode) frame with bit 16 set in 
+--     word one of the transmit buffer. Therefore, the GEM should just transmit
+--     the 2047-byte frame without appending any padding and crc.
+--  7. Transmit a frame where the descriptor indicates a buffer start address of
+--     98765005. This forces the TX DMA to use an offset of 1. Therefore
+--     Buffer data reads should begin at 98765004 (32 bit aligned), but the 
+--     lowest byte should be ignored and not be present in the transmitted data.
+--  8. Transmit a frame where the descriptor indicates a buffer start address of
+--     9876500a. This forces the TX DMA to use an offset of 2. Therefore
+--     Buffer data reads should begin at 98765008 (32 bit aligned), but the 2
+--     lowest bytes should be ignored and not be present in the transmitted
+--     data.
+--  9. Transmit a frame where the descriptor indicates a buffer start address of
+--     9876500f. This forces the TX DMA to use an offset of 3. Therefore
+--     Buffer data reads should begin at 9876500c (32 bit aligned), but the 3
+--     lowest bytes should be ignored and not be present in the transmitted
+--     data.
+-- 10. Queue up a 8-byte frame not including padding and crc (Length field 
+--     in the buffer descriptor should indicate a 8 byte frame).  Therefore,
+--     the GEM should transmit the 8-byte frame and append padding and crc
+--     to make the frame minimum frame size.
+-- 11. Transmit a frame where the descriptor indicates a buffer start address of
+--     98765009. This forces the TX DMA to use an offset of 1. Therefore
+--     Buffer data reads should begin at 98765008 (32 bit aligned), but the
+--     lowest byte should be ignored and not be present in the transmitted
+--     data.
+--     This time the frame data is only 6 bytes long, and hence only two
+--     DMA data reads are required. The frame will be padded to min frame size.
+-- 12. Transmit a frame where the descriptor indicates a buffer start address of
+--     9876500e. This forces the TX DMA to use an offset of 2. Therefore
+--     Buffer data reads should begin at 9876500c (32 bit aligned), but the 2
+--     lowest bytes should be ignored and not be present in the transmitted
+--     data.
+--     This time the frame data is only 3 bytes long, and but two DMA data 
+--     reads are still required. The frame will be padded to min frame size.
+-- 13. Check TX statistics at this point.
+-- 14. Queue up a 48-byte frame not including padding and crc (Length field
+--     in the buffer descriptor should indicate a 48 byte frame).
+--     Therefore, the GEM should transmit the 48-byte frame and append
+--     padding and crc to make the frame minimum frame size.
+-- 15. Queue up a 64-byte frame including crc. The GEM should transmit
+--     the 64-byte frame.
+-- 16. Queue up a 65-byte frame including crc. The GEM should transmit
+--     the 65-byte frame.
+-- 17. Queue up a 66-byte frame including crc. The GEM should transmit
+--     the 66-byte frame.
+-- 18. Queue up a 67-byte frame including crc. The GEM should transmit
+--     the 67-byte frame.
+-- 19. Queue up a 68-byte frame including crc. The GEM should transmit
+--     the 68-byte frame.
+-- 20. Queue up a 69-byte frame including crc. The GEM should transmit
+--     the 69-byte frame.
+-- 21. Queue up a 70-byte frame including crc. The GEM should transmit
+--     the 70-byte frame.
+-- 22. Queue up a 71-byte frame including crc. The GEM should transmit
+--     the 71-byte frame.
+-- 23. Queue up a 72-byte frame including crc. The GEM should transmit
+--     the 72-byte frame.
+-- 24. Queue up a 73-byte frame including crc. The GEM should transmit
+--     the 73-byte frame.
+-- 25. Queue up a 74-byte frame including crc. The GEM should transmit
+--     the 74-byte frame.
+-- 26. Queue up a 75-byte frame including crc. The GEM should transmit
+--     the 75-byte frame.
+-- 27. Queue up a 76-byte frame including crc. The GEM should transmit
+--     the 76-byte frame.
+-- 28. Queue up a 77-byte frame including crc. The GEM should transmit
+--     the 77-byte frame.
+-- 29. Queue up a 78-byte frame including crc. The GEM should transmit
+--     the 78-byte frame.
+-- 30. Queue up a 79-byte frame including crc. The GEM should transmit
+--     the 79-byte frame.
+-- 31. Queue up a 80-byte frame including crc. The GEM should transmit
+--     the 80-byte frame.
+-- 32. Queue up a 49-byte frame not including padding and crc (Length
+--     field in the buffer descriptor should indicate a 49 byte frame).
+--     Force the GEM to append padding and crc to make the frame minimum 
+--     frame size.
+-- 33. Queue up a 50-byte frame not including padding and crc (Length
+--     field in the buffer descriptor should indicate a 50 byte frame).
+--     Force the GEM to append padding and crc to make the frame minimum 
+--     frame size.
+-- 34. Queue up a 51-byte frame not including padding and crc (Length
+--     field in the buffer descriptor should indicate a 51 byte frame).
+--     Force the GEM to append padding and crc to make the frame minimum 
+--     frame size.
+-- 35. Check status and statistics registers and ensure that the above
+--     operations were handled properly.
+-- 36. Disable transmit.
+-- 37. Try writing tx_go whilst TX is still disabled, and verify that nothing 
+--     happens.
+-- 38. Enable RX and try writing tx_go again. Again verify that nothing happens.
+-- 39. Enable transmit.
+-- 40. Queue up a 1-byte frame not including padding and crc (Length field
+--     in the buffer descriptor should indicate a 1 byte frame).
+--     Therefore, the GEM should transmit the 1-byte frame and append
+--     padding and crc to make the frame minimum frame size.
+-- 41. Queue up a 2-byte frame not including padding and crc (Length field
+--     in the buffer descriptor should indicate a 2 byte frame).
+--     Therefore, the GEM should transmit the 2-byte frame and append
+--     padding and crc to make the frame minimum frame size.
+-- 42. Queue up a 3-byte frame not including padding and crc (Length field
+--     in the buffer descriptor should indicate a 3 byte frame).
+--     Therefore, the GEM should transmit the 3-byte frame and append
+--     padding and crc to make the frame minimum frame size.
+-- 43. Queue up a 4-byte frame not including padding and crc (Length field
+--     in the buffer descriptor should indicate a 4 byte frame).
+--     Therefore, the GEM should transmit the 4-byte frame and append
+--     padding and crc to make the frame minimum frame size.
+-- 44. Queue up a broadcast frame of 6 bytes not including pad and crc (Length
+--     field in the buffer descriptor should indicate a 6 byte frame).
+--     Therefore, the GEM should transmit the 6-byte frame and append
+--     padding and crc to make the frame minimum frame size. This should
+--     be recognised as a broadcast frame in the statistics.
+-- 45. Queue up a broadcast frame of 6 bytes not including pad and crc (Length
+--     field in the buffer descriptor should indicate a 6 byte frame).
+--     Therefore, the GEM should transmit the 6-byte frame and append
+--     padding and crc to make the frame minimum frame size. This time the
+--     last bit of the address is corrupted (0xfffffffffff7) so that this 
+--     should be recognised as a multicast frame in the statistics.
+-- 46. Check status and statistics registers and ensure the above operations
+--     were handled properly.
+-- 
+--------------------------------------------------------------------------------
+
+
+-- *****************************************************************************
+--  1. Initialise suitable wait states for the test.
+-- *****************************************************************************
+wait_states 0
+bus_grant_delay 0
+
+
+-- *****************************************************************************
+-- With packet buffer in the design by default we are limited to a max packet 
+-- size of less than 2K bytes. Since this test has packets greater than this
+-- we must configure the packet buffer for a 4Kbyte external DPRAM.
+-- *****************************************************************************
+apbwr(30)  10 00020504  -- write packet buffer register (4K TX, 2K RX)
+apbwr      440 88000000  -- write transmit queue pointer 1
+apbwr      444 99000000  -- write transmit queue pointer 2
+
+
+-- *****************************************************************************
+--  2. enable transmit to force transition in INTERFRAME_GAP_INIT for 
+--     code coverage
+-- *****************************************************************************
+apbwr      00 00000008  -- enable transmit
+
+
+-- *****************************************************************************
+--  3. Initialise GEM for 10 or 100-mode operation and for transmitting frames.
+--  4. Check status registers.
+-- *****************************************************************************
+apbrd(100) 00 00000008  -- check value of network control register
+apbwr      04 00280000  -- check reset value of network config register
+apbrd      04 00280000  -- check reset value of network config register
+apbrd      08 00000006  -- check value of network status register external_int high
+apbwr      00 00000008  -- enable transmit (not receive)
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      1c AAAAAA00  -- write transmit queue pointer register
+
+
+-- *****************************************************************************
+--  5. Queue up a 48-byte frame with bit 16 set in word one of the transmit
+--     buffer. Therefore, the GEM should just transmit the 48-byte frame without
+--     appending any padding and crc.
+-- *****************************************************************************
+apbwr      00 00000208  -- write tx_start
+apbrd      14 00000000  -- wait for tx_go to be set (needs to cross multiple
+apbrd      14 00000000  -- clock boundaries...
+apbrd      14 00000000  -- ...
+apbrd      14 00000000  -- ...
+apbrd      14 00000000  -- ...)
+apbrd      14 00000000  -- ...)
+apbrd      14 00000008  -- read transmit status register - tx_go now set
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa00 55555500 -- TX buffer address
+dma_rd aaaaaa04 00018030 -- length 48, no CRC and end of frame
+
+dma_rd 55555500 12345678
+dma_rd 55555504 11111111
+dma_rd 55555508 22222222
+dma_rd 5555550c 33333333
+dma_rd 55555510 44444444
+dma_rd 55555514 55555555
+dma_rd 55555518 66666666
+dma_rd 5555551c 77777777
+dma_rd 55555520 88888888
+dma_rd 55555524 99999999
+dma_rd 55555528 aaaaaaaa
+dma_rd 5555552c bbbbbbbb
+
+dma_wr aaaaaa04 80018030 -- write back ownership bit to tx descriptor
+
+
+-- check for correct preamble, SFD, data, pad and crc (crc not added)
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  "check interrupt status - transmit complete"
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      24 00000000  -- check interrupt status is now clear
+apbrd      14 00000028  -- read transmit status register - frame transmitted, still tx_go
+
+
+
+-- *****************************************************************************
+--  6. Queue up a 2047 byte (85 byte for 10 mode) frame with bit 16 set in 
+--     word one of the transmit buffer. Therefore, the GEM should just transmit
+--     the 2047-byte frame without appending any padding and crc.
+-- *****************************************************************************
+
+-- supply the transmit data to the AHB interface
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa08 aaaaa800 -- TX buffer address
+dma_rd aaaaaa0c 000187ff -- length 2047, no CRC and end of frame
+
+dma_rd aaaaa800 12345678
+dma_rd aaaaa804 11111111
+dma_rd aaaaa808 22222222
+dma_rd aaaaa80c 33333333
+dma_rd aaaaa810 44444444
+dma_rd aaaaa814 55555555
+dma_rd aaaaa818 66666666
+dma_rd aaaaa81c 77777777
+dma_rd aaaaa820 88888888
+dma_rd aaaaa824 99999999
+dma_rd aaaaa828 aaaaaaaa
+dma_rd aaaaa82c bbbbbbbb
+dma_rd aaaaa830 cccccccc
+dma_rd aaaaa834 dddddddd
+dma_rd aaaaa838 eeeeeeee
+dma_rd aaaaa83c ffffffff
+dma_rd aaaaa840 f0000000
+dma_rd aaaaa844 0000000f
+dma_rd aaaaa848 fc000000
+dma_rd aaaaa84c 0000003f
+dma_rd aaaaa850 6d6e1e99
+dma_rd aaaaa854 cccccc82
+dma_rd aaaaa858 66666666
+dma_rd aaaaa85c 77777777
+dma_rd aaaaa860 44444444
+dma_rd aaaaa864 55555555
+dma_rd aaaaa868 66666666
+dma_rd aaaaa86c 77777777
+dma_rd aaaaa870 44444444
+dma_rd aaaaa874 55555555
+dma_rd aaaaa878 66666666
+dma_rd aaaaa87c 77777777
+dma_rd aaaaa880 44444444
+dma_rd aaaaa884 55555555
+dma_rd aaaaa888 66666666
+dma_rd aaaaa88c 77777777
+dma_rd aaaaa890 44444444
+dma_rd aaaaa894 55555555
+dma_rd aaaaa898 66666666
+dma_rd aaaaa89c 77777777
+dma_rd aaaaa8a0 44444444
+dma_rd aaaaa8a4 55555555
+dma_rd aaaaa8a8 66666666
+dma_rd aaaaa8ac 77777777
+dma_rd aaaaa8b0 44444444
+dma_rd aaaaa8b4 55555555
+dma_rd aaaaa8b8 66666666
+dma_rd aaaaa8bc 77777777
+dma_rd aaaaa8c0 44444444
+dma_rd aaaaa8c4 55555555
+dma_rd aaaaa8c8 66666666
+dma_rd aaaaa8cc 77777777
+dma_rd aaaaa8d0 44444444
+dma_rd aaaaa8d4 55555555
+dma_rd aaaaa8d8 66666666
+dma_rd aaaaa8dc 77777777
+dma_rd aaaaa8e0 44444444
+dma_rd aaaaa8e4 55555555
+dma_rd aaaaa8e8 66666666
+dma_rd aaaaa8ec 77777777
+dma_rd aaaaa8f0 44444444
+dma_rd aaaaa8f4 55555555
+dma_rd aaaaa8f8 66666666
+dma_rd aaaaa8fc 77777777
+dma_rd aaaaa900 44444444
+dma_rd aaaaa904 55555555
+dma_rd aaaaa908 66666666
+dma_rd aaaaa90c 77777777
+dma_rd aaaaa910 44444444
+dma_rd aaaaa914 55555555
+dma_rd aaaaa918 66666666
+dma_rd aaaaa91c 77777777
+dma_rd aaaaa920 44444444
+dma_rd aaaaa924 55555555
+dma_rd aaaaa928 66666666
+dma_rd aaaaa92c 77777777
+dma_rd aaaaa930 44444444
+dma_rd aaaaa934 55555555
+dma_rd aaaaa938 66666666
+dma_rd aaaaa93c 77777777
+dma_rd aaaaa940 44444444
+dma_rd aaaaa944 55555555
+dma_rd aaaaa948 66666666
+dma_rd aaaaa94c 77777777
+dma_rd aaaaa950 44444444
+dma_rd aaaaa954 55555555
+dma_rd aaaaa958 66666666
+dma_rd aaaaa95c 77777777
+dma_rd aaaaa960 44444444
+dma_rd aaaaa964 55555555
+dma_rd aaaaa968 66666666
+dma_rd aaaaa96c 77777777
+dma_rd aaaaa970 44444444
+dma_rd aaaaa974 55555555
+dma_rd aaaaa978 66666666
+dma_rd aaaaa97c 77777777
+dma_rd aaaaa980 44444444
+dma_rd aaaaa984 55555555
+dma_rd aaaaa988 66666666
+dma_rd aaaaa98c 77777777
+dma_rd aaaaa990 44444444
+dma_rd aaaaa994 55555555
+dma_rd aaaaa998 66666666
+dma_rd aaaaa99c 77777777
+dma_rd aaaaa9a0 44444444
+dma_rd aaaaa9a4 55555555
+dma_rd aaaaa9a8 66666666
+dma_rd aaaaa9ac 77777777
+dma_rd aaaaa9b0 44444444
+dma_rd aaaaa9b4 55555555
+dma_rd aaaaa9b8 66666666
+dma_rd aaaaa9bc 77777777
+dma_rd aaaaa9c0 44444444
+dma_rd aaaaa9c4 55555555
+dma_rd aaaaa9c8 66666666
+dma_rd aaaaa9cc 77777777
+dma_rd aaaaa9d0 44444444
+dma_rd aaaaa9d4 55555555
+dma_rd aaaaa9d8 66666666
+dma_rd aaaaa9dc 77777777
+dma_rd aaaaa9e0 44444444
+dma_rd aaaaa9e4 55555555
+dma_rd aaaaa9e8 66666666
+dma_rd aaaaa9ec 77777777
+dma_rd aaaaa9f0 44444444
+dma_rd aaaaa9f4 55555555
+dma_rd aaaaa9f8 66666666
+dma_rd aaaaa9fc 77777777
+dma_rd aaaaaa00 44444444
+dma_rd aaaaaa04 55555555
+dma_rd aaaaaa08 66666666
+dma_rd aaaaaa0c 77777777
+dma_rd aaaaaa10 44444444
+dma_rd aaaaaa14 55555555
+dma_rd aaaaaa18 66666666
+dma_rd aaaaaa1c 77777777
+dma_rd aaaaaa20 44444444
+dma_rd aaaaaa24 55555555
+dma_rd aaaaaa28 66666666
+dma_rd aaaaaa2c 77777777
+dma_rd aaaaaa30 44444444
+dma_rd aaaaaa34 55555555
+dma_rd aaaaaa38 66666666
+dma_rd aaaaaa3c 77777777
+dma_rd aaaaaa40 44444444
+dma_rd aaaaaa44 55555555
+dma_rd aaaaaa48 66666666
+dma_rd aaaaaa4c 77777777
+dma_rd aaaaaa50 44444444
+dma_rd aaaaaa54 55555555
+dma_rd aaaaaa58 66666666
+dma_rd aaaaaa5c 77777777
+dma_rd aaaaaa60 44444444
+dma_rd aaaaaa64 55555555
+dma_rd aaaaaa68 66666666
+dma_rd aaaaaa6c 77777777
+dma_rd aaaaaa70 44444444
+dma_rd aaaaaa74 55555555
+dma_rd aaaaaa78 66666666
+dma_rd aaaaaa7c 77777777
+dma_rd aaaaaa80 44444444
+dma_rd aaaaaa84 55555555
+dma_rd aaaaaa88 66666666
+dma_rd aaaaaa8c 77777777
+dma_rd aaaaaa90 44444444
+dma_rd aaaaaa94 55555555
+dma_rd aaaaaa98 66666666
+dma_rd aaaaaa9c 77777777
+dma_rd aaaaaaa0 44444444
+dma_rd aaaaaaa4 55555555
+dma_rd aaaaaaa8 66666666
+dma_rd aaaaaaac 77777777
+dma_rd aaaaaab0 44444444
+dma_rd aaaaaab4 55555555
+dma_rd aaaaaab8 66666666
+dma_rd aaaaaabc 77777777
+dma_rd aaaaaac0 44444444
+dma_rd aaaaaac4 55555555
+dma_rd aaaaaac8 66666666
+dma_rd aaaaaacc 77777777
+dma_rd aaaaaad0 44444444
+dma_rd aaaaaad4 55555555
+dma_rd aaaaaad8 66666666
+dma_rd aaaaaadc 77777777
+dma_rd aaaaaae0 44444444
+dma_rd aaaaaae4 55555555
+dma_rd aaaaaae8 66666666
+dma_rd aaaaaaec 77777777
+dma_rd aaaaaaf0 44444444
+dma_rd aaaaaaf4 55555555
+dma_rd aaaaaaf8 66666666
+dma_rd aaaaaafc 77777777
+dma_rd aaaaab00 44444444
+dma_rd aaaaab04 55555555
+dma_rd aaaaab08 66666666
+dma_rd aaaaab0c 77777777
+dma_rd aaaaab10 44444444
+dma_rd aaaaab14 55555555
+dma_rd aaaaab18 66666666
+dma_rd aaaaab1c 77777777
+dma_rd aaaaab20 44444444
+dma_rd aaaaab24 55555555
+dma_rd aaaaab28 66666666
+dma_rd aaaaab2c 77777777
+dma_rd aaaaab30 44444444
+dma_rd aaaaab34 55555555
+dma_rd aaaaab38 66666666
+dma_rd aaaaab3c 77777777
+dma_rd aaaaab40 44444444
+dma_rd aaaaab44 55555555
+dma_rd aaaaab48 66666666
+dma_rd aaaaab4c 77777777
+dma_rd aaaaab50 44444444
+dma_rd aaaaab54 55555555
+dma_rd aaaaab58 66666666
+dma_rd aaaaab5c 77777777
+dma_rd aaaaab60 44444444
+dma_rd aaaaab64 55555555
+dma_rd aaaaab68 66666666
+dma_rd aaaaab6c 77777777
+dma_rd aaaaab70 44444444
+dma_rd aaaaab74 55555555
+dma_rd aaaaab78 66666666
+dma_rd aaaaab7c 77777777
+dma_rd aaaaab80 44444444
+dma_rd aaaaab84 55555555
+dma_rd aaaaab88 66666666
+dma_rd aaaaab8c 77777777
+dma_rd aaaaab90 44444444
+dma_rd aaaaab94 55555555
+dma_rd aaaaab98 66666666
+dma_rd aaaaab9c 77777777
+dma_rd aaaaaba0 44444444
+dma_rd aaaaaba4 55555555
+dma_rd aaaaaba8 66666666
+dma_rd aaaaabac 77777777
+dma_rd aaaaabb0 44444444
+dma_rd aaaaabb4 55555555
+dma_rd aaaaabb8 66666666
+dma_rd aaaaabbc 77777777
+dma_rd aaaaabc0 44444444
+dma_rd aaaaabc4 55555555
+dma_rd aaaaabc8 66666666
+dma_rd aaaaabcc 77777777
+dma_rd aaaaabd0 44444444
+dma_rd aaaaabd4 55555555
+dma_rd aaaaabd8 66666666
+dma_rd aaaaabdc 77777777
+dma_rd aaaaabe0 44444444
+dma_rd aaaaabe4 55555555
+dma_rd aaaaabe8 66666666
+dma_rd aaaaabec 77777777
+dma_rd aaaaabf0 44444444
+dma_rd aaaaabf4 55555555
+dma_rd aaaaabf8 66666666
+dma_rd aaaaabfc 77777777
+dma_rd aaaaac00 44444444
+dma_rd aaaaac04 55555555
+dma_rd aaaaac08 66666666
+dma_rd aaaaac0c 77777777
+dma_rd aaaaac10 44444444
+dma_rd aaaaac14 55555555
+dma_rd aaaaac18 66666666
+dma_rd aaaaac1c 77777777
+dma_rd aaaaac20 44444444
+dma_rd aaaaac24 55555555
+dma_rd aaaaac28 66666666
+dma_rd aaaaac2c 77777777
+dma_rd aaaaac30 44444444
+dma_rd aaaaac34 55555555
+dma_rd aaaaac38 66666666
+dma_rd aaaaac3c 77777777
+dma_rd aaaaac40 44444444
+dma_rd aaaaac44 55555555
+dma_rd aaaaac48 66666666
+dma_rd aaaaac4c 77777777
+dma_rd aaaaac50 44444444
+dma_rd aaaaac54 55555555
+dma_rd aaaaac58 66666666
+dma_rd aaaaac5c 77777777
+dma_rd aaaaac60 44444444
+dma_rd aaaaac64 55555555
+dma_rd aaaaac68 66666666
+dma_rd aaaaac6c 77777777
+dma_rd aaaaac70 44444444
+dma_rd aaaaac74 55555555
+dma_rd aaaaac78 66666666
+dma_rd aaaaac7c 77777777
+dma_rd aaaaac80 44444444
+dma_rd aaaaac84 55555555
+dma_rd aaaaac88 66666666
+dma_rd aaaaac8c 77777777
+dma_rd aaaaac90 44444444
+dma_rd aaaaac94 55555555
+dma_rd aaaaac98 66666666
+dma_rd aaaaac9c 77777777
+dma_rd aaaaaca0 44444444
+dma_rd aaaaaca4 55555555
+dma_rd aaaaaca8 66666666
+dma_rd aaaaacac 77777777
+dma_rd aaaaacb0 44444444
+dma_rd aaaaacb4 55555555
+dma_rd aaaaacb8 66666666
+dma_rd aaaaacbc 77777777
+dma_rd aaaaacc0 44444444
+dma_rd aaaaacc4 55555555
+dma_rd aaaaacc8 66666666
+dma_rd aaaaaccc 77777777
+dma_rd aaaaacd0 44444444
+dma_rd aaaaacd4 55555555
+dma_rd aaaaacd8 66666666
+dma_rd aaaaacdc 77777777
+dma_rd aaaaace0 44444444
+dma_rd aaaaace4 55555555
+dma_rd aaaaace8 66666666
+dma_rd aaaaacec 77777777
+dma_rd aaaaacf0 44444444
+dma_rd aaaaacf4 55555555
+dma_rd aaaaacf8 66666666
+dma_rd aaaaacfc 77777777
+dma_rd aaaaad00 44444444
+dma_rd aaaaad04 55555555
+dma_rd aaaaad08 66666666
+dma_rd aaaaad0c 77777777
+dma_rd aaaaad10 44444444
+dma_rd aaaaad14 55555555
+dma_rd aaaaad18 66666666
+dma_rd aaaaad1c 77777777
+dma_rd aaaaad20 44444444
+dma_rd aaaaad24 55555555
+dma_rd aaaaad28 66666666
+dma_rd aaaaad2c 77777777
+dma_rd aaaaad30 44444444
+dma_rd aaaaad34 55555555
+dma_rd aaaaad38 66666666
+dma_rd aaaaad3c 77777777
+dma_rd aaaaad40 44444444
+dma_rd aaaaad44 55555555
+dma_rd aaaaad48 66666666
+dma_rd aaaaad4c 77777777
+dma_rd aaaaad50 44444444
+dma_rd aaaaad54 55555555
+dma_rd aaaaad58 66666666
+dma_rd aaaaad5c 77777777
+dma_rd aaaaad60 44444444
+dma_rd aaaaad64 55555555
+dma_rd aaaaad68 66666666
+dma_rd aaaaad6c 77777777
+dma_rd aaaaad70 44444444
+dma_rd aaaaad74 55555555
+dma_rd aaaaad78 66666666
+dma_rd aaaaad7c 77777777
+dma_rd aaaaad80 44444444
+dma_rd aaaaad84 55555555
+dma_rd aaaaad88 66666666
+dma_rd aaaaad8c 77777777
+dma_rd aaaaad90 44444444
+dma_rd aaaaad94 55555555
+dma_rd aaaaad98 66666666
+dma_rd aaaaad9c 77777777
+dma_rd aaaaada0 44444444
+dma_rd aaaaada4 55555555
+dma_rd aaaaada8 66666666
+dma_rd aaaaadac 77777777
+dma_rd aaaaadb0 44444444
+dma_rd aaaaadb4 55555555
+dma_rd aaaaadb8 66666666
+dma_rd aaaaadbc 77777777
+dma_rd aaaaadc0 44444444
+dma_rd aaaaadc4 55555555
+dma_rd aaaaadc8 66666666
+dma_rd aaaaadcc 77777777
+dma_rd aaaaadd0 44444444
+dma_rd aaaaadd4 55555555
+dma_rd aaaaadd8 66666666
+dma_rd aaaaaddc 77777777
+dma_rd aaaaade0 44444444
+dma_rd aaaaade4 55555555
+dma_rd aaaaade8 66666666
+dma_rd aaaaadec 77777777
+dma_rd aaaaadf0 44444444
+dma_rd aaaaadf4 55555555
+dma_rd aaaaadf8 66666666
+dma_rd aaaaadfc 77777777
+dma_rd aaaaae00 44444444
+dma_rd aaaaae04 55555555
+dma_rd aaaaae08 66666666
+dma_rd aaaaae0c 77777777
+dma_rd aaaaae10 44444444
+dma_rd aaaaae14 55555555
+dma_rd aaaaae18 66666666
+dma_rd aaaaae1c 77777777
+dma_rd aaaaae20 44444444
+dma_rd aaaaae24 55555555
+dma_rd aaaaae28 66666666
+dma_rd aaaaae2c 77777777
+dma_rd aaaaae30 44444444
+dma_rd aaaaae34 55555555
+dma_rd aaaaae38 66666666
+dma_rd aaaaae3c 77777777
+dma_rd aaaaae40 44444444
+dma_rd aaaaae44 55555555
+dma_rd aaaaae48 66666666
+dma_rd aaaaae4c 77777777
+dma_rd aaaaae50 44444444
+dma_rd aaaaae54 55555555
+dma_rd aaaaae58 66666666
+dma_rd aaaaae5c 77777777
+dma_rd aaaaae60 44444444
+dma_rd aaaaae64 55555555
+dma_rd aaaaae68 66666666
+dma_rd aaaaae6c 77777777
+dma_rd aaaaae70 44444444
+dma_rd aaaaae74 55555555
+dma_rd aaaaae78 66666666
+dma_rd aaaaae7c 77777777
+dma_rd aaaaae80 44444444
+dma_rd aaaaae84 55555555
+dma_rd aaaaae88 66666666
+dma_rd aaaaae8c 77777777
+dma_rd aaaaae90 44444444
+dma_rd aaaaae94 55555555
+dma_rd aaaaae98 66666666
+dma_rd aaaaae9c 77777777
+dma_rd aaaaaea0 44444444
+dma_rd aaaaaea4 55555555
+dma_rd aaaaaea8 66666666
+dma_rd aaaaaeac 77777777
+dma_rd aaaaaeb0 44444444
+dma_rd aaaaaeb4 55555555
+dma_rd aaaaaeb8 66666666
+dma_rd aaaaaebc 77777777
+dma_rd aaaaaec0 44444444
+dma_rd aaaaaec4 55555555
+dma_rd aaaaaec8 66666666
+dma_rd aaaaaecc 77777777
+dma_rd aaaaaed0 44444444
+dma_rd aaaaaed4 55555555
+dma_rd aaaaaed8 66666666
+dma_rd aaaaaedc 77777777
+dma_rd aaaaaee0 44444444
+dma_rd aaaaaee4 55555555
+dma_rd aaaaaee8 66666666
+dma_rd aaaaaeec 77777777
+dma_rd aaaaaef0 44444444
+dma_rd aaaaaef4 55555555
+dma_rd aaaaaef8 66666666
+dma_rd aaaaaefc 77777777
+dma_rd aaaaaf00 44444444
+dma_rd aaaaaf04 55555555
+dma_rd aaaaaf08 66666666
+dma_rd aaaaaf0c 77777777
+dma_rd aaaaaf10 44444444
+dma_rd aaaaaf14 55555555
+dma_rd aaaaaf18 66666666
+dma_rd aaaaaf1c 77777777
+dma_rd aaaaaf20 44444444
+dma_rd aaaaaf24 55555555
+dma_rd aaaaaf28 66666666
+dma_rd aaaaaf2c 77777777
+dma_rd aaaaaf30 44444444
+dma_rd aaaaaf34 55555555
+dma_rd aaaaaf38 66666666
+dma_rd aaaaaf3c 77777777
+dma_rd aaaaaf40 44444444
+dma_rd aaaaaf44 55555555
+dma_rd aaaaaf48 66666666
+dma_rd aaaaaf4c 77777777
+dma_rd aaaaaf50 44444444
+dma_rd aaaaaf54 55555555
+dma_rd aaaaaf58 66666666
+dma_rd aaaaaf5c 77777777
+dma_rd aaaaaf60 44444444
+dma_rd aaaaaf64 55555555
+dma_rd aaaaaf68 66666666
+dma_rd aaaaaf6c 77777777
+dma_rd aaaaaf70 44444444
+dma_rd aaaaaf74 55555555
+dma_rd aaaaaf78 66666666
+dma_rd aaaaaf7c 77777777
+dma_rd aaaaaf80 44444444
+dma_rd aaaaaf84 55555555
+dma_rd aaaaaf88 66666666
+dma_rd aaaaaf8c 77777777
+dma_rd aaaaaf90 44444444
+dma_rd aaaaaf94 55555555
+dma_rd aaaaaf98 66666666
+dma_rd aaaaaf9c 77777777
+dma_rd aaaaafa0 44444444
+dma_rd aaaaafa4 55555555
+dma_rd aaaaafa8 66666666
+dma_rd aaaaafac 77777777
+dma_rd aaaaafb0 44444444
+dma_rd aaaaafb4 55555555
+dma_rd aaaaafb8 66666666
+dma_rd aaaaafbc 77777777
+dma_rd aaaaafc0 44444444
+dma_rd aaaaafc4 55555555
+dma_rd aaaaafc8 66666666
+dma_rd aaaaafcc 77777777
+dma_rd aaaaafd0 44444444
+dma_rd aaaaafd4 55555555
+dma_rd aaaaafd8 66666666
+dma_rd aaaaafdc 77777777
+dma_rd aaaaafe0 44444444
+dma_rd aaaaafe4 55555555
+dma_rd aaaaafe8 66666666
+dma_rd aaaaafec 77777777
+dma_rd aaaaaff0 44444444
+dma_rd aaaaaff4 55555555
+dma_rd aaaaaff8 66666666
+dma_rd aaaaaffc 77777777
+
+dma_wr aaaaaa0C 800187ff -- write back ownership bit to tx descriptor
+
+-- check for correct preamble, SFD, data, pad and crc
+-- the crc in this case has been read on the AHB interface
+-- rather than been calculated
+txd        55555555555555d5
+txd        78563412111111112222222233333333
+txd        44444444555555556666666677777777
+txd        8888888899999999aaaaaaaabbbbbbbb
+txd        ccccccccddddddddeeeeeeeeffffffff
+txd        000000f00f000000000000fc3f000000
+txd        991e6e6d82cccccc6666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        44444444555555556666666677777777
+txd        444444445555555566666666777777
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbrd      14 00000028  -- read it again
+apbwr      14 000000d7  -- don't clear it
+apbrd      14 00000028  -- read it again
+apbwr      14 00000020  -- clear tx complete
+apbrd      14 00000008  -- read it again
+apbwr      14 00000008  -- try clearing tx_go
+apbrd      14 00000008  -- read it again
+
+
+-- *****************************************************************************
+--  7. Transmit a frame where the descriptor indicates a buffer start address of
+--     98765005. This forces the TX DMA to use an offset of 1. Therefore
+--     Buffer data reads should begin at 98765004 (32 bit aligned), but the 
+--     lowest byte should be ignored and not be present in the transmitted data.
+-- *****************************************************************************
+
+-- supply the transmit data to the AHB interface
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa10 98765001 -- TX buffer address 4 + 1
+dma_rd aaaaaa14 00008030 -- length 48, CRC and end of frame
+
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+dma_rd 98765030 bbbbbb78
+dma_rd 98765034 00000000
+
+dma_wr aaaaaa14 80008030 -- write back ownership bit to tx descriptor
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d556341211111111222222223333333344
+txd                    44444455555555666666667777777788
+txd                    88888899999999aaaaaaaabbbbbbbb78
+txd                    000000000000000000000000ab14b4c1
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+
+-- *****************************************************************************
+--  8. Transmit a frame where the descriptor indicates a buffer start address of
+--     9876500a. This forces the TX DMA to use an offset of 2. Therefore
+--     Buffer data reads should begin at 98765004 (32 bit aligned), but the two
+--     lowest bytes should be ignored and not be present in the transmitted
+--     data.
+-- *****************************************************************************
+
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa18 9876500a -- TX buffer address 8 + 2
+dma_rd aaaaaa1c 00008030 -- length 48, CRC and end of frame
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765008 12345678
+dma_rd 9876500c 11111111
+dma_rd 98765010 22222222
+dma_rd 98765014 33333333
+dma_rd 98765018 44444444
+dma_rd 9876501c 55555555
+dma_rd 98765020 66666666
+dma_rd 98765024 77777777
+dma_rd 98765028 88888888
+dma_rd 9876502c 99999999
+dma_rd 98765030 aaaaaaaa
+dma_rd 98765034 bbbbbbbb
+dma_rd 98765038 12345678
+dma_rd 9876503c 00000000
+
+dma_wr aaaaaa1C 80008030 -- write back ownership bit to tx descriptor
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d534121111111122222222333333334444
+txd                    44445555555566666666777777778888
+txd                    888899999999aaaaaaaabbbbbbbb7856
+txd                    0000000000000000000000004f76792d
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+
+-- *****************************************************************************
+--  9. Transmit a frame where the descriptor indicates a buffer start address of
+--     9876500f. This forces the TX DMA to use an offset of 3. Therefore
+--     Buffer data reads should begin at 9876500c (32 bit aligned), but the 3
+--     lowest bytes should be ignored and not be present in the transmitted
+--     data.
+-- *****************************************************************************
+
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa20 9876500b -- TX buffer address c + 3
+dma_rd aaaaaa24 00008030 -- length 48, CRC and end of frame
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765008 12345678
+dma_rd 9876500c 11111111
+dma_rd 98765010 22222222
+dma_rd 98765014 33333333
+dma_rd 98765018 44444444
+dma_rd 9876501c 55555555
+dma_rd 98765020 66666666
+dma_rd 98765024 77777777
+dma_rd 98765028 88888888
+dma_rd 9876502c 99999999
+dma_rd 98765030 aaaaaaaa
+dma_rd 98765034 bbbbbbbb
+dma_rd 98765038 12345678
+dma_rd 9876503c 00000000
+
+dma_wr aaaaaa24 80008030 -- write back ownership bit to tx descriptor
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d512111111112222222233333333444444
+txd                    44555555556666666677777777888888
+txd                    8899999999aaaaaaaabbbbbbbb785634
+txd                    0000000000000000000000009dda470f
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+
+-- *****************************************************************************
+-- 10. Queue up a 8-byte frame not including padding and crc (Length field 
+--     in the buffer descriptor should indicate a 8 byte frame).  Therefore,
+--     the GEM should transmit the 8-byte frame and append padding and crc
+--     to make the frame minimum frame size.
+-- *****************************************************************************
+
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa28 98765008 -- TX buffer address
+dma_rd aaaaaa2c 00008008 -- length 8, CRC and end of frame
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765008 12345678
+dma_rd 9876500c 11111111
+
+dma_wr aaaaaa2c 80008008 -- write back ownership bit to tx descriptor
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d578563412111111110000000000000000
+txd                    00000000000000000000000000000000
+txd                    00000000000000000000000000000000
+txd                    0000000000000000000000005a3fc03e
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+
+-- *****************************************************************************
+-- 11. Transmit a frame where the descriptor indicates a buffer start address of
+--     98765009. This forces the TX DMA to use an offset of 1. Therefore
+--     Buffer data reads should begin at 98765008 (32 bit aligned), but the
+--     lowest byte should be ignored and not be present in the transmitted
+--     data.
+--     This time the frame data is only 6 bytes long, and hence only two
+--     DMA data reads are required. The frame will be padded to min frame size.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa30 98765009 -- TX buffer address
+dma_rd aaaaaa34 00008006 -- length 6, CRC and end of frame
+
+
+dma_rd 98765008 12345678
+dma_rd 9876500c 11111111
+
+dma_wr aaaaaa34 80008006 -- write back ownership bit to tx descriptor
+
+txd    55555555555555d556341211111100000000000000000000
+txd                    00000000000000000000000000000000
+txd                    00000000000000000000000000000000
+txd                    0000000000000000000000008444aa63
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 12. Transmit a frame where the descriptor indicates a buffer start address of
+--     9876500e. This forces the TX DMA to use an offset of 2. Therefore
+--     Buffer data reads should begin at 9876500c (32 bit aligned), but the 2
+--     lowest bytes should be ignored and not be present in the transmitted
+--     data.
+--     This time the frame data is only 3 bytes long, and but two DMA data 
+--     reads are still required. The frame will be padded to min frame size.
+-- *****************************************************************************
+
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa38 9876500a -- TX buffer address
+dma_rd aaaaaa3c 00008003 -- length 3, CRC and end of frame
+
+
+dma_rd 98765008 12345678
+dma_rd 9876500c 11111111
+
+dma_wr aaaaaa3c 80008003 -- write back ownership bit to tx descriptor
+
+txd    55555555555555d534121100000000000000000000000000
+txd                    00000000000000000000000000000000
+txd                    00000000000000000000000000000000
+txd                    0000000000000000000000006967a679
+
+
+-- read a used bit from next descriptor to halt transmission
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa40 9876500a -- TX buffer address
+dma_rd aaaaaa44 80008003 -- used bit
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000088  -- check interrupt status - transmit complete & used
+apbwr      24 00000088  -- clear interrupt status register
+apbrd      14 00000021  -- read transmit status register - tx complete and used
+apbwr      14 00000021  -- clear transmit status register
+
+
+
+-- *****************************************************************************
+-- 13. Check TX statistics at this point.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 000009af  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000008  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000006  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000001  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+
+
+
+-- *****************************************************************************
+-- 14. Queue up a 48-byte frame not including padding and crc (Length field
+--     in the buffer descriptor should indicate a 48 byte frame).
+--     Therefore, the GEM should transmit the 48-byte frame and append
+--     padding and crc to make the frame minimum frame size.
+-- *****************************************************************************
+
+-- setup a new tx queue
+apbwr      1c 55555500  -- write transmit queue pointer register
+apbwr      00 00000208  -- write tx_start
+apbrd      14 00000000  -- wait for tx_go to be set (needs to cross multiple
+apbrd      14 00000000  -- clock boundaries...
+apbrd      14 00000000  -- ...
+apbrd      14 00000000  -- ...
+apbrd      14 00000000  -- ...)
+apbrd      14 00000000  -- ...)
+apbrd      14 00000008  -- read transmit status register - tx_go now set
+
+
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555500 11100000 -- TX buffer address
+dma_rd 55555504 00008030 -- length 48, CRC and end of frame
+
+dma_rd 11100000 12345678
+dma_rd 11100004 11111111
+dma_rd 11100008 22222222
+dma_rd 1110000c 33333333
+dma_rd 11100010 44444444
+dma_rd 11100014 55555555
+dma_rd 11100018 66666666
+dma_rd 1110001c 77777777
+dma_rd 11100020 88888888
+dma_rd 11100024 99999999
+dma_rd 11100028 aaaaaaaa
+dma_rd 1110002c bbbbbbbb
+
+dma_wr 55555504 80008030 -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    0000000000000000000000002638309b
+
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 15. Queue up a 64-byte frame including crc. The GEM should transmit
+--     the 64-byte frame.
+-- *****************************************************************************
+
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555508 22200000 -- TX buffer address
+dma_rd 5555550c 00008040 -- length 64, CRC and end of frame
+
+
+dma_rd 22200000 12345678
+dma_rd 22200004 11111111
+dma_rd 22200008 22222222
+dma_rd 2220000c 33333333
+dma_rd 22200010 44444444
+dma_rd 22200014 55555555
+dma_rd 22200018 66666666
+dma_rd 2220001c 77777777
+dma_rd 22200020 88888888
+dma_rd 22200024 99999999
+dma_rd 22200028 aaaaaaaa
+dma_rd 2220002c bbbbbbbb
+dma_rd 22200030 88888888
+dma_rd 22200034 99999999
+dma_rd 22200038 aaaaaaaa
+dma_rd 2220003c bbbbbbbb
+
+dma_wr 5555550c 80008040 -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb1c8945d8
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 16. Queue up a 65-byte frame including crc. The GEM should transmit
+--     the 65-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555510 33300000 -- TX buffer address
+dma_rd 55555514 00008041 -- length 65, CRC and end of frame
+
+
+dma_rd 33300000 12345678
+dma_rd 33300004 11111111
+dma_rd 33300008 22222222
+dma_rd 3330000c 33333333
+dma_rd 33300010 44444444
+dma_rd 33300014 55555555
+dma_rd 33300018 66666666
+dma_rd 3330001c 77777777
+dma_rd 33300020 88888888
+dma_rd 33300024 99999999
+dma_rd 33300028 aaaaaaaa
+dma_rd 3330002c bbbbbbbb
+dma_rd 33300030 88888888
+dma_rd 33300034 99999999
+dma_rd 33300038 aaaaaaaa
+dma_rd 3330003c bbbbbbbb
+dma_rd 33300040 87654321
+dma_rd 33300044 00000000
+
+dma_wr 55555514 80008041 -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    2115e6b28a
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 17. Queue up a 66-byte frame including crc. The GEM should transmit
+--     the 66-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555518 44400000 -- TX buffer address
+dma_rd 5555551c 00008042 -- length 66, CRC and end of frame
+
+
+dma_rd 44400000 12345678
+dma_rd 44400004 11111111
+dma_rd 44400008 22222222
+dma_rd 4440000c 33333333
+dma_rd 44400010 44444444
+dma_rd 44400014 55555555
+dma_rd 44400018 66666666
+dma_rd 4440001c 77777777
+dma_rd 44400020 88888888
+dma_rd 44400024 99999999
+dma_rd 44400028 aaaaaaaa
+dma_rd 4440002c bbbbbbbb
+dma_rd 44400030 88888888
+dma_rd 44400034 99999999
+dma_rd 44400038 aaaaaaaa
+dma_rd 4440003c bbbbbbbb
+dma_rd 44400040 87654321
+dma_rd 44400044 00000000
+
+dma_wr 5555551c 80008042 -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    2143aaa98050
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 18. Queue up a 67-byte frame including crc. The GEM should transmit
+--     the 67-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555520 55500000 -- TX buffer address
+dma_rd 55555524 00008043 -- length 67, CRC and end of frame
+
+
+dma_rd 55500000 12345678
+dma_rd 55500004 11111111
+dma_rd 55500008 22222222
+dma_rd 5550000c 33333333
+dma_rd 55500010 44444444
+dma_rd 55500014 55555555
+dma_rd 55500018 66666666
+dma_rd 5550001c 77777777
+dma_rd 55500020 88888888
+dma_rd 55500024 99999999
+dma_rd 55500028 aaaaaaaa
+dma_rd 5550002c bbbbbbbb
+dma_rd 55500030 88888888
+dma_rd 55500034 99999999
+dma_rd 55500038 aaaaaaaa
+dma_rd 5550003c bbbbbbbb
+dma_rd 55500040 87654321
+dma_rd 55500044 00000000
+
+dma_wr 55555524 80008043 -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    21436505b089d9
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 19. Queue up a 68-byte frame including crc. The GEM should transmit
+--     the 68-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555528 66600000 -- TX buffer address
+dma_rd 5555552c 00008044 -- length 68, CRC and end of frame
+
+
+dma_rd 66600000 12345678
+dma_rd 66600004 11111111
+dma_rd 66600008 22222222
+dma_rd 6660000c 33333333
+dma_rd 66600010 44444444
+dma_rd 66600014 55555555
+dma_rd 66600018 66666666
+dma_rd 6660001c 77777777
+dma_rd 66600020 88888888
+dma_rd 66600024 99999999
+dma_rd 66600028 aaaaaaaa
+dma_rd 6660002c bbbbbbbb
+dma_rd 66600030 88888888
+dma_rd 66600034 99999999
+dma_rd 66600038 aaaaaaaa
+dma_rd 6660003c bbbbbbbb
+dma_rd 66600040 87654321
+dma_rd 66600044 00000000
+
+dma_wr 5555552c 80008044 -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    2143658731846dd1
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 20. Queue up a 69-byte frame including crc. The GEM should transmit
+--     the 69-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555530 77700000 -- TX buffer address
+dma_rd 55555534 00008045 -- length 69, CRC and end of frame
+
+
+dma_rd 77700000 12345678
+dma_rd 77700004 11111111
+dma_rd 77700008 22222222
+dma_rd 7770000c 33333333
+dma_rd 77700010 44444444
+dma_rd 77700014 55555555
+dma_rd 77700018 66666666
+dma_rd 7770001c 77777777
+dma_rd 77700020 88888888
+dma_rd 77700024 99999999
+dma_rd 77700028 aaaaaaaa
+dma_rd 7770002c bbbbbbbb
+dma_rd 77700030 88888888
+dma_rd 77700034 99999999
+dma_rd 77700038 aaaaaaaa
+dma_rd 7770003c bbbbbbbb
+dma_rd 77700040 cccccccc
+dma_rd 77700044 87654321
+
+dma_wr 55555534 80008045 -- write back ownership bit to tx descriptor
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    cccccccc214fc73e6f
+
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 21. Queue up a 70-byte frame including crc. The GEM should transmit
+--     the 70-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555538 88800000 -- TX buffer address
+dma_rd 5555553c 00008046 -- length 70, CRC and end of frame
+
+
+dma_rd 88800000 12345678
+dma_rd 88800004 11111111
+dma_rd 88800008 22222222
+dma_rd 8880000c 33333333
+dma_rd 88800010 44444444
+dma_rd 88800014 55555555
+dma_rd 88800018 66666666
+dma_rd 8880001c 77777777
+dma_rd 88800020 88888888
+dma_rd 88800024 99999999
+dma_rd 88800028 aaaaaaaa
+dma_rd 8880002c bbbbbbbb
+dma_rd 88800030 88888888
+dma_rd 88800034 99999999
+dma_rd 88800038 aaaaaaaa
+dma_rd 8880003c bbbbbbbb
+dma_rd 88800040 cccccccc
+dma_rd 88800044 87654321
+
+dma_wr 5555553c 80008046 -- write back ownership bit to tx descriptor
+
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    cccccccc2143619ddbdb
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 22. Queue up a 71-byte frame including crc. The GEM should transmit
+--     the 71-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555540 99900000 -- TX buffer address
+dma_rd 55555544 00008047 -- length 71, CRC and end of frame
+
+
+dma_rd 99900000 12345678
+dma_rd 99900004 11111111
+dma_rd 99900008 22222222
+dma_rd 9990000c 33333333
+dma_rd 99900010 44444444
+dma_rd 99900014 55555555
+dma_rd 99900018 66666666
+dma_rd 9990001c 77777777
+dma_rd 99900020 88888888
+dma_rd 99900024 99999999
+dma_rd 99900028 aaaaaaaa
+dma_rd 9990002c bbbbbbbb
+dma_rd 99900030 88888888
+dma_rd 99900034 99999999
+dma_rd 99900038 aaaaaaaa
+dma_rd 9990003c bbbbbbbb
+dma_rd 99900040 cccccccc
+dma_rd 99900044 87654321
+
+dma_wr 55555544 80008047 -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    cccccccc21436509f0b4d5
+
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 23. Queue up a 72-byte frame including crc. The GEM should transmit
+--     the 72-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555548 aaa00000 -- TX buffer address
+dma_rd 5555554c 00008048 -- length 72, CRC and end of frame
+
+
+dma_rd aaa00000 12345678
+dma_rd aaa00004 11111111
+dma_rd aaa00008 22222222
+dma_rd aaa0000c 33333333
+dma_rd aaa00010 44444444
+dma_rd aaa00014 55555555
+dma_rd aaa00018 66666666
+dma_rd aaa0001c 77777777
+dma_rd aaa00020 88888888
+dma_rd aaa00024 99999999
+dma_rd aaa00028 aaaaaaaa
+dma_rd aaa0002c bbbbbbbb
+dma_rd aaa00030 88888888
+dma_rd aaa00034 99999999
+dma_rd aaa00038 aaaaaaaa
+dma_rd aaa0003c bbbbbbbb
+dma_rd aaa00040 cccccccc
+dma_rd aaa00044 87654321
+
+dma_wr 5555554c 80008048 -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    cccccccc214365875af5d7d8
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 24. Queue up a 73-byte frame including crc. The GEM should transmit
+--     the 73-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555550 bbb00000 -- TX buffer address
+dma_rd 55555554 00008049 -- length 73, CRC and end of frame
+
+
+dma_rd bbb00000 12345678
+dma_rd bbb00004 11111111
+dma_rd bbb00008 22222222
+dma_rd bbb0000c 33333333
+dma_rd bbb00010 44444444
+dma_rd bbb00014 55555555
+dma_rd bbb00018 66666666
+dma_rd bbb0001c 77777777
+dma_rd bbb00020 88888888
+dma_rd bbb00024 99999999
+dma_rd bbb00028 aaaaaaaa
+dma_rd bbb0002c bbbbbbbb
+dma_rd bbb00030 88888888
+dma_rd bbb00034 99999999
+dma_rd bbb00038 aaaaaaaa
+dma_rd bbb0003c bbbbbbbb
+dma_rd bbb00040 cccccccc
+dma_rd bbb00044 dddddddd
+dma_rd bbb00048 87654321
+dma_rd bbb0004c 00000000
+
+dma_wr 55555554 80008049 -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    ccccccccdddddddd2171a14f4e
+
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 25. Queue up a 74-byte frame including crc. The GEM should transmit
+--     the 74-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555558 ccc00000 -- TX buffer address
+dma_rd 5555555c 0000804a -- length 74, CRC and end of frame
+
+
+dma_rd ccc00000 12345678
+dma_rd ccc00004 11111111
+dma_rd ccc00008 22222222
+dma_rd ccc0000c 33333333
+dma_rd ccc00010 44444444
+dma_rd ccc00014 55555555
+dma_rd ccc00018 66666666
+dma_rd ccc0001c 77777777
+dma_rd ccc00020 88888888
+dma_rd ccc00024 99999999
+dma_rd ccc00028 aaaaaaaa
+dma_rd ccc0002c bbbbbbbb
+dma_rd ccc00030 88888888
+dma_rd ccc00034 99999999
+dma_rd ccc00038 aaaaaaaa
+dma_rd ccc0003c bbbbbbbb
+dma_rd ccc00040 cccccccc
+dma_rd ccc00044 dddddddd
+dma_rd ccc00048 87654321
+dma_rd ccc0004c 00000000
+
+dma_wr 5555555c 8000804a -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    ccccccccdddddddd2143acf19b1a
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 26. Queue up a 75-byte frame including crc. The GEM should transmit
+--     the 75-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555560 ddd00000 -- TX buffer address
+dma_rd 55555564 0000804b -- length 75, CRC and end of frame
+
+
+dma_rd ddd00000 12345678
+dma_rd ddd00004 11111111
+dma_rd ddd00008 22222222
+dma_rd ddd0000c 33333333
+dma_rd ddd00010 44444444
+dma_rd ddd00014 55555555
+dma_rd ddd00018 66666666
+dma_rd ddd0001c 77777777
+dma_rd ddd00020 88888888
+dma_rd ddd00024 99999999
+dma_rd ddd00028 aaaaaaaa
+dma_rd ddd0002c bbbbbbbb
+dma_rd ddd00030 88888888
+dma_rd ddd00034 99999999
+dma_rd ddd00038 aaaaaaaa
+dma_rd ddd0003c bbbbbbbb
+dma_rd ddd00040 cccccccc
+dma_rd ddd00044 dddddddd
+dma_rd ddd00048 87654321
+dma_rd ddd0004c 00000000
+
+dma_wr 55555564 8000804b -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    ccccccccdddddddd214365680ea030
+
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 27. Queue up a 76-byte frame including crc. The GEM should transmit
+--     the 76-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555568 eee00000 -- TX buffer address
+dma_rd 5555556c 0000804c -- length 76, CRC and end of frame
+
+
+dma_rd eee00000 12345678
+dma_rd eee00004 11111111
+dma_rd eee00008 22222222
+dma_rd eee0000c 33333333
+dma_rd eee00010 44444444
+dma_rd eee00014 55555555
+dma_rd eee00018 66666666
+dma_rd eee0001c 77777777
+dma_rd eee00020 88888888
+dma_rd eee00024 99999999
+dma_rd eee00028 aaaaaaaa
+dma_rd eee0002c bbbbbbbb
+dma_rd eee00030 88888888
+dma_rd eee00034 99999999
+dma_rd eee00038 aaaaaaaa
+dma_rd eee0003c bbbbbbbb
+dma_rd eee00040 cccccccc
+dma_rd eee00044 dddddddd
+dma_rd eee00048 87654321
+dma_rd eee0004c 00000000
+
+dma_wr 5555556c 8000804c -- write back ownership bit to tx descriptor
+
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    ccccccccdddddddd214365876ab087e2
+
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 28. Queue up a 77-byte frame including crc. The GEM should transmit
+--     the 77-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555570 fff00000 -- TX buffer address
+dma_rd 55555574 0000804d -- length 77, CRC and end of frame
+
+
+dma_rd fff00000 12345678
+dma_rd fff00004 11111111
+dma_rd fff00008 22222222
+dma_rd fff0000c 33333333
+dma_rd fff00010 44444444
+dma_rd fff00014 55555555
+dma_rd fff00018 66666666
+dma_rd fff0001c 77777777
+dma_rd fff00020 88888888
+dma_rd fff00024 99999999
+dma_rd fff00028 aaaaaaaa
+dma_rd fff0002c bbbbbbbb
+dma_rd fff00030 88888888
+dma_rd fff00034 99999999
+dma_rd fff00038 aaaaaaaa
+dma_rd fff0003c bbbbbbbb
+dma_rd fff00040 cccccccc
+dma_rd fff00044 dddddddd
+dma_rd fff00048 eeeeeeee
+dma_rd fff0004c 87654321
+
+dma_wr 55555574 8000804d -- write back ownership bit to tx descriptor
+
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    ccccccccddddddddeeeeeeee21786af5be
+
+
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 29. Queue up a 78-byte frame including crc. The GEM should transmit
+--     the 78-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555578 11200000 -- TX buffer address
+dma_rd 5555557c 0000804e -- length 78, CRC and end of frame
+
+
+dma_rd 11200000 12345678
+dma_rd 11200004 11111111
+dma_rd 11200008 22222222
+dma_rd 1120000c 33333333
+dma_rd 11200010 44444444
+dma_rd 11200014 55555555
+dma_rd 11200018 66666666
+dma_rd 1120001c 77777777
+dma_rd 11200020 88888888
+dma_rd 11200024 99999999
+dma_rd 11200028 aaaaaaaa
+dma_rd 1120002c bbbbbbbb
+dma_rd 11200030 88888888
+dma_rd 11200034 99999999
+dma_rd 11200038 aaaaaaaa
+dma_rd 1120003c bbbbbbbb
+dma_rd 11200040 cccccccc
+dma_rd 11200044 dddddddd
+dma_rd 11200048 eeeeeeee
+dma_rd 1120004c 87654321
+
+dma_wr 5555557c 8000804e -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    ccccccccddddddddeeeeeeee2143c3f3b763
+
+
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 30. Queue up a 79-byte frame including crc. The GEM should transmit
+--     the 79-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555580 11300000 -- TX buffer address
+dma_rd 55555584 0000804f -- length 79, CRC and end of frame
+
+
+dma_rd 11300000 12345678
+dma_rd 11300004 11111111
+dma_rd 11300008 22222222
+dma_rd 1130000c 33333333
+dma_rd 11300010 44444444
+dma_rd 11300014 55555555
+dma_rd 11300018 66666666
+dma_rd 1130001c 77777777
+dma_rd 11300020 88888888
+dma_rd 11300024 99999999
+dma_rd 11300028 aaaaaaaa
+dma_rd 1130002c bbbbbbbb
+dma_rd 11300030 88888888
+dma_rd 11300034 99999999
+dma_rd 11300038 aaaaaaaa
+dma_rd 1130003c bbbbbbbb
+dma_rd 11300040 cccccccc
+dma_rd 11300044 dddddddd
+dma_rd 11300048 eeeeeeee
+dma_rd 1130004c 87654321
+
+dma_wr 55555584 8000804f -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    ccccccccddddddddeeeeeeee214365a35ed4ed
+
+
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+-- *****************************************************************************
+-- 31. Queue up a 80-byte frame including crc. The GEM should transmit
+--     the 80-byte frame.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555588 11400000 -- TX buffer address
+dma_rd 5555558c 00008050 -- length 80, CRC and end of frame
+
+
+dma_rd 11400000 12345678
+dma_rd 11400004 11111111
+dma_rd 11400008 22222222
+dma_rd 1140000c 33333333
+dma_rd 11400010 44444444
+dma_rd 11400014 55555555
+dma_rd 11400018 66666666
+dma_rd 1140001c 77777777
+dma_rd 11400020 88888888
+dma_rd 11400024 99999999
+dma_rd 11400028 aaaaaaaa
+dma_rd 1140002c bbbbbbbb
+dma_rd 11400030 88888888
+dma_rd 11400034 99999999
+dma_rd 11400038 aaaaaaaa
+dma_rd 1140003c bbbbbbbb
+dma_rd 11400040 cccccccc
+dma_rd 11400044 dddddddd
+dma_rd 11400048 eeeeeeee
+dma_rd 1140004c 87654321
+
+dma_wr 5555558c 80008050 -- write back ownership bit to tx descriptor
+
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    ccccccccddddddddeeeeeeee2143658702dfecee
+
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+
+
+
+-- *****************************************************************************
+-- 32. Queue up a 49-byte frame not including padding and crc (Length
+--     field in the buffer descriptor should indicate a 49 byte frame).
+--     Force the GEM to append padding and crc to make the frame minimum 
+--     frame size.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555590 11500000 -- TX buffer address
+dma_rd 55555594 00008031 -- length 49, CRC and end of frame
+
+
+dma_rd 11500000 12345678
+dma_rd 11500004 11111111
+dma_rd 11500008 22222222
+dma_rd 1150000c 33333333
+dma_rd 11500010 44444444
+dma_rd 11500014 55555555
+dma_rd 11500018 66666666
+dma_rd 1150001c 77777777
+dma_rd 11500020 88888888
+dma_rd 11500024 99999999
+dma_rd 11500028 aaaaaaaa
+dma_rd 1150002c bbbbbbbb
+dma_rd 11500030 87654321
+dma_rd 11500034 00000000
+
+dma_wr 55555594 80008031 -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    210000000000000000000000b1afa418
+
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+
+-- *****************************************************************************
+-- 33. Queue up a 50-byte frame not including padding and crc (Length
+--     field in the buffer descriptor should indicate a 50 byte frame).
+--     Force the GEM to append padding and crc to make the frame minimum 
+--     frame size.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555598 11600000 -- TX buffer address
+dma_rd 5555559c 00008032 -- length 50, CRC and end of frame
+
+
+dma_rd 11600000 12345678
+dma_rd 11600004 11111111
+dma_rd 11600008 22222222
+dma_rd 1160000c 33333333
+dma_rd 11600010 44444444
+dma_rd 11600014 55555555
+dma_rd 11600018 66666666
+dma_rd 1160001c 77777777
+dma_rd 11600020 88888888
+dma_rd 11600024 99999999
+dma_rd 11600028 aaaaaaaa
+dma_rd 1160002c bbbbbbbb
+dma_rd 11600030 87654321
+dma_rd 11600034 00000000
+
+dma_wr 5555559c 80008032 -- write back ownership bit to tx descriptor
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    2143000000000000000000005fd00e57
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit status register transmit complete bit
+
+
+
+-- *****************************************************************************
+-- 34. Queue up a 51-byte frame not including padding and crc (Length
+--     field in the buffer descriptor should indicate a 51 byte frame).
+--     Force the GEM to append padding and crc to make the frame minimum 
+--     frame size.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 555555a0 11700000 -- TX buffer address
+dma_rd 555555a4 00008033 -- length 51, CRC and end of frame
+
+
+dma_rd 11700000 12345678
+dma_rd 11700004 11111111
+dma_rd 11700008 22222222
+dma_rd 1170000c 33333333
+dma_rd 11700010 44444444
+dma_rd 11700014 55555555
+dma_rd 11700018 66666666
+dma_rd 1170001c 77777777
+dma_rd 11700020 88888888
+dma_rd 11700024 99999999
+dma_rd 11700028 aaaaaaaa
+dma_rd 1170002c bbbbbbbb
+dma_rd 11700030 87654321
+dma_rd 11700034 00000000
+
+dma_wr 555555a4 80008033 -- write back ownership bit to tx descriptor
+
+
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    2143650000000000000000006b1fc060
+
+--finish off tx buffer
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 555555a8 11700000 -- TX buffer address (ownership bit already set)
+dma_rd 555555ac 80008033 -- length 51, CRC and end of frame
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000088  -- check interrupt status - transmit complete & used
+apbwr      24 00000088  -- clear interrupt status register
+apbrd      14 00000021  -- read transmit status register - tx complete & used
+apbwr      14 00000021  -- clear transmit status register
+
+
+-- *****************************************************************************
+-- 35. Check status and statistics registers and ensure that the above
+--     operations were handled properly.
+-- *****************************************************************************
+
+-- check statistics
+apbrd     100 0000060c  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000015  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000004  -- check frames transmitted 64
+apbrd     11C 00000011  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+
+
+-- *****************************************************************************
+-- 36. Disable transmit.
+-- 37. Try writing tx_go whilst TX is still disabled, and verify that nothing 
+--     happens.
+-- *****************************************************************************
+
+apbwr      00 00000000  -- disable transmit & receive
+apbwr      1c aaaaaa00  -- write transmit queue pointer register
+apbwr      00 00000200  -- write tx_start (keep rx & tx disabled)
+apbrd      14 00000000  -- wait for tx_go to be set (needs to cross multiple
+apbrd      14 00000000  -- clock boundaries...
+apbrd      14 00000000  -- ...
+apbrd      14 00000000  -- ...
+apbrd      14 00000000  -- ...)
+apbrd      14 00000000  -- read transmit status register - tx_go will have been set by now
+
+
+-- *****************************************************************************
+-- 38. Enable RX and try writing tx_go again. Again verify that nothing happens.
+-- *****************************************************************************
+
+apbwr      00 00000004  -- enable receive
+apbwr      1c 55555500  -- write transmit queue pointer register
+apbwr      00 00000204  -- write tx_start (keep tx disabled, rx enabled)
+
+-- enabling read causes descriptor preread from rx
+--dma_rd     00000000 00000000
+
+apbrd      14 00000000  -- wait for tx_go to be set (needs to cross multiple
+apbrd      14 00000000  -- clock boundaries...
+apbrd      14 00000000  -- ...
+apbrd      14 00000000  -- ...
+apbrd      14 00000000  -- ...)
+apbrd      14 00000000  -- read transmit status register - tx_go will have been set by now
+
+
+
+-- *****************************************************************************
+-- 39. Enable transmit.
+-- *****************************************************************************
+apbwr      1c aaaaaa00  -- write transmit queue pointer register
+apbwr      00 00000208  -- write tx_start (keep tx enabled)
+apbrd      14 00000000  -- wait for tx_go to be set (needs to cross multiple
+apbrd      14 00000000  -- clock boundaries...
+apbrd      14 00000000  -- ...
+apbrd      14 00000000  -- ...
+apbrd      14 00000000  -- ...)
+apbrd      14 00000000  -- ...)
+apbrd      14 00000008  -- read transmit status register - tx_go will have been set by now
+
+
+
+-- *****************************************************************************
+-- 40. Queue up a 1-byte frame not including padding and crc (Length field
+--     in the buffer descriptor should indicate a 1 byte frame).
+--     Therefore, the GEM should transmit the 1-byte frame and append
+--     padding and crc to make the frame minimum frame size.
+-- *****************************************************************************
+
+-- supply DMA data
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa00 55555500 -- TX buffer address
+dma_rd aaaaaa04 00008001 -- length 1, CRC, start and end of frame, offset one byte
+
+dma_rd 55555500 12345678
+dma_rd 55555504 00000000
+
+dma_wr aaaaaa04 80008001 -- write back ownership bit to tx descriptor
+
+txd    55555555555555d578000000000000000000000000000000
+txd                    00000000000000000000000000000000
+txd                    00000000000000000000000000000000
+txd                    00000000000000000000000094d2d0a5
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - tx complete and tx_go
+
+
+-- *****************************************************************************
+-- 41. Queue up a 2-byte frame not including padding and crc (Length field
+--     in the buffer descriptor should indicate a 2 byte frame).
+--     Therefore, the GEM should transmit the 2-byte frame and append
+--     padding and crc to make the frame minimum frame size.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa08 55550000
+dma_rd aaaaaa0C 00008002
+dma_rd 55550000 12345678
+dma_rd 55550004 00000000
+dma_wr aaaaaa0C 80008002
+
+txd    55555555555555d578560000000000000000000000000000
+txd                    00000000000000000000000000000000
+txd                    00000000000000000000000000000000
+txd                    000000000000000000000000f289a9a2
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - tx complete and tx_go
+
+
+
+-- *****************************************************************************
+-- 42. Queue up a 3-byte frame not including padding and crc (Length field
+--     in the buffer descriptor should indicate a 3 byte frame).
+--     Therefore, the GEM should transmit the 3-byte frame and append
+--     padding and crc to make the frame minimum frame size.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa10 55550000
+dma_rd aaaaaa14 00008003
+dma_rd 55550000 12345678
+dma_rd 55550004 00000000
+dma_wr aaaaaa14 80008003
+
+txd    55555555555555d578563400000000000000000000000000
+txd                    00000000000000000000000000000000
+txd                    00000000000000000000000000000000
+txd                    00000000000000000000000025843fcb
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - tx complete and tx_go
+
+
+
+-- *****************************************************************************
+-- 43. Queue up a 4-byte frame not including padding and crc (Length field
+--     in the buffer descriptor should indicate a 4 byte frame).
+--     Therefore, the GEM should transmit the 4-byte frame and append
+--     padding and crc to make the frame minimum frame size.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa18 55555509 -- TX buffer address
+dma_rd aaaaaa1c 00008004 -- length 4, CRC and end of frame
+
+dma_rd 55555508 12345678
+dma_rd 5555550C 9abcdef0
+
+dma_wr aaaaaa1C 80008004 -- write back ownership bit to tx descriptor
+
+txd    55555555555555d5563412f0000000000000000000000000
+txd                    00000000000000000000000000000000
+txd                    00000000000000000000000000000000
+txd                    00000000000000000000000059fad5d7
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - tx complete and tx_go
+
+
+
+-- *****************************************************************************
+-- 44. Queue up a broadcast frame of 6 bytes not including pad and crc (Length
+--     field in the buffer descriptor should indicate a 6 byte frame).
+--     Therefore, the GEM should transmit the 6-byte frame and append
+--     padding and crc to make the frame minimum frame size. This should
+--     be recognised as a broadcast frame in the statistics.
+-- *****************************************************************************
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa20 55555500 -- TX buffer address
+dma_rd aaaaaa24 00008006 -- length 6, CRC and end of frame
+
+dma_rd 55555500 ffffffff -- broadcast address
+dma_rd 55555504 0000ffff
+
+dma_wr aaaaaa24 80008006 -- write back ownership bit to tx descriptor
+
+txd    55555555555555d5ffffffffffff00000000000000000000
+txd                    00000000000000000000000000000000
+txd                    00000000000000000000000000000000
+txd                    0000000000000000000000001f94c042
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status register
+apbrd      14 00000028  -- read transmit status register - tx complete and tx_go
+
+
+
+-- *****************************************************************************
+-- 45. Queue up a broadcast frame of 6 bytes not including pad and crc (Length
+--     field in the buffer descriptor should indicate a 6 byte frame).
+--     Therefore, the GEM should transmit the 6-byte frame and append
+--     padding and crc to make the frame minimum frame size. This time the
+--     last bit of the address is corrupted (0xfffffffffff7) so that this 
+--     should be recognised as a multicast frame in the statistics.
+-- *****************************************************************************
+
+
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa28 55555500 -- TX buffer address
+dma_rd aaaaaa2c 00008006 -- length 6, CRC and end of frame
+
+dma_rd 55555500 ffffffff -- broadcast address
+dma_rd 55555504 00007fff
+
+dma_wr aaaaaa2c 80008006 -- write back ownership bit to tx descriptor
+
+txd    55555555555555d5ffffffffff7f00000000000000000000
+txd                    00000000000000000000000000000000
+txd                    00000000000000000000000000000000
+txd                    000000000000000000000000c4401242
+
+-- finish off TX queue
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd aaaaaa30 55555500 -- TX buffer address (ownership bit set)
+dma_rd aaaaaa34 80008001 -- length 1, CRC and end of frame
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000088  -- check interrupt status - transmit complete & used
+apbwr      24 00000088  -- clear interrupt status register
+apbrd      14 00000021  -- read transmit status register - tx complete & used
+
+
+
+
+-- *****************************************************************************
+-- 46. Check status and statistics registers and ensure the above operations
+--     were handled properly.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000180  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000006  -- check frames transmitted ok
+apbrd     10C 00000001  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000006  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(30000)
+
+

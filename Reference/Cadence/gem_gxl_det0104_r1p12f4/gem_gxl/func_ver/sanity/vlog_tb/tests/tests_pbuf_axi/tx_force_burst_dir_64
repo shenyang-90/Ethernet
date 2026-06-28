@@ -1,0 +1,365 @@
+--
+--
+-- ************************************************************************** --
+
+
+-- need fast bus response for 25MHz Hclk
+wait_states 0
+bus_grant_delay 0
+
+
+-- check and initialise the relevant registers
+apbrd(100) 00  00000000  -- check reset value of network control register
+apbwr      28  0000ffff  -- enable all interrupts
+apbwr      04  00280000  -- check reset value of network config register
+apbrd      04  00280000  -- check reset value of network config register
+apbrd      08  00000006  -- check reset value of network status register
+apbwr      10  020107c8  -- enable RX burst enable, burst len = 4
+apbwr      1c  55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c  55555500  -- check transmit queue pointer
+apbwr      00  00000208  -- write tx_go and enable tx and rx
+
+-- First make sure the auto complete burst does not happen when only
+-- RX burst is enabled
+
+dma_rd tx_descr 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555504 40008073 -- start of frame,wrap
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 0000fde0
+dma_rd 98765040 005e0001
+dma_rd 98765044 d0000200
+dma_rd 98765048 04e7ecbc
+dma_rd 9876504c c0450008
+dma_rd 98765050 00003000
+dma_rd 98765054 11020000
+dma_rd 98765058 8c9e7258
+dma_rd 9876505c 00e0fce0
+dma_rd 98765060 c1070200
+dma_rd 98765064 1c00c107
+dma_rd 98765068 0000e9b6
+dma_rd 9876506c 640a0308
+dma_rd 98765070 69630002
+dma_rd 98765074 00000000
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fd0000
+txd          01005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       02006372733c63
+
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 c0008073 -- write used bit
+
+-- set the used bit so that transmission stops and we can reconfigure
+dma_rd tx_descr 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555504 80008073 -- start of frame,used
+
+apbrd(int) 24 00000080 -- Transmit Complete
+apbwr      24 00000080 -- Clearing Interrupt
+apbrd(int) 24 00000008 -- Used bit read
+apbwr      24 00000008 -- Clearing Interrupt
+apbrd	      14 00000021  -- tx status - frame transmitted
+apbwr       10 060107c8  -- enable TX burst enable, burst len = 4
+pinsd(1000) trigger_dma_tx_start 1
+
+
+-- Now enable RX and TX force_burst enable and repeat same test. 
+-- Make sure the TX packet is read in a multiple of ahb_burst_size
+-- words
+
+dma_rd tx_descr 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555504 40008068 -- start of frame,wrap
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 0000fde0
+dma_rd 98765040 005e0001
+dma_rd 98765044 d0000200
+dma_rd 98765048 04e7ecbc
+dma_rd 9876504c c0450008
+dma_rd 98765050 00003000
+dma_rd 98765054 11020000
+dma_rd 98765058 8c9e7258
+dma_rd 9876505c 00e0fce0
+dma_rd 98765060 c1070200
+dma_rd 98765064 1c00c107
+
+-- need another 6 words to complete the burst...
+dma_rd 98765068 0000e9b6
+dma_rd 9876506c 640a0308
+dma_rd 98765070 00630002
+dma_rd 98765074 00000073 --  data should be ignored
+dma_rd 98765078 12345678
+dma_rd 9876507c abcdef01
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fd0000
+txd          01005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001c2ccd1a60
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 c0008068 -- write used bit
+
+-- set the used bit so that transmission stops and we can reconfigure
+dma_rd tx_descr 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555504 80008073 -- start of frame,used
+
+apbrd(int) 24 00000080 -- Transmit Complete
+apbwr      24 00000080 -- Clearing Interrupt
+apbrd(int) 24 00000008 -- Used bit read
+apbwr      24 00000008 -- Clearing Interrupt
+apbrd	      14 00000021  -- tx status - frame transmitted
+pinsd(2000) trigger_dma_tx_start 0
+
+
+-- Now repeat same test, but with less words needed to complete burst 
+
+dma_rd tx_descr 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555504 40008070 -- start of frame,wrap
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 0000fde0
+dma_rd 98765040 005e0001
+dma_rd 98765044 d0000200
+dma_rd 98765048 04e7ecbc
+dma_rd 9876504c c0450008
+dma_rd 98765050 00003000
+dma_rd 98765054 11020000
+dma_rd 98765058 8c9e7258
+dma_rd 9876505c 00e0fce0
+dma_rd 98765060 c1070200
+dma_rd 98765064 1c00c107
+dma_rd 98765068 0000e9b6
+dma_rd 9876506c 640a0308
+
+-- need another 4 words to complete the burst...
+dma_rd 98765070 00630002
+dma_rd 98765074 00000056
+dma_rd 98765078 12345678
+dma_rd 9876507c abcdef01
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fd0000
+txd          01005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       12e72dac
+
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 c0008070 -- write used bit
+
+
+
+-- set the used bit so that transmission stops and we can reconfigure
+dma_rd tx_descr 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555504 80008073 -- start of frame,used
+
+apbrd(int) 24 00000080 -- Transmit Complete
+apbwr      24 00000080 -- Clearing Interrupt
+apbrd(int) 24 00000008 -- Used bit read
+apbwr      24 00000008 -- Clearing Interrupt
+apbrd	      14 00000021  -- tx status - frame transmitted
+pinsd(3000) trigger_dma_tx_start 1
+
+
+-- Now repeat same test, but with less words needed to complete burst 
+
+dma_rd tx_descr 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555504 40008072 -- start of frame,wrap
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 0000fde0
+dma_rd 98765040 005e0001
+dma_rd 98765044 d0000200
+dma_rd 98765048 04e7ecbc
+dma_rd 9876504c c0450008
+dma_rd 98765050 00003000
+dma_rd 98765054 11020000
+dma_rd 98765058 8c9e7258
+dma_rd 9876505c 00e0fce0
+dma_rd 98765060 c1070200
+dma_rd 98765064 1c00c107
+dma_rd 98765068 0000e9b6
+dma_rd 9876506c 640a0308
+dma_rd 98765070 00630002
+
+-- need another 2 words to complete the burst...
+dma_rd 98765074 12345678
+dma_rd 98765078 00000056
+dma_rd 9876507c abcdef01
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fd0000
+txd          01005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       020058db7535
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 c0008072 -- write used bit
+
+-- set the used bit so that transmission stops and we can reconfigure
+dma_rd tx_descr 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555504 80008073 -- start of frame,used
+
+apbrd(int) 24 00000080 -- Transmit Complete
+apbwr      24 00000080 -- Clearing Interrupt
+apbrd(int) 24 00000008 -- Used bit read
+apbwr      24 00000008 -- Clearing Interrupt
+apbrd	      14 00000021  -- tx status - frame transmitted
+pinsd(4000) trigger_dma_tx_start 0
+
+
+-- Now repeat same test, but with less words needed to complete burst 
+
+dma_rd tx_descr 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555504 4000807d -- start of frame,wrap
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 0000fde0
+dma_rd 98765040 005e0001
+dma_rd 98765044 d0000200
+dma_rd 98765048 04e7ecbc
+dma_rd 9876504c c0450008
+dma_rd 98765050 00003000
+dma_rd 98765054 11020000
+dma_rd 98765058 8c9e7258
+dma_rd 9876505c 00e0fce0
+dma_rd 98765060 c1070200
+dma_rd 98765064 1c00c107
+dma_rd 98765068 0000e9b6
+dma_rd 9876506c 640a0308
+dma_rd 98765070 00630002
+dma_rd 98765074 12345678
+dma_rd 98765078 5aa53356
+dma_rd 9876507c 00000056
+
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       0200636973636f0000009e8ce0fd0000
+txd          01005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8ce0fce000
+txd		       000207c107c1001cb6e9000008030a64
+txd		       02006300785634125633a55a5664d80632
+
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 c000807d -- write used bit
+
+
+
+
+dma_rd tx_descr 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555504 80008073 -- start of frame,used
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(10000)
+

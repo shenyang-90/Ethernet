@@ -1,0 +1,831 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_toe_4
+--
+--   Author         : Ewan McCulloch (ewanm@cadence.com)
+--
+--   Date           : 24 April 2006
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This tests ensures that illegally early End of packets will reset the
+-- the TCP state machine correctly
+--
+--
+--------------------------------------------------------------------------------
+
+-- Configuration Requirements ..
+requires ext_fifo_interface 0
+requires rx_pkt_buffer 1
+requires tx_pkt_buffer 1
+
+sel_ahb_freq 1 -- define host frequency. Dont care for this test
+
+-- The following ensures that whatever datawidth is selected for this test, the 
+-- translator will pass through correct multiples of 32bit words for data transfers
+-- (not descriptors). This relies on the test writer using the rx_descr and tx_descr to
+-- differentiate between the DMA accesses.
+enforce_data_width 1
+
+-- In 32b datapaths, the 64bit descriptors are accessed not in incrementing order
+-- The used bit is always read first, and written last.
+-- For TX since the used bit is bit 63, the 2nd 32bit word is always read first
+-- For RX since the used bit is bit 0, the 2nd 32bit word is always written first
+-- This ordering is only there for 32bit modes
+-- To simplify writing testcases and ensure the same test can operate on different datawidths
+-- we can automatically reverse the order ...
+auto_descriptor_swap 1
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+
+-- this is the event count that will initialize the scaler for event counts. it will cause any future scaling to only scale
+-- the counts after start_scale
+start_scale
+
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr     5a0 00000007  -- give all segments to Q0
+apbrd      08 00000006  -- check reset value of network status register
+
+-- # Initialize the network configuration register
+-- #   -eam      <1|0|random>, default = 0. This is external address matching
+-- #   -duplex   <full|half|random>, default = random
+-- #   -speed    <1g|100m|10m|random>, default = random
+-- #   -jumbo    <1|0|random>, default = random. This wont affect the RX transactor below, but will automatically cause jumbos to be dropped.
+-- #   -copy_all <1|0|random>, default = 0. If 0, ensure you initialize the dest_addr in the rx transactor to something that will match
+-- #   -databus  <32|64|128|take_from_cfg|random>, default = random, bus <= config.  The max value is the value set in dma_bus_width in gem_defs.v
+-- #   -rx_toe   <1|0|random>, default = 0. Enables RX TCP/IP checksum offload
+init_ncr -duplex full -speed 100m -jumbo 0 -databus random -copy_all 1 -eam random -rx_toe 0
+
+-- # Initialize the transmit and receive DMA queue pointers (random values but can add specifics if required)
+-- # use arg -rx_ptr_q<Q> and tx_ptr_q<Q> to set specific ptr values rather than the default random
+init_q_ptr  -num_tx_queues 1   -num_rx_queues 1 -rx_ptr_q0 fffff000 -tx_ptr_q0 55555500
+
+
+-- # initialize the DMA specific options for random data xfers
+-- #   - RX DMA data buffer size
+-- #     If left without an argument, it will be completely random
+-- #     Set high to force single buffer descriptor testing eg 16320
+-- #     use -max_buf_size for max (multiple 64 bytes only)
+-- #     use -min_buf_size for min (multiple 64 bytes only)
+-- #
+-- #   - Burst Length (random by default)
+-- #     use -burst <num>, where num can be 1,2,4,8,16, random
+-- #        
+-- #   - address bus (random by default, or off if config doesnt allow)
+-- #     use -addr_bus <32|64|random|take_from_cfg>     
+-- #        
+-- #   - extended buffer descriptors (random by default, or off if config doesnt allow)
+-- #     use -ext_bd <1|0|random>     
+-- #        
+-- #   - force max burst mode (forces AXI to send max length bursts)
+-- #     use -force_max_burst_<tx|rx> <1|0|random>    default is 0 
+-- #   - tx_csum_offload (sets TX checksum offload)
+-- #     use -tx_csum_offload <1|0|random>    default is 0 
+init_dma -ext_bd 0 -addr_bus 32  -burst random -min_buf_size 16320 -tx_csum_offload 1
+
+apbwr      00 00000208  -- write tx_go and enable tx
+
+
+--******************************************************************************
+-- Test 4.1
+--    Detect an EOP in the START state
+--******************************************************************************
+
+dma_rd tx_descr 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555504 00008010 -- start of frame
+
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 FFFFFFFF -- store frame to memory
+dma_rd 98765004 0008FFFF
+dma_rd 98765008 56341239
+dma_rd 9876500c 01000608
+
+txd         55555555555555d5 -- preamble & SDF
+txd         FFFFFFFFFFFF 
+txd         080039123456 
+txd         0806         
+txd         0001     
+
+txd         00000000     
+txd         00000000     
+txd         00000000     
+txd         00000000     
+txd         00000000     
+txd         00000000     
+txd         00000000     
+txd         00000000     
+txd         00000000     
+txd         00000000     
+txd         00000000     
+
+txd         dbce1fce     
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr tx_descr 55555504 80408010 -- write used bit 
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 4.2
+--    Detect an EOP in the VLAN2 state
+--******************************************************************************
+
+dma_rd tx_descr 55555508 22222200 -- dma reads pointer of 98765000
+dma_rd tx_descr 5555550c 00008014 -- start of frame
+
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 22222200 FFFFFFFF -- store frame to memory
+dma_rd 22222204 0008FFFF
+dma_rd 22222208 56341239
+dma_rd 2222220c 01000081
+dma_rd 22222210 004F0008
+
+
+txd        55555555555555d5         -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        8100         -- Length/typeID
+txd        0001         -- VLAN tag
+txd        0800         -- Length/typeID
+txd        4F00         -- Version, IHL, type of service
+
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+
+txd        7dbf0fae     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+--dma_wr tx_descr 5555550c 80608014 -- write used bit (TCP status can be 6 or 3 here, depending on configured databus width). Allow eiter
+dma_wr tx_descr 5555550c zzzzzzzz -- write used bit (TCP status can be 6 or 3 here, depending on configured databus width). Allow eiter
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 4.3
+--    Detect an EOP in the SNAP2 state
+--******************************************************************************
+
+dma_rd tx_descr 55555510 22222200 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555514 00008014 -- start of frame
+
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 22222200 FFFFFFFF -- store frame to memory
+dma_rd 22222204 0008FFFF
+dma_rd 22222208 56341239
+dma_rd 2222220c aaaadb05
+dma_rd 22222210 00000000
+
+
+txd        55555555555555d5         -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        05db         -- Length/typeID
+txd        aaaa         
+txd        0000         
+txd        0000         
+
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+
+txd        c80522f4     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr tx_descr 55555514 80208014 -- write used bit 
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+--******************************************************************************
+-- Test 4.4
+--    Detect an EOP in the SNAP4 state
+--******************************************************************************
+
+dma_rd tx_descr 55555518 22222200 -- dma reads pointer of 98765000
+dma_rd tx_descr 5555551c 00008018 -- start of frame
+
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 22222200 FFFFFFFF -- store frame to memory
+dma_rd 22222204 0008FFFF
+dma_rd 22222208 56341239
+dma_rd 2222220c aaaadb05
+dma_rd 22222210 00000003
+dma_rd 22222214 00000000
+
+
+txd        55555555555555d5         -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        05db         -- Length/typeID
+txd        aaaa         
+txd        0300         
+txd        0000         
+txd        0000         
+txd        0000         
+
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+
+txd        6e4d5a8a     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr tx_descr 5555551c 80308018 -- write used bit 
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+
+--******************************************************************************
+-- Test 4.5
+--    Detect an EOP in the IP2 state
+--******************************************************************************
+
+dma_rd tx_descr 55555520 22222200 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555524 0000801c -- start of frame
+
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 22222200 FFFFFFFF -- store frame to memory
+dma_rd 22222204 0008FFFF
+dma_rd 22222208 56341239
+dma_rd 2222220c aaaadb05
+dma_rd 22222210 00000003
+dma_rd 22222214 00450008
+dma_rd 22222218 00000000
+
+
+txd        55555555555555d5         -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        05db         -- Length/typeID
+txd        aaaa         
+txd        0300         
+txd        0000         
+txd        0800         
+txd        4500         
+txd        0000
+txd        0000     
+
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+
+txd        4f0b499d     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+--dma_wr tx_descr 55555524 8060801c -- write used bit 
+dma_wr tx_descr 55555524 zzzzzzzz -- write used bit (TCP status can be 6 or 3 here, depending on configured databus width). Allow eiter
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 4.6
+--    Detect an EOP in the IP4 state
+--******************************************************************************
+
+dma_rd tx_descr 55555528 22222200 -- dma reads pointer of 98765000
+dma_rd tx_descr 5555552c 00008020 -- start of frame
+
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 22222200 FFFFFFFF -- store frame to memory
+dma_rd 22222204 0008FFFF
+dma_rd 22222208 56341239
+dma_rd 2222220c aaaadb05
+dma_rd 22222210 00000003
+dma_rd 22222214 00450008
+dma_rd 22222218 00000001
+dma_rd 2222221c 00000000
+
+
+txd        55555555555555d5         -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        05db         -- Length/typeID
+txd        aaaa         
+txd        0300         
+txd        0000         
+txd        0800         
+txd        4500         
+txd        0100     
+txd        0000
+txd        0000     
+txd        0000     
+
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+
+txd        dadf3908     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+--dma_wr tx_descr 5555552c 80708020 -- write used bit 
+dma_wr tx_descr 5555552c zzzzzzzz -- write used bit (TCP status is not always 7. As long as its not 0 it doesnt matter)
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+
+--******************************************************************************
+-- Test 4.7
+--    Detect an EOP in the IP6 state
+--******************************************************************************
+
+dma_rd tx_descr 55555530 22222200 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555534 00008024 -- start of frame
+
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 22222200 FFFFFFFF -- store frame to memory
+dma_rd 22222204 0008FFFF
+dma_rd 22222208 56341239
+dma_rd 2222220c aaaadb05
+dma_rd 22222210 00000003
+dma_rd 22222214 00450008
+dma_rd 22222218 00000001
+dma_rd 2222221c 00000600
+dma_rd 22222220 00000000
+
+
+txd        55555555555555d5         -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        05db         -- Length/typeID
+txd        aaaa         
+txd        0300         
+txd        0000         
+txd        0800         
+txd        4500         
+txd        0100     
+txd        0000
+txd        0006     
+txd        0000     
+txd        0000     
+txd        0000     
+
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+
+txd        3cad692e     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr tx_descr 55555534 80708024 -- write used bit 
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+
+--******************************************************************************
+-- Test 4.8
+--    Detect an EOP in the IP8 state
+--******************************************************************************
+
+dma_rd tx_descr 55555538 22222200 -- dma reads pointer of 98765000
+dma_rd tx_descr 5555553c 00008028 -- start of frame
+
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 22222200 FFFFFFFF -- store frame to memory
+dma_rd 22222204 0008FFFF
+dma_rd 22222208 56341239
+dma_rd 2222220c aaaadb05
+dma_rd 22222210 00000003
+dma_rd 22222214 00450008
+dma_rd 22222218 00000001
+dma_rd 2222221c 00000600
+dma_rd 22222220 00000000
+dma_rd 22222224 00000000
+
+
+txd        55555555555555d5         -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        05db         -- Length/typeID
+txd        aaaa         
+txd        0300         
+txd        0000         
+txd        0800         
+txd        4500         
+txd        0100     
+txd        0000
+txd        0006     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+
+txd        3cad692e     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr tx_descr 5555553c 80708028 -- write used bit 
+
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 4.9
+--    Detect an EOP in the IP10 state
+--******************************************************************************
+
+dma_rd tx_descr 55555540 22222200 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555544 0000802c -- start of frame
+
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 22222200 FFFFFFFF -- store frame to memory
+dma_rd 22222204 0008FFFF
+dma_rd 22222208 56341239
+dma_rd 2222220c aaaadb05
+dma_rd 22222210 00000003
+dma_rd 22222214 00450008
+dma_rd 22222218 00000001
+dma_rd 2222221c 00000000
+dma_rd 22222220 00000000
+dma_rd 22222224 00000000
+dma_rd 22222228 00000000
+
+
+txd        55555555555555d5         -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        05db         -- Length/typeID
+txd        aaaa         
+txd        0300         
+txd        0000         
+txd        0800         
+txd        4500         
+txd        0100     
+txd        0000
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+
+txd        dadf3908     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr tx_descr 55555544 8070802c -- write used bit 
+
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+
+--******************************************************************************
+-- Test 4.10
+--    Detect an early EOP in the TCP1 state
+--******************************************************************************
+
+dma_rd tx_descr 55555548 22222200 -- dma reads pointer of 98765000
+dma_rd tx_descr 5555554c 00008030 -- start of frame
+
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 22222200 FFFFFFFF -- store frame to memory
+dma_rd 22222204 0008FFFF
+dma_rd 22222208 56341239
+dma_rd 2222220c aaaadb05
+dma_rd 22222210 00000003
+dma_rd 22222214 00450008
+dma_rd 22222218 00000001
+dma_rd 2222221c 06000040
+dma_rd 22222220 00000000
+dma_rd 22222224 00000000
+dma_rd 22222228 00000000
+dma_rd 2222222c 00000000
+
+
+txd        55555555555555d5         -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        05db         -- Length/typeID
+txd        aaaa         
+txd        0300         
+txd        0000         
+txd        0800         
+txd        4500         
+txd        0100     
+txd        0000
+txd        4000
+txd        0006     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+
+txd        00000000     
+txd        00000000     
+txd        00000000     
+
+txd        e7b43dec     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr tx_descr 5555554c 80708030 -- write used bit 
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+
+
+
+--******************************************************************************
+-- Test 4.11
+--    Detect an EOP in the IP6 state with no fragmentation
+--******************************************************************************
+
+dma_rd tx_descr 55555550 22222200 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555554 00008024 -- start of frame
+
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 22222200 FFFFFFFF -- store frame to memory
+dma_rd 22222204 0008FFFF
+dma_rd 22222208 56341239
+dma_rd 2222220c aaaadb05
+dma_rd 22222210 00000003
+dma_rd 22222214 00450008
+dma_rd 22222218 00000001
+dma_rd 2222221c 06000040
+dma_rd 22222220 00000000
+
+
+txd        55555555555555d5         -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        05db         -- Length/typeID
+txd        aaaa         
+txd        0300         
+txd        0000         
+txd        0800         
+txd        4500         
+txd        0100     
+txd        0000
+txd        4000
+txd        0006     
+txd        0000     
+txd        0000     
+
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+
+txd        e7b43dec     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr tx_descr 55555554 80708024 -- write used bit 
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+
+--******************************************************************************
+-- Test 4.12
+--    Detect an EOP in the IP8 state
+--******************************************************************************
+
+dma_rd tx_descr 55555558 22222200 -- dma reads pointer of 98765000
+dma_rd tx_descr 5555555c 00008028 -- start of frame
+
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 22222200 FFFFFFFF -- store frame to memory
+dma_rd 22222204 0008FFFF
+dma_rd 22222208 56341239
+dma_rd 2222220c aaaadb05
+dma_rd 22222210 00000003
+dma_rd 22222214 00450008
+dma_rd 22222218 00000001
+dma_rd 2222221c 06000040
+dma_rd 22222220 00000000
+dma_rd 22222224 00000000
+
+
+txd        55555555555555d5         -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        05db         -- Length/typeID
+txd        aaaa         
+txd        0300         
+txd        0000         
+txd        0800         
+txd        4500         
+txd        0100     
+txd        0000
+txd        4000
+txd        0006     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+
+txd        e7b43dec     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr tx_descr 5555555c 80708028 -- write used bit 
+
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 4.9
+--    Detect an EOP in the IP10 state
+--******************************************************************************
+
+dma_rd tx_descr 55555560 22222200 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555564 0000802c -- start of frame
+
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 22222200 FFFFFFFF -- store frame to memory
+dma_rd 22222204 0008FFFF
+dma_rd 22222208 56341239
+dma_rd 2222220c aaaadb05
+dma_rd 22222210 00000003
+dma_rd 22222214 00450008
+dma_rd 22222218 00000001
+dma_rd 2222221c 06000040
+dma_rd 22222220 00000000
+dma_rd 22222224 00000000
+dma_rd 22222228 00000000
+
+
+txd        55555555555555d5         -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        05db         -- Length/typeID
+txd        aaaa         
+txd        0300         
+txd        0000         
+txd        0800         
+txd        4500         
+txd        0100     
+txd        0000
+txd        4000
+txd        0006     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+txd        0000     
+
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+
+txd        e7b43dec     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr tx_descr 55555564 8070802c -- write used bit 
+
+
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete
+apbwr       24 00000088  -- check interrupt status - transmit complete
+apbrd	      14 00000021  -- tx status - frame transmitted,
+
+
+
+
+dma_rd tx_descr 55555568 98767000 -- 
+dma_rd tx_descr 5555556c 80008062 -- used bit read
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(100000)
+bus_grant_delay 0

@@ -1,0 +1,1030 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_buf_col_off
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 17 January 2003
+--
+--------------------------------------------------------------------------------
+--   Test Description
+--   
+--   This test ensures that the GEM can handle collision retries when
+--   the transmit buffers have various offsets.
+--   
+--   Functional Coverage
+--   * Ensures that collision retries successfully recovers data from correct
+--     buffer offsets.
+--   
+--   Detailed Test Description
+--   
+--   1. Setup wait states for the test.
+--   2. Initialise the GEM for 100M mode operation.
+--   3. Begin transmitting a three buffer frame which has an initial offset
+--      for the first buffer in the frame.
+--      Force a collision whilst the DMA is still reading the first buffer.
+--      Verify that the frame is successfully retried using the correct offset.
+--      Repeat the test three times with increasing offsets (1-3).
+--   4. Begin transmitting a three buffer frame which has an initial offset
+--      for the first buffer in the frame.
+--      Force a collision whilst the DMA is still reading the second buffer.
+--      Verify that the frame is successfully retried using the correct offset.
+--   5. Begin transmitting a three buffer frame which has an initial offset
+--      for the first buffer in the frame.
+--      Force a collision whilst the DMA is still reading the third buffer.
+--      Verify that the frame is successfully retried using the correct offset.
+--   6. Begin transmitting a three buffer frame which has a zero offset
+--      for the first buffer in the frame, but an offset for the second buffer.
+--      Force a collision whilst the DMA is still reading the second buffer.
+--      Verify that the frame is successfully retried using the correct offsets.
+--   7. Begin transmitting a three buffer frame which has a zero offset
+--      for the first buffer in the frame, but an offset for the second buffer.
+--      Force a collision whilst the DMA is still reading the third buffer.
+--      Verify that the frame is successfully retried using the correct offsets.
+--   8. Check the statistics registers for correct values.
+--
+-------------------------------------------------------------------------------
+
+
+-- ************************************************************************** --
+--   1. Setup wait states for the test.
+-- ************************************************************************** --
+wait_states 1      
+
+
+-- ************************************************************************** --
+--   2. Initialise the GEM for 100M mode operation.
+-- ************************************************************************** --
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      440 88000000  -- write transmit queue pointer 1
+apbwr      444 99000000  -- write transmit queue pointer 2
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      00 00000008  -- enable transmit
+apbrd      14 00000000  -- read transmit status register
+apbwr      1c ffffff00  -- write address of transmit buffer descriptor in memory
+apbrd      1c ffffff00  -- check transmit queue pointer
+apbwr      00 00000208  -- write transmit start bit and enable tx
+
+
+
+
+-- ************************************************************************** --
+--   3. Begin transmitting a three buffer frame which has an initial offset
+--      for the first buffer in the frame.
+--      Force a collision whilst the DMA is still reading the first buffer.
+--      Verify that the frame is successfully retried using the correct offset.
+--      Repeat the test three times with increasing offsets (1-3).
+-- ************************************************************************** --
+
+-- ************************************************************************** --
+-- With the packet buffer included in the design, this test is redundant and
+-- also impossible to recreate. This is because as whole packet is read into 
+-- the buffer and retried from there.
+-- ************************************************************************** --
+
+
+-- ************************************************************************** --
+--   3a. OFFSET = 1
+-- ************************************************************************** --
+
+apbrd      14 00000000  "Scenario 1: offset = 1, collision in 1st buffer"
+
+-- read first buffer
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff04 0001003f -- length 63 bytes, no CRC
+dma_rd ffffff00 98765101 -- dma reads pointer of 98765101
+dma_rd 98765100 11111100
+dma_rd 98765104 22222211
+dma_rd 98765108 33333322
+dma_rd 9876510c 44444433
+dma_rd 98765110 55555544
+dma_rd 98765114 66666655
+dma_rd 98765118 77777766
+dma_rd 9876511c 88888877
+dma_rd 98765120 99999988
+dma_rd 98765124 aaaaaa99
+dma_rd 98765128 bbbbbbaa
+dma_rd 9876512c ccccccbb
+dma_rd 98765130 ddddddcc
+dma_rd 98765134 eeeeeedd
+dma_rd 98765138 ffffffee
+dma_rd 9876513c 000000ff
+
+-- read second buffer
+dma_rd ffffff0c 00010040 -- length 64 bytes
+dma_rd ffffff08 98765200 -- dma reads pointer of 98765200
+dma_rd 98765200 11111100
+dma_rd 98765204 22222211
+dma_rd 98765208 33333322
+dma_rd 9876520c 44444433
+dma_rd 98765210 55555544
+dma_rd 98765214 66666655
+dma_rd 98765218 77777766
+dma_rd 9876521c 88888877
+dma_rd 98765220 99999988
+dma_rd 98765224 aaaaaa99
+dma_rd 98765228 bbbbbbaa
+dma_rd 9876522c ccccccbb
+dma_rd 98765230 ddddddcc
+dma_rd 98765234 eeeeeedd
+dma_rd 98765238 ffffffee
+dma_rd 9876523c 000000ff
+
+-- read third buffer
+dma_rd ffffff14 00018041 -- EOF, length 65 bytes
+dma_rd ffffff10 98765300 -- dma reads pointer of 98765300
+dma_rd 98765300 11111100
+dma_rd 98765304 22222211
+dma_rd 98765308 33333322
+dma_rd 9876530c 44444433
+dma_rd 98765310 55555544
+dma_rd 98765314 66666655
+dma_rd 98765318 77777766
+dma_rd 9876531c 88888877
+dma_rd 98765320 99999988
+dma_rd 98765324 aaaaaa99
+dma_rd 98765328 bbbbbbaa
+dma_rd 9876532c ccccccbb
+dma_rd 98765330 ddddddcc
+dma_rd 98765334 eeeeeedd
+dma_rd 98765338 ffffffee
+dma_rd 9876533c 000000ff
+dma_rd 98765340 00000000
+
+--------------------------------
+-- FIRST ATTEMPT AT TRANSMISSION
+--------------------------------
+
+-- Check transmission and force collision
+txd    55x555555555555d511111111
+
+
+
+--------------------------------
+-- SECOND ATTEMPT AT TRANSMISSION
+--------------------------------
+
+-- check transmission
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+
+-- write transmit complete status
+dma_wr ffffff04 8001003f -- write used bit
+
+
+-- check status on reception of transmit underrun interrupt
+apbrd(int) 24 00000080  "Scenario 1: Complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- check tx status - tx complete, single col
+apbwr      14 00000022  -- clear tx status
+
+
+
+
+-- ************************************************************************** --
+--   3b. OFFSET = 2
+-- ************************************************************************** --
+
+apbrd      14 00000008  "Scenario 2: offset = 2, collision in 1st buffer"
+
+-- read first buffer
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff1c 0001003e -- length 62 bytes, no CRC
+dma_rd ffffff18 98765102 -- dma reads pointer of 98765102
+dma_rd 98765100 11110000
+dma_rd 98765104 22221111
+dma_rd 98765108 33332222
+dma_rd 9876510c 44443333
+dma_rd 98765110 55554444
+dma_rd 98765114 66665555
+dma_rd 98765118 77776666
+dma_rd 9876511c 88887777
+dma_rd 98765120 99998888
+dma_rd 98765124 aaaa9999
+dma_rd 98765128 bbbbaaaa
+dma_rd 9876512c ccccbbbb
+dma_rd 98765130 ddddcccc
+dma_rd 98765134 eeeedddd
+dma_rd 98765138 ffffeeee
+dma_rd 9876513c 0000ffff
+
+-- read second buffer
+dma_rd ffffff24 00010040 -- length 64 bytes
+dma_rd ffffff20 98765200 -- dma reads pointer of 98765200
+dma_rd 98765200 11110000
+dma_rd 98765204 22221111
+dma_rd 98765208 33332222
+dma_rd 9876520c 44443333
+dma_rd 98765210 55554444
+dma_rd 98765214 66665555
+dma_rd 98765218 77776666
+dma_rd 9876521c 88887777
+dma_rd 98765220 99998888
+dma_rd 98765224 aaaa9999
+dma_rd 98765228 bbbbaaaa
+dma_rd 9876522c ccccbbbb
+dma_rd 98765230 ddddcccc
+dma_rd 98765234 eeeedddd
+dma_rd 98765238 ffffeeee
+dma_rd 9876523c 0000ffff
+
+-- read third buffer
+dma_rd ffffff2c 00018042 -- EOF, length 66 bytes
+dma_rd ffffff28 98765300 -- dma reads pointer of 98765300
+dma_rd 98765300 11110000
+dma_rd 98765304 22221111
+dma_rd 98765308 33332222
+dma_rd 9876530c 44443333
+dma_rd 98765310 55554444
+dma_rd 98765314 66665555
+dma_rd 98765318 77776666
+dma_rd 9876531c 88887777
+dma_rd 98765320 99998888
+dma_rd 98765324 aaaa9999
+dma_rd 98765328 bbbbaaaa
+dma_rd 9876532c ccccbbbb
+dma_rd 98765330 ddddcccc
+dma_rd 98765334 eeeedddd
+dma_rd 98765338 ffffeeee
+dma_rd 9876533c 0000ffff
+dma_rd 98765340 00000000
+
+
+--------------------------------
+-- FIRST ATTEMPT AT TRANSMISSION
+--------------------------------
+
+-- Check transmission and force collision
+txd    55x555555555555d511111111
+
+
+
+--------------------------------
+-- SECOND ATTEMPT AT TRANSMISSION
+--------------------------------
+
+-- check transmission
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+
+-- write transmit complete status
+dma_wr ffffff1c 8001003e -- write used bit
+
+
+-- check status on reception of transmit underrun interrupt
+apbrd(int) 24 00000080  "Scenario 2: Complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- check tx status - tx complete, single col
+apbwr      14 00000022  -- clear tx status
+
+
+
+
+-- ************************************************************************** --
+--   3c. OFFSET = 3
+-- ************************************************************************** --
+
+apbrd      14 00000008  "Scenario 3: offset = 3, collision in 1st buffer"
+
+
+-- read first buffer
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff34 0001003d -- length 61 bytes, no CRC
+dma_rd ffffff30 98765103 -- dma reads pointer of 98765103
+dma_rd 98765100 11000000
+dma_rd 98765104 22111111
+dma_rd 98765108 33222222
+dma_rd 9876510c 44333333
+dma_rd 98765110 55444444
+dma_rd 98765114 66555555
+dma_rd 98765118 77666666
+dma_rd 9876511c 88777777
+dma_rd 98765120 99888888
+dma_rd 98765124 aa999999
+dma_rd 98765128 bbaaaaaa
+dma_rd 9876512c ccbbbbbb
+dma_rd 98765130 ddcccccc
+dma_rd 98765134 eedddddd
+dma_rd 98765138 ffeeeeee
+dma_rd 9876513c 00ffffff
+
+-- read second buffer
+dma_rd ffffff3c 00010040 -- length 64 bytes
+dma_rd ffffff38 98765200 -- dma reads pointer of 98765200
+dma_rd 98765200 11000000
+dma_rd 98765204 22111111
+dma_rd 98765208 33222222
+dma_rd 9876520c 44333333
+dma_rd 98765210 55444444
+dma_rd 98765214 66555555
+dma_rd 98765218 77666666
+dma_rd 9876521c 88777777
+dma_rd 98765220 99888888
+dma_rd 98765224 aa999999
+dma_rd 98765228 bbaaaaaa
+dma_rd 9876522c ccbbbbbb
+dma_rd 98765230 ddcccccc
+dma_rd 98765234 eedddddd
+dma_rd 98765238 ffeeeeee
+dma_rd 9876523c 00ffffff
+
+-- read third buffer
+dma_rd ffffff44 00018043 -- EOF, length 67 bytes
+dma_rd ffffff40 98765300 -- dma reads pointer of 98765300
+dma_rd 98765300 11000000
+dma_rd 98765304 22111111
+dma_rd 98765308 33222222
+dma_rd 9876530c 44333333
+dma_rd 98765310 55444444
+dma_rd 98765314 66555555
+dma_rd 98765318 77666666
+dma_rd 9876531c 88777777
+dma_rd 98765320 99888888
+dma_rd 98765324 aa999999
+dma_rd 98765328 bbaaaaaa
+dma_rd 9876532c ccbbbbbb
+dma_rd 98765330 ddcccccc
+dma_rd 98765334 eedddddd
+dma_rd 98765338 ffeeeeee
+dma_rd 9876533c 00ffffff
+dma_rd 98765340 00000000
+
+
+--------------------------------
+-- FIRST ATTEMPT AT TRANSMISSION
+--------------------------------
+
+-- Check transmission and force collision
+txd    55x555555555555d511111111
+
+
+
+--------------------------------
+-- SECOND ATTEMPT AT TRANSMISSION
+--------------------------------
+
+-- check transmission
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+
+-- write transmit complete status
+dma_wr ffffff34 8001003d -- write used bit
+
+-- read next descriptors (used)
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff4c 80000000 -- used bit set
+dma_rd ffffff48 00000000
+
+
+
+-- check status on reception of transmit underrun interrupt
+apbrd(int) 24 00000088  "Scenario 3: Complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000088  -- clear interrupt status
+apbrd      14 00000023  -- check tx status - tx complete, single col & halted
+apbwr      14 00000023  -- clear tx status
+apbwr      00 00000000  -- 
+
+
+
+
+
+-- ************************************************************************** --
+--   4. Begin transmitting a three buffer frame which has an initial offset
+--      for the first buffer in the frame.
+--      Force a collision whilst the DMA is still reading the second buffer.
+--      Verify that the frame is successfully retried using the correct offset.
+-- ************************************************************************** --
+
+
+-- ************************************************************************** --
+-- With the packet buffer included in the design, this test is redundant and
+-- also impossible to recreate. This is because as whole packet is read into 
+-- the buffer and retried from there.
+-- ************************************************************************** --
+
+apbwr      00 00000208  -- write transmit start bit and enable tx
+apbwr      1c ffffff00  -- rewrite transmit buffer descriptor pointer
+
+apbrd      14 00000000  "Scenario 4: offset = 1, collision in 2nd buffer"
+
+-- read first buffer
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff04 0001003f -- length 63 bytes, no CRC
+dma_rd ffffff00 98765101 -- dma reads pointer of 98765101
+dma_rd 98765100 11111100
+dma_rd 98765104 22222211
+dma_rd 98765108 33333322
+dma_rd 9876510c 44444433
+dma_rd 98765110 55555544
+dma_rd 98765114 66666655
+dma_rd 98765118 77777766
+dma_rd 9876511c 88888877
+dma_rd 98765120 99999988
+dma_rd 98765124 aaaaaa99
+dma_rd 98765128 bbbbbbaa
+dma_rd 9876512c ccccccbb
+dma_rd 98765130 ddddddcc
+dma_rd 98765134 eeeeeedd
+dma_rd 98765138 ffffffee
+dma_rd 9876513c 000000ff
+
+-- read second buffer
+dma_rd ffffff0c 00010040 -- length 64 bytes
+dma_rd ffffff08 98765200 -- dma reads pointer of 98765200
+dma_rd 98765200 11111100
+dma_rd 98765204 22222211
+dma_rd 98765208 33333322
+dma_rd 9876520c 44444433
+dma_rd 98765210 55555544
+dma_rd 98765214 66666655
+dma_rd 98765218 77777766
+dma_rd 9876521c 88888877
+dma_rd 98765220 99999988
+dma_rd 98765224 aaaaaa99
+dma_rd 98765228 bbbbbbaa
+dma_rd 9876522c ccccccbb
+dma_rd 98765230 ddddddcc
+dma_rd 98765234 eeeeeedd
+dma_rd 98765238 ffffffee
+dma_rd 9876523c 000000ff
+
+-- read third buffer
+dma_rd ffffff14 00018041 -- EOF, length 65 bytes
+dma_rd ffffff10 98765300 -- dma reads pointer of 98765300
+dma_rd 98765300 11111100
+dma_rd 98765304 22222211
+dma_rd 98765308 33333322
+dma_rd 9876530c 44444433
+dma_rd 98765310 55555544
+dma_rd 98765314 66666655
+dma_rd 98765318 77777766
+dma_rd 9876531c 88888877
+dma_rd 98765320 99999988
+dma_rd 98765324 aaaaaa99
+dma_rd 98765328 bbbbbbaa
+dma_rd 9876532c ccccccbb
+dma_rd 98765330 ddddddcc
+dma_rd 98765334 eeeeeedd
+dma_rd 98765338 ffffffee
+dma_rd 9876533c 000000ff
+dma_rd 98765340 00000000
+
+
+--------------------------------
+-- FIRST ATTEMPT AT TRANSMISSION
+--------------------------------
+
+-- Check transmission and force collision
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbxbbcccccccccc
+
+
+
+--------------------------------
+-- SECOND ATTEMPT AT TRANSMISSION
+--------------------------------
+
+-- check transmission
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+
+-- write transmit complete status
+dma_wr ffffff04 8001003f -- write used bit
+
+
+-- check status on reception of transmit underrun interrupt
+apbrd(int) 24 00000080  "Scenario 4: Complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- check tx status - tx complete, single col
+apbwr      14 00000022  -- clear tx status
+
+
+
+
+-- *****************************************************************************
+--   5. Begin transmitting a three buffer frame which has an initial offset
+--      for the first buffer in the frame.
+--      Force a collision whilst the DMA is still reading the third buffer.
+--      Verify that the frame is successfully retried using the correct offset.
+-- *****************************************************************************
+
+
+-- ************************************************************************** --
+-- With the packet buffer included in the design, this test is redundant and
+-- also impossible to recreate. This is because as whole packet is read into 
+-- the buffer and retried from there.
+-- ************************************************************************** --
+
+
+
+apbrd      14 00000008  "Scenario 5: offset = 1, collision in 3rd buffer"
+
+-- read first buffer
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff1c 0001003f -- length 63 bytes, no CRC
+dma_rd ffffff18 98765101 -- dma reads pointer of 98765101
+dma_rd 98765100 11111100
+dma_rd 98765104 22222211
+dma_rd 98765108 33333322
+dma_rd 9876510c 44444433
+dma_rd 98765110 55555544
+dma_rd 98765114 66666655
+dma_rd 98765118 77777766
+dma_rd 9876511c 88888877
+dma_rd 98765120 99999988
+dma_rd 98765124 aaaaaa99
+dma_rd 98765128 bbbbbbaa
+dma_rd 9876512c ccccccbb
+dma_rd 98765130 ddddddcc
+dma_rd 98765134 eeeeeedd
+dma_rd 98765138 ffffffee
+dma_rd 9876513c 000000ff
+
+-- read second buffer
+dma_rd ffffff24 00010040 -- length 64 bytes
+dma_rd ffffff20 98765200 -- dma reads pointer of 98765200
+dma_rd 98765200 11111100
+dma_rd 98765204 22222211
+dma_rd 98765208 33333322
+dma_rd 9876520c 44444433
+dma_rd 98765210 55555544
+dma_rd 98765214 66666655
+dma_rd 98765218 77777766
+dma_rd 9876521c 88888877
+dma_rd 98765220 99999988
+dma_rd 98765224 aaaaaa99
+dma_rd 98765228 bbbbbbaa
+dma_rd 9876522c ccccccbb
+dma_rd 98765230 ddddddcc
+dma_rd 98765234 eeeeeedd
+dma_rd 98765238 ffffffee
+dma_rd 9876523c 000000ff
+
+-- read third buffer
+dma_rd ffffff2c 00018041 -- EOF, length 65 bytes
+dma_rd ffffff28 98765300 -- dma reads pointer of 98765300
+dma_rd 98765300 11111100
+dma_rd 98765304 22222211
+dma_rd 98765308 33333322
+dma_rd 9876530c 44444433
+dma_rd 98765310 55555544
+dma_rd 98765314 66666655
+dma_rd 98765318 77777766
+dma_rd 9876531c 88888877
+dma_rd 98765320 99999988
+dma_rd 98765324 aaaaaa99
+dma_rd 98765328 bbbbbbaa
+dma_rd 9876532c ccccccbb
+dma_rd 98765330 ddddddcc
+dma_rd 98765334 eeeeeedd
+dma_rd 98765338 ffffffee
+dma_rd 9876533c 000000ff
+dma_rd 98765340 00000000
+
+
+--------------------------------
+-- FIRST ATTEMPT AT TRANSMISSION
+--------------------------------
+
+-- Check transmission and force collision
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222x223333333333
+
+
+
+--------------------------------
+-- SECOND ATTEMPT AT TRANSMISSION
+--------------------------------
+
+-- check transmission
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+
+-- write transmit complete status
+dma_wr ffffff1c 8001003f -- write used bit
+
+
+-- check status on reception of transmit underrun interrupt
+apbrd(int) 24 00000080  "Scenario 5: Complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- check tx status - tx complete, single col
+apbwr      14 00000022  -- clear tx status
+
+
+
+
+-- *****************************************************************************
+--   6. Begin transmitting a three buffer frame which has a zero offset
+--      for the first buffer in the frame, but an offset for the second buffer.
+--      Force a collision whilst the DMA is still reading the second buffer.
+--      Verify that the frame is successfully retried using the correct offsets.
+-- *****************************************************************************
+
+-- ************************************************************************** --
+-- With the packet buffer included in the design, this test is redundant and
+-- also impossible to recreate. This is because as whole packet is read into 
+-- the buffer and retried from there.
+-- ************************************************************************** --
+
+
+
+apbrd      14 00000008  "Scenario 6: offset = 0 then 2, collision in 2nd buffer"
+
+-- read first buffer
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff34 00010040 -- length 64 bytes, no CRC
+dma_rd ffffff30 98765100 -- dma reads pointer of 98765100
+dma_rd 98765100 11111111
+dma_rd 98765104 22222222
+dma_rd 98765108 33333333
+dma_rd 9876510c 44444444
+dma_rd 98765110 55555555
+dma_rd 98765114 66666666
+dma_rd 98765118 77777777
+dma_rd 9876511c 88888888
+dma_rd 98765120 99999999
+dma_rd 98765124 aaaaaaaa
+dma_rd 98765128 bbbbbbbb
+dma_rd 9876512c cccccccc
+dma_rd 98765130 dddddddd
+dma_rd 98765134 eeeeeeee
+dma_rd 98765138 ffffffff
+dma_rd 9876513c 00000000
+
+-- read second buffer
+dma_rd ffffff3c 00010040 -- length 64 bytes
+dma_rd ffffff38 98765202 -- dma reads pointer of 98765202
+dma_rd 98765200 11110000
+dma_rd 98765204 22221111
+dma_rd 98765208 33332222
+dma_rd 9876520c 44443333
+dma_rd 98765210 55554444
+dma_rd 98765214 66665555
+dma_rd 98765218 77776666
+dma_rd 9876521c 88887777
+dma_rd 98765220 99998888
+dma_rd 98765224 aaaa9999
+dma_rd 98765228 bbbbaaaa
+dma_rd 9876522c ccccbbbb
+dma_rd 98765230 ddddcccc
+dma_rd 98765234 eeeedddd
+dma_rd 98765238 ffffeeee
+dma_rd 9876523c 0000ffff
+dma_rd 98765240 00000000
+
+-- read third buffer
+dma_rd ffffff44 00018040 -- EOF, length 64 bytes
+dma_rd ffffff40 98765302 -- dma reads pointer of 98765302
+dma_rd 98765300 11110000
+dma_rd 98765304 22221111
+dma_rd 98765308 33332222
+dma_rd 9876530c 44443333
+dma_rd 98765310 55554444
+dma_rd 98765314 66665555
+dma_rd 98765318 77776666
+dma_rd 9876531c 88887777
+dma_rd 98765320 99998888
+dma_rd 98765324 aaaa9999
+dma_rd 98765328 bbbbaaaa
+dma_rd 9876532c ccccbbbb
+dma_rd 98765330 ddddcccc
+dma_rd 98765334 eeeedddd
+dma_rd 98765338 ffffeeee
+dma_rd 9876533c 0000ffff
+dma_rd 98765340 00000000
+
+
+--------------------------------
+-- FIRST ATTEMPT AT TRANSMISSION
+--------------------------------
+
+-- Check transmission and force collision
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbxbbcccccccccc
+
+
+
+--------------------------------
+-- SECOND ATTEMPT AT TRANSMISSION
+--------------------------------
+
+-- check transmission
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+
+-- write transmit complete status
+dma_wr ffffff34 80010040 -- write used bit
+
+
+-- check status on reception of transmit underrun interrupt
+apbrd(int) 24 00000080  "Scenario 6: Complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- check tx status - tx complete, single col
+apbwr      14 00000022  -- clear tx status
+
+
+
+
+-- *****************************************************************************
+--   7. Begin transmitting a three buffer frame which has a zero offset
+--      for the first buffer in the frame, but an offset for the second buffer.
+--      Force a collision whilst the DMA is still reading the third buffer.
+--      Verify that the frame is successfully retried using the correct offsets.
+-- *****************************************************************************
+
+-- ************************************************************************** --
+-- With the packet buffer included in the design, this test is redundant and
+-- also impossible to recreate. This is because as whole packet is read into 
+-- the buffer and retried from there.
+-- ************************************************************************** --
+
+
+
+apbrd      14 00000008  "Scenario 7: offset = 0 then 2, collision in 3rd buffer"
+
+-- read first buffer
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff4c 00010040 -- length 64 bytes, no CRC
+dma_rd ffffff48 98765100 -- dma reads pointer of 98765100
+dma_rd 98765100 11111111
+dma_rd 98765104 22222222
+dma_rd 98765108 33333333
+dma_rd 9876510c 44444444
+dma_rd 98765110 55555555
+dma_rd 98765114 66666666
+dma_rd 98765118 77777777
+dma_rd 9876511c 88888888
+dma_rd 98765120 99999999
+dma_rd 98765124 aaaaaaaa
+dma_rd 98765128 bbbbbbbb
+dma_rd 9876512c cccccccc
+dma_rd 98765130 dddddddd
+dma_rd 98765134 eeeeeeee
+dma_rd 98765138 ffffffff
+dma_rd 9876513c 00000000
+
+-- read second buffer
+dma_rd ffffff54 00010040 -- length 64 bytes
+dma_rd ffffff50 98765202 -- dma reads pointer of 98765202
+dma_rd 98765200 11110000
+dma_rd 98765204 22221111
+dma_rd 98765208 33332222
+dma_rd 9876520c 44443333
+dma_rd 98765210 55554444
+dma_rd 98765214 66665555
+dma_rd 98765218 77776666
+dma_rd 9876521c 88887777
+dma_rd 98765220 99998888
+dma_rd 98765224 aaaa9999
+dma_rd 98765228 bbbbaaaa
+dma_rd 9876522c ccccbbbb
+dma_rd 98765230 ddddcccc
+dma_rd 98765234 eeeedddd
+dma_rd 98765238 ffffeeee
+dma_rd 9876523c 0000ffff
+dma_rd 98765240 00000000
+
+-- read third buffer
+dma_rd ffffff5c 00018040 -- EOF, length 64 bytes
+dma_rd ffffff58 98765302 -- dma reads pointer of 98765302
+dma_rd 98765300 11110000
+dma_rd 98765304 22221111
+dma_rd 98765308 33332222
+dma_rd 9876530c 44443333
+dma_rd 98765310 55554444
+dma_rd 98765314 66665555
+dma_rd 98765318 77776666
+dma_rd 9876531c 88887777
+dma_rd 98765320 99998888
+dma_rd 98765324 aaaa9999
+dma_rd 98765328 bbbbaaaa
+dma_rd 9876532c ccccbbbb
+dma_rd 98765330 ddddcccc
+dma_rd 98765334 eeeedddd
+dma_rd 98765338 ffffeeee
+dma_rd 9876533c 0000ffff
+dma_rd 98765340 00000000
+
+
+--------------------------------
+-- FIRST ATTEMPT AT TRANSMISSION
+--------------------------------
+
+-- Check transmission and force collision
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222x223333333333
+
+
+
+--------------------------------
+-- SECOND ATTEMPT AT TRANSMISSION
+--------------------------------
+
+-- check transmission
+txd    55555555555555d511111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+txd                    11111111222222223333333344444444
+txd                    55555555666666667777777788888888
+txd                    99999999aaaaaaaabbbbbbbbcccccccc
+txd                    ddddddddeeeeeeeeffffffff00000000
+
+-- write transmit complete status
+dma_wr ffffff4c 80010040 -- write used bit
+
+
+-- read next descriptors (used)
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff64 80000000 -- used bit set
+dma_rd ffffff60 00000000
+
+
+-- check status on reception of transmit underrun interrupt
+apbrd(int) 24 00000088  "Scenario 7: Complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000088  -- clear interrupt status
+apbrd      14 00000023  -- check tx status - tx complete, single col
+apbwr      14 00000022  -- clear tx status
+
+
+
+
+-- *****************************************************************************
+--   8. Check the statistics registers for correct values.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000540  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000007  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000007  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000007  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000007  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000002  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+
+end(15000)
+
+
+bus_grant_delay 0

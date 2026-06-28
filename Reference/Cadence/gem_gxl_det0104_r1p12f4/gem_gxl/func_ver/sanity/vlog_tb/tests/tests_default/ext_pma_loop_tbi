@@ -1,0 +1,233 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : ext_pma_loop_tbi
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 8 February 2002
+--
+--------------------------------------------------------------------------------
+--
+--  Description
+--  -----------
+--  This test verifies the operation of external PMA loopback.
+--
+--
+--  Functional Coverage
+--  ------------------
+--  * Checks operation of ewrap output
+--  * Checks that transmission encoding matches reception encoding.
+--
+--
+--  Detailed Test Description
+--  -------------------------
+--  1. Initialise wait states for the test.
+--  2. Disable autonegotiation and set PMA external loopback mode in the PCS
+--  3. Setup the GEM for full duplex gigabit operation through the TBI interface
+--  4. Setup interrupts, tx and rx queues, and the address filtering logic.
+--  5. Enable both transmit and receive and start tx operation.
+--  6. Verify that the link_status interrupt is signalled and then force
+--     signal_detect input low. This should not affect synchronisation as 
+--     we are in PMA loopback mode
+--  7. Supply a good frame to the TX DMA, and check tx_group as it is generated.
+--     Check that a transmit complete interrupt is generated and check tx 
+--     status.
+--  8. Check that the frame is successfully received and generates a frame
+--     received interrupt. Check RX status.
+--  9. Check the statistics for correct operation.
+--------------------------------------------------------------------------------
+
+-- *****************************************************************************
+--  1. Initialise wait states for the test.
+-- *****************************************************************************
+wait_states     0
+bus_grant_delay 0
+
+pinsc(50) ewrap 0   -- check reset state
+
+-- *****************************************************************************
+--  2. Disable autonegotiation and set PMA external loopback mode in the PCS
+--  3. Setup the GEM for full duplex gigabit operation through the TBI interface
+--  4. Setup interrupts, tx and rx queues, and the address filtering logic.
+--  5. Enable both transmit and receive and start tx operation.
+-- *****************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbrd     200 00009040  -- check value of pcs control register
+apbwr     200 00004040  -- disable autonegotioation and enable ewrap
+apbrd     200 0000c040  -- check autoneg disabled
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00280c02  -- indicate gigabit tbi operation and 64 bit transfers
+apbrd      04 00280c02  -- verify write
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffffff0  -- write receive queue pointer
+apbrd      18 fffffff0  -- check receive queue pointer
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      88 005e0001  -- specific address register 1 bottom
+apbwr      8C 00000200  -- specific address register 1 top
+apbwr      00 0000000c  -- enable receive & transmit
+apbwr      00 0000020c  -- write tx_go
+apbwr      00 0000040c  -- write tx halt immediately keeping tx enabled
+                        -- this stops fetch of second frame
+
+pinsc(200) ewrap 1   -- check changed
+
+dma_rd fffffff0 22222000 -- RX dma reads pointer of 22222000
+
+
+-- *****************************************************************************
+--  6. Verify that the link_status interrupt is signalled and then force
+--     signal_detect input low. This should not affect synchronisation as 
+--     we are in PMA loopback mode
+-- *****************************************************************************
+apbrd(int)  24 00000200  -- check link status change interrupt
+apbrd       14 00000008  -- check tx status - tx_go
+
+-- force signal detect low once link is established (shouldn't affect
+-- synchronisation as we are in PMA loopback mode).
+pinsd(int) signal_detect 0
+
+
+-- *****************************************************************************
+--  7. Supply a good frame to the TX DMA, and check tx_group as it is generated.
+--     Check that a transmit complete interrupt is generated and check tx 
+--     status.
+-- *****************************************************************************
+
+
+
+-- supply the transmit buffer location
+dma_rd 55555504 0000803e -- start of frame, length 62 bytes
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 0000fde0
+
+dma_wr 55555504 8000803e -- write used bit for tx descriptor
+
+-- check for correct preamble, SFD, data, pad and crc
+pcs_txd(s)       555555555555d501005e00000200d0bcece704080045c0
+pcs_txd                        003000000000021158729e8ce0fce000
+pcs_txd                        000207c107c1001cb6e9000008030a64
+pcs_txd                        0200636973636f0000009e8ce0fdgggggggg
+
+-- check status on transmission
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbrd	    14 00000020  -- tx status - frame transmitted, halted
+
+
+
+-- *****************************************************************************
+--  8. Check that the frame is successfully received and generates a frame
+--     received interrupt. Check RX status.
+-- *****************************************************************************
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222000 005e0001 -- store frame to memory
+dma_wr 22222004 d0000200
+dma_wr 22222008 04e7ecbc
+dma_wr 2222200c c0450008
+dma_wr 22222010 00003000
+dma_wr 22222014 11020000
+dma_wr 22222018 8c9e7258
+dma_wr 2222201c 00e0fce0
+dma_wr 22222020 c1070200
+dma_wr 22222024 1c00c107
+dma_wr 22222028 0000e9b6
+dma_wr 2222202c 640a0308
+dma_wr 22222030 69630002
+dma_wr 22222034 006f6373
+dma_wr 22222038 8c9e0000
+dma_wr 2222203c 2cfbfde0
+dma_wr 22222040 0000721f
+dma_wr 22222044 00000000
+
+dma_wr fffffff4 0800c042 -- dma writes rx status
+dma_wr fffffff0 22222001 -- dma writes ownership bit
+
+dma_rd fffffff8 44440008 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbrd      20 00000002  -- check receive status register - receive complete
+
+
+
+
+-- *****************************************************************************
+--  9. Check the statistics for correct operation.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000042  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000001  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000042  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000001  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000001  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000001  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(1000)
+

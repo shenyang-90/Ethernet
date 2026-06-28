@@ -1,0 +1,275 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : link_fault_sig_dummy
+--
+--   Author         : Emanuele Bezzeccheri (bemanuel@cadence.com)
+--
+--   Date           : September 22, 2017
+--
+--------------------------------------------------------------------------------
+-- Short Description
+------------------------
+-- Tests that the Link Fault Signaling is not operated when GEM is not working
+-- at 2.5G.
+--
+------------------------
+-- Test Summary
+------------------------
+--   0. Misc setup and pin check.
+--   1. Program the DUT and wait for PCS synchronization (LFSM is disabled).
+--   2. Receive >=4 Faults of each type and check that the link status is OK, as
+--      the LFSM is not enabled
+--   3. Transmit packets while receiving >=4 Faults of each type.
+--   4. Force end of test in case it doesn't stop of its own accord.
+--
+--------------------------------------------------------------------------------
+
+-- ************************************************************************** --
+-- 0. Test misc setup and pin check.
+-- ************************************************************************** --
+
+-- Design configuration requirements
+requires no_pcs             0    -- PCS shall be present
+requires ext_fifo_interface 0    -- DMA shall be present
+requires rx_pkt_buffer      1    -- DMA shall be of 'Packet Buffer' type
+requires tx_pkt_buffer      1    -- DMA shall be of 'Packet Buffer' type
+
+-- Disable txd checking for this test
+set_tx_data_check 0;
+
+-- Check the reset state of some DUT pins
+pinsc(50) loopback 0 half_duplex 1 extint 0 speed 0
+
+-- ************************************************************************** --
+-- 1. Program the DUT and wait for PCS synchronization.
+--    By default, the testbench drives automatically IDLE2 ordered sets (/I2/ =
+--    /K28.5/D5.6/) into PCS Rx. A long stream would cause the PCS to become
+--    synchronized. When auto-negotiation is disabled, the link status indicates
+--    the PCS synchronization status.
+-- ************************************************************************** --
+
+-- Check the reset value of needed registers and enable interrupts
+apbrd(100) 000 00000000        -- network_control : check reset
+apbrd      008 00000006        -- network_status  : check reset
+apbrd      024 00000000        -- int_status      : check reset
+apbrd      200 00009040        -- pcs_control     : check reset
+apbwr      028 00000200        -- int_enable      : enable link change interrupt
+
+-- Initialize the DMA transmit queue pointers. This is needed to transmit some
+-- packets later on in the test
+init_q_ptr -num_tx_queues 1 -num_rx_queues 0
+
+-- Set Tx enable, disable auto-negotiation, select PCS and disable unidirection
+apbwr      000 00000008        -- network_control : Tx enable
+apbwr      200 00000140        -- pcs_control     : disable auto-negotiation
+apbwr      004 00080c02        -- network_config  : PCS and unidir disable
+
+-- Wait for link status change to trigger an interrupt and check the
+-- network_status reg to assert PCS synchronization
+apbrd(int) 024 00000200        -- int_status     : check link_status interrupt
+apbwr      024 00000200        -- int_status     : clear interrupt
+apbrd      024 00000000        -- int_status     : readback
+apbrd      008 00000007        -- network_status : check pcs_link_state
+
+-- Wait some time by dummy reading the network_control reg and make the
+-- testbench settle
+apbrd      000 00000008 num=20 -- network_control : readback
+apbrdf     000 00000008        -- network_control : readback
+
+-- ************************************************************************** --
+-- 2. Receive >=4 Faults of each type and check that the link status is OK, as
+--    2.5G is not selected in the network_control reg and the LFSM is not
+--    enabled.
+-- ************************************************************************** --
+
+-- Inject Local Fault /Q/ mixed with /I2/ into PCS Rx
+pcs_synch_rx(apb) sbc o00 sbc oc0 sbc od0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc od0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc od0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc od0 sbc o00
+
+-- Wait some time by dummy reading the network_control reg and make the
+-- eventual link status change happen. Check that no interrupt is present and
+-- that the status is OK
+apbrd      000 00000008 num=50 -- network_control : readback
+apbrd      024 00000000        -- int_status      : readback
+apbrdf     008 00000007        -- network_status  : check link OK
+
+--------------------------------------------------------------------------------
+
+-- Inject Remote Fault /Q/ mixed with /I2/ into PCS Rx
+pcs_synch_rx(apb) sbc o00 sbc oc0 sbc oe0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc oe0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc oe0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc oe0 sbc o00
+
+-- Wait some time by dummy reading the network_control reg and make the
+-- eventual link status change happen. Check that no interrupt is present and
+-- that the status is OK
+apbrd      000 00000008 num=50 -- network_control : readback
+apbrd      024 00000000        -- int_status      : readback
+apbrdf     008 00000007        -- network_status  : check link OK
+
+--------------------------------------------------------------------------------
+
+-- Inject Link Interruption /Q/ mixed with /I2/ into PCS Rx
+pcs_synch_rx(apb) sbc o00 sbc oc0 sbc of0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc of0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc of0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc of0 sbc o00
+
+-- Wait some time by dummy reading the network_control reg and make the
+-- eventual link status change happen. Check that no interrupt is present and
+-- that the status is OK
+apbrd      000 00000008 num=50 -- network_control : readback
+apbrd      024 00000000        -- int_status      : readback
+apbrdf     008 00000007        -- network_status  : check link OK
+
+-- ************************************************************************** --
+-- 3. Transmit packets while receiving >=4 Faults of each type.
+-- ************************************************************************** --
+
+-- Give the trigger to start transmitting packets
+apbwr      000 00000208         -- network_control : Tx go
+
+-- Transmit a number of randomized data packets
+tx_frame          20
+  number_of_bufs  1
+  num_dma_queues  1
+  auto_gen_int    0
+  buffer_size     64-128
+  data            add_queue_id
+  data            random
+  fcs             YES
+
+--------------------------------------------------------------------------------
+
+-- Wait some time by dummy reading the network_control reg
+apbrd      000 00000008 num=20  -- network_control : readback
+apbrdf     000 00000008         -- network_control : readback
+
+--------------------------------------------------------------------------------
+
+-- Inject Local Fault /Q/ mixed with /I2/ into PCS Rx
+pcs_synch_rx(apb) sbc o00 sbc oc0 sbc od0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc od0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc od0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc od0 sbc o00
+
+-- Wait some time by dummy reading the network_control reg and make the
+-- eventual link status change happen. Check that no interrupt is present and
+-- that the status is OK
+apbrd      000 00000008 num=50    -- network_control : readback
+apbrd      024 00000000           -- int_status      : readback
+apbrd(est) 008 00000001 range=511 -- network_status  : check link OK (bits [8:1]
+                                  --                   can be whatever)
+
+--------------------------------------------------------------------------------
+
+-- Wait some time by dummy reading the network_control reg
+apbrd      000 00000008 num=20 -- network_control : readback
+apbrdf     000 00000008        -- network_control : readback
+
+--------------------------------------------------------------------------------
+
+-- Inject Remote Fault /Q/ mixed with /I2/ into PCS Rx
+pcs_synch_rx(apb) sbc o00 sbc oc0 sbc oe0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc oe0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc oe0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc oe0 sbc o00
+
+-- Wait some time by dummy reading the network_control reg and make the
+-- eventual link status change happen. Check that no interrupt is present and
+-- that the status is OK
+apbrd      000 00000008 num=50    -- network_control : readback
+apbrd      024 00000000           -- int_status      : readback
+apbrd(est) 008 00000001 range=511 -- network_status  : check link OK (bits [8:1]
+                                  --                   can be whatever)
+
+--------------------------------------------------------------------------------
+
+-- Wait some time by dummy reading the network_control reg
+apbrd      000 00000008 num=20 -- network_control : readback
+apbrdf     000 00000008        -- network_control : readback
+
+--------------------------------------------------------------------------------
+
+-- Inject Link Interruption /Q/ mixed with /I2/ into PCS Rx
+pcs_synch_rx(apb) sbc o00 sbc oc0 sbc of0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc of0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc of0 sbc o00
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o50 sbc o50 sbc o50 sbc o50
+pcs_synch_rx      sbc o00 sbc oc0 sbc of0 sbc o00
+
+-- Wait some time by dummy reading the network_control reg and make the
+-- eventual link status change happen. Check that no interrupt is present and
+-- that the status is OK
+apbrd      000 00000008 num=50    -- network_control : readback
+apbrd      024 00000000           -- int_status      : readback
+apbrd(est) 008 00000001 range=511 -- network_status  : check link OK (bits [8:1]
+                                  --                   can be whatever)
+
+-- ************************************************************************** --
+-- 4. Force end of test in case it doesn't stop of its own accord.
+-- ************************************************************************** --
+
+end(4000)

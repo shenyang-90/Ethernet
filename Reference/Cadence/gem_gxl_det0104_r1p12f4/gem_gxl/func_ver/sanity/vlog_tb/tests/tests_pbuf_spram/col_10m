@@ -1,0 +1,279 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : col_10m
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 3 March 2002
+--
+--------------------------------------------------------------------------------
+--   Test Description
+--   
+--   This test ensures that the GEM deals with collisions in 10 or 100 mode.
+--   
+--   Functional Coverage
+--   * Ensures that early collisions are detected in 10 or 100 mode.
+--      i.e. Tests for collisions during preamble and SFD.
+--   * Tests for late collisions in 10 or 100 mode.
+--   * Tests for collisions during padding in 10 or 100 mode.
+--   * Ensures that late collisions are detected in both normal gigabit mode 
+--     and burst gigabit mode.  
+--      i.e. Tests for collisions during crc in both normal gigabit mode and 
+--           burst gigabit mode.
+--   
+--   Detailed Test Description
+--   
+--   1. Initialise the GEM for 10M mode operation.
+--   2. Receive a minimum sized frame with a collision in the beginning of 
+--      the data portion of the frame.
+--   3. Receive a minimum sized frame with a collision towards the end of 
+--      preamble.
+--   4. Receive a minimum sized frame with a collision at SFD.
+--   5. Receive a minimum sized frame with a collision at the beginning of 
+--      preamble.
+--   6. Receive a minimum sized frame with padding with a collision towards 
+--      the end of the padding.
+--   7. Receive a minimum sized frame with a collision at the start of crc.
+--   8. Receive a minimum sized frame with a collision in the beginning of the 
+--      data portion of the frame.
+--   9. Receive a minimum sized frame with a collision towards the end
+--      of the frame. 
+--  10. Finally receive tha good frame and check status and statistic registers
+--      and ensure the above operations we handled properly.
+--  11. Successfully transmit frame 2 and read a used bit on frame 3.
+--   
+--      Note: only compatible with 1 wait state in tb_dma.v
+-------------------------------------------------------------------------------
+
+ten_meg_bit  -- 10Mbit/s operation (2.5Mhz tx_clk and rx_clk, 50MHz Pclk and Hclk)
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- ************************************************************************** --
+--   1. Initialise the GEM for 100M mode operation.
+-- ************************************************************************** --
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbwr      00 00000008  -- enable transmit
+apbrd      14 00000000  -- read transmit status register
+apbwr      1c ffffff00  -- write address of transmit buffer descriptor in memory
+apbrd      1c ffffff00  -- check transmit queue pointer
+apbwr      00 00000208  -- write transmit start bit and enable tx
+
+
+
+-- supply the transmit buffer location for frame 1.
+-- With TX packet buffer included all of frame is read in once and retried
+-- from the packet buffer.
+dma_rd ffffff04 00008030 -- reads tx control of eof and length of 48 bytes
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 12345678 -- read transmit data
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+
+-- DMA will now move onto processing frame 2.
+-- With TX packet buffer included all of frame is read in once and retried
+-- from the packet buffer.
+dma_rd ffffff0c 00008030 -- reads tx control of eof and length of 48 bytes
+dma_rd ffffff08 98765100 -- dma reads pointer of 98765100
+dma_rd 98765100 ffffffff -- read transmit data
+dma_rd 98765104 ffffffff
+dma_rd 98765108 ffffffff
+dma_rd 9876510c ffffffff
+dma_rd 98765110 ffffffff
+dma_rd 98765114 ffffffff
+dma_rd 98765118 ffffffff
+dma_rd 9876511c ffffffff
+dma_rd 98765120 ffffffff
+dma_rd 98765124 ffffffff
+dma_rd 98765128 ffffffff
+dma_rd 9876512c ffffffff
+
+
+-- ************************************************************************** --
+--   2. Receive a minimum sized frame with a collision in the beginning of 
+--      the data portion of the frame.
+-- ************************************************************************** --
+
+-- "x" forces data collision - jam must be at least 32 bits
+txd        55555555555555d578563412111111x1122
+txd                        22222222 -- JAM
+
+
+-- ************************************************************************** --
+--   3. Receive a minimum sized frame with a collision towards the end of 
+--      preamble.
+-- ************************************************************************** --
+
+-- "x" forces preamble collision - jam must be at least 32 bits
+-- preamble and SFD must both complete before jam is transmitted
+txd        55555555555x555d5         -- no data
+txd                         88888888 -- JAM
+
+
+-- ************************************************************************** --
+--   4. Receive a minimum sized frame with a collision at the beginning of 
+--      preamble.
+-- ************************************************************************** --
+
+-- "x" forces preamble collision - jam must be at least 32 bits
+-- preamble and SFD must both complete before jam is transmitted
+txd        55x555555555555d5         -- no data
+txd                         88888888 -- JAM
+
+
+-- ************************************************************************** --
+--   5. Receive a minimum sized frame with a collision at SFD.
+-- ************************************************************************** --
+
+-- "x" forces preamble collision - jam must be at least 32 bits
+-- preamble and SFD must both complete before jam is transmitted
+txd        555555555555x55d5         -- no data
+txd                         88888888 -- JAM
+
+
+-- ************************************************************************** --
+-- Force CRS high during backoff period
+-- ************************************************************************** --
+
+pinsd(50000) crs 1    -- force back off deferring state
+pinsd(70000) crs 0    -- end deference
+
+
+-- ************************************************************************** --
+--   6. Receive a minimum sized frame with padding with a collision towards 
+--      the end of the padding.
+-- ************************************************************************** --
+
+-- "x" forces fill collision - jam must be at least 32 bits
+txd        55555555555555d578563412111111112222222233333333
+txd                        44444444555555556666666677777777
+txd                        8888888899999999aaaaaaaabbbbbbbb
+txd                        000000000x000
+txd                        ffffffff -- JAM
+
+-- ************************************************************************** --
+--   7. Receive a minimum sized frame with a collision at the start of crc.
+-- ************************************************************************** --
+
+-- "x" forces crc collision - jam must be at least 32 bits
+txd        55555555555555d578563412111111112222222233333333
+txd                        44444444555555556666666677777777
+txd                        8888888899999999aaaaaaaabbbbbbbb
+txd                        00000000000000000000000026x3830
+txd                        ffffffff -- JAM
+
+
+-- ************************************************************************** --
+--   8. Receive a minimum sized frame with a collision in the beginning of the 
+--      data portion of the frame.
+-- ************************************************************************** --
+
+-- "x" forces data collision - jam must be at least 32 bits
+txd        55555555555555d578563412111111x1122
+txd                        22222222 -- JAM
+
+
+-- ************************************************************************** --
+--   9. Receive a minimum sized frame with a collision towards the end
+--      of the frame. 
+-- ************************************************************************** --
+
+-- "x" forces collision - jam must be at least 32 bits
+txd        55555555555555d578563412111111112222222233333333
+txd                        44444444555555556666666677777777
+txd                        8888888899999999aaaaaaaabbbbbbbb
+txd                        00000000000000000000000026x3830
+txd                        ffffffff -- JAM
+
+
+-- ************************************************************************** --
+--  10. Finally receive the good frame and check status and statistic registers
+--      and ensure the above operations we handled properly.
+-- ************************************************************************** --
+
+txd        55555555555555d578563412111111112222222233333333
+txd                        44444444555555556666666677777777
+txd                        8888888899999999aaaaaaaabbbbbbbb
+txd                        0000000000000000000000002638309b
+
+
+-- write used bit for frame 1
+dma_wr ffffff04 80008030
+
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- transmit status - frame transmitted, collision & tx_go
+apbwr      14 00000022  -- clear transmit status
+
+
+-- ************************************************************************** --
+--  11. Successfully transmit frame 2 and read a used bit on frame 3.
+-- ************************************************************************** --
+
+txd        55555555555555d5ffffffffffffffffffffffffffffffff
+txd                        ffffffffffffffffffffffffffffffff
+txd                        ffffffffffffffffffffffffffffffff
+txd                        000000000000000000000000a8c8c034 -- pad & CRC
+
+
+-- write used bit for frame 2
+dma_wr ffffff0c 80008030
+
+--DMA starts reading ahead to frame 3. This time it reads a used bit on frame 3.
+dma_rd ffffff14 80008020 -- reads tx control of eof and length of 48 bytes
+dma_rd ffffff10 98765100 -- dma reads pointer of 98765000
+
+
+apbrd(int) 24 00000088  -- check interrupt status - transmit complete and used bit read
+apbwr      24 00000088  -- clear interrupt status
+apbrd      14 00000021  -- transmit status - frame transmitted and used
+
+
+-- check transmit statistics
+apbrd     100 00000080  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000002  -- check frames transmitted ok
+apbrd     10C 00000001  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000002  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000001  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000001  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+ 
+
+end(1100000)
+
+

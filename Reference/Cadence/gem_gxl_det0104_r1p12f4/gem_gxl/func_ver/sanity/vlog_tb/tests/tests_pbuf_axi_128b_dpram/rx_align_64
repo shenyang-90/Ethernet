@@ -1,0 +1,949 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_align_64
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 08 March 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------------
+-- Test the realignment buffer of the GEM_RX block.
+-- Try lots of RX with different lengths and preamble that check combinations
+-- of the realignment buffer.
+-- Test is run 3 times, once through each interface (MII, GMII and TBI)
+-- 
+-- Functional Coverage
+----------------------
+-- Test the realignment buffer of the GEM_RX block in 64 bit mode.
+--
+--  
+-- Detailed Test Description
+----------------------------
+--
+-- Each test is broken down into combinations of the following conditions
+-- at the point the end_of_data signal in gem_rx is active. Not all combinations
+-- are possible (e.g. can't get next residue if we don't already have residue).
+--
+--   aligned at 16 bits - whether the curr_rx_dv signal in gem_rx finishes
+--                        the frame on a 16 bit boundary.
+--                          FALSE : the value of curr_rx_dv @ end_of data is
+--                                  either 01 or 10
+--                          TRUE  : the value of curr_rx_dv @ end_of data is
+--                                  either 11 and then 00 on next clock
+--
+--   current residue    - whether the value of prev_align_overflowd is high
+--                        at end_of_data
+--                          FALSE : the value of prev_align_overflowd @ 
+--                                  end_of data is 1'b0
+--                          TRUE  : the value of prev_align_overflowd @ 
+--                                  end_of data is 1'b1
+--                          
+--   next residue       - whether the value of next_align_overflow is high
+--                        at end_of_data
+--                          FALSE : the value of next_align_overflowd @ 
+--                                  end_of data is 1'b0
+--                          TRUE  : the value of next_align_overflowd @ 
+--                                  end_of data is 1'b1
+--                        Note that if true this condition will activate
+--                        the force_over_align mechanism.
+--
+-- 
+--------------------------------------------------------------------------------
+
+-- Setup wait states & hgrant delay to cope with gigabit 
+-- operation into 64 bits.
+wait_states 0
+bus_grant_delay 0
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      98 12345678  -- specific address register 1 bottom
+apbwr      9C 00001111  -- specific address register 1 top
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00280000  -- 64 bit AHB
+apbrd      04 00280000  -- check new value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+
+
+--******************************************************************************
+-- 10/100 MII mode
+--******************************************************************************
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      18 fffff000  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      20 00000000  -- check contents of the receive status register
+
+
+--------------------------------------------------------------------------------
+-- Scenario 1
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = false
+-- current residue    = false
+-- next residue       = false
+
+apbrdf     20 00000000  "Scenario 1 : 10/100, aligned=NO, current=NO, next=NO"
+                        -- check contents of the receive status register and 
+                        -- trigger reception of frame
+
+rxd(apb)     55d57856341211111111222222223333333344444444
+rxd                      55555555666666667777777788888888
+rxd                      99999999aaaaaaaabbbbbbbbcccccccc
+rxd                      ddddddddeeeeeeeeffffffff11
+rxd                      gggggggg
+-- Check memory accesses
+dma_rd rx_descr fffff000 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c 33333333
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 cccccccc
+dma_wr 22222034 dddddddd
+dma_wr 22222038 eeeeeeee
+dma_wr 2222203c ffffffff
+dma_wr 22222040 ceebfc11 -- last data + CRC (first part)
+dma_wr 22222044 0000008f -- CRC (second part)
+
+dma_wr rx_descr fffff000 22222001 -- dma writes ownership bit
+dma_wr rx_descr fffff004 0c00c045 -- dma writes rx status, local address match and 69 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 1 : Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+--------------------------------------------------------------------------------
+-- Scenario 2
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = false
+-- current residue    = false
+-- next residue       = true
+-- this end case is not possible (need current residue to force next residue)
+
+apbrd      20 00000000  "Scenario 2 : 10/100, aligned=NO, current=YES, next=YES"
+                        -- check contents of the receive status register
+
+apbrd      24 00000000  "Scenario 2 : Complete"
+                        -- check interrupt status - receive complete
+
+
+--------------------------------------------------------------------------------
+-- Scenario 3
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = false
+-- current residue    = true
+-- next residue       = false
+
+apbrd      20 00000000  "Scenario 3 : 10/100, aligned=NO, current=YES, next=NO"
+                        -- check contents of the receive status register
+
+rxd(gap) 5555d57856341211111111222222223333333344444444
+rxd                    55555555666666667777777788888888
+rxd                    99999999aaaaaaaabbbbbbbbcccccccc
+rxd                    ddddddddeeeeeeeeffffffff
+rxd                    gggggggg
+-- Check memory accesses
+dma_rd rx_descr fffff008 22222100 -- dma reads pointer of 22222100
+dma_wr 22222100 12345678 -- store frame to memory
+dma_wr 22222104 11111111
+dma_wr 22222108 22222222
+dma_wr 2222210c 33333333
+dma_wr 22222110 44444444
+dma_wr 22222114 55555555
+dma_wr 22222118 66666666
+dma_wr 2222211c 77777777
+dma_wr 22222120 88888888
+dma_wr 22222124 99999999
+dma_wr 22222128 aaaaaaaa
+dma_wr 2222212c bbbbbbbb
+dma_wr 22222130 cccccccc
+dma_wr 22222134 dddddddd
+dma_wr 22222138 eeeeeeee
+dma_wr 2222213c ffffffff
+dma_wr 22222140 a41f73eb -- CRC
+dma_wr 22222144 00000000
+
+dma_wr rx_descr fffff008 22222101 -- dma writes ownership bit
+dma_wr rx_descr fffff00c 0c00c044 -- dma writes rx status, local address match and 68 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3 : Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+--------------------------------------------------------------------------------
+-- Scenario 4
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = false
+-- current residue    = true
+-- next residue       = true
+-- This end case is not possible (need to be aligned at end to force next
+-- residue if currently have residue)
+
+apbrd      20 00000000  "Scenario 4 : 10/100, aligned=NO, current=YES, next=YES"
+                        -- check contents of the receive status register
+
+apbrd      24 00000000  "Scenario 4 : Complete"
+                        -- check interrupt status - receive complete
+
+
+--------------------------------------------------------------------------------
+-- Scenario 5
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = true
+-- current residue    = false
+-- next residue       = false
+
+apbrd      20 00000000  "Scenario 5 : 10/100, aligned=YES, current=NO, next=NO"
+                        -- check contents of the receive status register
+
+rxd(gap)   555555d57856341211111111222222223333333344444444
+rxd                        55555555666666667777777788888888
+rxd                        99999999aaaaaaaabbbbbbbbcccccccc
+rxd                        ddddddddeeeeeeeeffffffff
+rxd                        gggggggg
+-- Check memory accesses
+dma_rd rx_descr fffff010 22222300 -- dma reads pointer of 22222300
+dma_wr 22222300 12345678 -- store frame to memory
+dma_wr 22222304 11111111
+dma_wr 22222308 22222222
+dma_wr 2222232c 33333333
+dma_wr 22222310 44444444
+dma_wr 22222314 55555555
+dma_wr 22222318 66666666
+dma_wr 2222231c 77777777
+dma_wr 22222320 88888888
+dma_wr 22222324 99999999
+dma_wr 22222328 aaaaaaaa
+dma_wr 2222232c bbbbbbbb
+dma_wr 22222330 cccccccc
+dma_wr 22222334 dddddddd
+dma_wr 22222338 eeeeeeee
+dma_wr 2222233c ffffffff
+dma_wr 22222340 a41f73eb -- CRC
+dma_wr 22222344 00000000
+
+dma_wr rx_descr fffff010 22222301 -- dma writes ownership bit
+dma_wr rx_descr fffff014 0c00c044 -- dma writes rx status, local address match and 68 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 5 : Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+--------------------------------------------------------------------------------
+-- Scenario 6
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = true
+-- current residue    = false
+-- next residue       = true
+-- this end case is not possible (need current residue to force next residue)
+
+
+apbrd      20 00000000  "Scenario 6 : 10/100, aligned=YES, current=NO, next=YES"
+                        -- check contents of the receive status register
+
+apbrd      24 00000000  "Scenario 6 : Complete"
+                        -- check interrupt status - receive complete
+
+--------------------------------------------------------------------------------
+-- Scenario 7
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = true
+-- current residue    = true
+-- next residue       = false
+-- this end case is not possible (if current residue and 2 bytes added
+-- then will always have next residue)
+
+apbrd      20 00000000  "Scenario 7 : 10/100, aligned=YES, current=YES, next=NO"
+                        -- check contents of the receive status register
+
+
+apbrd      24 00000000  "Scenario 7 : Complete"
+                        -- check interrupt status - receive complete
+
+--------------------------------------------------------------------------------
+-- Scenario 8
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = true
+-- current residue    = true
+-- next residue       = true
+
+apbrd      20 00000000  "Scenario 8 : 10/100, aligned=YES, current=YES, next=YES"
+                        -- check contents of the receive status register
+
+rxd(gap)   5555d57856341211111111222222223333333344444444
+rxd                      55555555666666667777777788888888
+rxd                      99999999aaaaaaaabbbbbbbbcccccccc
+rxd                      ddddddddeeeeeeeeffffffff11
+rxd                      gggggggg
+-- Check memory accesses
+dma_rd rx_descr fffff018 22222400 -- dma reads pointer of 22222400
+dma_wr 22222400 12345678 -- store frame to memory
+dma_wr 22222404 11111111
+dma_wr 22222408 22222222
+dma_wr 2222240c 33333333
+dma_wr 22222410 44444444
+dma_wr 22222414 55555555
+dma_wr 22222418 66666666
+dma_wr 2222241c 77777777
+dma_wr 22222420 88888888
+dma_wr 22222424 99999999
+dma_wr 22222428 aaaaaaaa
+dma_wr 2222242c bbbbbbbb
+dma_wr 22222430 cccccccc
+dma_wr 22222434 dddddddd
+dma_wr 22222438 eeeeeeee
+dma_wr 2222243c ffffffff
+dma_wr 22222440 ceebfc11 -- last data + CRC (first part)
+dma_wr 22222444 0000008f -- CRC (second part)
+
+dma_wr rx_descr fffff018 22222401 -- dma writes ownership bit
+dma_wr rx_descr fffff01c 0c00c045 -- dma writes rx status, local address match and 69 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 8 : Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+dma_rd rx_descr fffff020 22222504 -- final buffer reads
+dma_rd rx_descr fffff028 55555500 
+
+
+--******************************************************************************
+
+
+--******************************************************************************
+-- Gigabit GMII mode
+--******************************************************************************
+apbwr      00 00000000  -- disable receive
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      20 00000000  -- check contents of the receive status register and trigger reception of frame
+apbwr      04 00280400  -- Setup gigabit mode GMII
+apbrd      04 00280400  -- verify write
+apbwr      00 00000004  -- enable receive again
+apbrd      00 00000004  -- wait a while before triggering next RXD
+apbrd      00 00000004  -- wait a while before triggering next RXD
+apbrd      00 00000004  -- wait a while before triggering next RXD
+apbrd      00 00000004  -- wait a while before triggering next RXD
+
+
+--------------------------------------------------------------------------------
+-- Scenario 9
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = false
+-- current residue    = false
+-- next residue       = false
+
+apbrdf     20 00000000  "Scenario 9 : Gigabit, aligned=NO, current=NO, next=NO"
+                        -- check contents of the receive status register and
+                        -- trigger reception of next receive frame
+
+rxd(apb_x) 555555d57856341211111111222222223333333344444444
+rxd                        55555555666666667777777788888888
+rxd                        99999999aaaaaaaabbbbbbbbcccccccc
+rxd                        ddddddddeeeeeeeeffffffff11
+rxd                        gggggggg
+-- Check memory accesses
+dma_rd rx_descr fffff000 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c 33333333
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 cccccccc
+dma_wr 22222034 dddddddd
+dma_wr 22222038 eeeeeeee
+dma_wr 2222203c ffffffff
+dma_wr 22222040 ceebfc11 -- last data + CRC (first part)
+dma_wr 22222044 0000008f -- CRC (second part)
+
+dma_wr rx_descr fffff000 22222001 -- dma writes ownership bit
+dma_wr rx_descr fffff004 0c00c045 -- dma writes rx status, local address match and 69 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 9 : Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+--------------------------------------------------------------------------------
+-- Scenario 10
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = false
+-- current residue    = false
+-- next residue       = true
+-- this end case is not possible (need current residue to force next residue)
+
+apbrd      20 00000000  "Scenario 10 : Gigabit, aligned=NO, current=NO, next=YES"
+                        -- check contents of the receive status register
+
+apbrd      24 00000000  "Scenario 10 : Complete"
+                        -- check interrupt status - receive complete
+
+--------------------------------------------------------------------------------
+-- Scenario 11
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = false
+-- current residue    = true
+-- next residue       = false
+
+apbrd      20 00000000  "Scenario 11 : Gigabit, aligned=NO, current=YES, next=NO"
+                        -- check contents of the receive status register
+
+rxd(gap_x) 5555d57856341211111111222222223333333344444444
+rxd                      55555555666666667777777788888888
+rxd                      99999999aaaaaaaabbbbbbbbcccccccc
+rxd                      ddddddddeeeeeeeeffffffff
+rxd                      gggggggg
+-- Check memory accesses
+dma_rd rx_descr fffff008 22222100 -- dma reads pointer of 22222100
+dma_wr 22222100 12345678 -- store frame to memory
+dma_wr 22222104 11111111
+dma_wr 22222108 22222222
+dma_wr 2222210c 33333333
+dma_wr 22222110 44444444
+dma_wr 22222114 55555555
+dma_wr 22222118 66666666
+dma_wr 2222211c 77777777
+dma_wr 22222120 88888888
+dma_wr 22222124 99999999
+dma_wr 22222128 aaaaaaaa
+dma_wr 2222212c bbbbbbbb
+dma_wr 22222130 cccccccc
+dma_wr 22222134 dddddddd
+dma_wr 22222138 eeeeeeee
+dma_wr 2222213c ffffffff
+dma_wr 22222140 a41f73eb -- CRC
+dma_wr 22222144 00000000
+
+dma_wr rx_descr fffff008 22222101 -- dma writes ownership bit
+dma_wr rx_descr fffff00c 0c00c044 -- dma writes rx status, local address match and 68 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 11 : Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+--------------------------------------------------------------------------------
+-- Scenario 12
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = false
+-- current residue    = true
+-- next residue       = true
+-- This end case is not possible (need to be aligned at end to force next
+-- residue if currently have residue)
+
+apbrd      20 00000000  "Scenario 12 : Gigabit, aligned=NO, current=YES, next=YES"
+                        -- check contents of the receive status register
+
+apbrd      24 00000000  "Scenario 12 : Complete"
+                        -- check interrupt status - receive complete
+
+
+--------------------------------------------------------------------------------
+-- Scenario 13
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = true
+-- current residue    = false
+-- next residue       = false
+
+apbrd      20 00000000  "Scenario 13 : Gigabit, aligned=YES, current=NO, next=NO"
+                        -- check contents of the receive status register
+
+rxd(gap_x) 55d57856341211111111222222223333333344444444
+rxd                    55555555666666667777777788888888
+rxd                    99999999aaaaaaaabbbbbbbbcccccccc
+rxd                    ddddddddeeeeeeeeffffffff
+rxd                    gggggggg
+-- Check memory accesses
+dma_rd rx_descr fffff010 22222300 -- dma reads pointer of 22222300
+dma_wr 22222300 12345678 -- store frame to memory
+dma_wr 22222304 11111111
+dma_wr 22222308 22222222
+dma_wr 2222230c 33333333
+dma_wr 22222310 44444444
+dma_wr 22222314 55555555
+dma_wr 22222318 66666666
+dma_wr 2222231c 77777777
+dma_wr 22222320 88888888
+dma_wr 22222324 99999999
+dma_wr 22222328 aaaaaaaa
+dma_wr 2222232c bbbbbbbb
+dma_wr 22222330 cccccccc
+dma_wr 22222334 dddddddd
+dma_wr 22222338 eeeeeeee
+dma_wr 2222233c ffffffff
+dma_wr 22222340 a41f73eb -- CRC
+dma_wr 22222344 00000000
+
+dma_wr rx_descr fffff010 22222301 -- dma writes ownership bit
+dma_wr rx_descr fffff014 0c00c044 -- dma writes rx status, local address match and 68 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 13 : Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+--------------------------------------------------------------------------------
+-- Scenario 14
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = true
+-- current residue    = false
+-- next residue       = true
+-- this end case is not possible (need current residue to force next residue)
+
+
+apbrd      20 00000000  "Scenario 14 : Gigabit, aligned=YES, current=NO, next=YES"
+                        -- check contents of the receive status register
+
+apbrd      24 00000000  "Scenario 14 : Complete"
+                        -- check interrupt status - receive complete
+
+--------------------------------------------------------------------------------
+-- Scenario 15
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = true
+-- current residue    = true
+-- next residue       = false
+-- this end case is not possible (if current residue and 2 bytes added
+-- then will always have next residue)
+
+
+apbrd      20 00000000  "Scenario 15 : Gigabit, aligned=YES, current=YES, next=NO"
+                        -- check contents of the receive status register
+
+apbrd      24 00000000  "Scenario 15 : Complete"
+                        -- check interrupt status - receive complete
+
+--------------------------------------------------------------------------------
+-- Scenario 16
+--------------------------------------------------------------------------------
+-- aligned at 16 bits = true
+-- current residue    = true
+-- next residue       = true
+
+apbrd      20 00000000  "Scenario 16 : Gigabit, aligned=YES, current=YES, next=YES"
+                        -- check contents of the receive status register
+
+rxd(gap_x) 5555d57856341211111111222222223333333344444444
+rxd                      55555555666666667777777788888888
+rxd                      99999999aaaaaaaabbbbbbbbcccccccc
+rxd                      ddddddddeeeeeeeeffffffff11
+rxd                      gggggggg
+-- Check memory accesses
+dma_rd rx_descr fffff018 22222400 -- dma reads pointer of 22222400
+dma_wr 22222400 12345678 -- store frame to memory
+dma_wr 22222404 11111111
+dma_wr 22222408 22222222
+dma_wr 2222240c 33333333
+dma_wr 22222410 44444444
+dma_wr 22222414 55555555
+dma_wr 22222418 66666666
+dma_wr 2222241c 77777777
+dma_wr 22222420 88888888
+dma_wr 22222424 99999999
+dma_wr 22222428 aaaaaaaa
+dma_wr 2222242c bbbbbbbb
+dma_wr 22222430 cccccccc
+dma_wr 22222434 dddddddd
+dma_wr 22222438 eeeeeeee
+dma_wr 2222243c ffffffff
+dma_wr 22222440 ceebfc11 -- last data + CRC (first part)
+dma_wr 22222444 0000008f -- CRC (second part)
+
+dma_wr rx_descr fffff018 22222401 -- dma writes ownership bit
+dma_wr rx_descr fffff01c 0c00c045 -- dma writes rx status, local address match and 69 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 16 : Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+dma_rd rx_descr fffff020 22222504 -- final buffer read
+dma_rd rx_descr fffff028 55555500 -- final buffer reads
+
+
+--******************************************************************************
+
+
+-- --******************************************************************************
+-- -- PCS mode
+-- --******************************************************************************
+-- -- NOTE : PCS mode will not run at 32-bit DMA mode because of 
+-- --        bandwidth limitations. Test will be run at 64 bits instead.
+-- 
+-- apbwr      00 00000000  -- disable receive
+-- apbwr      18 fffff000  -- write receive queue pointer
+-- apbrd      20 00000000  -- check contents of the receive status register and trigger reception of frame
+-- apbrd     200 00009040  -- check value of pcs control register
+-- apbwr     200 00000040  -- disable autonegotioation
+-- apbrd     200 00008040  -- check autoneg disabled
+-- apbwr      04 00280c00  -- Setup PCS mode and 64 bits (can't run at 32 bits)
+-- apbrd      04 00280c00  -- verify write
+-- apbwr      00 00000004  -- enable receive again
+-- 
+-- -- check for link status change
+-- apbrd(int) 24 00000200  -- check interrupt status - link status change
+-- 
+-- 
+-- --------------------------------------------------------------------------------
+-- -- Scenario 17
+-- --------------------------------------------------------------------------------
+-- -- aligned at 16 bits = false
+-- -- current residue    = false
+-- -- next residue       = false
+-- 
+-- apbrd      20 00000000  "Scenario 17 : PCS, aligned=NO, current=NO, next=NO"
+--                         -- check contents of the receive status register
+-- 
+-- -- trigger reception of next receive frame at time interval after TBI is enabled
+-- pcs_rxd(2600_x) 555555d57856341211111111222222223333333344444444
+-- pcs_rxd                         55555555666666667777777788888888
+-- pcs_rxd                         99999999aaaaaaaabbbbbbbbcccccccc
+-- pcs_rxd                         ddddddddeeeeeeeeffffffff11
+-- pcs_rxd                         gggggggg
+-- -- Check memory accesses
+-- dma_rd rx_descr fffff000 22222000 -- dma reads pointer of 22222000
+-- dma_wr 22222000 12345678 -- store frame to memory
+-- dma_wr 22222004 11111111
+-- dma_wr 22222008 22222222
+-- dma_wr 2222200c 33333333
+-- dma_wr 22222010 44444444
+-- dma_wr 22222014 55555555
+-- dma_wr 22222018 66666666
+-- dma_wr 2222201c 77777777
+-- dma_wr 22222020 88888888
+-- dma_wr 22222024 99999999
+-- dma_wr 22222028 aaaaaaaa
+-- dma_wr 2222202c bbbbbbbb
+-- dma_wr 22222030 cccccccc
+-- dma_wr 22222034 dddddddd
+-- dma_wr 22222038 eeeeeeee
+-- dma_wr 2222203c ffffffff
+-- dma_wr 22222040 ceebfc11 -- last data + CRC (first part)
+-- dma_wr 22222044 0000008f -- CRC (second part)
+-- 
+-- dma_wr fffff004 0c00c045 -- dma writes rx status, local address match and 69 bytes received
+-- dma_wr fffff000 22222001 -- dma writes ownership bit
+-- 
+-- -- check status on reception of receive complete interrupt
+-- apbrd(int) 24 00000002  "Scenario 17 : Complete"
+--                         -- check interrupt status - receive complete
+-- apbrd      20 00000002  -- check contents of the receive status register- frame received
+-- apbwr      20 00000002  -- clear it
+-- apbrd      20 00000000  -- check it again
+-- 
+-- --------------------------------------------------------------------------------
+-- -- Scenario 18
+-- --------------------------------------------------------------------------------
+-- -- aligned at 16 bits = false
+-- -- current residue    = false
+-- -- next residue       = true
+-- -- this end case is not possible (need current residue to force next residue)
+-- 
+-- apbrd      20 00000000  "Scenario 18 : PCS, aligned=NO, current=NO, next=YES"
+--                         -- check contents of the receive status register
+-- 
+-- apbrd      24 00000000  "Scenario 18 : Complete"
+--                         -- check interrupt status - receive complete
+-- 
+-- --------------------------------------------------------------------------------
+-- -- Scenario 19
+-- --------------------------------------------------------------------------------
+-- -- aligned at 16 bits = false
+-- -- current residue    = true
+-- -- next residue       = false
+-- 
+-- apbrd      20 00000000  "Scenario 19 : PCS, aligned=NO, current=YES, next=NO"
+--                         -- check contents of the receive status register
+-- 
+-- pcs_rxd(gap_x) 5555d57856341211111111222222223333333344444444
+-- pcs_rxd                      55555555666666667777777788888888
+-- pcs_rxd                      99999999aaaaaaaabbbbbbbbcccccccc
+-- pcs_rxd                      ddddddddeeeeeeeeffffffff
+-- pcs_rxd                      gggggggg
+-- -- Check memory accesses
+-- dma_rd rx_descr fffff008 22222100 -- dma reads pointer of 22222100
+-- dma_wr 22222100 12345678 -- store frame to memory
+-- dma_wr 22222104 11111111
+-- dma_wr 22222108 22222222
+-- dma_wr 2222210c 33333333
+-- dma_wr 22222110 44444444
+-- dma_wr 22222114 55555555
+-- dma_wr 22222118 66666666
+-- dma_wr 2222211c 77777777
+-- dma_wr 22222120 88888888
+-- dma_wr 22222124 99999999
+-- dma_wr 22222128 aaaaaaaa
+-- dma_wr 2222212c bbbbbbbb
+-- dma_wr 22222130 cccccccc
+-- dma_wr 22222134 dddddddd
+-- dma_wr 22222138 eeeeeeee
+-- dma_wr 2222213c ffffffff
+-- dma_wr 22222140 a41f73eb -- CRC
+-- dma_wr 22222144 00000000 -- extra for 64 bit bus
+-- 
+-- dma_wr fffff00c 0c00c044 -- dma writes rx status, local address match and 68 bytes received
+-- dma_wr fffff008 22222101 -- dma writes ownership bit
+-- 
+-- -- check status on reception of receive complete interrupt
+-- apbrd(int) 24 00000002  "Scenario 19 : Complete"
+--                         -- check interrupt status - receive complete
+-- apbrd      20 00000002  -- check contents of the receive status register- frame received
+-- apbwr      20 00000002  -- clear it
+-- apbrd      20 00000000  -- check it again
+-- 
+-- --------------------------------------------------------------------------------
+-- -- Scenario 20
+-- --------------------------------------------------------------------------------
+-- -- aligned at 16 bits = false
+-- -- current residue    = true
+-- -- next residue       = true
+-- -- This end case is not possible (need to be aligned at end to force next
+-- -- residue if currently have residue)
+-- 
+-- apbrd      20 00000000  "Scenario 20 : PCS, aligned=NO, current=YES, next=YES"
+--                         -- check contents of the receive status register
+-- 
+-- apbrd      24 00000000  "Scenario 20 : Complete"
+--                         -- check interrupt status - receive complete
+-- 
+-- 
+-- --------------------------------------------------------------------------------
+-- -- Scenario 21
+-- --------------------------------------------------------------------------------
+-- -- aligned at 16 bits = true
+-- -- current residue    = false
+-- -- next residue       = false
+-- 
+-- apbrd      20 00000000  "Scenario 21 : PCS, aligned=YES, current=NO, next=NO"
+--                         -- check contents of the receive status register
+-- 
+-- pcs_rxd(gap_x) 55d57856341211111111222222223333333344444444
+-- pcs_rxd                    55555555666666667777777788888888
+-- pcs_rxd                    99999999aaaaaaaabbbbbbbbcccccccc
+-- pcs_rxd                    ddddddddeeeeeeeeffffffff
+-- pcs_rxd                    gggggggg
+-- -- Check memory accesses
+-- dma_rd rx_descr fffff010 22222300 -- dma reads pointer of 22222300
+-- dma_wr 22222300 12345678 -- store frame to memory
+-- dma_wr 22222304 11111111
+-- dma_wr 22222308 22222222
+-- dma_wr 2222230c 33333333
+-- dma_wr 22222310 44444444
+-- dma_wr 22222314 55555555
+-- dma_wr 22222318 66666666
+-- dma_wr 2222231c 77777777
+-- dma_wr 22222320 88888888
+-- dma_wr 22222324 99999999
+-- dma_wr 22222328 aaaaaaaa
+-- dma_wr 2222232c bbbbbbbb
+-- dma_wr 22222330 cccccccc
+-- dma_wr 22222334 dddddddd
+-- dma_wr 22222338 eeeeeeee
+-- dma_wr 2222233c ffffffff
+-- dma_wr 22222340 a41f73eb -- CRC
+-- dma_wr 22222144 00000000 -- extra for 64 bit bus
+-- 
+-- dma_wr fffff014 0c00c044 -- dma writes rx status, local address match and 68 bytes received
+-- dma_wr fffff010 22222301 -- dma writes ownership bit
+-- 
+-- -- check status on reception of receive complete interrupt
+-- apbrd(int) 24 00000002  "Scenario 21 : Complete"
+--                         -- check interrupt status - receive complete
+-- apbrd      20 00000002  -- check contents of the receive status register- frame received
+-- apbwr      20 00000002  -- clear it
+-- apbrd      20 00000000  -- check it again
+-- 
+-- --------------------------------------------------------------------------------
+-- -- Scenario 22
+-- --------------------------------------------------------------------------------
+-- -- aligned at 16 bits = true
+-- -- current residue    = false
+-- -- next residue       = true
+-- -- this end case is not possible (need current residue to force next residue)
+-- 
+-- 
+-- apbrd      20 00000000  "Scenario 22 : PCS, aligned=YES, current=NO, next=YES"
+--                         -- check contents of the receive status register
+-- 
+-- apbrd      24 00000000  "Scenario 22 : Complete"
+--                         -- check interrupt status - receive complete
+-- 
+-- --------------------------------------------------------------------------------
+-- -- Scenario 23
+-- --------------------------------------------------------------------------------
+-- -- aligned at 16 bits = true
+-- -- current residue    = true
+-- -- next residue       = false
+-- -- this end case is not possible (if current residue and 2 bytes added
+-- -- then will always have next residue)
+-- 
+-- 
+-- apbrd      20 00000000  "Scenario 23 : PCS, aligned=YES, current=YES, next=NO"
+--                         -- check contents of the receive status register
+-- 
+-- apbrd      24 00000000  "Scenario 23 : Complete"
+--                         -- check interrupt status - receive complete
+-- 
+-- --------------------------------------------------------------------------------
+-- -- Scenario 24
+-- --------------------------------------------------------------------------------
+-- -- aligned at 16 bits = true
+-- -- current residue    = true
+-- -- next residue       = true
+-- 
+-- apbrd      20 00000000  "Scenario 24 : PCS, aligned=YES, current=YES, next=YES"
+--                         -- check contents of the receive status register
+-- 
+-- pcs_rxd(gap_x) 5555d57856341211111111222222223333333344444444
+-- pcs_rxd                      55555555666666667777777788888888
+-- pcs_rxd                      99999999aaaaaaaabbbbbbbbcccccccc
+-- pcs_rxd                      ddddddddeeeeeeeeffffffff11
+-- pcs_rxd                      gggggggg
+-- -- Check memory accesses
+-- dma_rd rx_descr fffff018 22222400 -- dma reads pointer of 22222400
+-- dma_wr 22222400 12345678 -- store frame to memory
+-- dma_wr 22222404 11111111
+-- dma_wr 22222408 22222222
+-- dma_wr 2222240c 33333333
+-- dma_wr 22222410 44444444
+-- dma_wr 22222414 55555555
+-- dma_wr 22222418 66666666
+-- dma_wr 2222241c 77777777
+-- dma_wr 22222420 88888888
+-- dma_wr 22222424 99999999
+-- dma_wr 22222428 aaaaaaaa
+-- dma_wr 2222242c bbbbbbbb
+-- dma_wr 22222430 cccccccc
+-- dma_wr 22222434 dddddddd
+-- dma_wr 22222438 eeeeeeee
+-- dma_wr 2222243c ffffffff
+-- dma_wr 22222440 ceebfc11 -- last data + CRC (first part)
+-- dma_wr 22222444 0000008f -- CRC (second part)
+-- 
+-- dma_wr fffff01c 0c00c045 -- dma writes rx status, local address match and 69 bytes received
+-- dma_wr fffff018 22222401 -- dma writes ownership bit
+-- 
+-- -- check status on reception of receive complete interrupt
+-- apbrd(int) 24 00000002  "Scenario 24 : Complete"
+--                         -- check interrupt status - receive complete
+-- apbrd      20 00000002  -- check contents of the receive status register- frame received
+-- apbwr      20 00000002  -- clear it
+-- apbrd      20 00000000  -- check it again
+-- 
+-- 
+-- dma_rd rx_descr fffff020 22222500 -- final buffer read
+-- 
+-- 
+
+
+
+--******************************************************************************
+-- check statsistic registers
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000224  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000008  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000008  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(10000)
+

@@ -1,0 +1,253 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2017
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_watermark
+--
+--   Author         : Arthur Marris (arthurm@cadence.com)
+--
+--   Date           : 14 February 2017
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This checks that an XON pause frame is sent when the receive SRAM fill level 
+-- exceeds the non-zero high water mark level and an XOFF pause frame is sent when
+-- the fill level falls below the low (non-zero) water mark level
+--
+--
+-- Detailed Test Description
+----------------------------
+--
+-- Set the receive water mark register to non zero values and then receive a frame to
+-- make the SRAM fill level go up and down and see the XON and XOFF pause frames transmitted
+--
+-- Then increase the value of the high water mark level and show that no pause frame are
+-- transmitted
+--
+-- Then receive a much longer frame to show a higher water mark in operation and with
+-- the low fill thresh-hold higher than high threshold
+--
+--------------------------------------------------------------------------------
+
+
+
+-- define config compatibility (names are the verilog defines in the defs file without the IP prefix)
+requires ext_fifo_interface 0
+requires rx_pkt_buffer 1
+requires tx_pkt_buffer 1
+requires rx_sram_size 1600
+
+
+#set_random_seed 1; -- seed can also be now set from calling script but this will override it
+
+# The following function sets the bandwidth on the host side
+# By default, the host clock frequency is randomized between
+# 
+#tb_set_host_bw
+
+-- Set AHB clock freq to 250MHz
+-- At 32bit, this means we have maximum bandwidth of 8Gbit/s shared between
+-- TX and RX. Randomize hready, keeping the maximum to 5 (averages around 2.5)
+-- to ensure no RX overflows occur, and max line rate is acheivable on TX
+sel_ahb_freq 3 
+randomize_hready -descr_max 5 -data_max 5 -read_max 5 -write_max 5
+tog_cnt_en 1
+bus_grant_delay 0 -- This sets hgrant to 1 always (for AHB configs!)
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+
+# Initialize the transmit and receive DMA queue pointers (random values but can add specifics if required)
+# use arg -rx_ptr_q<Q> and tx_ptr_q<Q> to set specific ptr values rather than the default random
+init_q_ptr  -num_tx_queues take_from_cfg   -num_rx_queues take_from_cfg
+
+
+# Initialize the screener type 1 registers (random values)
+# Note this will automatically force the transactor later on to
+# randomly create frames that match on these screeners, thus routing
+# frames to receive queues ..
+# we need everything to go to queue 0 because we are waiting for an interrupt on queue 0
+#init_screener_type1 -num_type1_screeners take_from_cfg   -num_rx_queues take_from_cfg 
+
+
+# initialize the DMA specific options for random data xfers
+#   - RX DMA data buffer size
+#     If left without an argument, it will be completely random
+#     Set high to force single buffer descriptor testing eg 16320
+#     use -max_buf_size for max (multiple 64 bytes only)
+#     use -min_buf_size for min (multiple 64 bytes only)
+#
+#   - Burst Length (random by default)
+#     use -burst <num>, where num can be 1,2,4,8,16, random
+#        
+#   - address bus (random by default, or off if config doesnt allow)
+#     use -addr_bus <32|64|random|take_from_cfg>     
+#        
+#   - extended buffer descriptors (random by default, or off if config doesnt allow)
+#     use -ext_bd <1|0|random>     
+#        
+#   - force max burst mode (forces AXI to send max length bursts)
+#     use -force_max_burst_<tx|rx> <1|0|random>    default is 0 
+init_dma -ext_bd random -addr_bus random  -burst random -min_buf_size 16320
+
+
+# Enable the interrupts
+# This is per queue, 
+# Valid args are ..
+#    -num_queues <1-16|take_from_cfg>
+#    -vector <the actual interrupt vector as per userguide>
+enable_ints -num_queues take_from_cfg   -vector 00000080  # enable TX complete
+
+
+
+# Initialize the network configuration register
+# Args are
+#   -eam      <1|0|random>, default = 0. This is external address matching
+#   -duplex   <full|half|random>, default = random
+#   -speed    <1g|100m|10m|random>, default = random
+#   -jumbo    <1|0|random>, default = random. This wont affect the RX transactor below, but will automatically cause jumbos to be dropped.
+#   -copy_all <1|0|random>, default = 0. If 0, ensure you initialize the dest_addr in the rx transactor to something that will match
+#   -databus  <32|64|128|take_from_cfg|random>, default = random, bus <= config.  The max value is the value set in dma_bus_width in gem_defs.v
+init_ncr -duplex full -speed random -jumbo random -databus take_from_cfg
+
+# Randomize the AXI QoS regs ..
+apbwr     2e0 rand_msb31_to_lsb0
+apbwr     2e4 rand_msb31_to_lsb0
+apbwr     2e8 rand_msb31_to_lsb0
+apbwr     2ec rand_msb31_to_lsb0
+
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      28 0ffffffd  -- enable all interrupts except receive
+
+apbwr      7c 00020004  -- write 8 to the high water mark field and 2 to the low water mark in the receive water mark register
+
+apbwr     000 0000000c  -- write tx_go and enable tx, enable rx
+
+apbrd      20 00000000 num=200 -- simple delay to allow enables to propagate through the IP ..
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+-- rx_frame and tx_frame are the random frame transactors
+-- by default, frames will be generated across the number of queues defined in the design config
+-- if there are screeners configured in this design configuration, and priority queues
+-- enabled, the rx_frame transactor will automatically generate IPv4/v6 UDP frames so
+-- that the screeners can match
+rx_frame (apb)  1
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      num_dma_queues take_from_cfg
+      data_size      16 
+      data           random
+      resource_err   0
+      auto_gen_int   0
+      fcs            good
+
+
+
+-- get the XON pause frame as the receive fill level has exceeded A
+txd  55555555555555d50180C200000178563412111188080001
+txd                  ffff0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000e66784ed
+
+-- wait for pause frame interrupt -- rx interrupt 00000002 is not enabled
+apbrd(int) 24 00004000  -- wait for 1st int -- 00004000 pause frame txed
+apbwr      24 00004000  -- clear interrupt status
+
+
+-- get the XOFF pause frame as the receive fill level is below 2
+txd  55555555555555d50180C200000178563412111188080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000620c8b94
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00004000  -- check interrupt status - pause frame transmitted
+apbwr      24 00004000  -- clear interrupt status
+enable_ints -num_queues take_from_cfg   -vector 00000082  # enable TX and RX complete
+apbwr      28 ffffffff  -- enable all interrupts including receive
+apbwr      7c 0002002a  -- write 2a to the high water mark field to show that this time no pause frame are transmitted
+apbrd      08 00000006  -- check reset value of network status register
+apbrdf     20 00000002  -- check contents of the receive status register and trigger reception of frame
+
+rx_frame (apb)  1
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      num_dma_queues take_from_cfg
+      data_size      16 
+      data           random
+      resource_err   0
+      auto_gen_int   0
+      fcs            good
+
+
+-- because the high water mark is higher neither XON nor XOFF pause frames will be transmitted
+
+
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+
+
+
+apbwr      7c 0199003e  -- write 177 to the high water mark field this time an XON pause frame will be transmitted
+                        -- but no XOFF because high water mark is set to 199 
+
+apbrd      38 00000000  -- check rx pause time
+
+apbrdf     20 00000002  -- check contents of the receive status register and trigger reception of frame
+
+
+rx_frame (apb)  1
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      num_dma_queues take_from_cfg
+      data_size      1400 
+      data           random
+      resource_err   0
+      auto_gen_int   0
+      fcs            good
+
+
+
+-- get the XON pause frame as the receive fill level has exceeded 3e
+txd  55555555555555d50180C200000178563412111188080001
+txd                  ffff0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000e66784ed
+
+-- because the low water mark is 199 no XOFF pause frame will be transmitted
+-- we will always get 2 interrupts, but we dont know the order ..
+-- 00004000 pause frame transmitted -- 00000002 receive complete
+apbrd(int) 24 zzzzzzzz  -- wait for 1st int
+apbwr      24 00004002  -- clear interrupt status
+apbrd(int) 24 zzzzzzzz  -- wait for 2nd int
+apbwr      24 00004002  -- clear interrupt status
+
+apbrd      38 00000000  -- check rx pause time
+
+apbrd     114 00000003  -- check pause frames transmitted
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(200000)
+
+

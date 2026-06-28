@@ -1,0 +1,495 @@
+-----------------------------------------------------
+-- tx_zero_buff test scenario for the Ethernet MAC --
+-----------------------------------------------------
+--
+--           CADENCE                    Copyright (c) 2002
+--           DESIGN                     Cadence Design Foundry, Inc.
+--           FOUNDRY                    All rights reserved.
+--
+-- Written by Martin James
+--
+-- 22Oct2001     martinj started it off
+-- 24Nov2001     martinj Updated for new implementation of wrapping mid frame
+--
+-- This test checks that the design can handle zero length buffers in the
+-- TX queue. These are useful for padding out the TX queue if required.
+--
+-- Test Procedure:
+--
+-- try a frame of zero length buffers
+-- This will be ignored, and nothing will be loaded into the FIFO.
+--
+-- try a frame of zero length buffers, with wrap bit set mid frame
+-- This will be ignored, and nothing will be loaded into the FIFO, but the
+-- queue pointer will wrap mid frame.
+--
+-- try zero length buffer with used bit set at start/end of frame
+-- This will cause an immediate reset because its the first buffer in the frame
+--
+-- try zero length buffer with wrap bit set at start/end of frame
+-- This frame will again be ignored, but the queue pointer will wrap
+--
+-- try zero length buffer with both wrap bit and used bit set at 
+-- start/end of frame
+--
+-- try frame of zero length buffers with used bit set mid frame
+-- This will halt the DMA, and indicate a used bit interrupt and status.
+--
+-- try some zero length buffers at the end of a valid frame
+--
+-- try some zero length buffers at in a new frame after a valid frame
+--
+-- try frame with real data and then a zero length buffer with used bit 
+-- (i.e. mid frame) This will halt the DMA, and will signal an interrupt, as
+-- real data has been transmitted, and hence an underrun is received.
+--
+-- try multi buffer frame with some zero length buffers mid way.
+--
+-- finally do a frame that starts with lots of zero length buffers
+-- and then does valid data
+--
+-- Check Statistics
+--
+-- ************************************************************************** --
+
+wait_states 0
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      00 00000208  -- write tx_go and enable tx
+
+-- ************************************************************************** --
+-- Try just padding the descriptor queue with zero length buffers
+-- This is the only defined use for zero length buffers, which must 
+-- have the END bit set.
+dma_rd 55555504 00008000 -- end, length=0
+dma_rd 55555500 aaaaaaaa -- dma reads pointer of aaaaaaaa
+dma_rd 5555550c 00008000 -- end, length=0
+dma_rd 55555508 55555555 -- dma reads pointer of 55555555
+
+
+-- ************************************************************************** --
+-- try a frame of zero length buffers
+-- This will be cause an exhausted mid frame even though nothing will 
+-- be loaded into the FIFO.
+dma_rd 55555514 00000000 -- no end, length=0
+dma_rd 55555510 aaaaaaaa -- dma reads pointer of aaaaaaaa
+dma_rd 5555551c 00008000 -- end, length=0
+dma_rd 55555518 55555555 -- dma reads pointer of 55555555
+
+-- We will get a writeback & interrupt for this frame even though nothing 
+-- was transmitted. Status will indicate exhausted mid-frame
+
+dma_wr 55555514 88000000 -- exhausted mid frame
+
+apbrd(int)   24 00000048 -- check interrupt status - used bit read & mid-frame
+apbwr        24 00000048 -- clear interrupt status
+apbrd        14 00000011 -- tx status - used bit read & mid-frame
+apbwr        14 00000011 -- clear tx status used bit read
+apbwr        00 00000208 -- write tx_go and enable tx
+
+
+-- ************************************************************************** --
+-- try a frame of zero length buffers, with wrap bit set mid frame
+-- This will be cause an exhausted mid frame even though nothing will 
+-- be loaded into the FIFO. The queue pointer will still wrap mid frame.
+-- Note that the descriptor pointer points to last successful descriptor
+dma_rd 55555514 00008000 -- end, length=0
+dma_rd 55555510 aaaaaaaa -- Pad to move start of packet on
+dma_rd 5555551c 00000000 -- no end, length=0
+dma_rd 55555518 aaaaaaaa -- dma reads pointer of aaaaaaaa
+dma_rd 55555524 40000000 -- no end, wrap set, length=0
+dma_rd 55555520 55555555 -- dma reads pointer of 55555555
+dma_rd 55555504 00000000 -- no end, length=0
+dma_rd 55555500 aaaaaaaa -- dma reads pointer of aaaaaaaa
+dma_rd 5555550c 00008000 -- end, length=0
+dma_rd 55555508 55555555 -- dma reads pointer of 55555555
+
+-- We will get a writeback & interrupt for this frame even though nothing 
+-- was transmitted. Status will indicate exhausted mid-frame
+
+dma_wr 5555551c 88000000 -- exhausted mid frame
+
+apbrd(int)   24 00000048 -- check interrupt status - used bit read & mid-frame
+apbwr        24 00000048 -- clear interrupt status
+apbrd        14 00000011 -- tx status - used bit read & mid-frame
+apbwr        14 00000011 -- clear tx status used bit read
+apbwr        00 00000208 -- write tx_go and enable tx
+
+
+-- ************************************************************************** --
+-- try zero length buffer with used bit set at start/end of frame
+-- This will signal an interrupt and halt the transmitter
+dma_rd 5555551c 80008000 -- end, used, length=0
+dma_rd 55555518 aaaaaaaa -- dma reads pointer of aaaaaaaa
+apbrd(int)   24 00000008 -- check interrupt status - used bit read
+apbwr        24 00000008 -- clear interrupt status
+apbrd        14 00000001 -- tx status - used bit read
+apbwr        14 00000001 -- clear tx status used bit read
+apbwr        00 00000208 -- write tx_go and enable tx
+-- Will now resume at descriptor offset address
+
+
+-- ************************************************************************** --
+-- try zero length buffer with wrap bit set at start/end of frame
+-- This frame will again be ignored, but the queue pointer will wrap
+-- Note that queue starts from immediately after last successful frame.
+dma_rd 5555551c 40008000 -- end, length=0, wrap
+dma_rd 55555518 55555555 -- dma reads pointer of 55555555
+
+-- ************************************************************************** --
+-- try zero length buffer with both wrap bit and used bit set at 
+-- start/end of frame, will cause reset as first buffer has a used bit set
+-- Note that used bit takes precedence here and the queue will not wrap
+-- Instead the queue pointer will return to after the last successful frame.
+dma_rd 55555504 c0008000 -- end, length=0, wrap & used
+dma_rd 55555500 55555555 -- dma reads pointer of 55555555
+
+
+apbrd(int)   24 00000008 -- check interrupt status - used bit read
+apbwr        24 00000008 -- clear interrupt status
+apbrd        14 00000001 -- tx status - used bit read
+apbwr        14 00000001 -- clear tx status used bit read
+apbwr        00 00000208 -- write tx_go and enable tx
+
+
+-- ************************************************************************** --
+-- try frame of zero length buffer with used bit set mid-frame
+-- This will halt the DMA, and will signal an interrupt.
+-- Note that the queue pointer has returned to after the last successful frame.
+
+-- first some padding
+dma_rd 55555504 00008000 -- end, length=0
+dma_rd 55555500 aaaaaaaa -- dma reads pointer of aaaaaaaa
+dma_rd 5555550c 00008000 -- end, length=0
+dma_rd 55555508 55555555 -- dma reads pointer of 55555555
+
+-- now the test
+dma_rd 55555514 00000000 -- no end, length=0
+dma_rd 55555510 55555555 -- dma reads pointer of 55555555
+dma_rd 5555551c 80000000 -- no end, length=0, used bit read 
+dma_rd 55555518 aaaaaaaa -- dma reads pointer of aaaaaaaa
+
+-- writeback exhausted mid-frame
+dma_wr 55555514 88000000 -- exhausted mid frame
+
+-- interrupt with exhausted mid-frame
+apbrd(int)   24 00000048 -- check interrupt status - used bit read & mid-frame
+apbwr        24 00000048 -- clear interrupt status
+apbrd        14 00000011 -- tx status - used bit read & mid-frame
+apbwr        14 00000011 -- clear tx status used bit read
+apbwr        00 00000208 -- write tx_go and enable tx
+
+
+-- ************************************************************************** --
+-- try some zero length buffers at the end of a valid frame,
+-- Since the zero length buffer happens at the end of frame we have no valid
+-- data to write into the TX FIFO to accompany the EOP. 
+-- The new DMA will force an exhausted mid frame error.
+-- Note that the queue pointer has returned to after the last successful frame.
+
+dma_rd 55555514 4000003e -- no end of frame, length 62 bytes
+dma_rd 55555510 98765000 -- dma reads pointer of 98765000
+
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 0000fde0
+
+--now some zero length buffers 
+dma_rd 55555504 40008000 -- end of frame, length 0 bytes, wrap
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+
+-- write transmit complete status
+dma_wr 55555514 c800003e -- exhausted mid frame (wrap still set)
+
+-- with the packet buffer in place, no TXD will be seen.
+-- -- check for correct preamble, SFD, data, pad and crc
+-- txd    55555555555555d501005e00000200d0bcece704080045c0
+-- txd                    003000000000021158729e8ce0fce000
+-- txd                    000207c107c1001cb6e9000008030a64
+-- txd                    0200636973636f000000000000 --9ecccccccc
+
+
+apbrd(int)   24 00000048 -- check interrupt status - used bit read & mid-frame
+apbwr        24 00000048 -- clear interrupt status
+apbrd        14 00000011 -- tx status - used bit read & mid-frame
+apbwr        14 00000011 -- clear tx status used bit read
+apbwr        00 00000208 -- write tx_go and enable tx
+
+
+-- ************************************************************************** --
+-- try some zero length buffers at in a new frame after a valid frame
+-- Note that the queue pointer has returned to after the last successful frame.
+dma_rd 55555514 4000803e -- end of frame, length 62 bytes, wrap
+dma_rd 55555510 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 0000fde0
+
+--now some zero length buffers in a new frame 
+dma_rd 55555504 00000000 -- no end of frame, length 0 bytes
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd 5555550c 00000000 -- no end of frame, length 0 bytes
+dma_rd 55555508 98765000 -- dma reads pointer of 98765000
+dma_rd 55555514 40008000 -- end of frame, wrap, length 0 bytes
+dma_rd 55555510 98765000 -- dma reads pointer of 98765000
+
+-- write transmit complete status (part of double writeback)
+dma_wr 55555514 c000803e -- write used bit 
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd                    003000000000021158729e8ce0fce000
+txd                    000207c107c1001cb6e9000008030a64
+txd                    0200636973636f0000009e8ce0fdfb2c1f72
+
+-- write transmit complete status for mid frame error (part of double writeback)
+dma_wr 55555504 88000000 -- write used bit & exhausted mid-frame
+
+-- Interrupts for the two frames are combined
+apbrd(int) 24 000000c8  -- check interrupt status - transmit complete, used & mid-frame
+apbwr      24 000000c8 -- clear interrupt status
+apbrd      14 00000031  -- tx status - transmit complete, used & mid-frame & halted
+apbwr      14 00000031  -- clear tx status
+apbrd      14 00000000  -- check tx status cleared
+apbwr      00 00000208
+
+
+
+-- ************************************************************************** --
+-- try frame with real data and then a zero length buffer with used bit 
+-- (i.e. mid frame) This will halt the DMA, and will signal an interrupt, as
+-- real data has been transmitted, and hence an underrun is received.
+dma_rd 55555504 0000003e -- no end of frame, length 62 bytes
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 0000fde0
+
+--now a zero length buffer with used bit set
+dma_rd 5555550c 80000000 -- no end of frame, length 0 bytes, used bit read
+dma_rd 55555508 98765000 -- dma reads pointer of 98765000
+
+-- write transmit complete status
+dma_wr 55555504 8800003e -- write used bit, exhausted mid frame.
+
+-- With the packet buffer in place no TXD will be seen.
+-- -- check for correct preamble, SFD, data, pad and crc
+-- txd    55555555555555d501005e00000200d0bcece704080045c0
+-- txd                    003000000000021158729e8ce0fce000
+-- txd                    000207c107c1001cb6e9000008030a64
+-- txd                    0200636973636f000000000000--9e
+-- --txd                    cccccccc   -- 32 bit JAM for underrun
+
+apbrd(int)   24 00000048 -- check interrupt status - used bit read & mid-frame
+apbwr        24 00000048 -- clear interrupt status
+apbrd        14 00000011 -- tx status - used bit read & mid-frame
+apbwr        14 00000011 -- clear tx status used bit read
+apbwr        00 00000208 -- write tx_go and enable tx
+
+
+-- ************************************************************************** --
+-- try multi buffer frame with some zero length buffers mid way.
+-- In the new DMA with packet buffer this will cause an exhausted mid-frame
+
+--first buffer
+dma_rd 55555504 00000020 -- no end of frame, length 32 bytes
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+
+--some zero length buffers
+dma_rd 5555550c 00000000 -- no end of frame, length 0 bytes
+dma_rd 55555508 98765000 -- dma reads pointer of 98765000
+dma_rd 55555514 00000000 -- no end of frame, length 0 bytes
+dma_rd 55555510 98765000 -- dma reads pointer of 98765000
+
+--last buffer with data in
+dma_rd 5555551c 0000801e -- end of frame, length 30 bytes
+dma_rd 55555518 98765030 -- dma reads pointer of 98765030
+dma_rd 98765030 00003000
+dma_rd 98765034 11020000
+dma_rd 98765038 8c9e7258
+dma_rd 9876503c 00e0fce0
+dma_rd 98765040 005e0001
+dma_rd 98765044 d0000200
+dma_rd 98765048 04e7ecbc
+dma_rd 9876504c c0450008
+
+dma_rd 55555524 80008020 -- used bit set, length 32 bytes
+dma_rd 55555520 98765030 -- dma reads pointer of 98765050
+
+-- write transmit complete status
+dma_wr 55555504 80000020 -- write used bit
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd                    003000000000021158729e8ce0fce000
+txd                    003000000000021158729e8ce0fce000
+txd                    01005e00000200d0bcece7040800003e6888
+    
+                   
+apbrd(int)   24 00000088 -- check interrupt status - TX complete & used bit read
+apbwr        24 00000088 -- clear interrupt status
+apbrd        14 00000021 -- tx status - TX complete & used bit read
+apbwr        14 00000021 -- clear tx status
+apbwr        00 00000208 -- write tx_go and enable tx
+
+
+
+-- ************************************************************************** --
+-- finally do a frame that starts with lots of zero length buffers
+-- and then does valid data
+-- Note that the queue pointer resumes just after the last successful frame.
+
+dma_rd 55555524 00000000 -- start of frame, no end, length=0
+dma_rd 55555520 aaaaaaaa -- dma reads pointer of aaaaaaaa (don't care)
+dma_rd 5555552c 00000000 -- no end, length=0
+dma_rd 55555528 55555555 -- dma reads pointer of 55555555 (don't care)
+dma_rd 55555534 00000000 -- no end, length=0
+dma_rd 55555530 aaaaaaaa -- dma reads pointer of aaaaaaaa (don't care)
+dma_rd 5555553c 00000000 -- no end, length=0
+dma_rd 55555538 55555555 -- dma reads pointer of 55555555 (don't care)
+dma_rd 55555544 0000803e -- end of frame, length 62 bytes
+dma_rd 55555540 98765000 -- dma reads pointer of 98765000 (this will be used)
+
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 0000fde0
+
+dma_rd 5555554c 8000803e -- used bit set
+dma_rd 55555548 98765000 -- dma reads pointer of 98765000
+
+-- write transmit complete status
+dma_wr 55555524 80000000 -- write used bit
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd                    003000000000021158729e8ce0fce000
+txd                    000207c107c1001cb6e9000008030a64
+txd                    0200636973636f0000009e8ce0fdfb2c1f72
+
+
+apbrd(int) 24 00000088  -- check interrupt status - transmit complete, used bit
+apbwr      24 00000088  -- clear interrupt status
+apbrd      14 00000021  -- tx status - frame transmitted and tx_go inactive, used bit 
+
+
+
+-- ************************************************************************** --
+-- check statistics
+
+-- check transmit statistics
+apbrd     100 000000c6  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000003  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000003  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000003  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(5000)
+
+bus_grant_delay 0

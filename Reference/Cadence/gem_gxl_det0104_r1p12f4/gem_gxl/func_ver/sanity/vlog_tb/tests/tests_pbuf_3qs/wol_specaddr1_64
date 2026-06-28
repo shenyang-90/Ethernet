@@ -1,0 +1,608 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : wol_specaddr1_64
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 6 March 2003
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- This test verifies the operation of Wake-on-LAN using specific address 1
+-- filter matches
+-- 
+-- Functional Coverage
+-- * Checks that WoL is asserted for specific address 1 matches.
+-- * Checks that WoL is not asserted for specific address 2-4 matches.
+-- * Checks the operation of the WoL enable mask.
+-- * Checks the operation of the "wol" output.
+-- * Checks that the WoL is asserted for both good and bad frames.
+--
+-- 
+-- Detailed Test Description
+--  1. Initialise suitable wait states for the test.
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 64-bit DMA data bus.
+--  3. Send the DUT various frames to test specific address 1 filter detection 
+--     for WoL:
+--
+-- Test 1: Specific address 1 match that generates WoL
+--     Enable the local address wake up event enable bit in the WoL register.
+--     Send a good receive frame that matches the specific address 1.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame is successfully received.
+--
+-- Test 2: Specific address 1 match, but mask disabled
+--     Disable the local address wake up event enable bit in the WoL register.
+--     Send a good receive frame that matches the specific address 1.
+--     Verify that the wol output is not asserted but that the frame is 
+--     successfully received.
+--
+-- Test 3: Not specific address 1 matched
+--     Enable the local address wake up event enable bit in the WoL register.
+--     Send a good receive frame that does not match the specific address 1,
+--     but matches on specific address 2-4.
+--     Verify that the wol output is not asserted but that the frame is 
+--     successfully received.
+--
+-- Test 4: Bad CRC that generates WoL
+--     Enable the local address wake up event enable bit in the WoL register.
+--     Send a receive frame with bad CRC that matches the specific address 1.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame dropped with a CRC error.
+--
+-- Test 5: Too short that generates WoL
+--     Enable the local address wake up event enable bit in the WoL register.
+--     Send a short (60 bytes) receive frame matching the specific address 1.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame dropped with a undersize error.
+--
+-- Test 6: Good VLAN frame that generates WoL
+--     Enable the local address wake up event enable bit in the WoL register.
+--     Send a good VLAN tagged receive frame matching the specific address 1.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame is successfully received.
+--
+--  4. Check statistics for correct values from above tests.
+--
+--------------------------------------------------------------------------------
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 3
+bus_grant_delay 3
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 64-bit DMA data bus.
+--******************************************************************************
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 00280001  -- Setup speed bit.
+apbrd      04 00280001  -- verify write to network config register.
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      18 fffff000  -- write receive queue pointer
+apbwr      480 88000000  -- write receive queue pointer 1
+apbwr      484 99000000  -- write receive queue pointer 2
+apbrd      18 fffff000  -- check receive queue pointer
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 0fffffff  -- enable all interrupts except WOL
+apbrd      24 00000000  -- check interrupt status
+apbwr      00 00000004  -- enable receive
+
+
+
+--******************************************************************************
+--  3. Send the DUT various frames to test specific address 1 filter detection 
+--     for WoL:
+--******************************************************************************
+
+--  check reset state of Wake-on-LAN output
+pinsc(50) wol 0
+
+
+
+--******************************************************************************
+-- Test 1: Specific address 1 match that generates WoL
+--     Enable the local address wake up event enable bit in the WoL register.
+--     Send a good receive frame that matches the specific address 1.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame is successfully received.
+--******************************************************************************
+
+apbwr      B8 00041213  -- enable WoL specific address 1
+apbrdf     20 00000000  "Test 1 : Specific address 1 match that generates WoL"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        785634121111 -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID (IP)
+rxd        4500         -- Version, IHL, type of service
+rxd        002A         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81E1         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        080089A2     -- Data
+rxd        00010001     -- Data
+rxd        01234567     -- Data
+rxd        89ABCDEF     -- Data
+rxd        01234567     -- Data
+rxd        01234567     -- Data
+rxd        89AB         -- Data
+rxd        gggggggg     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da 111112345678 sa 563412390008 type 0800
+
+
+-- supply the receive buffer location
+dma_rd fffff000 22222100 -- dma reads pointer of 22222100
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 12345678 -- store frame to memory
+dma_wr 22222104 00081111
+dma_wr 22222108 56341239
+dma_wr 2222210c 00450008
+dma_wr 22222110 00002A00
+dma_wr 22222114 010A0000
+dma_wr 22222118 BF86E181
+dma_wr 2222211c BF86520B
+dma_wr 22222120 00082216
+dma_wr 22222124 0100A289
+dma_wr 22222128 23010100
+dma_wr 2222212c AB896745
+dma_wr 22222130 2301EFCD
+dma_wr 22222134 23016745
+dma_wr 22222138 AB896745
+dma_wr 2222213c 030e3b64
+
+dma_wr fffff000 22222101 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- local 1 match
+                         -- No VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff004 0800c040 -- dma writes rx status,
+
+
+pinsc(533) wol 1  -- check wol pin is high
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 1 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Test 2: Specific address 1 match, but mask disabled
+--     Disable the local address wake up event enable bit in the WoL register.
+--     Send a good receive frame that matches the specific address 1.
+--     Verify that the wol output is not asserted but that the frame is 
+--     successfully received.
+--******************************************************************************
+
+apbwr      B8 000b1213  -- disable WoL specific address 1
+apbrdf     20 00000000  "Test 2 : Specific address 1 match, but mask disabled"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        785634121111 -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID (IP)
+rxd        4500         -- Version, IHL, type of service
+rxd        002A         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81E1         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        080089A2     -- Data
+rxd        00010001     -- Data
+rxd        01234567     -- Data
+rxd        89ABCDEF     -- Data
+rxd        01234567     -- Data
+rxd        01234567     -- Data
+rxd        89AB         -- Data
+rxd        gggggggg     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da 111112345678 sa 563412390008 type 0800
+
+
+
+
+-- supply the receive buffer location
+dma_rd fffff008 22222200 -- dma reads pointer of 22222200
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222200 12345678 -- store frame to memory
+dma_wr 22222204 00081111
+dma_wr 22222208 56341239
+dma_wr 2222220c 00450008
+dma_wr 22222210 00002A00
+dma_wr 22222214 010A0000
+dma_wr 22222218 BF86E181
+dma_wr 2222221c BF86520B
+dma_wr 22222220 00082216
+dma_wr 22222224 0100A289
+dma_wr 22222228 23010100
+dma_wr 2222222c AB896745
+dma_wr 22222230 2301EFCD
+dma_wr 22222234 23016745
+dma_wr 22222238 AB896745
+dma_wr 2222223c 030e3b64
+
+dma_wr fffff008 22222201 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- local 1 match
+                         -- No VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff00c 0800c040 -- dma writes rx status,
+
+
+pinsc(1014) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 2 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+--******************************************************************************
+-- Test 3: Not specific address 1 matched
+--     Enable the local address wake up event enable bit in the WoL register.
+--     Send a good receive frame that does not match the specific address 1,
+--     but matches on specific address 2-4.
+--     Verify that the wol output is not asserted but that the frame is 
+--     successfully received.
+--******************************************************************************
+
+apbwr      B8 00041213  -- enable WoL specific address 1
+apbwr      90 12345678  -- specific address register 2 bottom
+apbwr      94 00000111  -- specific address register 2 top
+apbwr      98 12345678  -- specific address register 3 bottom
+apbwr      9C 00000111  -- specific address register 3 top
+apbwr      a0 12345678  -- specific address register 4 bottom
+apbwr      a4 00000111  -- specific address register 4 top
+apbrdf     20 00000000  "Test 3 : Not specific address 1 matched"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        785634121101 -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID (IP)
+rxd        4500         -- Version, IHL, type of service
+rxd        002A         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81E1         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        080089A2     -- Data
+rxd        00010001     -- Data
+rxd        01234567     -- Data
+rxd        89ABCDEF     -- Data
+rxd        01234567     -- Data
+rxd        01234567     -- Data
+rxd        89AB         -- Data
+rxd        gggggggg     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da 011112345678 sa 563412390008 type 0800
+
+
+
+
+-- supply the receive buffer location
+dma_rd fffff010 22222300 -- dma reads pointer of 22222300
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222300 12345678 -- store frame to memory
+dma_wr 22222304 00080111
+dma_wr 22222308 56341239
+dma_wr 2222230c 00450008
+dma_wr 22222310 00002A00
+dma_wr 22222314 010A0000
+dma_wr 22222318 BF86E181
+dma_wr 2222231c BF86520B
+dma_wr 22222320 00082216
+dma_wr 22222324 0100A289
+dma_wr 22222328 23010100
+dma_wr 2222232c AB896745
+dma_wr 22222330 2301EFCD
+dma_wr 22222334 23016745
+dma_wr 22222338 AB896745
+dma_wr 2222233c 4ea600a7
+
+dma_wr fffff010 22222301 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- local 4 match (2 & 3 masked)
+                         -- No VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff014 0e00c040 -- dma writes rx status,
+
+
+pinsc(1534) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 3 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+--******************************************************************************
+-- Test 4: Bad CRC that generates WoL
+--     Enable the local address wake up event enable bit in the WoL register.
+--     Send a receive frame with bad CRC that matches the specific address 1.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame dropped with a CRC error.
+--******************************************************************************
+
+apbwr      B8 00041213  -- enable WoL specific address 1
+apbrdf     20 00000000  "Test 4 : Bad CRC that generates WoL"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        785634121111 -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID (IP)
+rxd        4500         -- Version, IHL, type of service
+rxd        002A         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81E1         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        080089A2     -- Data
+rxd        00010001     -- Data
+rxd        01234567     -- Data
+rxd        89ABCDEF     -- Data
+rxd        01234567     -- Data
+rxd        01234567     -- Data
+rxd        89AB         -- Data
+rxd        deaddead     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da 111112345678 sa 563412390008 type 0800
+
+
+
+
+-- supply the receive buffer location
+dma_rd fffff018 22222400 -- dma reads pointer of 22222400
+pinsc(2055) wol 1  -- check wol pin is high
+
+
+
+
+--******************************************************************************
+-- Test 5: Too short that generates WoL
+--     Enable the local address wake up event enable bit in the WoL register.
+--     Send a short (60 bytes) receive frame matching the specific address 1.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame dropped with a undersize error.
+--******************************************************************************
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        785634121111 -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID (IP)
+rxd        4500         -- Version, IHL, type of service
+rxd        002A         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81E1         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        080089A2     -- Data
+rxd        00010001     -- Data
+rxd        01234567     -- Data
+rxd        89ABCDEF     -- Data
+rxd        01234567     -- Data
+rxd        01234567     -- Data
+rxd        89           -- Data
+rxd        gggggggg     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da 111112345678 sa 563412390008 type 0800
+
+
+
+pinsc(2371) wol 1  -- check wol pin is high
+
+
+
+
+--******************************************************************************
+-- Test 6: Good VLAN frame that generates WoL
+--     Enable the local address wake up event enable bit in the WoL register.
+--     Send a good VLAN tagged receive frame matching the specific address 1.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame is successfully received.
+--******************************************************************************
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        785634121111 -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002A         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81E1         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        080089A2     -- Data
+rxd        00010001     -- Data
+rxd        01234567     -- Data
+rxd        89ABCDEF     -- Data
+rxd        01234567     -- Data
+rxd        89AB         -- Data
+rxd        gggggggg     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da 111112345678 sa 563412390008 vid 0001 type 0800
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222400 12345678 -- store frame to memory
+dma_wr 22222404 00081111
+dma_wr 22222408 56341239
+dma_wr 2222240c 01000081
+dma_wr 22222410 00450008
+dma_wr 22222414 00002A00
+dma_wr 22222418 010A0000
+dma_wr 2222241c BF86E181
+dma_wr 22222420 BF86520B
+dma_wr 22222424 00082216
+dma_wr 22222428 0100A289
+dma_wr 2222242c 23010100
+dma_wr 22222430 AB896745
+dma_wr 22222434 2301EFCD
+dma_wr 22222438 AB896745
+dma_wr 2222243c ab02f571
+
+dma_wr fffff018 22222401 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- local 1 match
+                         -- VLAN tag detected, no priority or CFI
+                         -- 64 bytes received
+dma_wr fffff01c 0820c040 -- dma writes rx status,
+
+
+
+pinsc(2663) wol 1  -- check wol pin is high
+
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Tests 4 to 6 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+
+-- supply the receive buffer location
+--dma_rd fffff020 00000000 -- dma reads pointer of 00000000
+
+
+
+
+--******************************************************************************
+--  4. Check statistics for correct values from above tests.
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000100  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000004  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000004  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000001  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000001  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+apbrd     1A8 00000000  -- check receive IP checksum errors
+apbrd     1AC 00000000  -- check receive TCP checksum errors
+apbrd     1B0 00000000  -- check receive UDP checksum errors
+
+end(10000)
+
+

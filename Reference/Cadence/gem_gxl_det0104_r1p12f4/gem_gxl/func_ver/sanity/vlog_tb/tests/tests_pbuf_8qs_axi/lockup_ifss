@@ -1,0 +1,134 @@
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Basic Background Test for Incsiv Functional Safety (IFSS) simulations
+--
+-- 5 random frames are transmitted to Q0-Q2
+-- 5 random frames are received to Q0-Q2
+-- 
+--------------------------------------------------------------------------------
+
+-- Set the seed for the test ...
+-- set_random_seed 0;
+
+-- enable automatic ECC / Parity Checker function
+-- This will automatically validate the ECC / Parity statistics at the end
+-- of the test.  It will also automatically check interrupts.
+set_auto_fault_checker 1;
+
+-- Set AHB clock freq to 250MHz
+-- At 32bit, this means we have maximum bandwidth of 8Gbit/s shared between
+-- TX and RX. Randomize hready, keeping the maximum to 5 (averages around 2.5)
+-- to ensure no RX overflows occur, and max line rate is acheivable on TX
+sel_ahb_freq 3 
+randomize_hready -descr_max 5 -data_max 5 -read_max 5 -write_max 5
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      10 01a00710
+apbwr      28 C0000fff  -- enable all interrupts
+apbwr      600 00000fff -- enable q1 interrupts
+apbwr      604 00000fff -- enable q2 interrupts
+apbwr      a08 000001ff -- enable RAS interrupts
+apbwr      440 88000000 -- write transmit queue pointer 1
+apbwr      444 99000000 -- write transmit queue pointer 2
+apbwr      448 aa000000 -- write transmit queue pointer 3
+apbwr      44c bb000000 -- write transmit queue pointer 4
+apbwr      450 cc000000 -- write transmit queue pointer 5
+apbwr      454 dd000000 -- write transmit queue pointer 6
+apbwr      458 ee000000 -- write transmit queue pointer 7
+apbwr      480 f0010000 -- write receive queue pointer 1
+apbwr      484 f0020000 -- write receive queue pointer 2
+apbwr      488 f0030000 -- write receive queue pointer 3
+apbwr      48c f0040000 -- write receive queue pointer 4
+apbwr      490 f0050000 -- write receive queue pointer 5
+apbwr      494 f0060000 -- write receive queue pointer 6
+apbwr      498 f0070000 -- write receive queue pointer 7
+apbwr      04 0008040a  -- 64bit enable, gigabit mode, full duplex
+apbwr      04 0108040a  -- check reset value of network config register
+apbwr      1c 11111100  -- write address of transmit buffer q0 descriptor in memory
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      90 abababab  -- specific address register 2 bottom (multicast)
+apbwr      94 0000abab  -- specific address register 2 top
+apbwr      98 abcdef10  -- specific address register 3 bottom (unicast)
+apbwr      9C 0000a5a5  -- specific address register 3 top
+apbwr      a0 cccccccc  -- specific address register 3 bottom (unicast)
+apbwr      a4 00005a5a  -- specific address register 3 top
+apbwr      4a0 00000001 -- Buffer size Q1
+apbwr      4a4 00000001 -- Buffer size Q1
+apbwr      500 31234aa1 -- Screener 1
+apbwr      504 31234bb2 -- Screener 2 
+apbwr      18 ffff0000  -- write receive queue pointer
+apbwr      68 f0040400  -- enable lockup detectors, set lockup_time to 0x0004 times 64 pclk periods
+apbwr      64 00800000  -- fatal or non fatal register
+apbwr      00 0000020c  -- write tx_go and enable tx, enable rx
+
+-- delay for enable rx to propagate though design
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     284 6ef13fff  -- read design cfg reg to set axi test in trans.pl
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+rx_frame (apb)  1
+      preamble_size  1-14
+      dest_addr      broadcast
+      num_dma_queues      8
+      src_addr       111122222222
+      type_len_field random
+      data_size      16 
+      data           random
+      data_check     0
+      auto_gen_int   0
+      resource_err   0
+      fcs            good
+
+rx_frame (gap)  5
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      num_dma_queues      8
+      type_len_field random
+      data_size      64-256 
+      data           random
+      auto_gen_int   0
+      resource_err   0
+      data_check     0
+      ipv4_en             1
+        num_ipv4_options  0
+        ipv4_tos          aa
+        ipv4_tos          bb
+        ipv4_tos          cc
+ 
+      #------------------------------
+      # Level 4 Stuff
+      udp_en              1
+        udp_sport         1234
+        udp_dport         1234
+       fcs            good
+
+tx_frame  5
+      number_of_bufs 2
+      num_dma_queues 8
+      auto_gen_int   0
+      buffer_size    60-100
+      data           random
+      fcs            YES
+
+
+
+apbwr(15000)     68 00000004  -- disable lockup detectors, set lockup_time to 0x0004 times 64 pclk periods
+
+-- force end of test in case it doesn't stop of its own accord
+end(20000)
+

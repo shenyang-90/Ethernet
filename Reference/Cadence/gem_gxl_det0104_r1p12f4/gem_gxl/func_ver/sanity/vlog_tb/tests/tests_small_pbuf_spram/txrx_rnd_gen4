@@ -1,0 +1,104 @@
+-------------------------------------------------
+-- tx_random test scenario for the Ethernet MAC --
+-------------------------------------------------
+--
+-- Written by Arthur Marris
+--
+-- Cadence Design Systems Ltd
+-- Livingston Design Centre,
+-- West Lothian.
+--
+-- 04Apr2003     Arthur wrote
+--
+--
+-- This tests basic transmit functionality using random length buffers
+-- at random locations
+--
+-- Enable transmit and interrupts, write transmit address and
+-- control registers.
+--
+-- Check stats after time out
+--
+--
+-- ************************************************************************** --
+-- 200MHz hclk and randomize wait states of 20 makes the AHB go at same rate as gigabit TX
+
+-- THIS TEST IS GOOD FOR Q2 to Q1
+
+
+randomize_hready -descr_min 0 -descr_max 0 -data_min 0 -data_max 0
+sel_ahb_freq 5
+set_random_seed 22181;
+bus_grant_delay 0
+
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      10 09040710
+apbwr      28 00000008  -- enable tx used bit interrupt
+apbwr      04 00280013
+apbwr      1c 55555500  -- write address of transmit buffer q0 descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      18 ffff0000  -- write receive queue pointer
+apbwr      00 0000020c  -- write tx_go and enable tx, enable rx
+
+-- delay for enable rx to propagate though design
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrdf    20 00000000
+
+
+rx_frame (apb)  1
+      preamble_size  1-14
+      auto_gen_int        0
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      data_size      16 
+      data           random
+      fcs            good
+
+rx_frame (gap)  300
+   preamble_size  1-14
+   auto_gen_int   0
+   number_of_bufs 1
+   dest_addr      broadcast
+   src_addr       111122222222
+   type_len_field random
+   data_size      64-900
+   data           random
+   fcs            good
+
+dma_rd rx_q_ptr ddddd000
+tx_frame  137
+      number_of_bufs 1
+      num_dma_queues 1
+      buffer_size    64-900
+      data           random
+      auto_gen_int   0
+      fcs            no
+
+apbrd(int) 24 00000008 -- TX used bit read interrupt
+apbwrf     24 00000008 -- Clear the interrupt
+apbwr      00 0000020c -- Write tx_go and enable tx and rx
+
+tx_frame  198
+      number_of_bufs 1
+      num_dma_queues 1
+      buffer_size    64-900
+      data           random
+      auto_gen_int   0
+      fcs            yes
+
+
+
+
+end (1048000)

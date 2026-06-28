@@ -1,0 +1,457 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2009
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : pfc_pause_basic_pbuf
+--
+--   Authors        : Christine Lin (htlin@cadence.com)
+--
+--   Date           : 24 November 2009
+--
+--------------------------------------------------------------------------------
+-- Test Description
+-- Receive non-zero/zero classic and PFC pause frames with puase enable set to one.
+-- Receive PFC pause frames with puase enable set to zero.
+-- Check the received pause frames on DMA interface if it is copied to memory
+-- Check interrupt status and RX stats registers after pause frames are received.
+-- Check pfc_negotiate and rx_pfc_paused outputs
+--
+--------------------------------------------------------------------------------
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 ffffff00  -- write address of receive buffer descriptor in memory
+apbrd      18 ffffff00  -- check receive queue pointer
+apbwr      00 0001000c  -- enable receive & transmit & PFC pause frame reception
+apbrd      00 0001000c  -- enable receive & transmit & PFC pause frame reception
+apbwr      04 00082003  -- set enable pause time bit(13)
+apbrd      04 00082003  -- check network configuration register
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      38 00000000  -- check the value of the pause time register
+
+
+-- The next two commands point to the location of the receive buffer descriptor
+-- queue in memory
+
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+pinsc(apb)  pfc_negotiate 0 rx_pfc_paused 00000000
+
+-- # 1
+-- ******************************************************************************* --
+-- Receive a non-zero classic pause frame where the destination address matches register 1, 
+-- type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x0008.
+-- Try to transmit a valid frame with valid CRC.  However, the frame should not 
+-- be transmitted until the pause time counter is zero.  Once the pause 
+-- time counter is zero the frame should be transmitted properly.
+-- ******************************************************************************* --
+
+rxd(apb)     d578563412111111112222222288080001
+rxd            00084444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- supply the receive buffer location
+dma_rd ffffff00 22222004 -- dma reads pointer of 22222004
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 01000888
+dma_wr 22222014 44440800
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 ead33c05
+
+
+dma_wr ffffff04 0800c040 -- checks for local address match, 64 bytes 
+dma_wr ffffff00 22222005 -- dma writes ownership bit
+dma_rd ffffff08 22222204 -- reads locations of next rx buffer
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received & frame rx'ed
+apbwr        24 00001000 -- clear interrupt status
+apbrd(int)   24 00000002 -- check interrupt status - non-zero pause frame received & frame rx'ed
+apbwr        24 00000002 -- clear interrupt status
+apbrd(int)   24 00002000 -- check interrupt status - puase decrements to zero
+apbwr        24 00002000 -- clear interrupt status
+apbrd        38 00000000 -- check the value of the pause time register (decements to zero)
+apbrdf       08 00000006 -- check pfc_negotiate = 0
+
+pinsc(apb)   pfc_negotiate 0 rx_pfc_paused 00000000
+
+-- # 2
+-- ******************************************************************************* --
+-- Receive a non-zero classic pause frame where the destination address matches multicast address, 
+-- type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x0010.
+-- Try to transmit a valid frame with valid CRC.  However, the frame should not 
+-- be transmitted until the pause time counter is zero.  Once the pause 
+-- time counter is zero the frame should be transmitted properly.
+-- ******************************************************************************* --
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00104444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is NOT written out on the AHB interface
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it
+
+apbrd(int)   24 00002000 -- check interrupt status - pause timer zero
+apbwr        24 00002000 -- Clear it
+apbrd        38 00000000 -- check the value of the pause time register
+apbrdf       08 00000006 -- check pfc_negotiate = 0
+
+pinsc(apb)   pfc_negotiate 0 rx_pfc_paused 00000000
+
+-- # 3
+-- ******************************************************************************* --
+-- Receive a zero classic pause frame where the destination address matches reg1, 
+-- type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x0000.
+-- Try to transmit a valid frame with valid CRC.  However, the frame should not 
+-- be transmitted until the pause time counter is zero.  Once the pause 
+-- time counter is zero the frame should be transmitted properly.
+-- ******************************************************************************* --
+
+rxd(apb)     d578563412111111112222222288080001
+rxd            00004444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222204 12345678 -- store frame to memory
+dma_wr 22222208 11111111
+dma_wr 2222220c 22222222
+dma_wr 22222210 01000888
+dma_wr 22222214 44440000
+dma_wr 22222218 55555555
+dma_wr 2222221c 66666666
+dma_wr 22222220 77777777
+dma_wr 22222224 88888888
+dma_wr 22222228 99999999
+dma_wr 2222222c aaaaaaaa
+dma_wr 22222230 bbbbbbbb
+dma_wr 22222234 00000000
+dma_wr 22222238 00000000
+dma_wr 2222223c 00000000
+dma_wr 22222240 bfdf811e
+
+dma_wr ffffff0C 0800c040 -- checks for local address match, 64 bytes (start and end set)
+dma_wr ffffff08 22222205 -- dma writes ownership bit
+dma_rd ffffff10 22222404 -- reads locations of next rx buffer
+
+
+apbrd(int)   24 00002000 -- check interrupt status - pause timer zero
+apbwr        24 00002000 -- Clear it
+
+apbrd(int)   24 00000002 -- check interrupt status - received frame 
+                         -- has been transferred to memeory ???
+apbwr        24 00000002 -- Clear it
+
+apbrd        38 00000000 -- check the value of the pause time register
+apbrdf       08 00000006 -- check pfc_negotiate = 0
+
+pinsc(apb)   pfc_negotiate 0 rx_pfc_paused 00000000
+
+-- # 4
+-- ******************************************************************************* --
+-- Receive a zero classic pause frame where the destination address matches multicast address, 
+-- type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x0010.
+-- Try to transmit a valid frame with valid CRC.  However, the frame should not 
+-- be transmitted until the pause time counter is zero.  Once the pause 
+-- time counter is zero the frame should be transmitted properly.
+-- ******************************************************************************* --
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00004444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is NOT written out on the AHB interface
+
+
+apbrd(int)   24 00002000 -- check interrupt status - pause timer zero
+apbwr        24 00002000 -- Clear it
+apbrd        38 00000000 -- check the value of the pause time register
+apbrdf       08 00000006 -- check pfc_negotiate = 0
+
+pinsc(apb)   pfc_negotiate 0 rx_pfc_paused 00000000
+
+-- # 5
+-- ******************************************************************************* --
+-- Receive a PFC pause frame where the destination address matches register 1, 
+-- type field = 0x8808, pause op-code = 0x0101 and priority enable to be set is 0x0008.
+-- ******************************************************************************* --
+
+rxd(apb)     d578563412111111112222222288080101
+rxd            00554444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222404 12345678 -- store frame to memory
+dma_wr 22222408 11111111
+dma_wr 2222240c 22222222
+dma_wr 22222410 01010888
+dma_wr 22222414 44445500
+dma_wr 22222418 55555555
+dma_wr 2222241c 66666666
+dma_wr 22222420 77777777
+dma_wr 22222424 88888888
+dma_wr 22222428 99999999
+dma_wr 2222242c aaaaaaaa
+dma_wr 22222430 bbbbbbbb
+dma_wr 22222434 00000000
+dma_wr 22222438 00000000
+dma_wr 2222243c 00000000
+dma_wr 22222440 2fd4a9f6
+
+
+dma_wr ffffff14 0800c040 -- checks for local address match, 64 bytes 
+dma_wr ffffff10 22222405 -- dma writes ownership bit
+dma_rd ffffff18 22222604 -- reads locations of next rx buffer
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received & frame rx'ed
+apbwr        24 00001000 -- clear interrupt status
+apbrd(int)   24 00000002 -- check interrupt status - non-zero pause frame received & frame rx'ed
+apbwr        24 00000002 -- clear interrupt status
+apbrd        38 00000000 -- check the value of the pause time register
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+
+pinsc(apb)   pfc_negotiate 1 rx_pfc_paused 01010101
+
+
+-- # 6
+-- ******************************************************************************* --
+-- Receive a PFC pause frame where the destination address matches multicast address, 
+-- type field = 0x8808, pause op-code = 0x0101 and priority enable to be set is 0x00FF.
+-- ******************************************************************************* --
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00aa4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is NOT written out on the AHB interface
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+pinsc(apb)   pfc_negotiate 1 rx_pfc_paused 11111111 -- counter 0,2,4,6 keeps decrementing
+                                                    -- from previous frame
+
+-- # 7
+-- ******************************************************************************* --
+-- Receive a PFC pause frame where the destination address matches multicast address, 
+-- type field = 0x8808, pause op-code = 0x0101 and priority enable to be set is 0x00FF.
+-- ******************************************************************************* --
+-- set retry_test bit to one
+apbwrf       04 00083003 -- dsiable copy of pause frame bit(23) = 0,
+                         -- reset retry test bit(12) = 1, 
+                         -- enable pause time bit(13) = 0,
+                         -- copy all frames bit(4) = 0
+                         -- full-duplex bit(1) = 1,
+                         -- 100Mbps speed bit(0) = 1
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00ff0023002400250026002700280029
+rxd            002a888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is NOT written out on the AHB interface
+
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- Clear it
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+-- counter has been loaded with new value 
+pinsc(9174)   pfc_negotiate 1 rx_pfc_paused 11111111 
+pinsc(9176)  pfc_negotiate 1 rx_pfc_paused 11111110 
+pinsc(9178)  pfc_negotiate 1 rx_pfc_paused 11111100 
+pinsc(9180)  pfc_negotiate 1 rx_pfc_paused 11111000 
+pinsc(9182)  pfc_negotiate 1 rx_pfc_paused 11110000 
+pinsc(9184)  pfc_negotiate 1 rx_pfc_paused 11100000 
+pinsc(9186)  pfc_negotiate 1 rx_pfc_paused 11000000 
+pinsc(9188)  pfc_negotiate 1 rx_pfc_paused 10000000 
+pinsc(9190)  pfc_negotiate 1 rx_pfc_paused 00000000 
+pinsc(apb)   pfc_negotiate 1 rx_pfc_paused 00000000 
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 000000c0  -- check octets received bottom (from 1,3,5, 3*64)
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000003  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000007  -- check pause frames received
+apbrd     168 00000003  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+--=============================== --
+--    set pause enable to zero    --
+--=============================== --
+
+apbwrf       04 00081003 -- dsiable copy of pause frame bit(23) = 0,
+                         -- reset retry test bit(12) = 1, 
+                         -- enable pause time bit(13) = 0,
+                         -- copy all frames bit(4) = 0
+                         -- full-duplex bit(1) = 1,
+                         -- 100Mbps speed bit(0) = 1
+                        
+-- # 8
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches reg1 
+-- type field = 0x8808, Pause op-code = 0x0101 and priority enable  
+-- to be set is 0x00FF. (Frame should be copied to memory)
+-- ************************************************************************** --
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     55d578563412111111112222222288080101
+rxd              00ff4444555555556666666677777777 
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222604 12345678 -- store frame to memory
+dma_wr 22222608 11111111
+dma_wr 2222260c 22222222
+dma_wr 22222610 01010888
+dma_wr 22222614 4444ff00
+dma_wr 22222618 55555555
+dma_wr 2222261c 66666666
+dma_wr 22222620 77777777
+dma_wr 22222624 88888888
+dma_wr 22222628 99999999
+dma_wr 2222262c aaaaaaaa
+dma_wr 22222630 bbbbbbbb
+dma_wr 22222634 00000000
+dma_wr 22222638 00000000
+dma_wr 2222263c 00000000
+dma_wr 22222640 2b20c941
+
+
+dma_wr ffffff1C 0800c040 -- checks for local address match, 64 bytes 
+dma_wr ffffff18 22222605 -- dma writes ownership bit
+dma_rd ffffff20 22222204 -- reads locations of next rx buffer
+
+
+apbrd(int)   24 00001000 -- check interrupt status - pause & frame received
+apbwr        24 00001000 -- Clear it 
+apbrd(int)   24 00000002 -- check interrupt status - pause & frame received
+apbwr        24 00000002 -- Clear it 
+apbrd       158 00000001 -- check frames rxed OK (register 1 match)
+apbrd       164 00000001 -- check pause frames rxed
+apbrd        38 00000000 -- pause time register not loaded
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+
+pinsc(apb)   pfc_negotiate 1 rx_pfc_paused 11111111 -- PFC counters are loaded
+
+-- # 9
+-- ************************************************************************** --
+-- Receive a PFC pause frame where the destination address matches pause frame address 
+-- 0x0180C2000001, type field = 0x8808, Pause op-code = 0x0101 and priority enable
+-- to be set is 0x00FF. (Frame should not be copied to memory)
+-- ************************************************************************** --
+
+
+rxd(apb)     d50180C200000111112222222288080101
+rxd            00FF0011001200130014001500160017
+rxd            0018888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(int)   24 00001000 -- check interrupt status
+apbwr        24 00001000 -- Clear it 
+
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       158 00000000 -- check no frames rxed OK (no register 1 match)
+apbrd       164 00000001 -- check pause frames rxed 
+apbrdf       08 00000046 -- check pfc_negotiate = 1
+
+pinsc(10226)   pfc_negotiate 1 rx_pfc_paused 11111111 -- PFC counters are loaded
+pinsc(10228)   pfc_negotiate 1 rx_pfc_paused 11111110 -- PFC counters are decrementing
+pinsc(10230)   pfc_negotiate 1 rx_pfc_paused 11111100 -- PFC counters are decrementing
+pinsc(10232)   pfc_negotiate 1 rx_pfc_paused 11111000 -- PFC counters are decrementing
+pinsc(10234)   pfc_negotiate 1 rx_pfc_paused 11110000 -- PFC counters are decrementing
+pinsc(10236)   pfc_negotiate 1 rx_pfc_paused 11100000 -- PFC counters are decrementing
+pinsc(10238)   pfc_negotiate 1 rx_pfc_paused 11000000 -- PFC counters are decrementing
+pinsc(10240)   pfc_negotiate 1 rx_pfc_paused 10000000 -- PFC counters are decrementing
+pinsc(10242)   pfc_negotiate 1 rx_pfc_paused 00000000 -- PFC counters are decrementing
+
+
+-- ************************************************************************** --
+end(15000)

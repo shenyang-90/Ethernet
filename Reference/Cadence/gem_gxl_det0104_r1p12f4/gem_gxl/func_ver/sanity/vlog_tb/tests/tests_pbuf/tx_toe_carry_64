@@ -1,0 +1,355 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_toe_carry_64
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 6 April 2006
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- This test applies IP packets of different types where the last data in the
+-- packet forces a carry from the final checksum addition. This test is required
+-- because the implementation adds the carry in the next cycle, so must look
+-- ahead for the final data in the packet to compare against the expected 0xFFFF.
+-- All frames in this test should be received successfully.
+-- 
+-- Functional Coverage
+--  * Checks the one's complement addition for the IP checksum
+--  * Checks the one's complement addition for the TCP checksum
+--  * Checks the one's complement addition for the UDP checksum
+-- 
+-- Detailed Test Description
+--  1. Initialise suitable wait states for the test.
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 32-bit DMA data bus.
+--  3. Send several IP frames with ethernet encapsulation, which
+--     have good IP checksum and are valid UDP or TCP with good checksums
+--     and have a carry on the checksum in the final data of the packet.
+--
+-- Frame 1
+--    Carry on final UDP data.
+--    Broadcast frame, Valid UDP, odd length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & UDP
+--    checksums checked (bits [23:22] = 11) and no SNAP (bit 24 low).
+--
+-- Frame 2
+--    Carry on final TCP data.
+--    Broadcast frame, Valid TCP, even length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+--
+-- Frame 3
+--    Carry on final IP header.
+--    Broadcast frame, Valid TCP, even length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+--
+--  4. Check statistics for correct values from above tests.
+--
+--------------------------------------------------------------------------------
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 0
+bus_grant_delay 0
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      04 00280000  -- check reset value of network config register
+apbrd      04 00280000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      10 00020c04  -- enable 4k ram and tcp offload
+apbwr      00 00000208  -- write tx_go and enable tx
+
+
+
+--******************************************************************************
+-- Frame 1
+--    Carry on final UDP data.
+--    Broadcast frame, Valid UDP, odd length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & UDP
+--    checksums checked (bits [23:22] = 11) and no SNAP (bit 24 low).
+--******************************************************************************
+
+dma_rd 55555500 22222100 -- dma reads pointer of 98765000
+dma_rd 55555504 000080d6 -- start of frame, length 50 bytes
+
+-- check the receive data as it is written out on the AHB interface
+dma_rd 22222100 33221100 -- store frame to memory
+dma_rd 22222104 d0005544
+dma_rd 22222108 dd14b2b7
+dma_rd 2222210c 00450008
+dma_rd 22222110 0100c800
+dma_rd 22222114 117f0040
+dma_rd 22222118 a8c0d175
+dma_rd 2222211c a8c00102
+dma_rd 22222120 30750102
+dma_rd 22222124 b4003075
+dma_rd 22222128 00803892
+dma_rd 2222212c 41831eed
+dma_rd 22222130 0000c99d
+dma_rd 22222134 fffe0000
+dma_rd 22222138 ffffffff
+dma_rd 2222213c fffe7eff
+dma_rd 22222140 ff7efffe
+dma_rd 22222144 ffffffff
+dma_rd 22222148 ff7effff
+dma_rd 2222214c fffe7eff
+dma_rd 22222150 ffffffff
+dma_rd 22222154 ffff7eff
+dma_rd 22222158 ffffffff
+dma_rd 2222215c ffffffff
+dma_rd 22222160 ffffffff
+dma_rd 22222164 ffff7eff
+dma_rd 22222168 ffffffff
+dma_rd 2222216c ffffffff
+dma_rd 22222170 ffffffff
+dma_rd 22222174 ffffffff
+dma_rd 22222178 ffffffff
+dma_rd 2222217c 7effffff
+dma_rd 22222180 ffffffff
+dma_rd 22222184 ffffffff
+dma_rd 22222188 ffffffff
+dma_rd 2222218c ff7e7eff
+dma_rd 22222190 ffffffff
+dma_rd 22222194 ffffffff
+dma_rd 22222198 7e7effff
+dma_rd 2222219c ffff7eff
+dma_rd 222221a0 ffffffff
+dma_rd 222221a4 ffffffff
+dma_rd 222221a8 7eff7eff
+dma_rd 222221ac ffffffff
+dma_rd 222221b0 ffffffff
+dma_rd 222221b4 ff7e7eff
+dma_rd 222221b8 ffffffff
+dma_rd 222221bc ffffffff
+dma_rd 222221c0 ffffffff
+dma_rd 222221c4 ffffffff
+dma_rd 222221c8 ffff7e7e
+dma_rd 222221cc ffffff7e
+dma_rd 222221d0 7effffff
+dma_rd 222221d4 0000ffff
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        001122334455 -- MAC DA
+txd        00d0b7b214dd -- MAC SA
+txd        0800         -- Length/typeID = IP
+txd        4500         -- Version = IPv4, IHL = no options, type of service
+txd        00c8         -- total length = 200 (even length)
+txd        0001         -- ID
+txd        4000         -- flags & fragmentation = no fragmentation
+txd        7f11         -- time to live and protocol = UDP
+txd        75d1         -- IP Header checksum
+txd        c0a80201     -- IP SA
+txd        c0a80201     -- IP DA
+txd        7530         -- UDP source port
+txd        7530         -- UDP destination port
+txd        00b4         -- UDP length = 180 bytes
+txd        9238         -- UDP checksum
+txd        8000ed1e     -- UDP data (total UDP data = 172 bytes)
+txd        83419dc9     -- UDP data
+txd        00000000     -- UDP data
+txd        feffffff     -- UDP data
+txd        ffffff7e     -- UDP data
+txd        fefffeff     -- UDP data
+txd        7effffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        7effff7e     -- UDP data
+txd        feffffff     -- UDP data
+txd        ffffff7e     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffff7e     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ff7effff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffff7e     -- UDP data
+txd        7effffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        7e7eff7e     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffff7e     -- UDP data
+txd        ff7effff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffff7e     -- UDP data
+txd        7effffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ffff7e7e     -- UDP data
+txd        ffff7eff     -- UDP data
+txd        ffffffff     -- UDP data
+txd        ff7effff     -- UDP data
+txd        17758b23     -- Good FCS (4 bytes)
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 800080d6 -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+
+
+--******************************************************************************
+-- Frame 2
+--    Carry on final TCP data.
+--    Broadcast frame, Valid TCP, even length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+--******************************************************************************
+
+dma_rd 55555508 22222300  
+dma_rd 5555550c 0000803c
+
+dma_rd 22222300 26f7e000 -- store frame to memory
+dma_rd 22222304 0008e93f
+dma_rd 22222308 4b358620
+dma_rd 2222230c 00450008
+dma_rd 22222310 b8082c00
+dma_rd 22222314 06ff0040
+dma_rd 22222318 858b9799
+dma_rd 2222231c 858b6ed9
+dma_rd 22222320 059002e9
+dma_rd 22222324 14721700
+dma_rd 22222328 000014f1
+dma_rd 2222232c 02600000
+dma_rd 22222330 e4b03822
+dma_rd 22222334 ffff0000
+dma_rd 22222338 0000ffff
+dma_rd 2222233c 00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        00e0f7263fe9 -- MAC DA
+txd        08002086354b -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        002c         -- total length = 55
+txd        08b8         -- ID
+txd        4000         -- flags & fragmentation
+txd        ff06         -- time to live and protocol
+txd        9997         -- IP Header checksum
+txd        8b85d96e     -- IP SA
+txd        8b85e902     -- IP DA
+txd        9005         -- TCP source port
+txd        0017         -- TCP destination port
+txd        7214f114     -- Sequence number
+txd        00000000     -- Acknowledgement Number
+txd        60022238     -- Flags and window
+txd        B0E4         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        FFFFFFFF     -- Telnet data
+txd        0000         -- PAD
+txd        323176f0     -- Good FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555550c 8000803c -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+
+--******************************************************************************
+-- Frame 3
+--    Carry on final IP header.
+--    Broadcast frame, Valid TCP, even length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+--******************************************************************************
+
+dma_rd 55555510 22222400  
+dma_rd 55555514 0000803c
+
+dma_rd 22222400 26f7e000 -- store frame to memory
+dma_rd 22222404 0008e93f
+dma_rd 22222408 4b358620
+dma_rd 2222240c 00450008
+dma_rd 22222410 b8082c00
+dma_rd 22222414 06ff0040
+dma_rd 22222418 858b200e
+dma_rd 2222241c ffff6ed9
+dma_rd 22222420 0590ffff
+dma_rd 22222424 14721700
+dma_rd 22222428 000014f1
+dma_rd 2222242c 02600000
+dma_rd 22222430 6d253822
+dma_rd 22222434 ffff0000
+dma_rd 22222438 0000ffff
+dma_rd 2222243c 00000000
+
+txd        55555555555555d5 -- preamble & SDF
+txd        00e0f7263fe9 -- MAC DA
+txd        08002086354b -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        002c         -- total length = 55
+txd        08b8         -- ID
+txd        4000         -- flags & fragmentation
+txd        ff06         -- time to live and protocol
+txd        0e20         -- IP Header checksum
+txd        8b85d96e     -- IP SA
+txd        FFFFFFFF     -- IP DA
+txd        9005         -- TCP source port
+txd        0017         -- TCP destination port
+txd        7214f114     -- Sequence number
+txd        00000000     -- Acknowledgement Number
+txd        60022238     -- Flags and window
+txd        256D         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        FFFFFFFF     -- Telnet data
+txd        0000         -- PAD
+txd        2a9ea23d     -- Good FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555514 8000803c -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete
+apbwr       24 00000088  -- check interrupt status - transmit complete
+
+apbrd	      14 00000021  -- tx status - frame transmitted,
+
+
+
+dma_rd 55555518 22222300  
+dma_rd 5555551c 8000803c -- read used bit
+
+
+
+
+end(20000)
+
+

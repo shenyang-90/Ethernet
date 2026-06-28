@@ -1,0 +1,152 @@
+
+--------------------------------------------------------------------------------
+--
+--                                       Copyright (c) 2002
+--            CADENCE                    Cadence Design Systems
+--                                       All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : pfc_rx_dis_fifo
+--
+--   Authors        : Andreas Bode (abode@cadence.com)
+--
+--   Date           : 22 February 2010
+--
+--   Description    : The tests checks that the PFC timer counter will be reset
+--                    when rx_enable is set low.
+--
+--------------------------------------------------------------------------------
+
+
+-- Configuration Requirements ..
+requires ext_fifo_interface 1
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- ************************************************************************** --
+-- Initialize
+-- ************************************************************************** --
+apbrd(100) 00 00000000  -- check reset value of receive control register
+
+-- this is the event count that will initialize the scaler for event counts. it will cause any future scaling to only scale
+-- the counts after start_scale
+start_scale
+
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      00 0001020C  -- start transmission
+                        -- enable receive/transmit and PFC pause frame reception
+
+
+-- # Initialize the network configuration register
+-- #   -eam      <1|0|random>, default = 0. This is external address matching
+-- #   -duplex   <full|half|random>, default = random
+-- #   -speed    <1g|100m|10m|random>, default = random
+-- #   -jumbo    <1|0|random>, default = random. This wont affect the RX transactor below, but will automatically cause jumbos to be dropped.
+-- #   -copy_all <1|0|random>, default = 0. If 0, ensure you initialize the dest_addr in the rx transactor to something that will match
+-- #   -databus  <32|64|128|take_from_cfg|random>, default = random, bus <= config.  The max value is the value set in dma_bus_width in gem_defs.v
+-- #   -rx_toe   <1|0|random>, default = 0. Enables RX TCP/IP checksum offload
+-- #   -pcs_en   <1|0|random>, default = 0. Enables SGMII PCS
+-- #   -pause_en <1|0|random>, default = 0. Enables pausing of transmission
+-- #   -dont_copy_pause <1|0|random>, default = 0. Controls whether pause frames are copied
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 1 -copy_all 0 -duplex full -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 1 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+                         -- reset retry test bit(12) = 1, 
+                         -- keep enable pause time bit(13) = 1,
+                         -- copy all frames bit(4) = 0
+                         -- full-duplex bit(1) = 1,
+                         -- 100Mbps speed bit(0) = 1
+                        
+
+apbwr      88 76543210  -- set exact match reg 1
+apbwr      8c 0000dcba  -- set exact match reg 1
+apbwr      90 11111111  -- set exact match reg 2
+apbwr      94 00001111  -- set exact match reg 2
+apbwr      98 11111111  -- set exact match reg 3
+apbwr      9c 00001111  -- set exact match reg 3
+apbwr      a0 11111111  -- set exact match reg 4
+apbwr      a4 00001111  -- set exact match reg 4
+apbrd      88 76543210  -- 
+apbrd      8c 0000dcba  -- 
+
+
+
+-- ************************************************************************** --
+-- #1
+-- receive a PFC frame with DA matching exact match 1
+-- PFC timer counter are loaded
+-- pfc_negotiate is set high and rx_pfc_paused to 8'hff
+-- ************************************************************************** --
+
+rxd(1000)       55d5
+rxd            10325476badc22222222333388080101
+rxd            00ff123456789abcdef0123456789abc
+rxd            def0888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    76543210   -- store frame to memory 
+fifo_wr      1000     0   xxxxxxxxxx    2222dcba
+fifo_wr      1000     0   xxxxxxxxxx    33332222
+fifo_wr      1000     0   xxxxxxxxxx    01010888
+fifo_wr      1000     0   xxxxxxxxxx    3412ff00
+fifo_wr      1000     0   xxxxxxxxxx    bc9a7856
+fifo_wr      1000     0   xxxxxxxxxx    3412f0de
+fifo_wr      1000     0   xxxxxxxxxx    bc9a7856
+fifo_wr      1000     0   xxxxxxxxxx    8888f0de
+fifo_wr      1000     0   xxxxxxxxxx    99999999
+fifo_wr      1000     0   xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1001     0   0010000040    6459e932
+
+
+apbrd(int)   24 00001002 -- check interrupt status - non-zero pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001002 -- Clear it 
+apbrd        38 00000000 -- check pause counter not overloaded
+apbrd       158 00000001 -- check frames rxed OK (register 1 match)
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+
+
+-- ************************************************************************** --
+-- #2
+-- disable receive, pfc_negotiate is still high but rx_pfc_paused are 8'00
+-- after receiving a new PFC frame the output signals haven't changed
+-- ************************************************************************** --
+
+apbwr(1500) 00 00010208  -- start transmission
+                        -- disable receive/transmit and PFC pause frame reception
+								
+
+rxd(1550)      55d5
+rxd            10325476badc22222222333388080101
+rxd            00ff123456789abcdef0123456789abc
+rxd            def0888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+								
+
+
+-- ************************************************************************** --
+-- #3
+-- enable receive, pfc_negotiate and rx_pfc_paused unchanged
+-- after receiving a new PFC frame rx_pfc_paused is 8'ff again
+-- ************************************************************************** --
+
+apbwr(2000) 00 0001020c  -- start transmission
+                         -- enable receive/transmit and PFC pause frame reception
+								
+
+rxd(2100)      55d5
+rxd            10325476badc22222222333388080101
+rxd            00ff123456789abcdef0123456789abc
+rxd            def0888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+								
+
+
+end(100000)

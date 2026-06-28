@@ -1,0 +1,1171 @@
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_toe_ipv6_64_1
+--
+--   Author         : Ewan McCulloch (ewanm@cadence.com)
+--
+--   Date           : 24 April 2006
+--
+--------------------------------------------------------------------------------
+-- Test Description:
+-- Test 1.1
+-- This is a real packet from http://www.ip6.com/us/book/AppB.pdf
+--   - UDP packet with IPv6
+--   - No extension headers
+--
+--
+-- Test 1.2
+-- Frigged from 1.1
+--   - UDP packet with IPv6
+--   - Type 0 routing header extension 
+--      - 5 addresses in routing table, routing type 0, 
+--      - Assume we are at first location, segments left = 4
+--
+-- Test 1.3
+-- Frigged from 1.1
+--   - UDP packet with IPv6
+--   - Type 0 routing header extension 
+--      - 5 addresses in routing table, routing type 0, 
+--      - Assume we are at 2nd location, segments left = 3 
+--
+-- Test 1.4
+-- Frigged from 1.1
+--   - UDP packet with IPv6
+--   - Type 0 routing header extension 
+--      - 5 addresses in routing table, routing type 0, 
+--      - Assume we are at 4th location, segments left = 1
+--
+-- Test 1.5
+-- Frigged from 1.1
+--   - UDP packet with IPv6
+--   - Type 0 routing header extension 
+--      - 5 addresses in routing table, routing type 0, 
+--      - Assume we are at last location, segments left = 0
+--
+-- Test 1.6
+-- Frigged from 1.1
+--   - UDP packet with IPv6
+--   - Type 0 routing header extension 
+--      - 256 addresses in routing table, routing type 0, 
+--      - Assume we are at last location, segments left = 255
+--
+-- Test 1.7
+-- Frigged from 1.1
+--   - UDP packet with IPv6
+--   - Type 0 routing header extension 
+--      - 256 addresses in routing table, routing type 0, 
+--      - Assume we are at last location, segments left = 0
+--
+-- Test 1.8
+-- Frigged from 1.1
+--   - UDP packet with IPv6 
+--      - Hop by Hop extension header, length field = 3
+--
+-- Test 1.9
+-- Frigged from 1.1
+--   - UDP packet with IPv6 
+--      - Hop by Hop extension header, length field = 255
+--
+-- Test 1.10
+-- Frigged from 1.1
+--   - UDP packet with IPv6 
+--      - Fragment extension header
+--
+-- Test 1.11
+-- Frigged from 1.1
+--   - UDP packet with IPv6 
+--      - Dest extension header, length field = 3
+--
+-- Test 1.12
+-- Frigged from 1.1
+--   - UDP packet with IPv6 
+--      - Dest extension header, length field = 255
+--
+--
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 0000ffff  -- enable all interrupts
+apbwr      04 00280000  -- check reset value of network config register
+apbrd      04 00280000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      10 00020c04  -- enable 4k ram and tcp offload
+apbwr      00 00000208  -- write tx_go and enable tx
+
+--******************************************************************************
+-- Test 1.1
+-- Real UDP packet
+--   - UDP packet with IPv6
+--******************************************************************************
+
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd 55555504 00008056 -- start of frame, 
+
+
+dma_rd 98765000   00003333
+dma_rd 98765004   00080900
+dma_rd 98765008   A8A7B52B
+dma_rd 9876500c   0067DD86
+dma_rd 98765010   20000000
+dma_rd 98765014   80FEFF11
+dma_rd 98765018   00000000
+dma_rd 9876501c   00000000
+dma_rd 98765020   B52B0008
+dma_rd 98765024   02FFA8A7
+dma_rd 98765028   00000000
+dma_rd 9876502c   00000000
+dma_rd 98765030   00000000
+dma_rd 98765034   09020900
+dma_rd 98765038   20000902
+dma_rd 9876503c   0101ffff  -- UDP checksum goes in here
+dma_rd 98765040   00000000
+dma_rd 98765044   00000000
+dma_rd 98765048   00000000
+dma_rd 9876504c   00000000
+dma_rd 98765050   00000000
+dma_rd 98765054   00001000
+
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002BB5A7A8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0020             -- Payload length  (==32)                
+txd        11ff             -- Next Header=UDP, Hop Limit                             
+txd        FE800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2BB5A7A8         -- Source Address (4th 32) 
+txd        FF020000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        00000009         -- Dest Address (4th 32)
+txd        02090209         -- UDP: Destination Port = RIPng <0209>
+txd        002021a1         -- UDP: Length = 32, CheckSum = 0x21A1
+txd        01010000         -- Command:1 Request, Version No.:1 <01>,RIPng: Must Be Zero:0x0000 <0000>
+txd        00000000         -- RIPng: Entry No. :1,IPv6 Prefix:0x00000000000000000000000000000000 [Default Route]
+txd        00000000
+txd        00000000
+txd        00000000
+txd        00000010         -- RIPng: Route Tag:0x0000 <0000>, Metric:16 <10>
+txd        F29BF373         -- MAC FCS
+
+dma_wr 55555504 80008056 -- write used bit,
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd       14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 1.2
+-- Frigged from 1.1
+--   - UDP packet with IPv6
+--   - Type 0 routing header extension 
+--      - 5 addresses in routing table, routing type 0, 
+--      - Assume we are at first location, segments left = 4
+--******************************************************************************
+
+dma_rd 55555508 98765000 -- dma reads pointer of 98765000
+dma_rd 5555550c 0000809e -- start of frame, 
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 00003333
+dma_rd 98765004 00080900
+dma_rd 98765008 A8A7B52B
+dma_rd 9876500c 0067DD86
+dma_rd 98765010 68000000
+dma_rd 98765014 80FEFF2b
+dma_rd 98765018 00000000
+dma_rd 9876501c 00000000                           
+dma_rd 98765020 B52B0008                           
+dma_rd 98765024 1111A8A7                           
+dma_rd 98765028 11111111                           
+dma_rd 9876502c 11111111                           
+dma_rd 98765030 11111111
+dma_rd 98765034 08111111
+dma_rd 98765038 00000400
+dma_rd 9876503c 22220000
+dma_rd 98765040 22222222
+dma_rd 98765044 22222222   
+dma_rd 98765048 22222222
+dma_rd 9876504c 33332222
+dma_rd 98765050 33333333
+dma_rd 98765054 33333333
+dma_rd 98765058 33333333
+dma_rd 9876505c 44443333
+dma_rd 98765060 44444444
+dma_rd 98765064 44444444
+dma_rd 98765068 44444444
+dma_rd 9876506c 02FF4444
+dma_rd 98765070 00000000
+dma_rd 98765074 00000000
+dma_rd 98765078 00000000
+dma_rd 9876507c 09020900
+dma_rd 98765080 20000902
+dma_rd 98765084 0101ffff  -- UDP checksum goes in here
+dma_rd 98765088 00000000
+dma_rd 9876508c 00000000
+dma_rd 98765090 00000000
+dma_rd 98765094 00000000
+dma_rd 98765098 00000000
+dma_rd 9876509c 00001000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002BB5A7A8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0068             -- Payload length  (==104)                
+txd        2bff             -- Next Header=route, Hop Limit                             
+txd        FE800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2BB5A7A8         -- Source Address (4th 32) 
+txd        11111111         -- Dest Address (1st 32)
+txd        11111111         -- Dest Address (2nd 32)
+txd        11111111         -- Dest Address (3rd 32)
+txd        11111111         -- Dest Address (4th 32)
+txd        11080004         -- Routing Header
+txd        00000000         -- Reserved
+txd        22222222         -- Dest Address point 2 (1st 32)
+txd        22222222         -- Dest Address point 2 (2nd 32)
+txd        22222222         -- Dest Address point 2 (3rd 32)
+txd        22222222         -- Dest Address point 2 (4th 32)
+txd        33333333         -- Dest Address point 3 (1st 32)
+txd        33333333         -- Dest Address point 3 (2nd 32)
+txd        33333333         -- Dest Address point 3 (3rd 32)
+txd        33333333         -- Dest Address point 3 (4th 32)
+txd        44444444         -- Dest Address point 4 (1st 32)
+txd        44444444         -- Dest Address point 4 (2nd 32)
+txd        44444444         -- Dest Address point 4 (3rd 32)
+txd        44444444         -- Dest Address point 4 (4th 32)
+txd        FF020000         -- Dest Address point 5 (1st 32)
+txd        00000000         -- Dest Address point 5 (2nd 32)
+txd        00000000         -- Dest Address point 5 (3rd 32)
+txd        00000009         -- Dest Address point 5 (4th 32)
+txd        02090209         -- UDP: Destination Port = RIPng <0209>
+txd        002021a1         -- UDP: Length = 32, CheckSum = 0x21A1
+txd        01010000         -- Command:1 Request, Version No.:1 <01>,RIPng: Must Be Zero:0x0000 <0000>
+txd        00000000         -- RIPng: Entry No. :1,IPv6 Prefix:0x00000000000000000000000000000000 [Default Route]
+txd        00000000
+txd        00000000
+txd        00000000
+txd        00000010         -- RIPng: Route Tag:0x0000 <0000>, Metric:16 <10>
+txd        zzzzzzzz
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555550c 8000809e -- write used bit -- UDP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+--******************************************************************************
+-- Test 1.3
+-- Frigged from 1.1
+--   - UDP packet with IPv6
+--   - Type 0 routing header extension 
+--      - 5 addresses in routing table, routing type 0, 
+--      - Assume we are at 2nd location, segments left = 3
+--******************************************************************************
+
+dma_rd 55555510 98765000 -- dma reads pointer of 98765000
+dma_rd 55555514 0000809e -- start of frame, 
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 00003333
+dma_rd 98765004 00080900
+dma_rd 98765008 A8A7B52B
+dma_rd 9876500c 0067DD86
+dma_rd 98765010 68000000
+dma_rd 98765014 80FEFF2b
+dma_rd 98765018 00000000
+dma_rd 9876501c 00000000
+dma_rd 98765020 B52B0008
+dma_rd 98765024 2222A8A7
+dma_rd 98765028 22222222
+dma_rd 9876502c 22222222
+dma_rd 98765030 22222222
+dma_rd 98765034 08112222
+dma_rd 98765038 00000300
+dma_rd 9876503c 11110000
+dma_rd 98765040 11111111
+dma_rd 98765044 11111111   
+dma_rd 98765048 11111111                   
+dma_rd 9876504c 33331111                   
+dma_rd 98765050 33333333                   
+dma_rd 98765054 33333333                   
+dma_rd 98765058 33333333                   
+dma_rd 9876505c 44443333
+dma_rd 98765060 44444444
+dma_rd 98765064 44444444
+dma_rd 98765068 44444444
+dma_rd 9876506c 02FF4444
+dma_rd 98765070 00000000
+dma_rd 98765074 00000000
+dma_rd 98765078 00000000
+dma_rd 9876507c 09020900
+dma_rd 98765080 20000902
+dma_rd 98765084 0101ffff  -- UDP checksum goes in here
+dma_rd 98765088 00000000
+dma_rd 9876508c 00000000
+dma_rd 98765090 00000000
+dma_rd 98765094 00000000
+dma_rd 98765098 00000000
+dma_rd 9876509c 00001000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002BB5A7A8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0068             -- Payload length  (==104)                
+txd        2bff             -- Next Header=route, Hop Limit                             
+txd        FE800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2BB5A7A8         -- Source Address (4th 32) 
+txd        22222222         -- Dest Address (1st 32)
+txd        22222222         -- Dest Address (2nd 32)
+txd        22222222         -- Dest Address (3rd 32)
+txd        22222222         -- Dest Address (4th 32)
+txd        11080003         -- Routing Header
+txd        00000000         -- Reserved
+txd        11111111         -- Dest Address point 1 (1st 32)
+txd        11111111         -- Dest Address point 1 (2nd 32)
+txd        11111111         -- Dest Address point 1 (3rd 32)
+txd        11111111         -- Dest Address point 1 (4th 32)
+txd        33333333         -- Dest Address point 3 (1st 32)
+txd        33333333         -- Dest Address point 3 (2nd 32)
+txd        33333333         -- Dest Address point 3 (3rd 32)
+txd        33333333         -- Dest Address point 3 (4th 32)
+txd        44444444         -- Dest Address point 4 (1st 32)
+txd        44444444         -- Dest Address point 4 (2nd 32)
+txd        44444444         -- Dest Address point 4 (3rd 32)
+txd        44444444         -- Dest Address point 4 (4th 32)
+txd        FF020000         -- Dest Address point 5 (1st 32)
+txd        00000000         -- Dest Address point 5 (2nd 32)
+txd        00000000         -- Dest Address point 5 (3rd 32)
+txd        00000009         -- Dest Address point 5 (4th 32)
+txd        02090209         -- UDP: Destination Port = RIPng <0209>
+txd        002021a1         -- UDP: Length = 32, CheckSum = 0x21A1
+txd        01010000         -- Command:1 Request, Version No.:1 <01>,RIPng: Must Be Zero:0x0000 <0000>
+txd        00000000         -- RIPng: Entry No. :1,IPv6 Prefix:0x00000000000000000000000000000000 [Default Route]
+txd        00000000
+txd        00000000
+txd        00000000
+txd        00000010         -- RIPng: Route Tag:0x0000 <0000>, Metric:16 <10>
+txd        zzzzzzzz
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555514 8000809e -- write used bit -- UDP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+--******************************************************************************
+-- Test 1.4
+-- Frigged from 1.1
+--   - UDP packet with IPv6
+--   - Type 0 routing header extension 
+--      - 5 addresses in routing table, routing type 0, 
+--      - Assume we are at 4th location, segments left = 1
+--******************************************************************************
+
+dma_rd 55555518 98765000 -- dma reads pointer of 98765000
+dma_rd 5555551c 0000809e -- start of frame, 
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 00003333
+dma_rd 98765004 00080900
+dma_rd 98765008 A8A7B52B
+dma_rd 9876500c 0067DD86
+dma_rd 98765010 68000000
+dma_rd 98765014 80FEFF2b
+dma_rd 98765018 00000000
+dma_rd 9876501c 00000000
+dma_rd 98765020 B52B0008
+dma_rd 98765024 4444A8A7
+dma_rd 98765028 44444444
+dma_rd 9876502c 44444444
+dma_rd 98765030 44444444
+dma_rd 98765034 08114444
+dma_rd 98765038 00000100
+dma_rd 9876503c 11110000
+dma_rd 98765040 11111111                        
+dma_rd 98765044 11111111                        
+dma_rd 98765048 11111111                        
+dma_rd 9876504c 22221111                        
+dma_rd 98765050 22222222                        
+dma_rd 98765054 22222222
+dma_rd 98765058 22222222
+dma_rd 9876505c 33332222
+dma_rd 98765060 33333333
+dma_rd 98765064 33333333
+dma_rd 98765068 33333333
+dma_rd 9876506c 02FF3333
+dma_rd 98765070 00000000
+dma_rd 98765074 00000000
+dma_rd 98765078 00000000
+dma_rd 9876507c 09020900
+dma_rd 98765080 20000902
+dma_rd 98765084 0101ffff  -- UDP checksum goes in here
+dma_rd 98765088 00000000
+dma_rd 9876508c 00000000
+dma_rd 98765090 00000000
+dma_rd 98765094 00000000
+dma_rd 98765098 00000000
+dma_rd 9876509c 00001000
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002BB5A7A8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0068             -- Payload length  (==104)                
+txd        2bff             -- Next Header=route, Hop Limit                             
+txd        FE800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2BB5A7A8         -- Source Address (4th 32) 
+txd        44444444         -- Dest Address (1st 32)
+txd        44444444         -- Dest Address (2nd 32)
+txd        44444444         -- Dest Address (3rd 32)
+txd        44444444         -- Dest Address (4th 32)
+txd        11080001         -- Routing Header
+txd        00000000         -- Reserved
+txd        11111111         -- Dest Address point 1 (1st 32)
+txd        11111111         -- Dest Address point 1 (2nd 32)
+txd        11111111         -- Dest Address point 1 (3rd 32)
+txd        11111111         -- Dest Address point 1 (4th 32)
+txd        22222222         -- Dest Address point 3 (1st 32)
+txd        22222222         -- Dest Address point 3 (2nd 32)
+txd        22222222         -- Dest Address point 3 (3rd 32)
+txd        22222222         -- Dest Address point 3 (4th 32)
+txd        33333333         -- Dest Address point 4 (1st 32)
+txd        33333333         -- Dest Address point 4 (2nd 32)
+txd        33333333         -- Dest Address point 4 (3rd 32)
+txd        33333333         -- Dest Address point 4 (4th 32)
+txd        FF020000         -- Dest Address point 5 (1st 32)
+txd        00000000         -- Dest Address point 5 (2nd 32)
+txd        00000000         -- Dest Address point 5 (3rd 32)
+txd        00000009         -- Dest Address point 5 (4th 32)
+txd        02090209         -- UDP: Destination Port = RIPng <0209>
+txd        002021a1         -- UDP: Length = 32, CheckSum = 0x21A1
+txd        01010000         -- Command:1 Request, Version No.:1 <01>,RIPng: Must Be Zero:0x0000 <0000>
+txd        00000000         -- RIPng: Entry No. :1,IPv6 Prefix:0x00000000000000000000000000000000 [Default Route]
+txd        00000000
+txd        00000000
+txd        00000000
+txd        00000010         -- RIPng: Route Tag:0x0000 <0000>, Metric:16 <10>
+txd        zzzzzzzz
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555551c 8000809e -- write used bit -- UDP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+--******************************************************************************
+-- Test 1.5
+-- Frigged from 1.1
+--   - UDP packet with IPv6
+--   - Type 0 routing header extension 
+--      - 5 addresses in routing table, routing type 0, 
+--      - Assume we are at 5th and last location, segments left = 0
+--******************************************************************************
+
+dma_rd 55555520 98765000 -- dma reads pointer of 98765000
+dma_rd 55555524 0000809e -- start of frame, 
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 00003333
+dma_rd 98765004 00080900
+dma_rd 98765008 A8A7B52B
+dma_rd 9876500c 0067DD86
+dma_rd 98765010 68000000
+dma_rd 98765014 80FEFF2b
+dma_rd 98765018 00000000
+dma_rd 9876501c 00000000
+dma_rd 98765020 B52B0008
+dma_rd 98765024 02FFA8A7
+dma_rd 98765028 00000000
+dma_rd 9876502c 00000000
+dma_rd 98765030 00000000
+dma_rd 98765034 08110900
+dma_rd 98765038 00000000
+dma_rd 9876503c 11110000
+dma_rd 98765040 11111111
+dma_rd 98765044 11111111
+dma_rd 98765048 11111111
+dma_rd 9876504c 22221111
+dma_rd 98765050 22222222
+dma_rd 98765054 22222222
+dma_rd 98765058 22222222
+dma_rd 9876505c 33332222
+dma_rd 98765060 33333333
+dma_rd 98765064 33333333
+dma_rd 98765068 33333333
+dma_rd 9876506c 44443333
+dma_rd 98765070 44444444
+dma_rd 98765074 44444444                               
+dma_rd 98765078 44444444                               
+dma_rd 9876507c 09024444
+dma_rd 98765080 20000902
+dma_rd 98765084 0101ffff  -- UDP checksum goes in here
+dma_rd 98765088 00000000
+dma_rd 9876508c 00000000
+dma_rd 98765090 00000000
+dma_rd 98765094 00000000
+dma_rd 98765098 00000000
+dma_rd 9876509c 00001000
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002BB5A7A8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0068             -- Payload length  (==104)                
+txd        2bff             -- Next Header=route, Hop Limit                             
+txd        FE800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2BB5A7A8         -- Source Address (4th 32) 
+txd        FF020000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        00000009         -- Dest Address (4th 32)
+txd        11080000         -- Routing Header
+txd        00000000         -- Reserved
+txd        11111111         -- Dest Address point 1 (1st 32)
+txd        11111111         -- Dest Address point 1 (2nd 32)
+txd        11111111         -- Dest Address point 1 (3rd 32)
+txd        11111111         -- Dest Address point 1 (4th 32)
+txd        22222222         -- Dest Address point 2 (1st 32)
+txd        22222222         -- Dest Address point 2 (2nd 32)
+txd        22222222         -- Dest Address point 2 (3rd 32)
+txd        22222222         -- Dest Address point 2 (4th 32)
+txd        33333333         -- Dest Address point 3 (1st 32)
+txd        33333333         -- Dest Address point 3 (2nd 32)
+txd        33333333         -- Dest Address point 3 (3rd 32)
+txd        33333333         -- Dest Address point 3 (4th 32)
+txd        44444444         -- Dest Address point 4 (1st 32)
+txd        44444444         -- Dest Address point 4 (2nd 32)
+txd        44444444         -- Dest Address point 4 (3rd 32)
+txd        44444444         -- Dest Address point 4 (4th 32)
+txd        02090209         -- UDP: Destination Port = RIPng <0209>
+txd        002021a1         -- UDP: Length = 32, CheckSum = 0x21A1
+txd        01010000         -- Command:1 Request, Version No.:1 <01>,RIPng: Must Be Zero:0x0000 <0000>
+txd        00000000         -- RIPng: Entry No. :1,IPv6 Prefix:0x00000000000000000000000000000000 [Default Route]
+txd        00000000
+txd        00000000
+txd        00000000
+txd        00000010         -- RIPng: Route Tag:0x0000 <0000>, Metric:16 <10>
+txd        zzzzzzzz
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555524 8000809e -- write used bit -- UDP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+--******************************************************************************
+-- Test 1.6
+-- Frigged from 1.1
+--   - UDP packet with IPv6
+--   - Type 0 routing header extension 
+--      - 256 addresses in routing table, routing type 0, 
+--      - Assume we are at first location, segments left = 255
+--******************************************************************************
+
+dma_rd 55555528 98765000 -- dma reads pointer of 98765000
+dma_rd 5555552c 0000884e -- start of frame, 
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 00003333
+dma_rd 98765004 00080900
+dma_rd 98765008 A8A7B52B
+dma_rd 9876500c 0067DD86
+dma_rd 98765010 18080000                   
+dma_rd 98765014 80FEFF2b                   
+dma_rd 98765018 00000000                   
+dma_rd 9876501c 00000000                   
+dma_rd 98765020 B52B0008                   
+dma_rd 98765024 1111A8A7
+dma_rd 98765028 11111111
+dma_rd 9876502c 11111111
+dma_rd 98765030 11111111
+dma_rd 98765034 fe111111
+dma_rd 98765038 00007f00
+dma_rd 9876503c 22220000
+dma_rd(502) 98765040 33333333 -- total of 503 (repeats 502 times!)
+dma_rd 9876581c 02FF4444
+dma_rd 98765820 00000000
+dma_rd 98765824 00000000
+dma_rd 98765828 00000000
+dma_rd 9876582c 09020900
+dma_rd 98765830 20000902
+dma_rd 98765834 0101ffff  -- UDP checksum goes in here
+dma_rd 98765838 00000000
+dma_rd 9876583c 00000000
+dma_rd 98765840 00000000
+dma_rd 98765844 00000000
+dma_rd 98765848 00000000
+dma_rd 9876584c 00001000
+           
+           
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002BB5A7A8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0818             -- Payload length  (==2072)                
+txd        2bff             -- Next Header=route, Hop Limit                             
+txd        FE800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2BB5A7A8         -- Source Address (4th 32) 
+txd        11111111         -- Dest Address (1st 32)
+txd        11111111         -- Dest Address (2nd 32)
+txd        11111111         -- Dest Address (3rd 32)
+txd        11111111         -- Dest Address (4th 32)
+txd        11fe007f         -- Routing Header
+txd        00000000         -- Reserved
+txd        2222333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333334444
+txd        FF020000         
+txd        00000000         
+txd        00000000         
+txd        00000009         
+txd        02090209         -- UDP: Destination Port = RIPng <0209>
+txd        002021a1         -- UDP: Length = 32, CheckSum = 0x21A1
+txd        01010000         -- Command:1 Request, Version No.:1 <01>,RIPng: Must Be Zero:0x0000 <0000>
+txd        00000000         -- RIPng: Entry No. :1,IPv6 Prefix:0x00000000000000000000000000000000 [Default Route]
+txd        00000000
+txd        00000000
+txd        00000000
+txd        00000010         -- RIPng: Route Tag:0x0000 <0000>, Metric:16 <10>
+txd        zzzzzzzz
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555552c 8000884e -- write used bit -- UDP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 1.7
+-- Frigged from 1.1
+--   - UDP packet with IPv6
+--   - Type 0 routing header extension 
+--      - 256 addresses in routing table, routing type 0, 
+--      - Assume we are at first location, segments left = 0
+--******************************************************************************
+
+dma_rd 55555530 98765000 -- dma reads pointer of 98765000
+dma_rd 55555534 0000884e -- start of frame, 
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 00003333
+dma_rd 98765004 00080900
+dma_rd 98765008 A8A7B52B
+dma_rd 9876500c 0067DD86
+dma_rd 98765010 18080000
+dma_rd 98765014 80FEFF2b
+dma_rd 98765018 00000000
+dma_rd 9876501c 00000000
+dma_rd 98765020 B52B0008
+dma_rd 98765024 02FFA8A7  
+dma_rd 98765028 00000000  
+dma_rd 9876502c 00000000  
+dma_rd 98765030 00000000  
+dma_rd 98765034 fe110900  
+dma_rd 98765038 00000000
+dma_rd 9876503c 22220000
+dma_rd(506) 98765040 33333333 -- total of 507 (repeats 506 times!)
+dma_rd 9876582c 09024444
+dma_rd 98765830 20000902
+dma_rd 98765834 0101ffff  -- UDP checksum goes in here
+dma_rd 98765838 00000000
+dma_rd 9876583c 00000000
+dma_rd 98765840 00000000
+dma_rd 98765844 00000000
+dma_rd 98765848 00000000
+dma_rd 9876584c 00001000
+           
+           
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002BB5A7A8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0818             -- Payload length  (==2072)                
+txd        2bff             -- Next Header=route, Hop Limit                             
+txd        FE800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2BB5A7A8         -- Source Address (4th 32) 
+txd        FF020000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        00000009         -- Dest Address (4th 32)
+txd        11fe0000         -- Routing Header
+txd        00000000         -- Reserved
+txd        2222333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333
+txd        33333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333334444
+txd        02090209         -- UDP: Destination Port = RIPng <0209>
+txd        002021a1         -- UDP: Length = 32, CheckSum = 0x21A1
+txd        01010000         -- Command:1 Request, Version No.:1 <01>,RIPng: Must Be Zero:0x0000 <0000>
+txd        00000000         -- RIPng: Entry No. :1,IPv6 Prefix:0x00000000000000000000000000000000 [Default Route]
+txd        00000000
+txd        00000000
+txd        00000000
+txd        00000010         -- RIPng: Route Tag:0x0000 <0000>, Metric:16 <10>
+txd        zzzzzzzz
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555534 8000884e -- write used bit -- UDP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+--******************************************************************************
+-- Test 1.8
+-- Frigged from 1.1
+--   - UDP packet with IPv6 
+--      - Hop by Hop extension header
+--      -length field = 8'h00
+--******************************************************************************
+dma_rd 55555538 98765000 -- dma reads pointer of 98765000
+dma_rd 5555553c 0000805e -- start of frame, 
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 00003333
+dma_rd 98765004 00080900
+dma_rd 98765008 A8A7B52B
+dma_rd 9876500c 0067DD86
+dma_rd 98765010 28000000
+dma_rd 98765014 80FEFF00
+dma_rd 98765018 00000000
+dma_rd 9876501c 00000000
+dma_rd 98765020 B52B0008
+dma_rd 98765024 02FFA8A7
+dma_rd 98765028 00000000                              
+dma_rd 9876502c 00000000                              
+dma_rd 98765030 00000000                              
+dma_rd 98765034 00110900                                
+dma_rd 98765038 00000000                                 
+dma_rd 9876503c 09020000
+dma_rd 98765040 20000902
+dma_rd 98765044 0101ffff  -- UDP checksum goes in here
+dma_rd 98765048 00000000
+dma_rd 9876504c 00000000
+dma_rd 98765050 00000000
+dma_rd 98765054 00000000
+dma_rd 98765058 00000000
+dma_rd 9876505c 00001000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002BB5A7A8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0028             -- Payload length  (==40)                
+txd        00ff             -- Next Header=hopbyhop, Hop Limit                             
+txd        FE800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2BB5A7A8         -- Source Address (4th 32) 
+txd        FF020000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        00000009         -- Dest Address (4th 32)
+txd        11000000         -- Hop By Hop Options Header(len field = 0)
+txd        00000000         -- Padding
+txd        02090209         -- UDP: Destination Port = RIPng <0209>
+txd        002021a1         -- UDP: Length = 32, CheckSum = 0x21A1
+txd        01010000         -- Command:1 Request, Version No.:1 <01>,RIPng: Must Be Zero:0x0000 <0000>
+txd        00000000         -- RIPng: Entry No. :1,IPv6 Prefix:0x00000000000000000000000000000000 [Default Route]
+txd        00000000
+txd        00000000
+txd        00000000
+txd        00000010         -- RIPng: Route Tag:0x0000 <0000>, Metric:16 <10>
+txd        c0cbb4d0
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555553c 8000805e -- write used bit -- UDP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 1.9
+-- Frigged from 1.1
+--   - UDP packet with IPv6 
+--      - Hop by Hop extension header
+--      -length field = 8'hff
+--******************************************************************************
+dma_rd 55555540 98765000 -- dma reads pointer of 98765000
+dma_rd 55555544 00008856 -- start of frame, 
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 00003333
+dma_rd 98765004 00080900
+dma_rd 98765008 A8A7B52B
+dma_rd 9876500c 0067DD86
+dma_rd 98765010 20080000
+dma_rd 98765014 80FEFF00
+dma_rd 98765018 00000000
+dma_rd 9876501c 00000000
+dma_rd 98765020 B52B0008
+dma_rd 98765024 02FFA8A7
+dma_rd 98765028 00000000                              
+dma_rd 9876502c 00000000                              
+dma_rd 98765030 00000000                              
+dma_rd 98765034 ff110900                                
+dma_rd(510) 98765038 00000000    -- repeat 510 times (total = 511)                             
+dma_rd 98765834 09020000
+dma_rd 98765838 20000902
+dma_rd 9876583c 0101ffff  -- UDP checksum goes in here
+dma_rd 98765840 00000000
+dma_rd 98765844 00000000
+dma_rd 98765848 00000000
+dma_rd 9876584c 00000000
+dma_rd 98765850 00000000
+dma_rd 98765854 00001000
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002BB5A7A8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0820             -- Payload length  (==2080)                
+txd        00ff             -- Next Header=hopbyhop, Hop Limit                             
+txd        FE800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2BB5A7A8         -- Source Address (4th 32) 
+txd        FF020000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        00000009         -- Dest Address (4th 32)
+txd        11ff0000         -- Hop By Hop Options Header(len field = 8'hff)
+txd        00000000         
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        02090209         -- UDP: Destination Port = RIPng <0209>
+txd        002021a1         -- UDP: Length = 32, CheckSum = 0x21A1
+txd        01010000         -- Command:1 Request, Version No.:1 <01>,RIPng: Must Be Zero:0x0000 <0000>
+txd        00000000         -- RIPng: Entry No. :1,IPv6 Prefix:0x00000000000000000000000000000000 [Default Route]
+txd        00000000
+txd        00000000
+txd        00000000
+txd        00000010         -- RIPng: Route Tag:0x0000 <0000>, Metric:16 <10>
+txd        dd47c7b4
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555544 80008856 -- write used bit -- UDP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+--******************************************************************************
+-- Test 1.10
+-- Frigged from 1.1
+--   - UDP packet with IPv6 
+--      - Frag extension header
+--******************************************************************************
+dma_rd 55555548 98765000 -- dma reads pointer of 98765000
+dma_rd 5555554c 0000805e -- start of frame, 
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 00003333
+dma_rd 98765004 00080900
+dma_rd 98765008 A8A7B52B
+dma_rd 9876500c 0067DD86
+dma_rd 98765010 28000000
+dma_rd 98765014 80FEFF2c
+dma_rd 98765018 00000000
+dma_rd 9876501c 00000000
+dma_rd 98765020 B52B0008
+dma_rd 98765024 02FFA8A7
+dma_rd 98765028 00000000                              
+dma_rd 9876502c 00000000                              
+dma_rd 98765030 00000000                              
+dma_rd 98765034 00110900                                
+dma_rd 98765038 00000000                                 
+dma_rd 9876503c 09020000
+dma_rd 98765040 20000902
+dma_rd 98765044 0101ffff  -- UDP checksum goes in here
+dma_rd 98765048 00000000
+dma_rd 9876504c 00000000
+dma_rd 98765050 00000000
+dma_rd 98765054 00000000
+dma_rd 98765058 00000000
+dma_rd 9876505c 00001000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002BB5A7A8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0028             -- Payload length  (==40)                
+txd        2cff             -- Next Header=frag, Hop Limit                             
+txd        FE800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2BB5A7A8         -- Source Address (4th 32) 
+txd        FF020000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        00000009         -- Dest Address (4th 32)
+txd        11000000         -- Frag Options Header
+txd        00000000         -- Identification
+txd        02090209         -- UDP: Destination Port = RIPng <0209>
+txd        0020ffff         -- UDP: Length = 32, CheckSum = unchanged!
+txd        01010000         -- Command:1 Request, Version No.:1 <01>,RIPng: Must Be Zero:0x0000 <0000>
+txd        00000000         -- RIPng: Entry No. :1,IPv6 Prefix:0x00000000000000000000000000000000 [Default Route]
+txd        00000000
+txd        00000000
+txd        00000000
+txd        00000010         -- RIPng: Route Tag:0x0000 <0000>, Metric:16 <10>
+txd        zzzzzzzz
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555554c 8050805e -- write used bit -- UDP status is PKT FRAGMENTED
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 1.11
+-- Frigged from 1.1
+--   - UDP packet with IPv6 
+--      - Dest extension header
+--      - length field = 8'h00
+--******************************************************************************
+dma_rd 55555550 98765000 -- dma reads pointer of 98765000
+dma_rd 55555554 0000805e -- start of frame, 
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 00003333
+dma_rd 98765004 00080900
+dma_rd 98765008 A8A7B52B
+dma_rd 9876500c 0067DD86
+dma_rd 98765010 28000000
+dma_rd 98765014 80FEFF3c
+dma_rd 98765018 00000000
+dma_rd 9876501c 00000000
+dma_rd 98765020 B52B0008
+dma_rd 98765024 02FFA8A7
+dma_rd 98765028 00000000                              
+dma_rd 9876502c 00000000                              
+dma_rd 98765030 00000000                              
+dma_rd 98765034 00110900                                
+dma_rd 98765038 00000000                                 
+dma_rd 9876503c 09020000
+dma_rd 98765040 20000902
+dma_rd 98765044 0101ffff  -- UDP checksum goes in here
+dma_rd 98765048 00000000
+dma_rd 9876504c 00000000
+dma_rd 98765050 00000000
+dma_rd 98765054 00000000
+dma_rd 98765058 00000000
+dma_rd 9876505c 00001000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002BB5A7A8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0028             -- Payload length  (==40)                
+txd        3cff             -- Next Header=dest, Hop Limit                             
+txd        FE800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2BB5A7A8         -- Source Address (4th 32) 
+txd        FF020000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        00000009         -- Dest Address (4th 32)
+txd        11000000         -- Dest Options Header(len field = 0)
+txd        00000000         -- Padding
+txd        02090209         -- UDP: Destination Port = RIPng <0209>
+txd        002021a1         -- UDP: Length = 32, CheckSum = 0x21A1
+txd        01010000         -- Command:1 Request, Version No.:1 <01>,RIPng: Must Be Zero:0x0000 <0000>
+txd        00000000         -- RIPng: Entry No. :1,IPv6 Prefix:0x00000000000000000000000000000000 [Default Route]
+txd        00000000
+txd        00000000
+txd        00000000
+txd        00000010         -- RIPng: Route Tag:0x0000 <0000>, Metric:16 <10>
+txd        zzzzzzzz
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555554 8000805e -- write used bit -- UDP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 1.12
+-- Frigged from 1.1
+--   - UDP packet with IPv6 
+--      - Dest extension header
+--      - length field = 8'hff
+--******************************************************************************
+dma_rd 55555558 98765000 -- dma reads pointer of 98765000
+dma_rd 5555555c 00008856 -- start of frame, 
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 00003333
+dma_rd 98765004 00080900
+dma_rd 98765008 A8A7B52B
+dma_rd 9876500c 0067DD86
+dma_rd 98765010 20080000
+dma_rd 98765014 80FEFF3c
+dma_rd 98765018 00000000
+dma_rd 9876501c 00000000
+dma_rd 98765020 B52B0008
+dma_rd 98765024 02FFA8A7
+dma_rd 98765028 00000000                              
+dma_rd 9876502c 00000000                              
+dma_rd 98765030 00000000                              
+dma_rd 98765034 ff110900                                
+dma_rd(510) 98765038 00000000    -- repeat 510 times (total = 511)                             
+dma_rd 98765834 09020000
+dma_rd 98765838 20000902
+dma_rd 9876583c 0101ffff  -- UDP checksum goes in here
+dma_rd 98765840 00000000
+dma_rd 98765844 00000000
+dma_rd 98765848 00000000
+dma_rd 9876584c 00000000
+dma_rd 98765850 00000000
+dma_rd 98765854 00001000
+
+txd        55555555555555d5 -- preamble & SDF
+txd        333300000009     -- MAC DA
+txd        08002BB5A7A8     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        67000000         -- Version, Traffic Class, Flow Label  
+txd        0820             -- Payload length  (==2080)                
+txd        3cff             -- Next Header=dest, Hop Limit                             
+txd        FE800000         -- Source Address (1st 32)
+txd        00000000         -- Source Address (2nd 32) 
+txd        00000800         -- Source Address (3rd 32)
+txd        2BB5A7A8         -- Source Address (4th 32) 
+txd        FF020000         -- Dest Address (1st 32)
+txd        00000000         -- Dest Address (2nd 32)
+txd        00000000         -- Dest Address (3rd 32)
+txd        00000009         -- Dest Address (4th 32)
+txd        11ff0000         -- Dest Options Header(len field = 8'hff)
+txd        00000000         
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+txd        02090209         -- UDP: Destination Port = RIPng <0209>
+txd        002021a1         -- UDP: Length = 32, CheckSum = 0x21A1
+txd        01010000         -- Command:1 Request, Version No.:1 <01>,RIPng: Must Be Zero:0x0000 <0000>
+txd        00000000         -- RIPng: Entry No. :1,IPv6 Prefix:0x00000000000000000000000000000000 [Default Route]
+txd        00000000
+txd        00000000
+txd        00000000
+txd        00000010         -- RIPng: Route Tag:0x0000 <0000>, Metric:16 <10>
+txd        zzzzzzzz
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555555c 80008856 -- write used bit -- UDP status is okay
+
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete
+apbwr       24 00000088  -- check interrupt status - transmit complete
+apbrd	      14 00000021  -- tx status - frame transmitted,
+
+
+dma_rd 55555560 98765000 -- dma reads pointer of 98765000
+dma_rd 55555564 8000805a -- start of frame, 
+
+bus_grant_delay 0

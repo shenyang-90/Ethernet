@@ -1,0 +1,815 @@
+
+
+--- PAGE 105 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+105
+• Second, the transmission delay between the master and slave is corrected. The slave sends a delay request frame to 
+the master which sends a delay response frame in reply. Hardware assist modules at the master and slave side detect 
+exactly when the delay request frame was sent by the slave and received by the master. The slave will now have 
+enough information to adjust its clock to account for delay. For example, if the slave was assuming zero delay the 
+actual delay will be half the difference between the transmit and receive time of the delay request frame (assuming 
+equal transmit and receive times) because the slave clock will be lagging the master clock by the delay time already.
+For hardware assist, it is necessary to time-stamp when sync and delay_req messages are sent and received. The 
+timestamp is taken when the message timestamp point passes the clock timestamp point. For Ethernet, the message time-
+stamp point is the SFD and the clock timestamp point is the MII interface. (The 1588 spec refers to sync and delay_req 
+messages as event messages as these require time-stamping. Follow up, delay response and management messages do 
+not require time-stamping and are referred to as general messages.)
+IEEE 1588 version 2 defines two additional PTP event messages. These are the peer delay request (Pdelay_Req) and 
+peer delay response (Pdelay_Resp) messages. These messages are used to calculate the delay on a link. Nodes at both 
+ends of a link send both types of frames (regardless of whether they contain a master or slave clock). The Pdelay_Resp 
+message contains the time at which a Pdelay_Req was received and is itself an event message. The time at which a 
+Pdelay_Resp message is received is returned in a Pdelay_Resp_Follow_Up message.
+IEEE 1588 version 2 introduces two kinds of transparent clocks: peer-to-peer (P2P) and end-to-end (E2E). Transparent 
+clocks measure the transit time of event messages through a bridge and amend a correction field within the message to 
+allow for the transit time. P2P transparent clocks additionally correct for the delay in the receive path of the link using the 
+information gathered from the peer delay frames. With P2P transparent clocks delay_req messages are not used to 
+measure link delay. This simplifies the protocol and makes larger systems more stable.
+The sof_tx and sof_rx signals are provided to indicate the message timestamp point and follow up signals are provided to 
+indicate the presence of an event frame. With IEEE 1588 version 1, for a given data-rate, the assertion of the event frame 
+signals will be a fixed delay after the SOF signals so taking the timestamp could be delayed until the event signals are 
+asserted and suitable compensation made.
+GEM recognizes ten different encapsulations for PTP event messages:
+1. IEEE 1588 version 1 (UDP/IPv4 multicast)
+2. IEEE 1588 version 1 (UDP/IPv4 multicast with VLAN)
+3. IEEE 1588 version 2 (UDP/IPv4 multicast)
+4. IEEE 1588 version 2 (UDP/IPv4 multicast with VLAN)
+5. IEEE 1588 version 2 (UDP/IPv4 unicast)
+6. IEEE 1588 version 2 (UDP/IPv4 unicast with VLAN)
+7. IEEE 1588 version 2 (UDP/IPv6 multicast)
+8. IEEE 1588 version 2 (UDP/IPv6 multicast with VLAN)
+9. IEEE 1588 version 2 (Ethernet multicast)
+10. IEEE 1588 version 2 (Ethernet multicast with VLAN)
+Unicast PTP frame recognition is enabled via bit 20 of the network control register. The unicast addresses themselves are 
+user programmable via the unicast PTP address register for which there are two (0x0D4 and 0x0D8). The first holds the RX 
+unicast IP destination address and the other the TX unicast IP destination address. The unicast PTP address register 
+should only be changed when the unicast PTP frame recognition is disabled.
+Table 43 and Table 44 show examples of these frames for IEEE 1588 version 1 format.
+Table 43: Example of a Sync Frame − IEEE 1588 version 1
+Field
+Value Checked
+Preamble/SFD
+55555555555555D5
+DA (Octets 0 - 5)
+SA (Octets 6 - 11)
+Type (Octets 12-13)
+0800
+IP header (Octets 14-22)
+IP header - UDP identifier (Octet 23)
+11
+IP header (Octets 24-29)
+
+
+--- PAGE 106 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+106
+For 1588 version 1 messages, sync and delay request frames are indicated by GEM if:
+• The frames type field indicates TCP/IP, UDP protocol is indicated
+• The destination IP address is 224.0.1.129/130/131 or 132
+• The destination UDP port is 319 and the control field is correct
+The control field is 0x00 for sync frames and 0x01 for delay request frames.
+For 1588 version 2 messages, the type of frame is determined by looking at the message type field in the first byte of the 
+PTP frame. Whether a frame is version 1 or version 2 can be determined by looking at the version PTP field in the second 
+byte of both version 1 and version 2 PTP frames.
+In version 2 messages, sync frames have a message type value of 0x0, delay_req have 0x1, pdelay_req have 0x2 and 
+pdelay_resp have 0x3.
+Table 45 to Table 48 show examples of these frames for IEEE 1588 version 2 format.
+IP header - DA (Octets 30-32)
+E00001
+IP header - DA (Octet 33)
+81 or 82 or 83 or 84
+UDP header - source port (Octets 34-35)
+UDP header - dest port (Octets 36-37)
+013F
+UDP header – length and checksum (Octets 38-41)
+PTP header (Octet 42)
+PTP header - version PTP (Octet 43)
+01
+PTP header (Octets 44-73)
+PTP header - control (Octet 74)
+00
+PTP header (Octets 75-168)
+Table 44: Example of a Delay Request Frame − IEEE 1588 version 1
+Field
+Value Checked
+Preamble/SFD
+55555555555555D5
+DA (Octets 0 - 5)
+SA (Octets 6 - 11)
+Type (Octets 12-13)
+0800
+IP header (Octets 14-22)
+IP header - UDP identifier (Octet 23)
+11
+IP header (Octets 24-29)
+IP header - DA (Octets 30-32)
+E00001
+IP header - DA (Octet 33)
+81 or 82 or 83 or 84
+UDP header - source port (Octets 34-35)
+UDP header - dest port (Octets 36-37)
+013F
+UDP header – length and checksum (Octets 38-41)
+PTP header (Octet 42)
+PTP header - version PTP (Octet 43)
+01
+PTP header (Octets 44-73)
+PTP header - control (Octet 74)
+01
+PTP header (Octets 75-168)
+Table 45: Example of a Sync Frame − IEEE 1588 version 2 (UDP/IPv4)
+Field
+Value Checked
+Preamble/SFD
+55555555555555D5
+DA (Octets 0 - 5)
+Table 43: Example of a Sync Frame − IEEE 1588 version 1 (Continued)
+Field
+Value Checked
+
+
+--- PAGE 107 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+107
+SA (Octets 6 - 11)
+Type (Octets 12-13)
+0800
+IP header (Octets 14-22)
+IP header - UDP identifier (Octet 23)
+11
+IP header (Octets 24-29)
+IP header - DA (Octets 30-33)
+E0000181
+UDP header - source port (Octets 34-35)
+UDP header - dest port (Octets 36-37)
+013F
+UDP header – length and checksum (Octets 38-41)
+PTP header – messagetype (Octet 42[3:0])
+0
+PTP header – transport specific (Octet 42[7:4])
+not checked
+PTP header - version PTP (Octet 43)
+02
+Table 46: Example of a pdelay_req − IEEE 1588 version 2 (UDP/IPv4)
+Field
+Value Checked
+Preamble/SFD
+55555555555555D5
+DA (Octets 0 - 5)
+SA (Octets 6 - 11)
+Type (Octets 12-13)
+0800
+IP header (Octets 14-22)
+IP header - UDP identifier (Octet 23)
+11
+IP header (Octets 24-29)
+IP header - DA (Octets 30-33)
+E000006B
+UDP header - source port (Octets 34-35)
+UDP header - dest port (Octets 36-37)
+013F
+UDP header – other stuff (Octets 38-41)
+PTP header – messagetype (Octet 42[3:0])
+2
+PTP header – transport specific (Octet 42[7:4])
+not checked
+PTP header - version PTP (Octet 43)
+02
+Table 47: Example of a Sync Frame − IEEE 1588 version 2 (UDP/IPv6)
+Field
+Value Checked
+Preamble/SFD
+55555555555555D5
+DA (Octets 0 - 5)
+SA (Octets 6 - 11)
+Type (Octets 12-13)
+86dd
+IP header (Octets 14-19)
+IP header - UDP identifier (Octet 20)
+11
+IP header (Octets 21-37)
+IP header - DA (Octets 38-53)
+FF0X000000000181
+UDP header - source port (Octets 54-55)
+UDP header - dest port (Octets 56-57)
+013F
+UDP header – (Octets 58-61)
+PTP header – messagetype (Octet 62[3:0])
+0
+PTP header – transport specific (Octet 62[7:4])
+not checked
+PTP header - version PTP (Octet 63)
+02
+Table 45: Example of a Sync Frame − IEEE 1588 version 2 (UDP/IPv4) (Continued)
+Field
+Value Checked
+
+
+--- PAGE 108 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+108
+Table 49 is an example of a sync frame in the 1588 version 2 (Ethernet multicast) format. For the multicast address 
+011B19000000 sync and delay request frames are recognized depending on the messagetype field, 00 for sync and 01 for 
+delay request.
+Table 50 is an example of a pdelay_req frame in the 1588 version 2 (Ethernet multicast) format which uses the “nearest 
+bridge group address” of 0180C200000E as defined in 802.1Q. 0180C200000E is a special multicast address that is not 
+forwarded by bridges. Also IEEE 802.1AS requires the use of this address with Ethernet encapsulation without VLAN 
+tagging (see 11.3.3 and 11.3.4 in the IEEE 802.1AS spec), so sync frames are recognized with this address in addition to 
+pdelay request and pdelay response frames depending on the messagetype field, 00 for sync, 02 for pdelay request and 03 
+for pdelay response. However sync frames will not be indicated with this address if they are VLAN tagged.
+GEM contains an optional timestamp unit (TSU) selectable with a tick define. The TSU consists of a timer and registers to 
+capture the time at which PTP event frames cross the message time-stamp point. These are accessible through the GEM 
+APB interface. An interrupt is issued when a capture register is updated.
+6.1.13.1 Support for Timestamping and Timestamp Accuracy
+Table 48: Example of a pdelay_req − IEEE 1588 version 2 (UDP/IPv6)
+Field
+Value Checked
+Preamble/SFD
+55555555555555D5
+DA (Octets 0 - 5)
+SA (Octets 6 - 11)
+Type (Octets 12-13)
+86dd
+IP header (Octets 14-19)
+IP header - UDP identifier (Octet 20)
+11
+IP header (Octets 21-37)
+IP header - DA (Octets 38-53)
+FF0200000000006B
+UDP header – source port (Octets 54-55)
+UDP header – dest port (Octets 56-57)
+013F
+UDP header – (Octets 58-61)
+PTP header – messagetype (Octet 62[3:0])
+0
+PTP header – transport specific (Octet 62[7:4])
+not checked
+PTP header - version PTP (Octet 63)
+02
+Table 49: Example of a Sync Frame − IEEE 1588 version 2 (Ethernet Multicast)
+Field
+Value Checked
+Preamble/SFD
+55555555555555D5
+DA (Octets 0 - 5)
+011B19000000
+SA (Octets 6 - 11)
+Type (Octets 12-13)
+88F7
+messagetype (Octet 14[3:0])
+0
+transport specific (Octet 14[7:4])
+not checked
+version PTP (Octet 15)
+02
+Table 50: Example of a pdelay_req frame − IEEE 1588 version 2 (Ethernet Multicast)
+Field
+Value Checked
+Preamble/SFD
+55555555555555D5
+DA (Octets 0 - 5)
+0180C200000E
+SA (Octets 6 - 11)
+Type (Octets 12-13)
+88F7
+messagetype (Octet 14[3:0])
+0
+transport specific (Octet 14[7:4])
+not checked
+version PTP (Octet 15)
+02
+
+
+--- PAGE 109 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+109
+The MAC has the responsibility of sampling the TSU timer value when the TX or RX SOF event of the frame passes the 
+MII/GMII boundary. This event is an existing signal synchronous to MAC TX/RX clock domains. The MAC uses the 
+sampled timestamp to insert the timestamp into transmitted PTP sync frames (if one step sync feature is enabled), or to 
+pass to the register block to capture the timestamp in APB accessible registers, or to pass to the DMA to insert into TX or 
+RX descriptors. For each of these, the SOF event, which is captured in the tx_clk and rx_clk domains respectively, is 
+synchronized to the tsu_clk domain and the resulting signal is used to sample the TSU count value. This value will be kept 
+stable for an entire frame, or specifically at least 64  TX/RX clock cycles, since the minimum frame size in Ethernet is 
+64bytes and worst case is a transfer rate of 1byte per cycle. It is used as the source for all the various components within 
+GEM that require the timestamp value.
+Since the SOF event had to pass a clock boundary, there is a degree of inaccuracy in the captured timestamp. The level of 
+inaccuracy depends on the frequency of tsu_clk. There will be no more than 1 cycle of inaccuracy as in Figure 18.
+Figure 18: Timestamp Capture
+In the best case, the SOF event (which is in the rx/tx clk domain) just meets the setup time of the tsu_clk domain at the 
+input to the first sync flop. The captured TS is N+2, but it really should be N+1. In the worst case, the captured TS is also 
+N+2, but it really should be N. There is 1 cycle of uncertainty.
+6.1.14 Single-Step Timestamping
+Support of one step clock for TX Sync frames can be enabled by setting a bit in the network control register. In this mode 
+the timestamp field, within the 1588 (ver 2) sync frame, is replaced by the TSU timestamp value at the time the Sync frame 
+sof passes the MII interface. To use single step timestamping, the sampled timestamp must be stable before the point at 
+which GEM requires to insert the timestamp. This can be guaranteed by enforcing a rule that TSU clock (tsu_clk) is greater 
+than 1/8th the frequency of tx_clk or rx_clk. The UDP checksum offload functionality cannot be used with single step 
+timestamping.
+6.1.14.1 Single-Step Update of Correction Field in PTP Sync Frames
+Version 2 PTP frames have a common message header of 34 octets defined in Table 18 of the IEEE 1588-2008 spec. Sync 
+frames contain the origin Timestamp immediately after the header. The correction field begins at the ninth octet in the 
+header.
+The correction field is defined in 13.3.2.7 of IEEE 1588-2008. The correction field is measured in nanoseconds and is 
+multiplied by 2^16. For example, 2.5ns is represented by the 64-bit value 0x0000000000028000 and is transmitted most 
+significant byte first. A value of one in all bits, except the most significant, indicates that the correction is too big to be 
+represented.
+From release 1p09 onwards, if bit 27 “oss_correction_field” is set in the network_control register then the correction field 
+will be updated.
+
+
+--- PAGE 110 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+110
+Section 11.5 of the IEEE 1588 spec describes updating of the correction field. Sections 13.3 and 13.6 describe the fields of 
+the sync frame. At offset 8 in the PTP sync frame there is an 8 byte correction field. The requirement is to add the sync 
+frame residence time to this field in a single step process.
+The residence time is the difference between the ingress and egress timestamps of the sync frame. The ingress time stamp 
+will be available to firmware as is the correction field which can be extracted from the received sync frame.
+The TSU value is stored as nanoseconds and seconds, while the correction field is stored as nanoseconds (48 bits for ns 
+and 16 bits for subns). The subns bits of the correction field can be used by firmware to signal to the gem_tx block what 
+action it should take as timestamps cannot be taken with sub-nanosecond precision. Firmware can also update the 
+correction field to take account of the ingress timestamp.
+For single step updating of the correction field to work firmware has to do the following:
+1. Clear the 16 least significant bits of the correction field except any bits that need to be set as below
+2. If the correction field is at its maximum value, set bit[15] of the correction field to 1 and take no further action
+3. Set bit[8] of the correction field to the value of the LSB of the captured ingress seconds TSU value. The captured value 
+refers to the time the sync frame entered the SoC.
+4. Subtract the nanosecond value of the ingress time-stamp from the correction field (ignoring the subns bits of the correc-
+tion field). If the resulting value is negative, set bit[14] of the correction field.
+5. Write the absolute result (i.e. positive integer nanosecond number) to the correction field
+Because firmware will have initialized the correction field by subtracting the nanosecond value of the ingress timestamp 
+from it, adding the nanosecond egress time to the correction field results in it being incremented by the residence time of 
+the sync frame in device.
+GEM adds the egress nanosecond value to the correction field and clears the least significant 16 bits. If the egress least 
+significant bit of the seconds value is different from the value stored in bit [8] then an extra billion nanoseconds are added 
+to the correction field.
+If there is an overflow or bit[15] is set, then the correction field is set to the maximum value of 0x7FFFFFFFFFFFFFFF.
+The least significant bits of the correction field are subnanoseconds and GEM cannot take timestamps with this precision, 
+so it is allowed to reuse the subnanosecond field of the correction field to carry seconds and other data. It is also assumed 
+that the residence time of the sync frame will be less than a second, so only a single second bit needs to be carried.
+For reference for IEEE 802.1AS, the origin Timestamp field is reserved and the correction field is zero in sync frames 
+because IEEE 802.1AS does not support one-step (single step) time stamping (see 7.5 f, 10.5.2.2.7 and 11.4.3 in the IEEE 
+802.1AS spec).
+6.1.14.2 Timestamp Capture in APB registers
+There are eight 80-bit status registers that capture the time at which PTP event frames are transmitted and received. An 
+interrupt is issued when these registers are updated.
+6.1.14.3 Timestamp Capture in DMA descriptors
+The TX and/or RX Timestamp can optionally be captured in an extended buffer descriptor when configured using bits in the 
+DMA configuration register. The timestamp can be captured for a number of frame types (ptp event or ptp general, or all 
+frames, or none as defined in tx/rx_bd_control registers) and a bit within BD word 0/1 is used to indicate that the timestamp 
+is present.
+6.1.15 Controlling the GEM TSU
+The timer is implemented as a 102-bit register with the bits designated as follows:
+• The upper 48 bits counting seconds
+• The next 30 bits counting nanoseconds
+• The lowest 24 bits counting sub-nanoseconds
+• The lower 54 bits roll over when they have counted to one second
+
+
+--- PAGE 111 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+111
+An interrupt is generated when the seconds increment. The timer value can be read, written, and adjusted through the APB 
+interface.
+The initial value of the timer is written through the tsu_timer_msb_sec, tsu_timer_sec, and tsu_timer_nsec registers. The 
+timer can be adjusted by adding or subtracting an integral number of nanoseconds in a one-off write to the tsu_timer_adjust 
+register. The amount the timer increments by each clock cycle is set by the tsu_timer_incr and tsu_timer_incr_sub_nsec 
+registers.
+The timer is clocked by either pclk or by tsu_clk if gem_tsu_clk is defined the gem_gxl_defs.v file.
+There are three modes of operation to control the way the timer varies over time. These are:
+1. Increment mode: Increment timer by a fixed value every input clock (tsu_clk or pclk)
+2. Alternative increment mode: Increment timer by a fixed value for a fixed number of input clocks, followed by an alterna-
+tive increment value for a single clock. This is a legacy mode of operation and it is not recommended to use the alterna-
+tive increment mode of operation.
+3. Timer adjust mode: Adjust the timer by adding or subtracting 1ns from the timer. This mode is controlled by 
+gem_tsu_inc_ctrl and gem_tsu_ms inputs.
+These modes are described in Table 51.
+Table 51: Timer Modes of Operations
+Mode
+Description
+Increment Mode
+The amount by which the timer increments each clock cycle is controlled by the timer incre-
+ment register. 
+Bits 7:0 are the default increment value in nanoseconds and an additional 24 bits of sub-nsec 
+resolution are available using the timer increment sub_nsec register. 
+If the rest of the timer increment register is written with zero the timer increments by the value 
+in 7:0 plus sub-nsec register, each clock cycle.
+The sub-nsec register allows a resolution of approximately 59.6 attoseconds (5.96E-17). The 
+sub-nsec register is split into two fields with the MSBs at 15:0 and the LSBs at 31:24. This is 
+because when the number of significant bits was increased from 16 to 24, the location of the 
+MSBs was left unchanged and the LSBs were added to the top of the register. 
+To calculate the value to write to the sub-ns register, you take the decimal value of the sub-
+nanosecond value, then multiply it by 2 to the power of 24 (16777216) and convert the result 
+to hexadecimal. For example, for a sub-nanosecond value of 0.33333333 you would write 
+0x55005555.
+Alternative Increment 
+Mode
+It is NOT recommended to use this legacy mode of operation.
+Bits 15:8 of the increment register are the alternative increment value in nanoseconds and 
+bits 23:16 are the number of increments after which the alternative increment value is used. If 
+23:16 are zero then the alternative increment value will never be used.
+Taking the example of 10.2MHz, you have 102 cycles every ten microseconds or 51 every 
+five microseconds. So a timer with a 10.2MHz clock source is constructed by incrementing by 
+98ns for fifty cycles and then incrementing by 100ns (98*50+100=5000). This is programmed 
+by setting the IEEE 1588 timer increment register to 0x00326462.
+For a 49.8MHz clock source, it would be 20ns for 248 cycles followed by an increment of 
+40ns (20*248+40=5000) programmed as 0x00F82814.
+Having eight bits for the ‘number of increments’ field allows frequencies up to 50MHz to be 
+supported with 200kHz resolution.
+
+
+--- PAGE 112 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+112
+The TSU timer count value bits are passed out of the core so that it can optionally be used directly by external hardware.
+The TSU timer count value can be compared to a programmable comparison value. For the comparison, the 48 bits of the 
+seconds value and the upper 22 bits of the nanoseconds value are used. A signal is output from the core to indicate when 
+the TSU timer count value is equal to the comparison value stored in the TSU timer comparison value registers (0x0DC, 
+0x0E0 and 0x0E4). An interrupt can also be generated (if enabled) when the TSU timer count value and comparison value 
+are equal, mapped to bit 29 of the interrupt status register.
+IEEE 802.1AS is mostly a subset of IEEE 1588. There is one difference in that IEEE 802.1AS uses the Ethernet multicast 
+address 0180C200000E for sync frame recognition whereas 1588 does not. GEM is designed to recognize sync frames 
+with both 802.1AS and 1588 addresses and so can support both 1588 and 802.1AS frame recognition simultaneously.
+An optional external timestamp port can be used instead of the internal timer. The external port is 94 bits wide, conforming 
+to the 94 most significant bits of the internal TSU count as defined above.
+The external port must be synchronous to the supplied tsu_clk.
+The external port is enabled using a bit in the network control register.
+When using external timestamp port the registers which modify the timestamp in internal mode, will have no effect, but the 
+timer read and compare registers operate as described above.
+6.1.16 IEEE 802.1Qbv: Enhancement for Scheduled Traffic (EnST)
+IEEE 802.1Qbv is a TSN (Time Sensitive Networking) standard for “Enhancements for Scheduled Traffic" and specifies 
+“time-aware queue-draining procedures” based on “timing derived from IEEE 802.1AS”. It adds transmission gates to the 
+eight priority queues which allow low priority queues to be shut down at specific times to allow higher priority queues 
+immediate access to the network at specific times. There are two main use cases for this:
+• Firstly to allow guaranteed access for high priority low latency control frames (this is similar to Time Triggered Ethernet 
+previously specified by the SAE in 2011 - AS6802) 
+• Secondly to allow periodic transmission of AVB traffic such as 1722 talker class A streams which need frames to be 
+transmitted every 125 microseconds
+GEM supports IEEE 802.1Qbv by allowing time-aware control of individual transmit queues. GEM has the ability to enable 
+and disable transmission on a particular queue on a periodic basis with the on/off cycling starting at a specified TSU clock 
+time.
+For each transmit queue, configured up to a maximum of eight, there is a gate on timer and a gate off timer.
+The on and off timer values are set in two 17-bit registers. These registers determine the “on” and “off” times for each 
+queue in bytes. The actual “on” and “off” time will be a function of the number of bytes programmed in these registers and 
+Timer Adjust Mode
+An alternative way of controlling the way the timer increment register is to use the 
+gem_tsu_inc_ctrl inputs. 
+When gem_tsu_inc_ctrl [1:0] =
+• 2b’11 − timer register increments as normal.
+• 2b’01 − timer register increments by an additional nanosecond.
+• 2b’10 − timer increments by a nanosecond less.
+• 2b’00 −
+• When gem_tsu_ms = 1b’1, the “nanoseconds” timer register is cleared and the “seconds” timer 
+register is incremented with each clock cycle.
+• When gem_tsu_ms = 1b’0, the timer register increments as normal but the timer value is copied to 
+the sync strobe register.
+The timer sync strobe register is loaded with the value of the timer when the input signals 
+gem_tsu_ms xgm_tsu_ms and gem_tsu_inc_ctrl are set to zero.
+Table 51: Timer Modes of Operations (Continued)
+Mode
+Description
+
+
+--- PAGE 113 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+113
+the speed of operation. 17 bits allow for a maximum value of about 1.05 milliseconds at 1G speed of operation (there is an 
+exception for 2.5G operation where the on-time register counts 20-bit quantities, 2.5 bytes – so 17 bits is also equivalent to 
+1.05 milliseconds).
+For each transmit queue, configured up to a maximum of eight, there is a 32-bit register to control the start time for IEEE 
+802.1Qbv queuing. The bottom 30 bits define the nanosecond value (as matched against the TSU timer) at which the 
+queue will start and the top two bits the second value.
+There is a 16-bit register that enables and disables IEEE 802.1Qbv traffic scheduling on each queue. The bottom 8 bits are 
+for enabling each queue and the top 8 bits are for disabling. The disabling bits start at bit location 16. You should not set the 
+enable and disable bit simultaneously for a particular queue, but if this is done, the disable bit has priority. The disable bits 
+are write-only. The enable bits are read/write with a read returning the queue’s status.
+When enabled traffic scheduling starts for a particular queue at the time the TSU rolls over to the start time value in the 
+relevant 32-bit register, the queue will then be on for the time in the “on” time register and off for the time in the “off” time 
+register and the sequence will then repeat ignoring the time on the start time register. The functionality is similar to but not 
+identical to the “Cycle Timer state machine” specified in Figure 8-14 of the IEEE 802.1Qbv standard. The state machine in 
+the IEEE 802.1Qbv standard allows complete freedom in setting a queue’s “on” and “off” times. The GEM implementation 
+assumes that the “on” and “off” times will occur with a fixed period. If it is necessary to change the on/off sequencing, you 
+need to write to the enst_control register to disable the queue and reprogram the “on”, “off”, and start times before 
+restarting EnST on the queue.
+When traffic scheduling is disabled, the queue will no longer be gated and will be scheduled as normal.
+If scheduling is enabled for a queue, transmission will not start if the frame to be transmitted will not complete in the 
+remaining on-time available, that is, it is too long. If the frame is too long to ever be transmitted, then the frame will be 
+dropped and an error indicated.
+IEEE 802.1Qbv scheduling works in addition to other queue arbitration schemes such as CBS and priority queuing.
+The EnST registers should be set so that the queues are not overlapping when they are open. For example, for a three-
+queue configuration, the following is a correct setting (depicted in Figure 19): 
+• If more than eight queues exist in the hardware configuration, then EnST applies only to the eight highest queues.
+•  If the highest priority queues are disabled by writing 1 to the disable bit in the transmit queue pointer registers, the 
+IEEE 802.1Qbv (EnST) control register mapping does not change and EnST functionality is partially lost as queues are 
+disabled. For example, with 12 queues and 2 disabled, you would only have the ability to do EnST on six queues 
+(rather than eight).
+
+
+--- PAGE 114 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+114
+Figure 19: 802.1Qbv Transmit Scheduling
+Table 52 lists the programmable registers of the EnST module.
+To simplify implementation the on_time and the off_time are specified in bytes rather than nanoseconds.
+The relation between the on_time (nanoseconds) and the on_time (bytes, the register of the module), that you should use 
+for 1Gbps, 100Mbps, and 10Mbps, is the following:
+Where the value of X is given in table below for various operating speeds:
+So, for example a gate open time of 800 ns at 10Mbps is equivalent to one byte:
+Table 52: EnST Registers
+Register
+Type
+Description
+start_time[31:0]
+R/W
+The TSU Time at which to begin the “on” time. 
+The 2 MSB are seconds, the 30 LSB are expressing nanoseconds.
+on_time[16:0]
+R/W
+The time in which the gate has to be open, expressed in bytes. 
+off_time[16:0]
+R/W
+The time in which the gate has to be closed, expressed in bytes.
+enst_en
+R/W
+EnST function enabled
+Table 53: 802/1Qbv “On” Time Calculation
+Speed
+Value of X
+2.5Gbps
+8
+1Gbps
+8
+100Mbps
+80
+10Mbps
+800
+
+
+--- PAGE 115 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+115
+So, 1 byte represents 800ns at 10Mbps, 80ns at 100Mbps and 8ns at 1Gbps.
+The maximum value of 
+  and 
+ that can be set is 1,048,568ns. 
+6.1.17 IEEE 802.1CB Support
+IEEE 802.1CB “Frame Replication and Elimination for Reliability” is one of the TSN (Time Sensitive Networking) standards 
+developed by the 802.1 working group. Using Frame Replication and Elimination for Reliability (FRER) within a network 
+increases the probability that a given packet will be delivered using multipath paths through the network.
+The MAC supports a subset of this standard and provides the capability for stream identification and frame elimination but 
+does not provide support for the replication of frames.
+6.1.17.1 Configuration
+The IEEE 802.1CB FRER functionality is a configuration option. When gem_no_of_cb_streams is zero or undefined 
+802.1CB functionality will not be present.
+Table 54 lists the configuration options for this feature.
+Note: The identification of IEEE 802.1CB streams relies on the use of the ‘Type 2 Screener’ functionality, therefore there 
+must be at least `gem_no_of_cb_streams number of num_type2_screeners defined.
+6.1.17.2 Stream Identification
+The identification of IEEE 802.1CB streams relies on the use of the existing type 2 screener functionality. Each type 2 
+screener may be configured to inspect various fields of the receive frame and compared against values programmed into 
+the type 2 screeners and compare registers. 
+For each implemented IEEE 802.1CB stream function, its associated control register contains the two fields 
+‘member_stream_1’ and ‘member_stream_2’: 
+• Each contains a value between 0x0 and 0xf representing the type 2 screener associated with this stream
+• Each may point to the same or different type 2 screeners providing the option to eliminate packets which may have 
+been sent across two different paths using different VLAN ID for example.
+6.1.17.3 Support for FRER Redundancy Tag and Sequence Number Identification
+In order to be able to identify duplicate frames, a sequence number must be extracted from the incoming frame. 
+IEEE 802.1CB defines a new optional Redundancy Tag field that will immediately follow either the MAC source address 
+field or the VLAN tag fields of the frame. This Redundancy Tag is identified by a new Ethertype with a value of 0xF1C1.
+Draft 2.5 of the IEEE 802.1CB standard (see subclause 7.8) increased the length of the redundancy tag to 6 bytes from 4 
+bytes: 
+• The first two bytes are for the Ethertype (F1C1)
+• The second two bytes are reserved and are set to zero
+• The final two bytes are the 16-bit sequence number. 
+Table 54: FRER Configuration ‘define
+‘define Name
+Description
+gem_no_of_cb_streams
+When defined or non-zero defines the number of compound CB streams supported.
+This number cannot exceed the number of type 2 screener registers (as defined by 
+num_type2_screeners) (valid range 0..16).
+gem_seq_history_len
+Indicates the length of the 2-bit vector used by the vector recovery algorithm for each 
+802.1CB stream. 
+The maximum value allowed for the history length is 64 (valid range 1..64).
+
+
+--- PAGE 116 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+116
+Releases 1p10 and 1p11 of GEM implemented 802.1CB in accordance with draft 2.4 of the 802.1CB standard which 
+defined the redundancy tag to be four bytes in length without the second two bytes of zero. Release 1p12 of the GEM 
+added support for 6 byte redundancy tags.
+Control of Redundancy Tag detection is done through the frer_red_tag register. This selects between 4 and 6 byte 
+operation and controls the ability to automatically strip out the tag from the received frame such that it will be transparent to 
+the software stack.
+Alternatively to the use of the redundancy tag, an offset from the start of the frame may be used to identify the location of 
+the sequence number.
+For each IEEE 802.1CB stream function, its associated control register should be set up to determine how the sequence 
+number is to be extracted. If the use_r_tag field is set, then the above extracted sequence number from the Redundancy 
+Tag will be used, otherwise the offset_value fields should be programmed to point to the byte offset of where the sequence 
+number is, this may be a TCP sequence number or any other unique number that may be injected by software.
+6.1.17.4 Supported Recovery Algorithms
+The IEEE 802.1CB specification specifies two different algorithms for processing the received frames and determining 
+whether the frame should be discarded. Both of these algorithms are supported and each stream function should be set up 
+to use the appropriate algorithm via the en_vector_rec_alg field.
+6.1.17.4.1 Match Recovery Algorithm
+For each CB stream configured and enabled, the first packet matched by the relevant screeners is accepted as valid and its 
+sequence number is stored in the RecovSeqNum register (this is a hidden register not accessible by firmware).
+Subsequent packets matched by the screeners have their sequence number checked against the RecovSeqNum register 
+and if there is a match they are dropped and the duplicate bit is set.
+If there is no match the frame is accepted 
+• And if the duplicate bit is not set, then the latent error counter is incremented
+• Then the RecovSeqNum register is updated and the duplicate bit is reset
+• And if the received sequence number does not directly follow the previous sequence number, the out of order statistics 
+counter is incremented
+• The sequence recovery reset timer is reset to the value in the FRER timeout register
+If the sequence recovery reset timer recovery timer decrements to zero, the RecovSeqNum register and the duplicate bit 
+are reset, the sequence recovery reset field in the statistics register is incremented, and the next packet matched by the 
+relevant screeners is accepted.
+6.1.17.4.2 Vector Recovery Algorithm
+The vector recovery algorithm uses the history vector which is as long as the gem_seq_history_len configured. This 
+indicates which sequence numbers have been seen relative to the maximum sequence number seen as indicated by the 
+value in the RecovSeqNum register.
+For each CB stream configured and enabled, the first packet matched by the relevant screeners for a CB stream or after a 
+sequence recovery reset event is accepted as valid and its sequence number is stored in the RecovSeqNum register.
+Subsequent packets matched by the screeners have their sequence number checked against the RecovSeqNum register 
+and if it is equal to it, then it is a duplicate of the last frame and is discarded. If it differs by more than the history depth, it is 
+considered a rogue frame and is rejected, and the rogue frames statistics is incremented.
+If the sequence number is greater than the value stored in the RecovSeqNum register, the frame is accepted and the 
+RecovSeqNum register is updated with the new sequence number. The history vector is updated to take account of the 
+new max sequence number. If the sequence number did not immediately follow RecovSeqNum, the out of order statistics is 
+incremented. The latent error statistics counter is updated to take account of any non-duplicates as the history vector is 
+updated.
+
+
+--- PAGE 117 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+117
+If the sequence number is less than the value stored in the RecovSeqNum register the frame is accepted as long as the 
+frame is not a duplicate. If the frame is accepted, the appropriate bit is set in the history vector and the out of order statistics 
+register updated.
+6.1.18 IEEE 802.3br Support
+IEEE 802.3br “Interspering Express Traffic” is one of the TSN (Time Sensitive Networking) standards developed by the 
+IEEE 802.3 working group, which defines a mechanism to allow an express frame to be transmitted with minimum delay at 
+the expense of delaying completion of normal priority frames. 
+This standard has been implemented by instantiating two separate MAC modules with related DMA, an MMSL (MAC 
+Merge Sub Layer) and an AXI arbiter. One MAC is termed the express or eMAC and the other is a pre-emptable or pMAC. 
+The eMAC is designed to carry time sensitive traffic which must be delivered within a known time.
+A conceptual view of this structure is shown in Figure 20.
+Figure 20: IEEE 802.3br Support Block Diagram
+Note: The addition of the AXI Arbiter and APB Switch means that the main SoC interfaces to the core are not duplicated 
+per MAC instance. Instead, a unified interface is provided to ease integration.
+6.1.18.1 Frame Types
+The use of this standard introduces a new format of frame, called an M-frame. M-frames are defined in the IEEE 802.3br 
+standard as frames that have a special type of Start Frame Delimiter, called a Start mPacket Delimiter (SMD) and have a 
+special type of CRC, called MCRC.
+This new frame type is used by the MMSL to differentiate between the different types of traffic to determine whether: 
+• The frame is for the pMAC or eMAC 
+• An M-frame may consist of a full Ethernet frame or a fragment of an Ethernet frame
+Frames to/from the eMAC are the same as regular Ethernet frames and when received will always contain a complete 
+frame.
+
+
+--- PAGE 118 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+118
+Frames to/from the pMAC uses a different SFD and may be fragmented if a frame was required to be sent from the eMAC, 
+in which case the pMAC frame is transmitted in between at least two pMAC frame fragments.
+6.1.18.2 Configuration
+Refer to Table 15 IEEE 802.3br Pre-Emption Support ‘defines on page 27 for the defines available for this standard.
+Note: In order to reduce the size of the eMAC, a number of configuration parameters of the eMAC are fixed and do not 
+share the same configuration as the pMAC. These are listed below:
+• The number of queues is fixed to 1
+• If 802.1CB is supported, then the number of stream functions is fixed to 2
+• The number of type 2 screeners and compare registers is fixed at 2 and 6 respectively if IEEEv802.1CB is supported; 
+otherwise these are set to 0 since only 1 queue is supported
+• The eMAC will share the TSU from the pMAC and is configured to use an external TSU.
+• RSC is not supported in the eMAC
+If the IEEE 802.3br functionality is to be used, then cut-thru and half-duplex and pause modes should not be enabled.
+6.1.18.3 Memory Map
+Table 55 shows the memory map defined for when 802.3br is used.
+6.1.18.4 TX Interspersing Capability
+On the transmit side, the interspersing capability is achieved by pre-empting M-frames from the pMAC in order to give the 
+priority to Express frames from the eMAC.
+If the pMAC is in the process of transmitting a frame and the eMAC requests to transmit, then the M-frame from the pMAC 
+is halted with the M-frame transmission stopped and appended with a 32-bit MCRC before transmission of the express 
+frame commences.
+The additional support for IEEE 802.1Qbv also provides the capability to send time-scheduled express frames. This is 
+supported by a set of programmable registers to define when the frame should be transmitted.
+There are certain circumstances where a pMAC transmission will not be pre-empted, this is handled in accordance to the 
+IEEE 802.3br standard as defined below:
+• There are less than 64 M-frame bytes left to transmit
+• The M-frame transmission started at the moment when an Express packet requested the channel (he minimum number 
+of bytes to be transmitted before pre-emption can occur is programmable using the register add_frag_size register). In 
+this case pre-emption will start after the minimum number of bytes of the M-frame have been transmitted.
+• If the pre-emption function is not enabled 
+• If the pre-emption function is enabled, the verification function is not disabled and the link partner couldn’t complete the 
+handshake protocol indicating that it can’t support the IEEE 802.3br standard.
+6.1.18.5 RX Interspersing Capability
+The MMSL receiver processes the received M-frames to determine whether the frame is destined for the eMAC or the 
+pMAC and routes them appropriately.
+Table 55: Memory Map for IEEE 802.3br Support 
+Register Space
+Slave
+0x1000 – 0x1FFC
+eMAC
+0x0F00 – 0x0FFC
+MMSL
+0x0000 – 0x0EFC
+pMAC
+
+
+--- PAGE 119 ---
+
+IP Rev: R1p12 - Doc Rev: 1.0   Cadence IP for Gigabit Ethernet MAC for Automotive (IP7014A) User Guide
+November 6, 2017
+Cadence Design Systems, Inc.
+Cadence Confidential
+119
+Frames destined for the eMAC look like standard Ethernet frames and are passed un-modified to the eMAC.
+Frames destined for the pMAC contain a modified SFD and this new SFD is also used to identify frame fragments in order 
+to reconstruct a complete Ethernet frame for the pMAC.
+If a frame for the pMAC is fragmented due to an express frame, the MMSL receive state machine and the pMAC receive 
+path are halted while the express frame is routed to the eMAC. Once a continuation fragment is received, the MMSL 
+receive state machine and pMAC receive path resumes operation.
+6.1.18.6 Verification Process
+The verification process is defined by the IEEE 802.3br as a mechanism to validate the support of the 802.3br standard by 
+both ends of the link.
+If the pre-emption capability and the verification process are enabled, after reset a “verify frame” which consists of a special 
+type of M-frame is transmitted. This frame, when received by the link partner should cause the link partner to transmit a 
+‘Respond Frame’.
+The proper reception of this ‘Respond Frame’ completes the verification process and enables the pre-emption capability.
+If no ‘Respond Frame’ is received within 10ms, the process will automatically be repeated another two times before the 
+pre-emption capability is disabled. If this happens, the verification process may be restarted through the programming 
+registers.
+During the time in which the core is waiting for the Respond packet, the receive traffic will be routed to either the pMAC or 
+the eMAC depending on the value of the 802.3br configuration registers.
+6.1.19 IEEE 802.1Qci: Receive (Ingress) Traffic Policing
+The rx_q_flush registers starting at 0x0b00 allow frames to be discarded on a per-queue basis when the following events 
+occur: 
+• All traffic received to a particular queue 
+• When a receive queue’s buffer descriptor is read with the used bit set 
+• When a queue’s SRAM utilization reaches a programmable depth (specified in 128-byte chunks) 
+• When a frame is received above a programmable length (specified in bytes) 
+The scr2_reg_rate_limit registers starting at 0x0b40 allow frames to be discarded that exceed a certain flow rate.
+The TSN standards enable provisioning the resources in a network in such a way that high priority traffic is guaranteed to 
+get through as long as it does not exceed its frame length and flow rate allocation.
+802.1Qci is a policing mechanism that discards frames on ingress (ie received frames) if they exceed their allocated frame 
+length or flow rate. The rx_q_flush and scr2_reg_rate_limit registers are provided for this purpose.

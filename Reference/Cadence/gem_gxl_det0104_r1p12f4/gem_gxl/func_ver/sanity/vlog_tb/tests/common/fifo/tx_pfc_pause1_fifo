@@ -1,0 +1,180 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2009
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_pfc_pause1_fifo
+--
+--   Author         : Christine Lin (htlin@cadence.com)
+--
+--   Date           : 25 November 2009
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This checks transmission of PFC pause frame from FIFO interface.
+--
+--
+-- Functional Coverage
+----------------------
+-- 
+--
+-- Detailed Test Description
+----------------------------
+----
+-- ************************************************************************** --
+
+-- Configuration Requirements ..
+requires ext_fifo_interface 1
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+
+-- this is the event count that will initialize the scaler for event counts. it will cause any future scaling to only scale
+-- the counts after start_scale
+start_scale
+
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+
+-- # Initialize the network configuration register
+-- #   -eam      <1|0|random>, default = 0. This is external address matching
+-- #   -duplex   <full|half|random>, default = random
+-- #   -speed    <1g|100m|10m|random>, default = random
+-- #   -jumbo    <1|0|random>, default = random. This wont affect the RX transactor below, but will automatically cause jumbos to be dropped.
+-- #   -copy_all <1|0|random>, default = 0. If 0, ensure you initialize the dest_addr in the rx transactor to something that will match
+-- #   -databus  <32|64|128|take_from_cfg|random>, default = random, bus <= config.  The max value is the value set in dma_bus_width in gem_defs.v
+-- #   -rx_toe   <1|0|random>, default = 0. Enables RX TCP/IP checksum offload
+-- #   -pcs_en   <1|0|random>, default = 0. Enables SGMII PCS
+-- #   -pause_en <1|0|random>, default = 0. Enables pausing of transmission
+-- #   -dont_copy_pause <1|0|random>, default = 0. Controls whether pause frames are copied
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 0 -copy_all 0 -duplex full -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 0 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+
+apbwr      00 00000208  -- write tx_go and enable tx (apb trigger to trigger FIFO)
+apbrd      24 00000000  -- check interrupt status
+
+
+-- ************************************************************************** --
+-- # 1
+-- *               Driving in PFC pause frame from FIFO interface           * --
+-- ************************************************************************** --
+
+apbwr        00 0000020C -- write tx_start
+apbrd        14 00000008 -- read transmit status register
+                         -- bit 3 represetns bit 3 pf network control register
+                         -- (transmit enable = 1)
+apbwrf       00 0000040C -- write tx_halt to ensure dma does not fetch next frame
+                         -- right away
+                         
+-- Supply PFC transmit data (with reg1 matching) to the FIFO interface 
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd(apb)    00000010   0   00000000      12345678
+fifo_rd         00000000   0   00000000      11111111
+fifo_rd         00000000   0   00000000      22222222
+fifo_rd         00000000   0   00000000      01010888
+fifo_rd         00000000   0   00000000      4444ff00
+fifo_rd         00000000   0   00000000      55555555
+fifo_rd         00000000   0   00000000      66666666
+fifo_rd         00000000   0   00000000      77777777
+fifo_rd         00000000   0   00000000      88888888
+fifo_rd         00000000   0   00000000      99999999
+fifo_rd         00000000   0   00000000      aaaaaaaa
+fifo_rd         00000000   0   00000000      bbbbbbbb
+fifo_rd         00000000   0   00000000      cccccccc
+fifo_rd         00000000   0   00000000      dddddddd
+fifo_rd         00000000   0   00000000      eeeeeeee
+fifo_rd         00000001   0   00000000      ffffffff
+
+-- check for correct preamble, SFD, data, pad and crc 
+txd       55555555555555d5
+txd       78563412111111112222222288080101
+txd	  00ff44445555555566666666
+txd       777777778888888899999999
+txd       aaaaaaaabbbbbbbbcccccccc
+txd       ddddddddeeeeeeeeffffffff6b044b37
+
+
+-- check status on transmit complete interrupt
+apbrd(int)   24 00000080 -- check interrupt status - transmit complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00000080 -- clear interrupt status
+apbrd        14 00000028 -- read transmit status register - frame transmitted 
+                         -- bit 3 represetns bit 3 pf network control register
+                         -- (transmit enable = 1)
+apbwr        14 00000028 -- clear transmit status register
+apbrd       108 00000001 -- check one frame txed OK
+apbrd	     38 00000000  -- check rx pause time
+
+-- ************************************************************************** --
+-- # 2
+-- *               Driving in PFC pause frame from FIFO interface           * --
+-- ************************************************************************** --
+
+apbwr        00 0000020C -- write tx_start
+apbrd        14 00000008 -- read transmit status register
+                         -- bit 3 represetns bit 3 pf network control register
+                         -- (transmit enable = 1)
+apbwrf       00 0000040C -- write tx_halt to ensure dma does not fetch next frame
+                         -- right away
+                         
+-- Supply PFC transmit data (with muticast address matching) to the FIFO interface 
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd(apb)    00000010   0   00000000      00c28001
+fifo_rd         00000000   0   00000000      11110100
+fifo_rd         00000000   0   00000000      22222222
+fifo_rd         00000000   0   00000000      01010888
+fifo_rd         00000000   0   00000000      4444ff00
+fifo_rd         00000000   0   00000000      55555555
+fifo_rd         00000000   0   00000000      66666666
+fifo_rd         00000000   0   00000000      77777777
+fifo_rd         00000000   0   00000000      88888888
+fifo_rd         00000000   0   00000000      99999999
+fifo_rd         00000000   0   00000000      aaaaaaaa
+fifo_rd         00000000   0   00000000      bbbbbbbb
+fifo_rd         00000000   0   00000000      cccccccc
+fifo_rd         00000000   0   00000000      dddddddd
+fifo_rd         00000000   0   00000000      eeeeeeee
+fifo_rd         00000001   0   00000000      ffffffff
+
+-- check for correct preamble, SFD, data, pad and crc 
+txd       55555555555555d5
+txd       0180c200000111112222222288080101
+txd	  00ff44445555555566666666
+txd       777777778888888899999999
+txd       aaaaaaaabbbbbbbbcccccccc
+txd       ddddddddeeeeeeeeffffffff328402cb
+
+
+-- check status on transmit complete interrupt
+apbrd(int)   24 00000080 -- check interrupt status - transmit complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00000080 -- clear interrupt status
+apbrd        14 00000028 -- read transmit status register - frame transmitted 
+                         -- bit 3 represetns bit 3 pf network control register
+                         -- (transmit enable = 1)
+apbwr        14 00000028 -- clear transmit status register
+apbrd       108 00000001 -- check one frame txed OK
+apbrd	     38 00000000  -- check rx pause time
+
+-- force end of test in case it doesn't stop of its own accord
+end(100000)
+
+
+
+
+
+
+

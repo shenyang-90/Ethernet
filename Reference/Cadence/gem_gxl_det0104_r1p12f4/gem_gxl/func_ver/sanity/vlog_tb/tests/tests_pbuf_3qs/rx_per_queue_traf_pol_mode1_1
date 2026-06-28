@@ -1,0 +1,311 @@
+-------------------------------------------------
+-- rx_per_queue_traf_pol_mode1_1 test 
+-------------------------------------------------
+-- This test proves the functionality of the force_discard_on_err
+-- per queue, which is the mode1 of the rx per queue flushing
+-- functionality. A few frames are received for different queues
+-- and the DUT is expected to drop the frame if the bit1 is set
+-- for the queue which the frame is routed to.
+-- In this case we simulate an ahb resource error for the 2nd and 3rd frame
+-- both destined to queue2 and then for the last frame, to queue0.
+-- For both queue0 and queue2 the force_discard_on_err is set
+-- ************************************************************************** --
+
+wait_states 5
+set_random_seed 0;
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 f0000000  -- write receive queue pointer
+apbrd      18 f0000000  -- check receive queue pointer
+apbwr      10 000107c4  -- set buffer size to 64 -- UNSET bit 24
+
+apbwr    0b00 00000002  -- set force_discard_on_err for queue0
+apbwr    0b04 00000000  -- set force_discard_on_err for queue1
+apbwr    0b08 00000002  -- set force_discard_on_err for queue2
+
+apbwr     480 f0010000  -- write receive queue pointer
+apbwr     484 f0020000  -- write receive queue pointer
+apbwr     488 f0030000  -- write receive queue pointer
+apbwr     48c f0040000  -- write receive queue pointer
+apbwr     490 f0050000  -- write receive queue pointer
+apbwr     494 f0060000  -- write receive queue pointer
+apbwr     498 f0070000  -- write receive queue pointer
+apbwr      4a0 00000001  -- Buffer size Q1
+apbwr      4a4 00000001  -- Buffer size Q1
+-- Setup the screeners
+-- [3:0]  - Selected Queue
+-- [7:4]  - VLAN priority 
+-- [8]    - VLAN enable 
+-- [11:9] - ethertype reg#
+-- [12]   - ethertype match enable
+-- [17:13]- compa reg#
+-- [18]   - compa match enable
+-- [23:19]- compb reg#
+-- [24]   - compb match enable
+-- [29:25]- compc reg#
+-- [30]   - compc match enable
+apbwr      540 00000102  -- Screener2 reg 0, vlan enabled, pri = 0
+apbwr      544 00000112  -- Screener2 reg 1, vlan enabled, pri = 1
+apbwr      548 00000122  -- Screener2 reg 2, vlan enabled, pri = 2
+apbwr      54c 00000131  -- Screener2 reg 3, vlan enabled, pri = 3
+apbwr      550 00000141  -- Screener2 reg 4, vlan enabled, pri = 4
+apbwr      554 00000151  -- Screener2 reg 5, vlan enabled, pri = 5
+apbwr      558 00000160  -- Screener2 reg 6, vlan enabled, pri = 6
+apbwr      55c 00000170  -- Screener2 reg 7, vlan enabled, pri = 7
+
+apbwr      6e0 0000ffff  -- Ethtype reg 0
+apbwr      6e4 00005a5a  -- Ethtype reg 1
+apbwr      6e8 0000a5a5  -- Ethtype reg 2
+apbwr      6ec 0000def0  -- Ethtype reg 3
+apbwr      6f0 00009abc  -- Ethtype reg 4
+apbwr      6f4 00005678  -- Ethtype reg 5
+apbwr      6f8 00001234  -- Ethtype reg 6
+apbwr      6fc 00000080  -- Ethtype reg 7
+
+apbwr      700 2211ffff  -- Compare reg 0a
+apbwr      704 00000007  -- Compare reg 0b
+apbwr      708 a334ffff  -- Compare reg 1a
+apbwr      70c 00000022  -- Compare reg 1b
+
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      600 ffffffff -- enable q1 interrupts
+apbwr      604 ffffffff -- enable q2 interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      90 abababab  -- specific address register 2 bottom (multicast)
+apbwr      94 0000abab  -- specific address register 2 top
+apbwr      98 abcdef10  -- specific address register 3 bottom (unicast)
+apbwr      9C 0000a5a5  -- specific address register 3 top
+apbwr      a0 cccccccc  -- specific address register 3 bottom (unicast)
+apbwr      a4 00005a5a  -- specific address register 3 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 0108040a  -- indicate 100M operation, will check pin l8r.
+apbrd      04 0108040a  -- verify write to speed register..
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+-- Frame to queue2
+
+rx_frame (apb)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           broadcast
+      src_addr            111122222222
+      vlan1_en            1
+      vlan1_field         0000
+      type_len_field      ffff
+      
+      #------------------------------
+      # Dont simulate AHB resource_err
+      resource_err        0
+      
+      #------------------------------
+      # Payload
+      data_size           16-300
+      data                random
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+      
+
+-- Frame to queue2
+
+rx_frame (gap)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           broadcast
+      src_addr            111122222222
+      vlan1_en            1
+      vlan1_field         2000
+      type_len_field      5a5a
+      
+      #------------------------------
+      # Simulate AHB resource_err
+      resource_err        1
+
+      #------------------------------
+      # Payload
+      data_size           16-300
+      data                random
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+-- read stats registers
+apbrd(730) 1b4 00000001 -- this is the first frame discarded
+
+-- Frame to queue2
+
+rx_frame (gap)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           broadcast
+      src_addr            111122222222
+      vlan1_en            1
+      vlan1_field         4000
+      type_len_field      a5a5
+
+      #------------------------------
+      # Simulate AHB resource_err
+      resource_err        1
+      
+      #------------------------------
+      # Payload
+      data_size           16-300
+      data                random
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+-- read stats register
+apbrd(800) 1b4 00000001 -- this is the second frame discarded
+
+
+rx_frame (gap)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           broadcast
+      src_addr            111122222222
+      vlan1_en            1
+      vlan1_field         6000
+      type_len_field      def0
+      resource_err        0
+      
+      #------------------------------
+      # Payload
+      data_size           16-300
+      data                random
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+
+rx_frame (gap)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           broadcast
+      src_addr            111122222222
+      vlan1_en            1
+      vlan1_field         8000
+      type_len_field      9abc
+      resource_err        0
+
+      #------------------------------
+      # Payload
+      data_size           16-300
+      data                random
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+
+rx_frame (gap)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           broadcast
+      src_addr            111122222222
+      vlan1_en            1
+      vlan1_field         a000
+      type_len_field      5678
+      resource_err        0
+      
+      #------------------------------
+      # Payload
+      data_size           16-300
+      data                random
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+
+rx_frame (gap)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           broadcast
+      src_addr            111122222222
+      vlan1_en            1
+      vlan1_field         c000
+      type_len_field      1234
+      resource_err        0
+      
+      #------------------------------
+      # Payload
+      data_size           16-300
+      data                random
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+
+rx_frame (gap)  1
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           broadcast
+      src_addr            111122222222
+      vlan1_en            1
+      vlan1_field         e000
+      type_len_field      0080
+      resource_err        1
+      
+      #------------------------------
+      # Payload
+      data_size           16-300
+      data                random
+
+      #------------------------------
+      debug_print_frame   1
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+-- read stats register
+apbrd(2030) 1b4 00000001 -- this is the third frame discarded
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(25000)
+

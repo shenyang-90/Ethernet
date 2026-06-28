@@ -1,0 +1,760 @@
+---------------------------------------------------------
+-- tx_offset_32_1gm test scenario for the Ethernet MAC --
+-- (converted from tx_offset_64_1gm)                   --
+---------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+-- Written by Martin James
+--
+-- 18May2001     Martin started it off
+--
+-- Check initial offsets of 0,1,2 & 3, whilst reducing byte count by one each
+-- time. This means that the buffers always finish on a word boundary.
+--
+--
+-- Check lots of combinations of offsets as follows
+-- 1.  offset 0, length 2 + 3
+-- 2.  offset 1, length 2 + 3
+-- 3.  offset 2, length 2 + 3
+-- 4.  offset 3, length 2 + 3
+-- 5.  offset 0, length 2 + 2
+-- 6.  offset 1, length 2 + 2
+-- 7.  offset 2, length 2 + 2
+-- 8.  offset 3, length 2 + 2
+-- 9.  offset 0, length 2 + 1
+-- 10. offset 1, length 2 + 1
+-- 11. offset 2, length 2 + 1
+-- 12. offset 3, length 2 + 1
+-- 13. offset 0, length 2 + 0
+-- 14. offset 1, length 2 + 0
+-- 15. offset 2, length 2 + 0
+-- 16. offset 3, length 2 + 0
+--
+--
+-- Now do something horrible.
+-- 20 bytes transmitted in total from 10 buffers as follows:
+--             byte lane |3|2|1|0|
+--  buffer no. _____________________
+--       1               | | | |X|
+--       2               | | |X| |
+--       3               | |X| | |
+--       4               |X| | | |
+--       5               | | |X|X|
+--       6               | |X|X| |
+--       7               |X|X| | |
+--       8               | |X|X|X|
+--       9               |X|X|X| |
+--      10               |X|X|X|X|
+--
+-- ************************************************************************** --
+
+wait_states 0
+bus_grant_delay 1
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      00 00000008  -- enable transmit 
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      04 00080400  -- write network config register
+apbrd      04 00080400  -- check network config register
+apbrd      08 00000006  -- check reset value of network status register
+
+
+
+-- ************************************************************************** --
+-- Setup a multi-buffer transmit queue in memory
+
+apbwr      1c ffffff00  -- write address of receive buffer descriptor in memory
+apbrd      1c ffffff00  -- check transmit queue pointer
+apbwr      00 00000208  -- Start the transmission by setting the go bit in network control register
+
+--  buffer no. _____________________
+--       1               |X| | | |
+--       2               | |X| | |
+--       3               | | |X| |
+--       4               | | | |X|
+
+-- ************************************************************************** --
+-- check initial offsets of 0,1,2 & 3, whilst reducing byte count by one each
+-- time. This means that the buffers always finish on a word boundary.
+
+-- descriptor reads for first buffer
+dma_rd tx_descr ffffff04 00000020 -- length 32 bytes
+dma_rd tx_descr ffffff00 98765003 -- offset 3
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 18000000
+dma_rd 98765004 19181818
+dma_rd 98765008 1a191919
+dma_rd 9876500c 1b1a1a1a
+dma_rd 98765010 1c1b1b1b
+dma_rd 98765014 1d1c1c1c
+dma_rd 98765018 1e1d1d1d
+dma_rd 9876501c 1f1e1e1e -- only 32 bytes
+dma_rd 98765020 001f1f1f
+
+
+
+-- descriptor reads for second buffer
+dma_rd tx_descr ffffff0c 0000001f -- length 31 bytes
+dma_rd tx_descr ffffff08 98765102 -- offset 2
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765100 10100000
+dma_rd 98765104 11111010
+dma_rd 98765108 12121111
+dma_rd 9876510c 13131212
+dma_rd 98765110 14141313
+dma_rd 98765114 15151414
+dma_rd 98765118 16161515
+dma_rd 9876511c 17171616 -- only 31 bytes
+dma_rd 98765120 00000017
+
+
+-- descriptor reads for third buffer
+dma_rd tx_descr ffffff14 0000001e -- length 30 bytes
+dma_rd tx_descr ffffff10 98765201 -- offset 1
+
+dma_rd 98765200 88888800
+dma_rd 98765204 99999988
+dma_rd 98765208 aaaaaa99
+dma_rd 9876520c bbbbbbaa
+dma_rd 98765210 ccccccbb
+dma_rd 98765214 ddddddcc
+dma_rd 98765218 eeeeeedd
+dma_rd 9876521c 00ffffee -- only 30 bytes
+
+
+-- descriptor reads for fourth and final buffer
+dma_rd tx_descr ffffff1c 0001801d -- end of frame, length 29 bytes, generate CRC
+dma_rd tx_descr ffffff18 98765300 -- offset 0
+
+dma_rd 98765300 12345678
+dma_rd 98765304 11111111
+dma_rd 98765308 22222222
+dma_rd 9876530c 33333333
+dma_rd 98765310 44444444
+dma_rd 98765314 55555555
+dma_rd 98765318 66666666
+dma_rd 9876531c 00000077
+
+
+dma_rd tx_descr ffffff24 8001801d -- used
+dma_rd tx_descr ffffff20 98765300 
+
+
+
+--write back ownership bit for first buffer descriptor only
+dma_wr ffffff04 80000020 -- write back descriptor with ownership bit set
+
+
+
+
+txd       55555555555555d518181818191919191a1a1a1a1b1b1b1b
+txd                               1c1c1c1c1d1d1d1d1e1e1e1e
+txd                               1f1f1f1f1010101011111111121212
+txd                               121313131314141414151515
+txd                               15161616161717178888888899
+txd                               999999aaaaaaaabbbbbbbbcc
+txd                               ccccccddddddddeeeeeeeeff
+txd                               ff78563412111111112222
+txd		                  222233333333444444445555
+txd                               555566666666776c464b14
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd(int) 24 00000008  
+apbwr      24 00000008  -- clear interrupt status
+apbrd      14 00000021  -- read transmit status register - frame transmitted
+apbwr      00 00000208  -- restart transmission
+
+
+--  buffer no. _____________________
+--       1               | | | |X|
+--       2               | | |X| |
+--       3               | |X| | |
+--       4               |X| | | |
+-- ************************************************************************** --
+-- check initial offsets of 0,1,2 & 3, whilst reducing byte count by one each
+-- time. This means that the buffers always finish on a word boundary.
+
+-- descriptor reads for first buffer
+dma_rd ffffff24 00000020 -- length 32 bytes
+dma_rd tx_descr ffffff20 98765000 -- no initial offset
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+
+
+
+-- descriptor reads for second buffer
+dma_rd tx_descr ffffff2c 0000001f -- length 31 bytes
+dma_rd tx_descr ffffff28 98765101 -- offset 1
+
+dma_rd 98765100 88888800
+dma_rd 98765104 99999988
+dma_rd 98765108 aaaaaa99
+dma_rd 9876510c bbbbbbaa
+dma_rd 98765110 ccccccbb
+dma_rd 98765114 ddddddcc
+dma_rd 98765118 eeeeeedd
+dma_rd 9876511c ffffffee -- only 31 bytes
+
+
+-- descriptor reads for third buffer
+dma_rd tx_descr ffffff34 0000001e -- length 30 bytes
+dma_rd tx_descr ffffff30 98765202 -- offset 2
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765200 10100000
+dma_rd 98765204 11111010
+dma_rd 98765208 12121111
+dma_rd 9876520c 13131212
+dma_rd 98765210 14141313
+dma_rd 98765214 15151414
+dma_rd 98765218 16161515
+dma_rd 9876521c 17171616 -- only 30 bytes
+
+
+
+-- descriptor reads for fourth and final buffer
+dma_rd tx_descr ffffff3c 0001801d -- end of frame, length 29 bytes, generate CRC
+dma_rd tx_descr ffffff38 98765303 -- offset 3
+
+dma_rd 98765300 18000000
+dma_rd 98765304 19181818
+dma_rd 98765308 1a191919
+dma_rd 9876530c 1b1a1a1a
+dma_rd 98765310 1c1b1b1b
+dma_rd 98765314 1d1c1c1c
+dma_rd 98765318 1e1d1d1d
+dma_rd 9876531c 1f1e1e1e -- only 29 bytes
+
+
+
+
+
+--write back ownership bit for first buffer descriptor only
+dma_wr ffffff24 80000020 -- write back descriptor with ownership bit set
+
+dma_rd tx_descr ffffff44 8001801d -- used
+dma_rd tx_descr ffffff40 98765300 
+
+-- check for correct preamble, SFD, data, pad and crc
+txd       55555555555555d578563412111111112222222233333333
+txd		                  444444445555555566666666
+txd                               777777778888888899999999
+txd                               aaaaaaaabbbbbbbbcccccccc
+txd                               ddddddddeeeeeeeeffffff10
+txd                               101010111111111212121213
+txd                               131313141414141515151516
+txd                               161616171718181818191919
+txd                               191a1a1a1a1b1b1b1b1c1c1c
+txd                               1c1d1d1d1d1e1e1e1e1f8b36f1ca
+
+
+
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd(int) 24 00000008  
+apbwr      24 00000008  -- clear interrupt status
+apbrd      14 00000021  -- read transmit status register - frame transmitted
+apbwr      00 00000208  -- restart transmission
+
+
+
+
+
+
+--  buffer no. _____________________
+--       1               | | | |X|
+--       2               |X| | | |
+--       3               | | | |X|
+--       4               |X| | | |
+-- ************************************************************************** --
+-- check initial offsets of 0,1,2 & 3, whilst reducing byte count by one each
+-- time. This means that the buffers always finish on a word boundary.
+
+-- descriptor reads for first buffer
+dma_rd ffffff44 00000024 -- length 36 bytes
+dma_rd tx_descr ffffff40 98765003 -- offset 3
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 78000000
+dma_rd 98765004 11123456
+dma_rd 98765008 22111111
+dma_rd 9876500c 33222222
+dma_rd 98765010 44333333
+dma_rd 98765014 55444444
+dma_rd 98765018 66555555
+dma_rd 9876501c 77666666
+dma_rd 98765020 88777777
+dma_rd 98765024 00888888
+
+
+
+-- descriptor reads for second buffer
+dma_rd tx_descr ffffff4c 00000028 -- length 40 bytes, generate CRC (should be ignored)
+dma_rd tx_descr ffffff48 98765100 -- offset 0
+
+dma_rd 98765100 88888888
+dma_rd 98765104 99999999
+dma_rd 98765108 aaaaaaaa
+dma_rd 9876510c bbbbbbbb
+dma_rd 98765110 cccccccc
+dma_rd 98765114 dddddddd
+dma_rd 98765118 eeeeeeee
+dma_rd 9876511c ffffffff 
+dma_rd 98765120 10101010 
+dma_rd 98765124 11111111 
+
+
+-- descriptor reads for third buffer
+dma_rd tx_descr ffffff54 0000002c -- length 44 bytes, generate CRC (should be ignored)
+dma_rd tx_descr ffffff50 98765203 -- offset 3
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765200 78000000
+dma_rd 98765204 11123456
+dma_rd 98765208 22111111
+dma_rd 9876520c 33222222
+dma_rd 98765210 44333333
+dma_rd 98765214 55444444
+dma_rd 98765218 66555555
+dma_rd 9876521c 77666666
+dma_rd 98765220 88777777
+dma_rd 98765224 99888888
+dma_rd 98765228 aa999999
+dma_rd 9876522c 00aaaaaa
+
+
+
+-- descriptor reads for fourth and final buffer
+dma_rd tx_descr ffffff5c 40018030 -- end of frame, length 48 bytes, generate CRC, wrap
+dma_rd tx_descr ffffff58 98765300 -- offset 0
+
+dma_rd 98765300 88888888
+dma_rd 98765304 99999999
+dma_rd 98765308 aaaaaaaa
+dma_rd 9876530c bbbbbbbb
+dma_rd 98765310 cccccccc
+dma_rd 98765314 dddddddd
+dma_rd 98765318 eeeeeeee
+dma_rd 9876531c ffffffff 
+dma_rd 98765320 10101010 
+dma_rd 98765324 11111111 
+dma_rd 98765328 12121212 
+dma_rd 9876532c 13131313 
+
+
+--write back ownership bit for first buffer descriptor only
+dma_wr ffffff44 80000024 -- write back descriptor with ownership bit set
+
+dma_rd tx_descr ffffff04 8001801d -- used
+dma_rd tx_descr ffffff00 98765300 
+
+-- check for correct preamble, SFD, data, pad and crc
+txd       55555555555555d578563412111111112222222233333333
+txd                               444444445555555566666666
+txd                               777777778888888888888888
+txd                               99999999aaaaaaaabbbbbbbb
+txd                               ccccccccddddddddeeeeeeee
+txd                               ffffffff1010101011111111
+txd                               78563412111111112222222233333333        
+txd                               444444445555555566666666        
+txd                               777777778888888899999999        
+txd                               aaaaaaaa8888888899999999       
+txd                               aaaaaaaabbbbbbbbcccccccc
+txd                               ddddddddeeeeeeeeffffffff
+txd                               101010101111111112121212
+txd                               13131313e83bf0a5
+
+
+
+
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd(int) 24 00000008  
+apbwr      24 00000008  -- clear interrupt status
+apbrd      14 00000021  -- read transmit status register - frame transmitted
+apbwr      00 00000208  -- restart transmission
+
+
+
+
+
+-- ************************************************************************** --
+-- check lots of combinations of offsets as follows
+
+-- 1.  offset 0, length 2 + 3
+-- 2.  offset 1, length 2 + 3
+-- 3.  offset 2, length 2 + 3
+-- 4.  offset 3, length 2 + 3
+
+-- 5.  offset 0, length 2 + 2
+-- 6.  offset 1, length 2 + 2
+-- 7.  offset 2, length 2 + 2
+-- 8.  offset 3, length 2 + 2
+
+-- 9.  offset 0, length 2 + 1
+-- 10. offset 1, length 2 + 1
+-- 11. offset 2, length 2 + 1
+-- 12. offset 3, length 2 + 1
+
+-- 13. offset 0, length 2 + 0
+-- 14. offset 1, length 2 + 0
+-- 15. offset 2, length 2 + 0
+-- 16. offset 3, length 2 + 0
+
+
+-- 1.  offset 0, length 2 + 3
+dma_rd tx_descr ffffff04 0000000b -- length of 11
+dma_rd tx_descr ffffff00 98765100
+dma_rd 98765100 04030201
+dma_rd 98765104 08070605
+dma_rd 98765108 00111009
+
+
+-- 2.  offset 1, length 2 + 3
+dma_rd tx_descr ffffff0c 0000000b
+dma_rd tx_descr ffffff08 98765201
+dma_rd 98765200 14131200
+dma_rd 98765204 18171615
+dma_rd 98765208 22212019
+
+
+-- 3.  offset 2, length 2 + 3
+dma_rd tx_descr ffffff14 0000000b
+dma_rd tx_descr ffffff10 98765302
+dma_rd 98765300 24230000
+dma_rd 98765304 28272625
+dma_rd 98765308 32313029
+dma_rd 9876530c 00000033
+
+--apbwr      00 00000408  -- halt transmission
+
+-- 4.  offset 3, length 2 + 3
+dma_rd tx_descr ffffff1c 0000000b
+dma_rd tx_descr ffffff18 98765403
+dma_rd 98765400 34000000
+dma_rd 98765404 38373635
+dma_rd 98765408 42414039
+dma_rd 9876540c 00004443
+
+
+-- 5.  offset 0, length 2 + 2
+dma_rd tx_descr ffffff24 0000000a
+dma_rd tx_descr ffffff20 98765500
+dma_rd 98765500 48474645
+dma_rd 98765504 52515049
+dma_rd 98765508 00005453
+
+
+-- 6.  offset 1, length 2 + 2
+dma_rd tx_descr ffffff2c 0000000a
+dma_rd tx_descr ffffff28 98765601
+dma_rd 98765600 57565500
+dma_rd 98765604 61605958
+dma_rd 98765608 00646362
+
+
+-- 7.  offset 2, length 2 + 2
+dma_rd tx_descr ffffff34 0000000a
+dma_rd tx_descr ffffff30 98765702
+dma_rd 98765700 66650000
+dma_rd 98765704 70696867
+dma_rd 98765708 74737271
+
+-- 8.  offset 3, length 2 + 2
+dma_rd tx_descr ffffff3c 0000000a
+dma_rd tx_descr ffffff38 98765803
+dma_rd 98765800 75000000
+dma_rd 98765804 79787776
+dma_rd 98765808 83828180
+dma_rd 9876580c 00000084
+
+
+-- 9.  offset 0, length 2 + 1
+dma_rd tx_descr ffffff44 00000009
+dma_rd tx_descr ffffff40 98765900
+dma_rd 98765900 88878685
+dma_rd 98765904 92919089
+dma_rd 98765908 00000093
+
+
+---- 10. offset 1, length 2 + 1
+dma_rd tx_descr ffffff4c 00000009
+dma_rd tx_descr ffffff48 98765a01
+dma_rd 98765a00 96959400
+dma_rd 98765a04 a0999897
+dma_rd 98765a08 0000a2a1
+
+
+---- 11. offset 2, length 2 + 1
+dma_rd tx_descr ffffff54 00000009
+dma_rd tx_descr ffffff50 98765b02
+dma_rd 98765b00 a4a30000
+dma_rd 98765b04 a8a7a6a5
+dma_rd 98765b08 00b1b0a9
+
+
+---- 12. offset 3, length 2 + 1
+dma_rd tx_descr ffffff5c 00000009
+dma_rd tx_descr ffffff58 98765c03
+dma_rd 98765c00 b2000000
+dma_rd 98765c04 b6b5b4b3
+dma_rd 98765c08 c0b9b8b7
+
+-- 13. offset 0, length 2 + 0
+dma_rd tx_descr ffffff64 00000008
+dma_rd tx_descr ffffff60 98765d00
+dma_rd 98765d00 c4c3c2c1
+dma_rd 98765d04 c8c7c6c5
+
+
+---- 14. offset 1, length 2 + 0
+dma_rd tx_descr ffffff6c 00000008
+dma_rd tx_descr ffffff68 98765e01
+dma_rd 98765e00 d1d0c900
+dma_rd 98765e04 d5d4d3d2
+dma_rd 98765e08 000000d6
+
+
+---- 15. offset 2, length 2 + 0
+dma_rd tx_descr ffffff74 00000008
+dma_rd tx_descr ffffff70 98765f02
+dma_rd 98765f00 d8d70000
+dma_rd 98765f04 e2e1e0d9
+dma_rd 98765f08 0000e4e3
+
+
+---- 16. offset 3, length 2 + 0
+dma_rd tx_descr ffffff7c 00018008 -- end of frame
+dma_rd tx_descr ffffff78 98765113
+dma_rd 98765110 e5000000
+dma_rd 98765114 e9e8e7e6
+dma_rd 98765118 00ecebea
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd       55555555555555d5
+txd       01020304
+txd       05060708
+txd       09101112
+txd       13141516
+txd       17181920
+txd       21222324
+txd       25262728
+txd       29303132
+txd       33343536
+txd       37383940
+txd       41424344
+txd       45464748
+txd       49505152
+txd       53545556
+txd       57585960
+txd       61626364
+txd       65666768
+txd       69707172
+txd       73747576
+txd       77787980
+txd       81828384
+txd       85868788
+txd       89909192
+txd       93949596
+txd       979899a0
+txd       a1a2a3a4
+txd       a5a6a7a8
+txd       a9b0b1b2
+txd       b3b4b5b6
+txd       b7b8b9c0
+txd       c1c2c3c4
+txd       c5c6c7c8
+txd       c9d0d1d2
+txd       d3d4d5d6
+txd       d7d8d9e0
+txd       e1e2e3e4
+txd       e5e6e7e8
+txd       e9eaebec
+txd       931e9116 -- valid CRC
+
+--write back ownership bit for first buffer descriptor only
+dma_wr ffffff04 8000000b -- write back descriptor with ownership bit set
+
+dma_rd tx_descr ffffff84 80018008 -- used
+dma_rd tx_descr ffffff80 98765113
+
+apbrd(int) 24 00000080 -- Transmit Complete
+apbwr      24 00000080 -- Clearing Interrupt
+apbrd(int) 24 00000008 -- Used bit read
+apbwr      24 00000008 -- Clearing Interrupt
+apbrd      14 00000021  -- read transmit status register - frame transmitted
+apbwr      1c ffffffa0  -- write address of receive buffer descriptor in memory
+apbrd      1c ffffffa0  -- check transmit queue pointer
+apbwr      00 00000208  -- restart transmission
+
+
+
+
+
+-- ************************************************************************** --
+-- do something horrible.
+-- 20 bytes transmitted in total from 10 buffers as follows:
+--             byte lane |3|2|1|0|
+--  buffer no. _____________________
+--       1               | | | |X|
+--       2               | | |X| |
+--       3               | |X| | |
+--       4               |X| | | |
+--       5               | | |X|X|
+--       6               | |X|X| |
+--       7               |X|X| | |
+--       8               | |X|X|X|
+--       9               |X|X|X| |
+--      10               |X|X|X|X|
+
+
+-- descriptor reads for first buffer
+dma_rd tx_descr ffffffa4 00000001 -- length 1 byte
+dma_rd tx_descr ffffffa0 98765100 -- no offset
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765100 00000011
+
+
+-- descriptor reads for second buffer
+dma_rd tx_descr ffffffac 00000001 -- length 1 byte, generate CRC (should be ignored)
+dma_rd tx_descr ffffffa8 98765201 -- offset 1
+
+dma_rd 98765200 00002200
+
+
+-- descriptor reads for third buffer
+dma_rd tx_descr ffffffb4 00000001 -- length 1 byte, generate CRC (should be ignored)
+dma_rd tx_descr ffffffb0 98765302 -- offset 2
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765300 00330000
+
+
+-- descriptor reads for fourth buffer
+dma_rd tx_descr ffffffbc 00000001 -- length 1 byte, generate CRC (should be ignored)
+dma_rd tx_descr ffffffb8 98765403 -- offset 3
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765400 44000000
+
+
+-- descriptor reads for fifth buffer
+dma_rd tx_descr ffffffc4 00000002 -- length 2 byte, generate CRC (should be ignored)
+dma_rd tx_descr ffffffc0 98765500 -- offset 0
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765500 00006655
+
+
+-- descriptor reads for sixth buffer
+dma_rd tx_descr ffffffcc 00000002 -- length 2 byte, generate CRC (should be ignored)
+dma_rd tx_descr ffffffc8 98765601 -- offset 1
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765600 00887700
+
+
+-- descriptor reads for seventh buffer
+dma_rd tx_descr ffffffd4 00000002 -- length 2 byte, generate CRC (should be ignored)
+dma_rd tx_descr ffffffd0 98765702 -- offset 2
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765700 aa990000
+
+
+-- descriptor reads for eigth buffer
+dma_rd tx_descr ffffffdc 00000003 -- length 3 byte, generate CRC (should be ignored)
+dma_rd tx_descr ffffffd8 98765800 -- offset 0
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765800 00ddccbb
+
+
+-- descriptor reads for ninth buffer
+dma_rd tx_descr ffffffe4 00000003 -- length 3 byte, generate CRC (should be ignored)
+dma_rd tx_descr ffffffe0 98765901 -- offset 1
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765900 10ffee00
+
+
+-- descriptor reads for tenth & final buffer
+dma_rd tx_descr ffffffec 00018004 -- length 4 byte, end of frame and no CRC
+dma_rd tx_descr ffffffe8 98765a00 -- offset 0
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765a00 14131211
+
+
+
+
+
+
+--write back ownership bit for first buffer descriptor only
+dma_wr ffffffa4 80000001 -- write back descriptor with ownership bit set
+
+dma_rd tx_descr fffffff4 80018004 -- used
+dma_rd tx_descr fffffff0 98765a00 -- offset 0
+
+-- check for correct preamble, SFD, data, pad and crc
+txd       55555555555555d5112233445566778899aabbccddeeff1011121314
+txd                       0000000000000000000000000000000000000000
+txd                       0000000000000000000000000000000000000000f00e9472
+
+
+
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd(int) 24 00000008  
+apbwr      24 00000008  -- clear interrupt status
+apbrd      14 00000021  -- read transmit status register - frame transmitted
+
+-- check transmit statistics
+apbrd     100 00000284  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000005  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000002  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000002  -- check frames transmitted 65-127
+apbrd     120 00000002  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+
+
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(10000)
+
+

@@ -1,0 +1,223 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2006
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : ptp_timer
+--
+--   Author         : Andreas Bode
+--
+--   Date           : 11 July 2007
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- Check TSU timer values - increment, adjust (subtract and add)
+--
+--
+--
+--------------------------------------------------------------------------------
+
+
+requires ext_fifo_interface 0
+requires rx_pkt_buffer 1
+requires tx_pkt_buffer 1
+requires tsu 1
+requires tsu_clk 1
+
+-- tsu_clk is always 10MHz,
+-- but pclk changes. since there is a clk boundary between tsu_clk to pclk, fix pclk to 50Mhz for this test
+sel_ahb_freq 1
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states     0
+bus_grant_delay 1
+
+-- The following ensures that whatever datawidth is selected for this test, the 
+-- translator will pass through correct multiples of 32bit words for data transfers
+-- (not descriptors). This relies on the test writer using the rx_descr and tx_descr to
+-- differentiate between the DMA accesses.
+enforce_data_width 1
+
+-- In 32b datapaths, the 64bit descriptors are accessed not in incrementing order
+-- The used bit is always read first, and written last.
+-- For TX since the used bit is bit 63, the 2nd 32bit word is always read first
+-- For RX since the used bit is bit 0, the 2nd 32bit word is always written first
+-- This ordering is only there for 32bit modes
+-- To simplify writing testcases and ensure the same test can operate on different datawidths
+-- we can automatically reverse the order ...
+auto_descriptor_swap 1
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts
+--******************************************************************************
+apbrd(100)  00 00000000  -- check reset value of network control register
+
+# Initialize the network configuration register
+init_ncr -duplex full -speed random -jumbo random -databus random -copy_all random -eam random
+
+# Enable the interrupts
+enable_ints -num_queues 1   -vector ffffffff  # enable all ints
+
+apbrd      24 00000000  -- check interrupt status
+apbrd      30 00000000  -- check that all interrupts are now enabled
+apbrd      08 00000006  -- check reset value of network status register
+
+
+-- check TSU timer and PTP event frame register
+apbrd     1e0 00000000  -- PTP event frame transmitted seconds register
+apbrd     1e4 00000000  -- PTP event frame transmitted nanoseconds register
+apbrd     1e8 00000000  -- PTP event frame received seconds register
+apbrd     1ec 00000000  -- PTP event frame received nanoseconds register
+apbrd     1f0 00000000  -- peer event frame transmitted seconds register
+apbrd     1f4 00000000  -- peer event frame transmitted nanoseconds register
+apbrd     1f8 00000000  -- peer event frame received seconds register
+apbrd     1fc 00000000  -- peer event frame received nanoseconds register
+apbrd     1d0 00000000  -- Timer seconds register
+apbrd     1d4 00000000  -- Timer nanoseconds register
+apbrd     1d8 00000000  -- Timer adjust
+apbrd     1dc 00000000  -- Timer increment
+
+
+--******************************************************************************
+--  3. Check Timer adjust while increment is zero-
+--     Set different adjust values to be subtracted or added.
+--******************************************************************************
+
+-- set timer adjust, only timer nanoseconds change
+apbwr     1d8 20000000  -- write Timer adjust -- add 536870912 decimal
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd     1d0 00000000  -- read Timer seconds register
+apbrd     1d4 20000000  -- read Timer nanoseconds register -expected
+                        -- 536870912 decimal
+apbrd     1d4 20000000  -- read again Timer nanoseconds register
+
+-- set timer adjust, timer seconds increment by 1
+apbwr     1d8 20000000  -- write Timer adjust -- add 536870912 decimal
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd     1d0 00000001  -- read Timer seconds register
+apbrd     1d4 04653600  -- read Timer nanoseconds register - expected
+                        -- 73741824 decimal
+
+-- set timer adjust,  timer seconds increment by 2
+apbwr     1d8 20000000  -- write Timer adjust -- add 536870912 decimal
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd     1d0 00000001  -- read Timer seconds register
+apbrd     1d4 24653600  -- read Timer nanoseconds register - expected
+                        -- 610612736 decimal
+apbwr     1d8 173593ff  -- write Timer adjust -- add 389387263 decimal
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd     1d0 00000001  -- read Timer seconds register
+apbrd     1d4 3b9ac9ff  -- read Timer nanoseconds register - expected
+                        -- 999999999 decimal
+apbwr     1d8 3fffffff  -- write Timer adjust -- add 1073741823 decimal
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd     1d0 00000003  -- read Timer seconds register - increment of 2
+apbrd     1d4 046535fe  -- read Timer nanoseconds register - expected
+                        -- 73741822 decimal
+
+-- set timer adjust,  timer seconds decrement by 2
+apbwr     1d8 846535fe  -- write Timer adjust -- sub 73741822 decimal
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd     1d0 00000003  -- read Timer seconds register
+apbrd     1d4 00000000  -- read Timer nanoseconds register - expected
+                        -- 0 decimal
+apbwr     1d8 bfffffff  -- write Timer adjust -- sub 1073741823 decimal
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd     1d0 00000001  -- read Timer seconds register -- decrement of 2
+apbrd     1d4 37359401  -- read Timer nanoseconds register - expected
+                        -- 926258177 decimal
+
+-- set timer adjust,  timer seconds decrement by 1
+apbwr     1d8 1f000000  -- write Timer adjust -- sub 251658240 decimal
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd     1d0 00000002  -- read Timer seconds register
+apbrd     1d4 1a9aca01  -- read Timer nanoseconds register - expected
+                        -- 446351873 decimal
+apbwr     1d8 bfffffff  -- write Timer adjust -- sub 1073741823 decimal
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd     1d0 00000001  -- read Timer seconds register -- decrement of 2
+apbrd     1d4 16359402  -- read Timer nanoseconds register - expected
+                        -- 372610050 decimal
+
+
+--******************************************************************************
+--  4. Check Timer increment -
+--     Set different increment values.
+--******************************************************************************
+
+-- initialise timer
+apbwr     1d0 00000000  -- Timer seconds register
+apbwr     1d4 00000000  -- Timer nanoseconds register
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+
+apbrd     1d0 00000000  -- Timer seconds register
+apbrd     1d4 00000000  -- Timer nanoseconds register
+
+apbwr     1dc 00000010  -- Timer increment 16 decimal
+
+-- medium change
+apbrd       1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd(est)  1d4 00000050 range=200 -- Timer nanoseconds register
+apbrd       1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd(est)  1d4 00000100 range=200 -- Timer nanoseconds register
+apbrd       1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd(est)  1d4 00000190 range=200 -- Timer nanoseconds register
+
+apbwr     1dc 000000ff  -- Timer increment 255 decimal
+
+-- great change
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd(est)  1d4 00000680 range=150 -- Timer nanoseconds register
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd(est)  1d4 00001280 range=150 -- Timer nanoseconds register
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd(est)  1d4 00001b80 range=150 -- Timer nanoseconds register
+
+apbwr     1dc 00000001  -- Timer increment 1 decimal
+apbwr     1d4 0bcdef00  -- Timer nanoseconds register
+-- small change
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd(est)  1d4 0bcdef07 range=5 -- Timer nanoseconds register
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd(est)  1d4 0bcdef10 range=5 -- Timer nanoseconds register
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd(est)  1d4 0bcdef1a range=5 -- Timer nanoseconds register
+
+apbwr     1dc 00000000  -- Timer increment 0 decimal
+-- no change
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd(est)  1d4 0bcdef20 range=3 -- Timer nanoseconds register
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd(est)  1d4 0bcdef20 range=3 -- Timer nanoseconds register
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd(est)  1d4 0bcdef20 range=3 -- Timer nanoseconds register
+
+
+--******************************************************************************
+--  5. Create Timer seconds/nanoseconds overflow.
+--******************************************************************************
+
+-- initialise timer
+apbwr     1d8 00000000  -- Timer adjust
+apbwr     1d0 ffffffff  -- Timer seconds register
+apbwr     1d4 3b9ac700  -- Timer nanoseconds register
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd     1d0 ffffffff  -- Timer seconds register
+apbrd     1d4 3b9ac700  -- Timer nanoseconds register
+
+apbwr     1dc 000000ff  -- Timer increment 16 decimal
+apbrd     1d0 ffffffff  -- Timer seconds register
+apbrd     1d4 3b9ac700  -- Timer nanoseconds register
+apbrd     1d8 00000000 num=25 -- read Timer adjust - write only, wait for signal propagation
+apbrd     1d0 00000000  -- Timer seconds register
+apbrd(est) 1d4 00000400 range=50 -- Timer nanoseconds register
+
+end(10000)
+
+

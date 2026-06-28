@@ -1,0 +1,347 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : pause_min_max
+--
+--   Authors        : Mike MacGillis (mikema@tality.com)
+--
+--   Date           :  25 January 2002
+--
+--------------------------------------------------------------------------------
+
+-- Test Description
+-- This test ensures the GEM deals with runt pause frames and jumbo pause frames properly.
+-- 
+-- Test Coverage
+-- · Ensures that the GEM will ignore pause frames that are less than 64 bytes in length.
+-- · Ensures that the GEM will accept pause frames that are greater than 64 bytes in length.
+--
+-- Detailed Test Description
+-- 1. Initialise the GEM for 100-mode operation.
+-- 2. Enable receive.
+-- 3. Enable reception of pause frames.
+-- 4. Receive a pause frame that is only 63 bytes, the destination address 
+--    matches pause frame address 0x0180C2000001, type field = 0x8808, 
+--    pause op-code = 0x0001 and pause time to be set is 0x00FF.  
+--    Then, transmit a frame. The GEM should ignore the pause frame 
+--    and just transmit the frame.
+-- 5. Receive a pause frame that is 65 bytes (greater than minimum frame size),
+--    the destination address matches pause frame address 0x0180C2000001, 
+--    type field = 0x8808, pause op-code = 0x0001 and pause time to be set 
+--    is 0x00FF.  Then, transmit a frame. The GEM should accept the pause frame
+--    and transmit a frame once the pause time is zero.
+-- 6. Receive a pause frame that is 64 bytes (minimum frame size), 
+--    the destination address matches pause frame address 0x0180C2000001, 
+--    type field = 0x8808, pause op-code = 0x0001 and pause time to be set 
+--    is 0x00FF.  Then, try to transmit a frame. The GEM should not 
+--    transmit the frame until the pause timer is zero.
+-- 7. Check the status and statistics registers and ensure that the 
+--    above operations were handled properly.
+
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 ffffff00  -- write address of receive buffer descriptor in memory
+apbrd      18 ffffff00  -- check receive queue pointerapbrd     
+apbrd      24 00000000  -- check interrupt status
+apbwr      00 0000000C  -- enable receive and transmit
+apbrd      00 0000000C  -- check receive and transmit
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      04 00082003  -- set enable pause time bit(13)
+apbrd      04 00082003  -- check network configuration register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      38 00000000  -- check the value of the pause time register
+
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+-- ************************************************************************** --
+-- Receive a pause frame that is only 63 bytes, the destination address 
+-- matches pause frame address 0x0180C2000001, type field = 0x8808, 
+-- pause op-code = 0x0001 and pause time to be set is 0x00FF.  
+-- Then, transmit a frame. The GEM should ignore the pause frame 
+-- and just transmit the frame.
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000gggggggg
+
+apbrd(524)   24 00000000 -- check interrupt status - pause timer zero
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       158 00000000 -- check no frames rxed OK (no register 1 match)
+apbrd       164 00000000 -- check pause frames rxed
+apbrd       184 00000001 -- check undersized frame register
+
+-- ************************************************************************** --
+-- *               Driving in frame to be transmitted                       * --
+-- ************************************************************************** --
+
+-- transmit a frame starting at one word and one byte removed from
+-- the 16-byte boundary
+
+apbwr        1c 11111000 -- write transmit queue pointer register
+apbwr        00 0000020C -- write tx_start
+apbrd        14 00000000 -- read transmit status register
+
+-- supply the transmit data to the AHB interface
+apbwr        00 0000040C -- write tx halt bit
+
+-- supply the transmit data to the AHB interface
+dma_rd 11111004 00018040 -- length 64, no CRC and end of frame
+dma_rd 11111000 98765000 -- TX buffer address
+
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+dma_rd 98765030 cccccccc
+dma_rd 98765034 dddddddd
+dma_rd 98765038 eeeeeeee
+dma_rd 9876503c ffffffff
+
+dma_wr 11111004 80018040 -- write back ownership bit
+
+-- check for correct preamble, SFD, data, pad and crc 
+txd       55555555555555d578563412111111112222222233333333
+txd		                  444444445555555566666666
+txd                               777777778888888899999999
+txd                               aaaaaaaabbbbbbbbcccccccc
+txd                               ddddddddeeeeeeeeffffffff
+
+-- check status on transmit complete interrupt
+apbrd(int)   24 00000080 -- check interrupt status - transmit complete
+apbwr        24 00000080 -- clear interrupt status
+apbrd        14 00000020 -- read transmit status register - frame transmitted 
+apbwr        14 00000020 -- clear transmit status register
+apbrdf       108 00000001 -- check one frame txed OK
+
+-- ************************************************************************** --
+-- Receive a pause frame that is 65 bytes (greater than minimum frame size),
+-- the destination address matches pause frame address 0x0180C2000001, 
+-- type field = 0x8808, pause op-code = 0x0001 and pause time to be set 
+-- is 0x00FF.  Then, transmit a frame. The GEM accept the pause frame
+-- and transmit a frame once the pause time is zero.
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            00000000000000000000000000gggggggg
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- clear interrupt status
+apbrd        38 000000FF -- check the value of the pause time register
+apbwr        04 00083003 -- set retry test bit(12) to speed things up a bit
+                         -- keep enable pause time(13) set
+
+apbrd(int)   24 00002000 -- check interrupt status - pause timer zero
+apbwr        24 00002000 -- clear interrupt status
+apbrd        38 00000000 -- check the value of the pause time register
+
+
+-- ************************************************************************** --
+-- *               Driving in frame to be transmitted                       * --
+-- ************************************************************************** --
+
+-- Valid frame with valid CRC, test that when the pause time counter is non zero
+-- the frame is queued. Once the time is zero then this frame should be 
+-- transmitted.
+
+-- transmit a frame starting at one word and one byte removed from
+-- the 16-byte boundary
+
+
+-- supply the transmit data to the AHB interface
+apbwr        00 0000020C -- write tx_start
+apbwr        00 0000040C -- write tx halt bit
+
+-- supply the transmit data to the AHB interface
+dma_rd 1111100c 00018040 -- length 64, no CRC and end of frame
+dma_rd 11111008 98765000 -- TX buffer address
+
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+dma_rd 98765030 cccccccc
+dma_rd 98765034 dddddddd
+dma_rd 98765038 eeeeeeee
+dma_rd 9876503c ffffffff
+
+dma_wr 1111100c 80018040 -- write back ownership bit
+
+-- check for correct preamble, SFD, data, pad and crc 
+txd       55555555555555d578563412111111112222222233333333
+txd		                  444444445555555566666666
+txd                               777777778888888899999999
+txd                               aaaaaaaabbbbbbbbcccccccc
+txd                               ddddddddeeeeeeeeffffffff
+
+-- check status on transmit complete interrupt
+apbrd(int)   24 00000080 -- check interrupt status - transmit complete
+apbwr        24 00000080 -- clear interrupt status
+apbrd        14 00000020 -- read transmit status register - frame transmitted 
+apbwr        14 00000020 -- clear transmit status register
+apbrd       108 00000001 -- check one frame txed OK
+apbwrf       04 00082003 -- reset retry test bit(12)
+
+-- ************************************************************************** --
+-- Receive a pause frame that is 64 bytes (minimum frame size), 
+-- the destination address matches pause frame address 0x0180C2000001, 
+-- type field = 0x8808, pause op-code = 0x0001 and pause time to be set 
+-- is 0x00FF.  Then, try to transmit a frame. The GEM should not 
+-- transmit the frame until the pause timer is zero.
+-- ************************************************************************** --
+
+rxd(apb)     d50180C200000111112222222288080001
+rxd            00FF4444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(int)   24 00001000 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001000 -- clear interrupt status
+apbrd        38 000000FF -- check the value of the pause time register
+apbwr        04 00083003 -- set retry test bit(12) to speed things up a bit
+                         -- keep enable pause time(13) set
+
+apbrd(int)   24 00002000 -- check interrupt status - pause timer zero
+apbwr        24 00002000 -- clear interrupt status
+apbrd        38 00000000 -- check the value of the pause time register
+apbrd       158 00000000 -- check no frames rxed OK (no register 1 match)
+apbrd       164 00000002 -- check pause frames rxed
+
+-- ************************************************************************** --
+-- *               Driving in frame to be transmitted                       * --
+-- ************************************************************************** --
+
+-- transmit a frame starting at one word and one byte removed from
+-- the 16-byte boundary
+
+apbwr        1c 11111000 -- write transmit queue pointer register
+apbwr        00 0000020C -- write tx_start
+apbrd        14 00000000 -- read transmit status register
+
+-- supply the transmit data to the AHB interface
+apbwr        00 0000040C -- write tx halt bit
+
+-- supply the transmit data to the AHB interface
+dma_rd 11111004 00018040 -- length 64, no CRC and end of frame
+dma_rd 11111000 98765000 -- TX buffer address
+
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+dma_rd 98765030 cccccccc
+dma_rd 98765034 dddddddd
+dma_rd 98765038 eeeeeeee
+dma_rd 9876503c ffffffff
+
+dma_wr 11111004 80018040 -- write back ownership bit
+
+-- check for correct preamble, SFD, data, pad and crc 
+txd       55555555555555d578563412111111112222222233333333
+txd		                  444444445555555566666666
+txd                               777777778888888899999999
+txd                               aaaaaaaabbbbbbbbcccccccc
+txd                               ddddddddeeeeeeeeffffffff
+
+-- check status on transmit complete interrupt
+apbrd(int)   24 00000080 -- check interrupt status - transmit complete
+apbwr        24 00000080 -- clear interrupt status
+apbrd        14 00000020 -- read transmit status register - frame transmitted 
+apbwr        14 00000020 -- clear transmit status register
+apbrdf       108 00000001 -- check one frame txed OK
+
+-- check transmit statistics
+apbrd     100 000000C0  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000003  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrdf    1A4 00000000  -- check receive overrun errors
+
+-- ************************************************************************** --
+-- force end of test in case it doesn't stop of its own accord
+end(10000)
+bus_grant_delay 0

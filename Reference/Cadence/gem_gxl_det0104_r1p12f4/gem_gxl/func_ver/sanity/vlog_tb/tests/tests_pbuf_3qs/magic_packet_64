@@ -1,0 +1,888 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : magic_packet_64
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 4 November 2002
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- Checks response to magic packet in 100Mbits/s mode
+-- 
+-- Functional Coverage
+-- * Checks that synchronisation FF bytes can be recognised anywhere in frame
+-- * Checks that magic packet only accepted if spec_add1 is repeated 16 times
+-- * Checks that magic packet can be seen if not aligned to 16-bit boundary
+-- 
+-- Detailed Test Description
+--  1. Initialise suitable wait states for the test.
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 64-bit DMA data bus.
+--  3. Receive a correctly addressed frame that almost has a magic packet in it
+--     and check that wol is not asserted.
+--  4. Receive a correctly addressed frame that almost has a magic packet in it
+--     at a non 16-bit alignment and check that wol is not asserted.
+--  5. Receive a correctly addressed frame that has a magic packet but with crc
+--     error and check that wol is not asserted.
+--  6. Receive a correctly addressed frame that has a magic packet and check for
+--     wol assertion
+--  7. Receive a correctly addressed frame that has a magic packet at a non 
+--     16-bit alignment and check for wol assertion
+--  8. Turn off the magic packet WoL mask and receive a good frame which has
+--     a magic packet. Check that the frame is received and wol is not asserted.
+--  9. Receive a good frame which is not a magic packet to ensure everything
+--     is OK and check the wol is not asserted.
+-- 10. Set the local addresss to all F's (broadcast) and receive a good broadcast
+--     frame which contains a magic packet. Check that magic packet is asseted.
+-- 11. Check statistics for correct values from above tests.
+--
+-- ************************************************************************** --
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states     0
+bus_grant_delay 1
+
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 64-bit DMA data bus.
+--******************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffffff0  -- write receive queue pointer
+apbwr      480 88000000  -- write receive queue pointer 1
+apbwr      484 99000000  -- write receive queue pointer 2
+apbrd      18 fffffff0  -- check receive queue pointer
+apbwr      B8 00010000  -- enable WoL magic packet mask
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 0fffffff  -- enable all interrupts except WOL
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 00280001  -- indicate 100M operation, will check pin l8r.
+apbrd      04 00280001  -- verify write to speed register..
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+
+--******************************************************************************
+--  3. Receive a correctly addressed frame that almost has a magic packet in it
+--     and check that wol is not asserted.
+--******************************************************************************
+
+--  check reset state of magic packet
+pinsc(50) wol 0
+
+
+-- drive the receive frame data into the MII interface
+-- go through all magic packet state transitions without
+-- actually detecting a magic packet
+--------------------------------------------------------------------------------
+rxd(apb)     d578563412111111112222         -- frame needs to be address recognized
+--------------------------------------------------------------------------------
+rxd            ff56                         -- not enough sync bytes
+rxd            ffff34
+rxd            ffffff12
+rxd            ffffffff11
+rxd            ffffffffff22
+--------------------------------------------------------------------------------
+rxd            ffffffffff0078               -- missing FF before beginning of DA
+rxd            ffffffffffff0078
+rxd            ffffffffffffff0078
+rxd            ffffffffffffffff0078
+--------------------------------------------------------------------------------
+rxd            ffffffffffff33               -- bad DA
+rxd            ffffffffffffff7844
+rxd            ffffffffffff785655
+rxd            ffffffffffff78563466
+rxd            ffffffffffff7856341277
+rxd            ffffffffffff78563434121188
+rxd            ffffffffffff78563434121111
+--------------------------------------------------------------------------------
+rxd            ffffffffffff78               -- fragments of DA then sync again
+rxd            ffffffffffff7856
+rxd            ffffffffffff785634
+rxd            ffffffffffff78563412
+rxd            ffffffffffff7856341211
+rxd            ffffffffffff785634121100
+rxd            ffffffffffff78563412110078
+--------------------------------------------------------------------------------
+rxd            ffffffffffff785634121111ff78 -- rogue bytes before beginning of 2nd DA
+rxd            ffffffffffff7856341211110078
+rxd            ffffffffffff785634121111ffff
+rxd            ffffffffffff785634121111ff00
+--------------------------------------------------------------------------------
+rxd            ffffffffffff785634121111     -- 16th repetition of DA corrupted
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121100
+--------------------------------------------------------------------------------
+rxd            ffgggggggg                   -- sync just before CRC
+--------------------------------------------------------------------------------
+
+
+-- supply the receive buffer location
+dma_rd fffffff0 22222000 -- dma reads pointer of 22222000
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 56ff2222
+dma_wr 2222200c ff34ffff
+dma_wr 22222010 ff12ffff
+dma_wr 22222014 11ffffff
+dma_wr 22222018 ffffffff
+dma_wr 2222201c ffff22ff
+dma_wr 22222020 00ffffff
+dma_wr 22222024 ffffff78
+dma_wr 22222028 00ffffff
+dma_wr 2222202c ffffff78
+dma_wr 22222030 ffffffff
+dma_wr 22222034 ffff7800
+dma_wr 22222038 ffffffff
+dma_wr 2222203c 7800ffff
+dma_wr 22222040 ffffffff
+dma_wr 22222044 ff33ffff
+dma_wr 22222048 ffffffff
+dma_wr 2222204c 4478ffff
+dma_wr 22222050 ffffffff
+dma_wr 22222054 5678ffff
+dma_wr 22222058 ffffff55
+dma_wr 2222205c 78ffffff
+dma_wr 22222060 ff663456
+dma_wr 22222064 ffffffff
+dma_wr 22222068 345678ff
+dma_wr 2222206c ffff7712
+dma_wr 22222070 ffffffff
+dma_wr 22222074 34345678
+dma_wr 22222078 ff881112
+dma_wr 2222207c ffffffff
+
+dma_wr fffffff0 22222001 -- dma writes ownership bit
+dma_wr fffffff4 00004000 -- dma writes start of frame
+
+dma_rd fffffff8 44440000 -- reads locations of next rx buffer
+
+dma_wr 44440000 345678ff
+dma_wr 44440004 11111234
+dma_wr 44440008 ffffffff
+dma_wr 4444000c ff78ffff
+dma_wr 44440010 ffffffff
+dma_wr 44440014 ff5678ff
+dma_wr 44440018 ffffffff
+dma_wr 4444001c 345678ff
+dma_wr 44440020 ffffffff
+dma_wr 44440024 5678ffff
+dma_wr 44440028 ffff1234
+dma_wr 4444002c ffffffff
+dma_wr 44440030 12345678
+dma_wr 44440034 ffffff11
+dma_wr 44440038 78ffffff
+dma_wr 4444003c 11123456
+dma_wr 44440040 ffffff00
+dma_wr 44440044 78ffffff
+dma_wr 44440048 11123456
+dma_wr 4444004c ffff7800
+dma_wr 44440050 ffffffff
+dma_wr 44440054 12345678
+dma_wr 44440058 78ff1111
+dma_wr 4444005c ffffffff
+dma_wr 44440060 5678ffff
+dma_wr 44440064 11111234
+dma_wr 44440068 ffff7800
+dma_wr 4444006c ffffffff
+dma_wr 44440070 12345678
+dma_wr 44440074 ffff1111
+dma_wr 44440078 ffffffff
+dma_wr 4444007c 5678ffff
+
+dma_wr fffffff8 44440001 -- dma writes ownership bit
+dma_wr fffffffc 00000000 -- dma writes null status
+
+dma_rd 00000000 11110000 -- reads locations of next rx buffer
+
+dma_wr 11110000 11111234
+dma_wr 11110004 ffff00ff
+dma_wr 11110008 ffffffff
+dma_wr 1111000c 12345678
+dma_wr 11110010 56781111
+dma_wr 11110014 11111234
+dma_wr 11110018 12345678
+dma_wr 1111001c 56781111
+dma_wr 11110020 11111234
+dma_wr 11110024 12345678
+dma_wr 11110028 56781111
+dma_wr 1111002c 11111234
+dma_wr 11110030 12345678
+dma_wr 11110034 56781111
+dma_wr 11110038 11111234
+dma_wr 1111003c 12345678
+dma_wr 11110040 56781111
+dma_wr 11110044 11111234
+dma_wr 11110048 12345678
+dma_wr 1111004c 56781111
+dma_wr 11110050 11111234
+dma_wr 11110054 12345678
+dma_wr 11110058 56781111
+dma_wr 1111005c 11111234
+dma_wr 11110060 12345678
+dma_wr 11110064 56781111
+dma_wr 11110068 00111234
+dma_wr 1111006c 348097ff
+dma_wr 11110070 0000008e
+dma_wr 11110074 00000000
+
+dma_wr 00000000 11110001 -- dma writes ownership bit
+dma_wr 00000004 08008171 -- dma writes rx status, local address match and 369 bytes received
+
+dma_rd 00000008 22222000 -- reads locations of next rx buffer
+
+
+pinsc(1700) wol 0  -- check wol pin is low
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register
+apbwr      20 00000002  -- clear receive status register
+
+
+
+--******************************************************************************
+--  4. Receive a correctly addressed frame that almost has a magic packet in it
+--     at a non 16-bit alignment and check that wol is not asserted.
+--******************************************************************************
+
+-- drive the receive frame data into the MII interface
+-- go through all magic packet state transitions without
+-- actually detecting a magic packet
+--------------------------------------------------------------------------------
+rxd(gap)     d578563412111111112222         -- frame needs to be address recognized
+--------------------------------------------------------------------------------
+rxd            00                           -- extra byte to make odd aligned
+--------------------------------------------------------------------------------
+rxd            ff56                         -- not enough sync bytes
+rxd            ffff34
+rxd            ffffff12
+rxd            ffffffff11
+rxd            ffffffffff22
+--------------------------------------------------------------------------------
+rxd            ffffffffff0078               -- missing FF before beginning of DA
+rxd            ffffffffffff0078
+rxd            ffffffffffffff0078
+rxd            ffffffffffffffff0078
+--------------------------------------------------------------------------------
+rxd            ffffffffffff33               -- bad DA
+rxd            ffffffffffffff7844
+rxd            ffffffffffff785655
+rxd            ffffffffffff78563466
+rxd            ffffffffffff7856341277
+rxd            ffffffffffff78563434121188
+rxd            ffffffffffff78563434121111
+--------------------------------------------------------------------------------
+rxd            ffffffffffff78               -- fragments of DA then sync again
+rxd            ffffffffffff7856
+rxd            ffffffffffff785634
+rxd            ffffffffffff78563412
+rxd            ffffffffffff7856341211
+rxd            ffffffffffff785634121100
+rxd            ffffffffffff78563412110078
+--------------------------------------------------------------------------------
+rxd            ffffffffffff785634121111ff78 -- rogue bytes before beginning of 2nd DA
+rxd            ffffffffffff7856341211110078
+rxd            ffffffffffff785634121111ffff
+rxd            ffffffffffff785634121111ff00
+--------------------------------------------------------------------------------
+rxd            ffffffffffff785634121111     -- 16th repetition of DA corrupted
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121111
+rxd                        785634121100
+--------------------------------------------------------------------------------
+rxd            ffgggggggg                   -- sync just before CRC
+--------------------------------------------------------------------------------
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 ff002222
+dma_wr 2222200c 34ffff56
+dma_wr 22222010 12ffffff
+dma_wr 22222014 ffffffff
+dma_wr 22222018 ffffff11
+dma_wr 2222201c ff22ffff
+dma_wr 22222020 ffffffff
+dma_wr 22222024 ffff7800
+dma_wr 22222028 ffffffff
+dma_wr 2222202c ffff7800
+dma_wr 22222030 ffffffff
+dma_wr 22222034 ff7800ff
+dma_wr 22222038 ffffffff
+dma_wr 2222203c 00ffffff
+dma_wr 22222040 ffffff78
+dma_wr 22222044 33ffffff
+dma_wr 22222048 ffffffff
+dma_wr 2222204c 78ffffff
+dma_wr 22222050 ffffff44
+dma_wr 22222054 78ffffff
+dma_wr 22222058 ffff5556
+dma_wr 2222205c ffffffff
+dma_wr 22222060 66345678
+dma_wr 22222064 ffffffff
+dma_wr 22222068 5678ffff
+dma_wr 2222206c ff771234
+dma_wr 22222070 ffffffff
+dma_wr 22222074 345678ff
+dma_wr 22222078 88111234
+dma_wr 2222207c ffffffff
+
+dma_wr 00000008 22222001 -- dma writes ownership bit
+dma_wr 0000000c 00004000 -- dma writes start of frame
+
+dma_rd 00000010 44440000 -- reads locations of next rx buffer
+
+dma_wr 44440000 5678ffff
+dma_wr 44440004 11123434
+dma_wr 44440008 ffffff11
+dma_wr 4444000c 78ffffff
+dma_wr 44440010 ffffffff
+dma_wr 44440014 5678ffff
+dma_wr 44440018 ffffffff
+dma_wr 4444001c 5678ffff
+dma_wr 44440020 ffffff34
+dma_wr 44440024 78ffffff
+dma_wr 44440028 ff123456
+dma_wr 4444002c ffffffff
+dma_wr 44440030 345678ff
+dma_wr 44440034 ffff1112
+dma_wr 44440038 ffffffff
+dma_wr 4444003c 12345678
+dma_wr 44440040 ffff0011
+dma_wr 44440044 ffffffff
+dma_wr 44440048 12345678
+dma_wr 4444004c ff780011
+dma_wr 44440050 ffffffff
+dma_wr 44440054 345678ff
+dma_wr 44440058 ff111112
+dma_wr 4444005c ffffff78
+dma_wr 44440060 78ffffff
+dma_wr 44440064 11123456
+dma_wr 44440068 ff780011
+dma_wr 4444006c ffffffff
+dma_wr 44440070 345678ff
+dma_wr 44440074 ff111112
+dma_wr 44440078 ffffffff
+dma_wr 4444007c 78ffffff
+
+dma_wr 00000010 44440001 -- dma writes ownership bit
+dma_wr 00000014 00000000 -- dma writes null status
+
+dma_rd 00000018 11110000 -- reads locations of next rx buffer
+
+dma_wr 11110000 11123456
+dma_wr 11110004 ff00ff11
+dma_wr 11110008 ffffffff
+dma_wr 1111000c 345678ff
+dma_wr 11110010 78111112
+dma_wr 11110014 11123456
+dma_wr 11110018 34567811
+dma_wr 1111001c 78111112
+dma_wr 11110020 11123456
+dma_wr 11110024 34567811
+dma_wr 11110028 78111112
+dma_wr 1111002c 11123456
+dma_wr 11110030 34567811
+dma_wr 11110034 78111112
+dma_wr 11110038 11123456
+dma_wr 1111003c 34567811
+dma_wr 11110040 78111112
+dma_wr 11110044 11123456
+dma_wr 11110048 34567811
+dma_wr 1111004c 78111112
+dma_wr 11110050 11123456
+dma_wr 11110054 34567811
+dma_wr 11110058 78111112
+dma_wr 1111005c 11123456
+dma_wr 11110060 34567811
+dma_wr 11110064 78111112
+dma_wr 11110068 11123456
+dma_wr 1111006c d928ff00
+dma_wr 11110070 0000f6d2
+dma_wr 11110074 00000000
+
+dma_wr 00000018 11110001 -- dma writes ownership bit
+dma_wr 0000001c 08008172 -- dma writes rx status, local address match and 370 bytes received
+
+dma_rd 00000020 55555000 -- reads locations of next rx buffer
+
+
+pinsc(3250) wol 0  -- check wol pin is low
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register
+apbwr      20 00000002  -- clear receive status register
+
+
+
+--******************************************************************************
+--  5. Receive a correctly addressed frame that has a magic packet but with crc
+--     error and check that wol is not asserted.
+--******************************************************************************
+
+-- drive the receive frame data into the MII interface
+-- good magic packet except bad crc so magic packet will not be asserted
+rxd(gap)     d578563412111111112222ffffffffffff
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            785634121111
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+
+--dma_rd 00000028 55555005 -- reads locations of next rx buffer - in use bit set
+--                         -- Will not generate resource error as also CRC erro--r
+
+pinsc(3990) wol 0  -- check wol pin is low
+
+---- check status on reception of receive complete interrupt
+--apbrd(int) 24 00000004  -- check interrupt status - rx used bit read
+--apbwr      24 00000004  -- Clear it
+--apbrd      20 00000001  -- check contents of the receive status register
+--apbwr      20 00000001  -- clear receive status register
+
+
+
+
+
+
+--******************************************************************************
+--  6. Receive a correctly addressed frame that has a magic packet and check for
+--     wol assertion
+--******************************************************************************
+
+
+-- drive the receive frame data into the MII interface
+-- good magic packet detection
+rxd(gap)     d578563412111111112222ffffffffffff
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            7856341211110000000000000000gggggggg
+
+--dma_rd 00000028 55555004 -- reads locations of next rx buffer
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55555000 12345678 -- store frame to memory
+dma_wr 55555004 11111111
+dma_wr 55555008 ffff2222
+dma_wr 5555500c ffffffff
+dma_wr 55555010 12345678
+dma_wr 55555014 56781111
+dma_wr 55555018 11111234
+dma_wr 5555501c 12345678
+dma_wr 55555020 56781111
+dma_wr 55555024 11111234
+dma_wr 55555028 12345678
+dma_wr 5555502c 56781111
+dma_wr 55555030 11111234
+dma_wr 55555034 12345678
+dma_wr 55555038 56781111
+dma_wr 5555503c 11111234
+dma_wr 55555040 12345678
+dma_wr 55555044 56781111
+dma_wr 55555048 11111234
+dma_wr 5555504c 12345678
+dma_wr 55555050 56781111
+dma_wr 55555054 11111234
+dma_wr 55555058 12345678
+dma_wr 5555505c 56781111
+dma_wr 55555060 11111234
+dma_wr 55555064 12345678
+dma_wr 55555068 56781111
+dma_wr 5555506c 11111234
+dma_wr 55555070 00000000
+dma_wr 55555074 00000000
+dma_wr 55555078 391848ba
+dma_wr 5555507c 00000000
+
+
+
+dma_wr 00000020 55555001 -- dma writes ownership bit
+dma_wr 00000024 0800c07c -- dma writes rx status, local address match and 124 bytes received
+
+dma_rd 00000028 55555000 -- reads locations of next rx buffer
+
+pinsc(4570) wol 1  -- check wol pin is high
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register
+apbwr      20 00000002  -- clear receive status register
+
+
+
+
+--******************************************************************************
+--  7. Receive a correctly addressed frame that has a magic packet at a non 
+--     16-bit alignment and check for wol assertion
+--******************************************************************************
+
+
+-- drive the receive frame data into the MII interface
+-- good magic packet detection
+rxd(gap)     d57856341211111111222200ffffffffffff
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            7856341211110000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55555000 12345678 -- store frame to memory
+dma_wr 55555004 11111111
+dma_wr 55555008 ff002222
+dma_wr 5555500c ffffffff
+dma_wr 55555010 345678ff
+dma_wr 55555014 78111112
+dma_wr 55555018 11123456
+dma_wr 5555501c 34567811
+dma_wr 55555020 78111112
+dma_wr 55555024 11123456
+dma_wr 55555028 34567811
+dma_wr 5555502c 78111112
+dma_wr 55555030 11123456
+dma_wr 55555034 34567811
+dma_wr 55555038 78111112
+dma_wr 5555503c 11123456
+dma_wr 55555040 34567811
+dma_wr 55555044 78111112
+dma_wr 55555048 11123456
+dma_wr 5555504c 34567811
+dma_wr 55555050 78111112
+dma_wr 55555054 11123456
+dma_wr 55555058 34567811
+dma_wr 5555505c 78111112
+dma_wr 55555060 11123456
+dma_wr 55555064 34567811
+dma_wr 55555068 78111112
+dma_wr 5555506c 11123456
+dma_wr 55555070 00000011
+dma_wr 55555074 00000000
+dma_wr 55555078 e00cc800
+dma_wr 5555507c 00000067
+
+dma_wr 00000028 55555001 -- dma writes ownership bit
+dma_wr 0000002c 0800c07d -- dma writes rx status, local address match and 125 bytes received
+dma_rd 00000030 55555000 -- reads locations of next rx buffer
+
+
+
+
+pinsc(5140) wol 1  -- check wol pin is high
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register
+apbwr      20 00000002  -- clear receive status register
+
+
+
+
+--******************************************************************************
+--  8. Turn off the magic packet WoL mask and receive a good frame which has
+--     a magic packet. Check that the frame is received and wol is not asserted.
+--******************************************************************************
+
+apbwr      B8 000a0000  -- disable WoL magic packet mask (enable other WoL except local 1 match)
+apbrd      20 00000000  -- check contents of the receive status register
+apbrdf     20 00000000  -- trigger RX frame
+
+
+-- drive the receive frame data into the MII interface
+-- good magic packet detection
+rxd(apb)     d57856341211111111222200ffffffffffff
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            785634121111785634121111785634121111
+rxd            7856341211110000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55555000 12345678 -- store frame to memory
+dma_wr 55555004 11111111
+dma_wr 55555008 ff002222
+dma_wr 5555500c ffffffff
+dma_wr 55555010 345678ff
+dma_wr 55555014 78111112
+dma_wr 55555018 11123456
+dma_wr 5555501c 34567811
+dma_wr 55555020 78111112
+dma_wr 55555024 11123456
+dma_wr 55555028 34567811
+dma_wr 5555502c 78111112
+dma_wr 55555030 11123456
+dma_wr 55555034 34567811
+dma_wr 55555038 78111112
+dma_wr 5555503c 11123456
+dma_wr 55555040 34567811
+dma_wr 55555044 78111112
+dma_wr 55555048 11123456
+dma_wr 5555504c 34567811
+dma_wr 55555050 78111112
+dma_wr 55555054 11123456
+dma_wr 55555058 34567811
+dma_wr 5555505c 78111112
+dma_wr 55555060 11123456
+dma_wr 55555064 34567811
+dma_wr 55555068 78111112
+dma_wr 5555506c 11123456
+dma_wr 55555070 00000011
+dma_wr 55555074 00000000
+dma_wr 55555078 e00cc800
+dma_wr 5555507c 00000067
+
+dma_wr 00000030 55555001 -- dma writes ownership bit
+dma_wr 00000034 0800c07d -- dma writes rx status, local address match and 125 bytes received
+dma_rd 00000038 22222000 -- reads locations of next rx buffer
+
+
+
+
+pinsc(5930) wol 0  -- check wol pin is low
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register
+apbwr      20 00000002  -- clear receive status register
+
+
+
+--******************************************************************************
+--  9. Receive a good frame which is not a magic packet to ensure everything
+--     is OK and check the wol is not asserted.
+--******************************************************************************
+
+apbwr      B8 00010000  -- re-enable WoL magic packet mask
+apbrd      20 00000000  -- check contents of the receive status register
+apbrdf     20 00000000  -- trigger RX frame
+
+rxd(apb)     55d578563412111111112222222233333333
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              ccccccccddddddddeeeeeeee
+rxd              9e6207c3  -- good CRC
+
+-- Check memory accesses
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c 33333333
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 cccccccc
+dma_wr 22222034 dddddddd
+dma_wr 22222038 eeeeeeee
+dma_wr 2222203c c307629e -- good CRC
+
+dma_wr 00000038 22222001 -- dma writes ownership bit
+dma_wr 0000003c 0800c040 -- dma writes rx status, local address match and 64 bytes received
+dma_rd 00000040 55555000 -- reads locations of next rx buffer
+
+
+pinsc(6450) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+
+
+
+--******************************************************************************
+-- 10. Set the local addresss to all F's (broadcast) and receive a good broadcast
+--     frame which contains a magic packet. Check that magic packet is asseted.
+--******************************************************************************
+
+apbwr      88 ffffffff  -- specific address register 1 bottom
+apbwr      8C 0000ffff  -- specific address register 1 top
+apbrd      20 00000000  -- check RX status register
+apbrdf     20 00000000  -- check RX status register and trigger frame
+
+
+-- drive the receive frame data into the MII interface
+-- good magic packet detection
+rxd(apb)     d5ffffffffffff11112222ffffffffffff
+rxd            ffffffffffffffffffffffffffffffffffff
+rxd            ffffffffffffffffffffffffffffffffffff
+rxd            ffffffffffffffffffffffffffffffffffff
+rxd            ffffffffffffffffffffffffffffffffffff
+rxd            ffffffffffffffffffffffffffffffffffff
+rxd            ffffffffffff0000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 55555000 ffffffff -- store frame to memory
+dma_wr 55555004 1111ffff
+dma_wr 55555008 ffff2222
+dma_wr 5555500c ffffffff
+dma_wr 55555010 ffffffff
+dma_wr 55555014 ffffffff
+dma_wr 55555018 ffffffff
+dma_wr 5555501c ffffffff
+dma_wr 55555020 ffffffff
+dma_wr 55555024 ffffffff
+dma_wr 55555028 ffffffff
+dma_wr 5555502c ffffffff
+dma_wr 55555030 ffffffff
+dma_wr 55555034 ffffffff
+dma_wr 55555038 ffffffff
+dma_wr 5555503c ffffffff
+dma_wr 55555040 ffffffff
+dma_wr 55555044 ffffffff
+dma_wr 55555048 ffffffff
+dma_wr 5555504c ffffffff
+dma_wr 55555050 ffffffff
+dma_wr 55555054 ffffffff
+dma_wr 55555058 ffffffff
+dma_wr 5555505c ffffffff
+dma_wr 55555060 ffffffff
+dma_wr 55555064 ffffffff
+dma_wr 55555068 ffffffff
+dma_wr 5555506c ffffffff
+dma_wr 55555070 00000000
+dma_wr 55555074 00000000
+dma_wr 55555078 cdd363ad
+dma_wr 5555507c 00000000
+
+
+
+dma_wr 00000040 55555001 -- dma writes ownership bit
+dma_wr 00000044 8800c07c -- dma writes rx status, broadcast & local address match and 124 bytes received
+
+pinsc(6850) wol 1  -- check wol pin is high
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register
+apbwr      20 00000002  -- clear receive status register
+
+
+
+
+
+--******************************************************************************
+-- 11. Check statistics for correct values from above tests.
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000515  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000007  -- check frames received ok
+apbrd     15C 00000001  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000001  -- check frames received 64
+apbrd     16C 00000004  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000002  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000001  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(15000)
+

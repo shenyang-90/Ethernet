@@ -1,0 +1,249 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2017
+--                                       Cadence Design Systems, Inc.
+--                                       All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : asf_dma_rx_lockup
+--
+--   Author         : Steven Ho
+--
+--   Date           : 22nd May 2017
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Simple random RX test using the DMA but setting the lockup detection to a
+-- low value to ensure it can be signalled and detected.
+-- 
+--
+--
+-- 
+--------------------------------------------------------------------------------
+
+-- define config compatibility (names are the verilog defines in the defs file without the IP prefix)
+requires ext_fifo_interface 0
+requires rx_pkt_buffer 1
+requires tx_pkt_buffer 1
+
+-- Set AHB clock freq to 250MHz
+-- At 32bit, this means we have maximum bandwidth of 8Gbit/s shared between
+-- TX and RX. Randomize hready, keeping the maximum to 5 (averages around 2.5)
+-- to ensure no RX overflows occur, and max line rate is acheivable on TX
+sel_ahb_freq 3 
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- APB writes to instruct testbench to release the lockup detect forces as we
+-- want to control them directly in this test.
+apbwr(60)  40 80000000  -- Enable TX cutthru
+apbwr      44 80000000  -- Enable RX cutthru
+apbwr      40 00000000  -- Disable TX cutthru
+apbwr      44 00000000  -- Disable RX cutthru
+
+# Initialize the transmit and receive DMA queue pointers (random values but can add specifics if required)
+# use arg -rx_ptr_q<Q> and tx_ptr_q<Q> to set specific ptr values rather than the default random
+init_q_ptr  -num_tx_queues take_from_cfg   -num_rx_queues take_from_cfg
+
+
+# Initialize the screener type 1 registers (random values)
+# Note this will automatically force the transactor later on to
+# randomly create frames that match on these screeners, thus routing
+# frames to receive queues ..
+init_screener_type1 -num_type1_screeners take_from_cfg   -num_rx_queues take_from_cfg 
+
+
+# initialize the DMA specific options for random data xfers
+#   - RX DMA data buffer size
+#     If left without an argument, it will be completely random
+#     Set high to force single buffer descriptor testing eg 16320
+#     use -max_buf_size for max (multiple 64 bytes only)
+#     use -min_buf_size for min (multiple 64 bytes only)
+#
+#   - Burst Length (random by default)
+#     use -burst <num>, where num can be 1,2,4,8,16, random
+#        
+#   - address bus (random by default, or off if config doesnt allow)
+#     use -addr_bus <32|64|random|take_from_cfg>     
+#        
+#   - extended buffer descriptors (random by default, or off if config doesnt allow)
+#     use -ext_bd <1|0|random>     
+#        
+#   - force max burst mode (forces AXI to send max length bursts)
+#     use -force_max_burst_<tx|rx> <1|0|random>    default is 0 
+init_dma -ext_bd random -addr_bus random  -burst random -min_buf_size 16320
+
+
+# Enable the interrupts
+# This is per queue, 
+# Valid args are ..
+#    -num_queues <1-16|take_from_cfg>
+#    -vector <the actual interrupt vector as per userguide>
+enable_ints -num_queues take_from_cfg   -vector 00000082  # enable TX and RX complete
+
+
+
+# Initialize the network configuration register
+# Args are
+#   -eam      <1|0|random>, default = 0. This is external address matching
+#   -duplex   <full|half|random>, default = random
+#   -speed    <1g|100m|10m|random>, default = random
+#   -jumbo    <1|0|random>, default = random. This wont affect the RX transactor below, but will automatically cause jumbos to be dropped.
+#   -copy_all <1|0|random>, default = 0. If 0, ensure you initialize the dest_addr in the rx transactor to something that will match
+#   -databus  <32|64|128|take_from_cfg|random>, default = random, bus <= config.  The max value is the value set in dma_bus_width in gem_defs.v
+init_ncr -duplex full -speed 1g -jumbo random -databus random
+
+apbwr     e34 00000000  -- Unmask all transaction timeout fault sources for ASF
+
+-- First start with testing the standard interrupt for lockup detection.
+-- TX
+apbwr      28 80000000  -- Enable lockup detect interrupts
+apbwr      68 00000000  -- Set timer values to 0
+apbwr      6c 00000000  -- Set timer values to 0
+apbwr      68 c0000000  -- Enable TX lockup detect
+apbwr      00 00000008  -- Enable TX
+
+-- Since the timer value is 0, this actually triggers a lockup scenario
+apbrd(int) 24 80000000  -- TX lockup detected.
+apbrd      14 00000600  -- Lockup detected
+
+-- Check the ASF registers
+apbrd     e00 00000000  -- No interrupts, still masked
+apbrd     e04 00000010  -- Raw interrupt status, trans_to
+apbrd     e38 00000005  -- Trans TO fault status
+
+-- Clear down
+apbwr      00 00000000  -- Disable TX/RX
+apbwr      24 80000000  -- Clear interrupt
+apbwr      14 00000600  -- Clear status
+apbwr     e04 00000010  -- Clear interrupt
+apbwr     e38 00000005  -- Clear status
+apbwr      2c 80000000  -- Disable interrupt
+
+-- RX
+apbwr      28 40000000  -- Enable RX lockup detect interrupt
+apbwr      68 30000000  -- Enable RX lockup detect
+apbwr      00 00000004  -- Enable RX
+
+-- Since the timer value is 0, this actually triggers a lockup scenario
+apbrd(int) 24 40000000  -- RX lockup detected.
+apbrd      20 00000030  -- RX Lockup detected
+
+-- Check the ASF registers
+apbrd     e00 00000000  -- No interrupts, still masked
+apbrd     e04 00000010  -- Raw interrupt status, trans_to
+apbrd     e38 0000000a  -- Trans TO fault status
+
+-- Clear down
+apbwr      00 00000000  -- Disable TX/RX
+apbwr      24 40000000  -- Clear interrupt
+apbwr      20 00000030  -- Clear status
+apbwr     e04 00000010  -- Clear interrupt
+apbwr     e38 0000000a  -- Clear status
+apbwr      2c 40000000  -- Disable interrupt
+
+-- Properly set up lockup registers to non-zero values.
+-- This will still be low values to ensure lockup is detected at some point. We 
+-- will only check the ASF interrupt registers at end of test
+
+-- The DMA clock frequency is set to 250MHz and the MAC TX clock is 125MHz. This
+-- means that we can set the prescale toggle to be a very low value and still be
+-- sure that it will be captured by the DMA.
+apbwr      68 20100000  -- Set prescale value to 0, enable RX DMA lockup detect
+
+apbwr      00 00000004  -- Enable rx
+
+-- delay for enable rx to propagate though design
+apbrd      20 00000000  
+apbrd      20 00000000  
+apbrd      20 00000000  
+apbrd      20 00000000  
+apbrd      20 00000000  
+apbrd      20 00000000  
+apbrd      20 00000000  
+apbrd      20 00000000  
+apbrd      20 00000000  -- check contents of the receive status register  
+apbrdf     20 00000000  -- Trigger reception of frame
+
+rx_frame (apb)  1
+      preamble_size  1-14
+      dest_addr      broadcast
+      num_dma_queues take_from_cfg
+      src_addr       111122222222
+      type_len_field random
+      data_size      16 
+      data           random
+      auto_gen_int   1
+      resource_err   0
+      fcs            good
+
+rx_frame (gap)  10
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      num_dma_queues take_from_cfg
+      type_len_field random
+      data_size      64-take_from_cfg
+      data           random
+      auto_gen_int   1
+      resource_err   0
+      fcs            good
+
+-- Check that lockup was detected
+apbrd      20 00000022  -- RX DMA Lockup detected.
+apbrd     e00 00000000  -- No interrupts, still masked
+apbrd     e04 00000010  -- Raw interrupt status, trans_to
+apbrd     e38 00000008  -- Trans TO fault status
+
+-- Clear down
+apbwr      68 00100000  -- Disable lockup detect
+apbwr      20 00000022  -- Clear status
+apbwr     e04 00000010  -- Clear interrupt
+apbwr     e38 00000008  -- Clear status
+
+-- Now set to a reasonable time value to avoid lockups.
+apbwr      68 20200080  -- Lockup time equivalent to roughly (32-1)*(128)*8ns
+
+apbrd      20 00000000  -- Delay for propagation
+apbrd      20 00000000  -- Delay for propagation
+apbrd      20 00000000  -- Delay for propagation
+apbrd      20 00000000  -- Delay for propagation
+apbrd      20 00000000  -- Delay for propagation
+
+apbrdf     20 00000000  -- Trigger reception of frame
+
+rx_frame (apb)  1
+      preamble_size  1-14
+      dest_addr      broadcast
+      num_dma_queues take_from_cfg
+      src_addr       111122222222
+      type_len_field random
+      data_size      16 
+      data           random
+      auto_gen_int   1
+      resource_err   0
+      fcs            good
+
+rx_frame (gap)  10
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      num_dma_queues take_from_cfg
+      type_len_field random
+      data_size      64-127 
+      data           random
+      auto_gen_int   1
+      resource_err   0
+      fcs            good
+
+-- Check that no lockup was detected
+apbrd     e38 00000000  -- Trans TO fault status
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(3000000)
+

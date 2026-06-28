@@ -1,0 +1,1306 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : toe_8
+--
+--   Author         : Arthur Marris
+--
+--   Date           : 5 October 2006
+--
+--------------------------------------------------------------------------------
+--
+-- copied from toe_3 - rx TOE disabled
+--
+-- Test Description
+-- This test checks the operation of the RX TCP offload engine, with IP frames
+-- with SNAP and ethernet encapsulation, which have bad IP, UDP or TCP checksums
+-- 
+-- Functional Coverage
+-- * Checks that the TOE recognises that these are TCP or UDP frames
+--   and therefore checks the TCP/UDP checksum.
+-- * Checks that the TOE can detect bad IP, TCP and UDP checksums for both 
+--   odd and even length frames.
+-- * Checks that the GEM does not discard frames with bad checksums when
+--   rx TOE is not enabled
+-- 
+-- Detailed Test Description
+--  1. Initialise suitable wait states for the test.
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 32-bit DMA data bus.
+--  3. Send several IP frames with either SNAP or ethernet encapsulation, which
+--     have bad IP, TCP or UDP checksums.
+--
+-- Test 3.1
+--    Broadcast frame, Min length IP, no VLAN or SNAP, no IP options, TCP,
+--    incorrect IP checksum.
+
+-- Test 3.2
+--    Broadcast frame, IP packet, no VLAN or SNAP, with IP options, no TCP or
+--    UDP, incorrect IP checksum.
+
+-- Test 3.3
+--    Broadcast frame, IP packet, no VLAN or SNAP, no IP options, correct IP
+--    checksum, TCP, incorrect TCP checksum.
+
+-- Test 3.4
+--    Broadcast frame, IP packet, VLAN and SNAP, IP options, correct IP
+--    checksum, UDP, incorrect UDP checksum.
+
+-- Test 3.5
+--    Broadcast frame, Otherwise valid IP packet where the end of Ethernet
+--    data comes before the expected end of the IP header.
+
+-- Test 3.6
+--    Broadcast frame, Otherwise valid UDP packet where the end of Ethernet
+--    data comes before the expected end of the UDP data.
+
+-- Test 3.7
+--    Broadcast frame, Max length (1518 octets including CRC) TCP packet with
+--    incorrect TCP checksum.
+
+-- Test 3.8
+--    Broadcast frame, Min length IP, VLAN, SNAP, no IP options, UDP,
+--    incorrect IP checksum.
+
+--
+--  4. Receive a good frame to trigger an interrupt and check stats.
+--  5. Check statistics for correct values from above tests.
+--
+--------------------------------------------------------------------------------
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 3
+bus_grant_delay 3
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 32-bit DMA data bus.
+--******************************************************************************
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 00080001  -- enable RX TCP offload engine.
+apbrd      04 00080001  -- verify write to network config register.
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      18 fffff000  -- check receive queue pointer
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      00 00000004  -- enable receive
+
+
+
+--******************************************************************************
+--  3. Send several IP frames with either SNAP or ethernet encapsulation, which
+--     have bad IP, TCP or UDP checksums.
+--******************************************************************************
+
+
+
+--******************************************************************************
+-- Test 3.1
+--    Broadcast frame, Min length IP, no VLAN or SNAP, no IP options, TCP,
+--    incorrect IP checksum.
+--    The frame should be discarded, with bad status, and a bad IP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 3.1 to 3.7 : various frames, all with bad checksums"
+                        -- trigger reception of frame
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98E2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1376         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        BA9876543210 -- data
+rxd        97E1CE6B     -- FCS
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 ipsa 0100A8C0 ipda 9100A8C0
+
+
+-- supply the receive buffer location
+dma_rd fffff000 22222100 -- dma reads pointer of 22222100
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 FFFFFFFF -- store frame to memory
+dma_wr 22222104 0008FFFF
+dma_wr 22222108 56341239
+dma_wr 2222210c 00450008
+dma_wr 22222110 FADF2800
+dma_wr 22222114 06800040
+dma_wr 22222118 A8C0E298
+dma_wr 2222211c A8C00100
+dma_wr 22222120 15009100
+dma_wr 22222124 BB3D8A04
+dma_wr 22222128 22EA605C
+dma_wr 2222212c 1050764D
+dma_wr 22222130 76132844
+dma_wr 22222134 98BA0000
+dma_wr 22222138 10325476
+dma_wr 2222213c 6BCEE197
+
+dma_wr fffff004 8000c040
+dma_wr fffff000 22222101
+
+
+-- supply the receive buffer location
+dma_rd fffff008 22222100 -- dma reads pointer of 22222100
+
+
+
+--******************************************************************************
+-- Test 3.2
+--    Broadcast frame, IP packet, no VLAN or SNAP, with IP options, no TCP or
+--    UDP, incorrect IP checksum.
+--    The frame should be discarded, with bad status, and a bad IP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4800         -- Version, IHL, type of service
+rxd        002E         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        FE1F         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        FACECAFF     -- IP options
+rxd        ABCDB1B1     -- IP options
+rxd        B0B0BABE     -- IP options
+rxd        0800BA8F     -- data
+rxd        00010001     -- data
+rxd        01234567     -- data
+rxd        89ABCDEF     -- data
+rxd        01234567     -- data
+rxd        89ABCDEF     -- data
+rxd        0123         -- data
+rxd        AEFA440B     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 ipsa 520BBF86 ipda 2216BF86
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 FFFFFFFF -- store frame to memory
+dma_wr 22222104 0008FFFF
+dma_wr 22222108 56341239
+dma_wr 2222210c 00480008
+dma_wr 22222110 00002E00
+dma_wr 22222114 010A0000
+dma_wr 22222118 BF861FFE
+dma_wr 2222211c BF86520B
+dma_wr 22222120 CEFA2216
+dma_wr 22222124 CDABFFCA
+dma_wr 22222128 B0B0B1B1
+dma_wr 2222212c 0008BEBA
+dma_wr 22222130 01008FBA
+dma_wr 22222134 23010100
+dma_wr 22222138 AB896745
+dma_wr 2222213c 2301EFCD
+dma_wr 22222140 AB896745
+dma_wr 22222144 2301EFCD
+dma_wr 22222148 0B44FAAE
+
+
+dma_wr fffff00c 8000c04c
+dma_wr fffff008 22222101
+
+
+-- supply the receive buffer location
+dma_rd fffff010 22222100 -- dma reads pointer of 22222100
+
+
+
+
+--******************************************************************************
+-- Test 3.3
+--    Broadcast frame, IP packet, no VLAN or SNAP, no IP options, correct IP
+--    checksum, TCP, incorrect TCP checksum.
+--    The frame should be discarded, with bad status, and a bad TCP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98F2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1396         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        66668888FFFF -- data
+rxd        75ED3120     -- FCS
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 ipsa 0100A8C0 ipda 9100A8C0
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 FFFFFFFF -- store frame to memory
+dma_wr 22222104 0008FFFF
+dma_wr 22222108 56341239
+dma_wr 2222210c 00450008
+dma_wr 22222110 FADF2800
+dma_wr 22222114 06800040
+dma_wr 22222118 A8C0F298
+dma_wr 2222211c A8C00100
+dma_wr 22222120 15009100
+dma_wr 22222124 BB3D8A04
+dma_wr 22222128 22EA605C
+dma_wr 2222212c 1050764D
+dma_wr 22222130 96132844
+dma_wr 22222134 66660000
+dma_wr 22222138 FFFF8888
+dma_wr 2222213c 2031ED75
+
+
+dma_wr fffff014 8000c040
+dma_wr fffff010 22222101
+
+
+-- supply the receive buffer location
+dma_rd fffff018 22222100 -- dma reads pointer of 22222100
+
+
+
+
+--******************************************************************************
+-- Test 3.4
+--    Broadcast frame, IP packet, VLAN and SNAP, IP options, correct IP
+--    checksum, UDP, incorrect UDP checksum.
+--    The frame should be discarded, with bad status, and a bad UDP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0024         -- Length/typeID
+rxd        AAAA         -- DSAP and SSAP
+rxd        0300         -- Control / Protocol ID[7:0]
+rxd        0000         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        001C         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A11         -- time to live and protocol
+rxd        81DF         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        0000         -- UDP source port
+rxd        0000         -- UDP destination port
+rxd        0008         -- UDP length
+rxd        D5EB         -- UDP checksum
+rxd        00000000     -- UDP data
+rxd        00000000     -- UDP data
+rxd        0000         -- UDP data
+rxd        84526705     -- Good FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 vid 0001 ipsa 520BBF86 ipda 2216BF86
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 FFFFFFFF -- store frame to memory
+dma_wr 22222104 0008FFFF
+dma_wr 22222108 56341239
+dma_wr 2222210c 01000081
+dma_wr 22222110 AAAA2400
+dma_wr 22222114 00000003
+dma_wr 22222118 00450008
+dma_wr 2222211c 00001C00
+dma_wr 22222120 110A0000
+dma_wr 22222124 BF86DF81
+dma_wr 22222128 BF86520B
+dma_wr 2222212c 00002216
+dma_wr 22222130 08000000
+dma_wr 22222134 0000EBD5
+dma_wr 22222138 00000000
+dma_wr 2222213c 00000000
+dma_wr 22222140 05675284
+
+
+dma_wr fffff01c 8020c044  -- vlan tagged status
+dma_wr fffff018 22222101
+
+
+-- supply the receive buffer location
+dma_rd fffff020 22222100 -- dma reads pointer of 22222100
+
+
+
+
+--******************************************************************************
+-- Test 3.5
+--    Broadcast frame, Otherwise valid IP packet where the end of Ethernet
+--    data comes before the expected end of the IP header.
+--    The frame should be discarded, with bad status, and a bad IP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0800         -- Length/typeID
+rxd        4F00         -- Version, IHL, type of service
+rxd        0050         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        8ECA         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        11112222     -- IP options
+rxd        33334444     -- IP options
+rxd        55556666     -- IP options
+rxd        77778888     -- IP options
+rxd        9999AAAA     -- IP options
+rxd        BBBBCCCC     -- IP options
+rxd        DDDDEEEE     -- IP options
+rxd        FFFF1111     -- IP options
+rxd        22223333     -- IP options
+rxd        7D0A1E7C     -- Good FCS
+
+
+-- check the correct DA, SA, type, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 vid 0001 type 0800 ipsa 0100A8C0 ipda 9100A8C0
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 FFFFFFFF
+dma_wr 22222104 0008FFFF
+dma_wr 22222108 56341239
+dma_wr 2222210c 01000081
+dma_wr 22222110 004F0008
+dma_wr 22222114 FADF5000
+dma_wr 22222118 06800040
+dma_wr 2222211c A8C0CA8E
+dma_wr 22222120 A8C00100
+dma_wr 22222124 11119100
+dma_wr 22222128 33332222
+dma_wr 2222212c 55554444
+dma_wr 22222130 77776666
+dma_wr 22222134 99998888
+dma_wr 22222138 BBBBAAAA
+dma_wr 2222213c DDDDCCCC
+dma_wr 22222140 FFFFEEEE
+dma_wr 22222144 22221111
+dma_wr 22222148 0A7D3333
+dma_wr 2222214c 00007C1E
+
+
+dma_wr fffff024 8020c04e   -- VLAN tagged status
+dma_wr fffff020 22222101
+
+
+-- supply the receive buffer location
+dma_rd fffff028 22222100 -- dma reads pointer of 22222100
+
+
+
+
+--******************************************************************************
+-- Test 3.6
+--    Broadcast frame, Otherwise valid UDP packet where the end of Ethernet
+--    data comes before the expected end of the UDP data.
+--    The frame should be discarded, with bad status, and a bad UDP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0024         -- Length/typeID
+rxd        AAAA         -- DSAP and SSAP
+rxd        0300         -- Control / Protocol ID[7:0]
+rxd        0000         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        003C         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A11         -- time to live and protocol
+rxd        81BF         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        0000         -- UDP source port
+rxd        0000         -- UDP destination port
+rxd        0008         -- UDP length
+rxd        CA7E         -- UDP checksum
+rxd        00001234     -- UDP data
+rxd        56783333     -- UDP data
+rxd        44445555     -- UDP data
+rxd        E2AC1101     -- Good FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 vid 0001 ipsa 520BBF86 ipda 2216BF86
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 FFFFFFFF -- store frame to memory
+dma_wr 22222104 0008FFFF
+dma_wr 22222108 56341239
+dma_wr 2222210c 01000081
+dma_wr 22222110 AAAA2400
+dma_wr 22222114 00000003
+dma_wr 22222118 00450008
+dma_wr 2222211c 00003C00
+dma_wr 22222120 110A0000
+dma_wr 22222124 BF86BF81
+dma_wr 22222128 BF86520B
+dma_wr 2222212c 00002216
+dma_wr 22222130 08000000
+dma_wr 22222134 00007ECA
+dma_wr 22222138 78563412
+dma_wr 2222213c 44443333
+dma_wr 22222140 ACE25555
+
+dma_wr 22222144 00000111
+
+
+dma_wr fffff02c 8020c046   -- VLAN tagged status
+dma_wr fffff028 22222101
+
+
+-- supply the receive buffer location
+dma_rd fffff030 22222100 -- dma reads pointer of 22222100
+
+
+
+
+--******************************************************************************
+-- Test 3.7
+--    Broadcast frame, Max length (1518 octets including CRC) TCP packet with
+--    incorrect TCP checksum.
+--    The frame should be discarded, with bad status, and a bad TCP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        05DC         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        933E         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        9CF6         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE -- Data
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FFBABB000FB000873401853829
+rxd        3333781944439999FAFFBACEBEBBBABE
+rxd        FABBCAFEFACEEFFEF000F1FFBABB000F
+rxd        B0008734018538293333781944439999
+rxd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+rxd        F000F1FF                         -- last data
+
+rxd        73D3E473     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 ipsa 0100A8C0 ipda 9100A8C0
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 FFFFFFFF
+dma_wr 22222104 0008FFFF
+dma_wr 22222108 56341239
+dma_wr 2222210c 00450008
+dma_wr 22222110 FADFDC05
+dma_wr 22222114 06800040
+dma_wr 22222118 A8C03E93
+dma_wr 2222211c A8C00100
+dma_wr 22222120 15009100
+dma_wr 22222124 BB3D8A04
+dma_wr 22222128 22EA605C
+dma_wr 2222212c 1050764D
+dma_wr 22222130 F69C2844
+dma_wr 22222134 FFFA0000
+dma_wr 22222138 BBBECEBA
+dma_wr 2222213c BBFABEBA
+dma_wr 22222140 CEFAFECA
+dma_wr 22222144 00F0FEEF
+dma_wr 22222148 BBBAFFF1
+dma_wr 2222214c 00B00F00
+dma_wr 22222150 85013487
+dma_wr 22222154 33332938
+dma_wr 22222158 43441978
+dma_wr 2222215c FFFA9999
+dma_wr 22222160 BBBECEBA
+dma_wr 22222164 BBFABEBA
+dma_wr 22222168 CEFAFECA
+dma_wr 2222216c 00F0FEEF
+dma_wr 22222170 BBBAFFF1
+dma_wr 22222174 00B00F00
+dma_wr 22222178 85013487
+dma_wr 2222217c 33332938
+
+dma_wr fffff034 00004000 -- dma writes rx status (start of frame)
+dma_wr fffff030 22222101 -- dma writes ownership bit
+dma_rd fffff038 22222100 -- dma reads pointer of 22222100
+
+dma_wr 22222100 43441978
+dma_wr 22222104 FFFA9999
+dma_wr 22222108 BBBECEBA
+dma_wr 2222210c BBFABEBA
+dma_wr 22222110 CEFAFECA
+dma_wr 22222114 00F0FEEF
+dma_wr 22222118 BBBAFFF1
+dma_wr 2222211c 00B00F00
+dma_wr 22222120 85013487
+dma_wr 22222124 33332938
+dma_wr 22222128 43441978
+dma_wr 2222212c FFFA9999
+dma_wr 22222130 BBBECEBA
+dma_wr 22222134 BBFABEBA
+dma_wr 22222138 CEFAFECA
+dma_wr 2222213c 00F0FEEF
+dma_wr 22222140 BBBAFFF1
+dma_wr 22222144 00B00F00
+dma_wr 22222148 85013487
+dma_wr 2222214c 33332938
+dma_wr 22222150 43441978
+dma_wr 22222154 FFFA9999
+dma_wr 22222158 BBBECEBA
+dma_wr 2222215c BBFABEBA
+dma_wr 22222160 CEFAFECA
+dma_wr 22222164 00F0FEEF
+dma_wr 22222168 BBBAFFF1
+dma_wr 2222216c 00B00F00
+dma_wr 22222170 85013487
+dma_wr 22222174 33332938
+dma_wr 22222178 43441978
+dma_wr 2222217c FFFA9999
+
+dma_wr fffff03c 00000000 -- dma writes rx status
+dma_wr fffff038 22222101 -- dma writes ownership bit
+dma_rd fffff040 22222100 -- dma reads pointer of 22222100
+
+dma_wr 22222100 BBBECEBA
+dma_wr 22222104 BBFABEBA
+dma_wr 22222108 CEFAFECA
+dma_wr 2222210c 00F0FEEF
+dma_wr 22222110 BBBAFFF1
+dma_wr 22222114 00B00F00
+dma_wr 22222118 85013487
+dma_wr 2222211c 33332938
+dma_wr 22222120 43441978
+dma_wr 22222124 FFFA9999
+dma_wr 22222128 BBBECEBA
+dma_wr 2222212c BBFABEBA
+dma_wr 22222130 CEFAFECA
+dma_wr 22222134 00F0FEEF
+dma_wr 22222138 BBBAFFF1
+dma_wr 2222213c 00B00F00
+dma_wr 22222140 85013487
+dma_wr 22222144 33332938
+dma_wr 22222148 43441978
+dma_wr 2222214c FFFA9999
+dma_wr 22222150 BBBECEBA
+dma_wr 22222154 BBFABEBA
+dma_wr 22222158 CEFAFECA
+dma_wr 2222215c 00F0FEEF
+dma_wr 22222160 BBBAFFF1
+dma_wr 22222164 00B00F00
+dma_wr 22222168 85013487
+dma_wr 2222216c 33332938
+dma_wr 22222170 43441978
+dma_wr 22222174 FFFA9999
+dma_wr 22222178 BBBECEBA
+dma_wr 2222217c BBFABEBA
+
+dma_wr fffff044 00000000 -- dma writes rx status
+dma_wr fffff040 22222101 -- dma writes ownership bit
+dma_rd fffff048 22222100 -- dma reads pointer of 22222100
+
+dma_wr 22222100 CEFAFECA
+dma_wr 22222104 00F0FEEF
+dma_wr 22222108 BBBAFFF1
+dma_wr 2222210c 00B00F00
+dma_wr 22222110 85013487
+dma_wr 22222114 33332938
+dma_wr 22222118 43441978
+dma_wr 2222211c FFFA9999
+dma_wr 22222120 BBBECEBA
+dma_wr 22222124 BBFABEBA
+dma_wr 22222128 CEFAFECA
+dma_wr 2222212c 00F0FEEF
+dma_wr 22222130 BBBAFFF1
+dma_wr 22222134 00B00F00
+dma_wr 22222138 85013487
+dma_wr 2222213c 33332938
+dma_wr 22222140 43441978
+dma_wr 22222144 FFFA9999
+dma_wr 22222148 BBBECEBA
+dma_wr 2222214c BBFABEBA
+dma_wr 22222150 CEFAFECA
+dma_wr 22222154 00F0FEEF
+dma_wr 22222158 BBBAFFF1
+dma_wr 2222215c 00B00F00
+dma_wr 22222160 85013487
+dma_wr 22222164 33332938
+dma_wr 22222168 43441978
+dma_wr 2222216c FFFA9999
+dma_wr 22222170 BBBECEBA
+dma_wr 22222174 BBFABEBA
+dma_wr 22222178 CEFAFECA
+dma_wr 2222217c 00F0FEEF
+
+dma_wr fffff04c 00000000 -- dma writes rx status
+dma_wr fffff048 22222101 -- dma writes ownership bit
+dma_rd fffff050 22222100 -- dma reads pointer of 22222100
+
+dma_wr 22222100 BBBAFFF1
+dma_wr 22222104 00B00F00
+dma_wr 22222108 85013487
+dma_wr 2222210c 33332938
+dma_wr 22222110 43441978
+dma_wr 22222114 FFFA9999
+dma_wr 22222118 BBBECEBA
+dma_wr 2222211c BBFABEBA
+dma_wr 22222120 CEFAFECA
+dma_wr 22222124 00F0FEEF
+dma_wr 22222128 BBBAFFF1
+dma_wr 2222212c 00B00F00
+dma_wr 22222130 85013487
+dma_wr 22222134 33332938
+dma_wr 22222138 43441978
+dma_wr 2222213c FFFA9999
+dma_wr 22222140 BBBECEBA
+dma_wr 22222144 BBFABEBA
+dma_wr 22222148 CEFAFECA
+dma_wr 2222214c 00F0FEEF
+dma_wr 22222150 BBBAFFF1
+dma_wr 22222154 00B00F00
+dma_wr 22222158 85013487
+dma_wr 2222215c 33332938
+dma_wr 22222160 43441978
+dma_wr 22222164 FFFA9999
+dma_wr 22222168 BBBECEBA
+dma_wr 2222216c BBFABEBA
+dma_wr 22222170 CEFAFECA
+dma_wr 22222174 00F0FEEF
+dma_wr 22222178 BBBAFFF1
+dma_wr 2222217c 00B00F00
+
+dma_wr fffff054 00000000 -- dma writes rx status
+dma_wr fffff050 22222101 -- dma writes ownership bit
+dma_rd fffff058 22222100 -- dma reads pointer of 22222100
+
+dma_wr 22222100 85013487
+dma_wr 22222104 33332938
+dma_wr 22222108 43441978
+dma_wr 2222210c FFFA9999
+dma_wr 22222110 BBBECEBA
+dma_wr 22222114 BBFABEBA
+dma_wr 22222118 CEFAFECA
+dma_wr 2222211c 00F0FEEF
+dma_wr 22222120 BBBAFFF1
+dma_wr 22222124 00B00F00
+dma_wr 22222128 85013487
+dma_wr 2222212c 33332938
+dma_wr 22222130 43441978
+dma_wr 22222134 FFFA9999
+dma_wr 22222138 BBBECEBA
+dma_wr 2222213c BBFABEBA
+dma_wr 22222140 CEFAFECA
+dma_wr 22222144 00F0FEEF
+dma_wr 22222148 BBBAFFF1
+dma_wr 2222214c 00B00F00
+dma_wr 22222150 85013487
+dma_wr 22222154 33332938
+dma_wr 22222158 43441978
+dma_wr 2222215c FFFA9999
+dma_wr 22222160 BBBECEBA
+dma_wr 22222164 BBFABEBA
+dma_wr 22222168 CEFAFECA
+dma_wr 2222216c 00F0FEEF
+dma_wr 22222170 BBBAFFF1
+dma_wr 22222174 00B00F00
+dma_wr 22222178 85013487
+dma_wr 2222217c 33332938
+
+dma_wr fffff05c 00000000 -- dma writes rx status
+dma_wr fffff058 22222101 -- dma writes ownership bit
+dma_rd fffff060 22222100 -- dma reads pointer of 22222100
+
+dma_wr 22222100 43441978
+dma_wr 22222104 FFFA9999
+dma_wr 22222108 BBBECEBA
+dma_wr 2222210c BBFABEBA
+dma_wr 22222110 CEFAFECA
+dma_wr 22222114 00F0FEEF
+dma_wr 22222118 BBBAFFF1
+dma_wr 2222211c 00B00F00
+dma_wr 22222120 85013487
+dma_wr 22222124 33332938
+dma_wr 22222128 43441978
+dma_wr 2222212c FFFA9999
+dma_wr 22222130 BBBECEBA
+dma_wr 22222134 BBFABEBA
+dma_wr 22222138 CEFAFECA
+dma_wr 2222213c 00F0FEEF
+dma_wr 22222140 BBBAFFF1
+dma_wr 22222144 00B00F00
+dma_wr 22222148 85013487
+dma_wr 2222214c 33332938
+dma_wr 22222150 43441978
+dma_wr 22222154 FFFA9999
+dma_wr 22222158 BBBECEBA
+dma_wr 2222215c BBFABEBA
+dma_wr 22222160 CEFAFECA
+dma_wr 22222164 00F0FEEF
+dma_wr 22222168 BBBAFFF1
+dma_wr 2222216c 00B00F00
+dma_wr 22222170 85013487
+dma_wr 22222174 33332938
+dma_wr 22222178 43441978
+dma_wr 2222217c FFFA9999
+
+dma_wr fffff064 00000000 -- dma writes rx status
+dma_wr fffff060 22222101 -- dma writes ownership bit
+dma_rd fffff068 22222100 -- dma reads pointer of 22222100
+
+dma_wr 22222100 BBBECEBA
+dma_wr 22222104 BBFABEBA
+dma_wr 22222108 CEFAFECA
+dma_wr 2222210c 00F0FEEF
+dma_wr 22222110 BBBAFFF1
+dma_wr 22222114 00B00F00
+dma_wr 22222118 85013487
+dma_wr 2222211c 33332938
+dma_wr 22222120 43441978
+dma_wr 22222124 FFFA9999
+dma_wr 22222128 BBBECEBA
+dma_wr 2222212c BBFABEBA
+dma_wr 22222130 CEFAFECA
+dma_wr 22222134 00F0FEEF
+dma_wr 22222138 BBBAFFF1
+dma_wr 2222213c 00B00F00
+dma_wr 22222140 85013487
+dma_wr 22222144 33332938
+dma_wr 22222148 43441978
+dma_wr 2222214c FFFA9999
+dma_wr 22222150 BBBECEBA
+dma_wr 22222154 BBFABEBA
+dma_wr 22222158 CEFAFECA
+dma_wr 2222215c 00F0FEEF
+dma_wr 22222160 BBBAFFF1
+dma_wr 22222164 00B00F00
+dma_wr 22222168 85013487
+dma_wr 2222216c 33332938
+dma_wr 22222170 43441978
+dma_wr 22222174 FFFA9999
+dma_wr 22222178 BBBECEBA
+dma_wr 2222217c BBFABEBA
+
+dma_wr fffff06c 00000000 -- dma writes rx status
+dma_wr fffff068 22222101 -- dma writes ownership bit
+dma_rd fffff070 22222100 -- dma reads pointer of 22222100
+
+dma_wr 22222100 CEFAFECA
+dma_wr 22222104 00F0FEEF
+dma_wr 22222108 BBBAFFF1
+dma_wr 2222210c 00B00F00
+dma_wr 22222110 85013487
+dma_wr 22222114 33332938
+dma_wr 22222118 43441978
+dma_wr 2222211c FFFA9999
+dma_wr 22222120 BBBECEBA
+dma_wr 22222124 BBFABEBA
+dma_wr 22222128 CEFAFECA
+dma_wr 2222212c 00F0FEEF
+dma_wr 22222130 BBBAFFF1
+dma_wr 22222134 00B00F00
+dma_wr 22222138 85013487
+dma_wr 2222213c 33332938
+dma_wr 22222140 43441978
+dma_wr 22222144 FFFA9999
+dma_wr 22222148 BBBECEBA
+dma_wr 2222214c BBFABEBA
+dma_wr 22222150 CEFAFECA
+dma_wr 22222154 00F0FEEF
+dma_wr 22222158 BBBAFFF1
+dma_wr 2222215c 00B00F00
+dma_wr 22222160 85013487
+dma_wr 22222164 33332938
+dma_wr 22222168 43441978
+dma_wr 2222216c FFFA9999
+dma_wr 22222170 BBBECEBA
+dma_wr 22222174 BBFABEBA
+dma_wr 22222178 CEFAFECA
+dma_wr 2222217c 00F0FEEF
+
+dma_wr fffff074 00000000 -- dma writes rx status
+dma_wr fffff070 22222101 -- dma writes ownership bit
+dma_rd fffff078 22222100 -- dma reads pointer of 22222100
+
+dma_wr 22222100 BBBAFFF1
+dma_wr 22222104 00B00F00
+dma_wr 22222108 85013487
+dma_wr 2222210c 33332938
+dma_wr 22222110 43441978
+dma_wr 22222114 FFFA9999
+dma_wr 22222118 BBBECEBA
+dma_wr 2222211c BBFABEBA
+dma_wr 22222120 CEFAFECA
+dma_wr 22222124 00F0FEEF
+dma_wr 22222128 BBBAFFF1
+dma_wr 2222212c 00B00F00
+dma_wr 22222130 85013487
+dma_wr 22222134 33332938
+dma_wr 22222138 43441978
+dma_wr 2222213c FFFA9999
+dma_wr 22222140 BBBECEBA
+dma_wr 22222144 BBFABEBA
+dma_wr 22222148 CEFAFECA
+dma_wr 2222214c 00F0FEEF
+dma_wr 22222150 BBBAFFF1
+dma_wr 22222154 00B00F00
+dma_wr 22222158 85013487
+dma_wr 2222215c 33332938
+dma_wr 22222160 43441978
+dma_wr 22222164 FFFA9999
+dma_wr 22222168 BBBECEBA
+dma_wr 2222216c BBFABEBA
+dma_wr 22222170 CEFAFECA
+dma_wr 22222174 00F0FEEF
+dma_wr 22222178 BBBAFFF1
+dma_wr 2222217c 00B00F00
+
+dma_wr fffff07c 00000000 -- dma writes rx status
+dma_wr fffff078 22222101 -- dma writes ownership bit
+dma_rd fffff080 22222100 -- dma reads pointer of 22222100
+
+dma_wr 22222100 85013487
+dma_wr 22222104 33332938
+dma_wr 22222108 43441978
+dma_wr 2222210c FFFA9999
+dma_wr 22222110 BBBECEBA
+dma_wr 22222114 BBFABEBA
+dma_wr 22222118 CEFAFECA
+dma_wr 2222211c 00F0FEEF
+dma_wr 22222120 BBBAFFF1
+dma_wr 22222124 00B00F00
+dma_wr 22222128 85013487
+dma_wr 2222212c 33332938
+dma_wr 22222130 43441978
+dma_wr 22222134 FFFA9999
+dma_wr 22222138 BBBECEBA
+dma_wr 2222213c BBFABEBA
+dma_wr 22222140 CEFAFECA
+dma_wr 22222144 00F0FEEF
+dma_wr 22222148 BBBAFFF1
+dma_wr 2222214c 00B00F00
+dma_wr 22222150 85013487
+dma_wr 22222154 33332938
+dma_wr 22222158 43441978
+dma_wr 2222215c FFFA9999
+dma_wr 22222160 BBBECEBA
+dma_wr 22222164 BBFABEBA
+dma_wr 22222168 CEFAFECA
+dma_wr 2222216c 00F0FEEF
+dma_wr 22222170 BBBAFFF1
+dma_wr 22222174 00B00F00
+dma_wr 22222178 85013487
+dma_wr 2222217c 33332938
+
+dma_wr fffff084 00000000 -- dma writes rx status
+dma_wr fffff080 22222101 -- dma writes ownership bit
+dma_rd fffff088 22222100 -- dma reads pointer of 22222100
+
+dma_wr 22222100 43441978
+dma_wr 22222104 FFFA9999
+dma_wr 22222108 BBBECEBA
+dma_wr 2222210c BBFABEBA
+dma_wr 22222110 CEFAFECA
+dma_wr 22222114 00F0FEEF
+dma_wr 22222118 BBBAFFF1
+dma_wr 2222211c 00B00F00
+dma_wr 22222120 85013487
+dma_wr 22222124 33332938
+dma_wr 22222128 43441978
+dma_wr 2222212c FFFA9999
+dma_wr 22222130 BBBECEBA
+dma_wr 22222134 BBFABEBA
+dma_wr 22222138 CEFAFECA
+dma_wr 2222213c 00F0FEEF
+dma_wr 22222140 BBBAFFF1
+dma_wr 22222144 00B00F00
+dma_wr 22222148 85013487
+dma_wr 2222214c 33332938
+dma_wr 22222150 43441978
+dma_wr 22222154 FFFA9999
+dma_wr 22222158 BBBECEBA
+dma_wr 2222215c BBFABEBA
+dma_wr 22222160 CEFAFECA
+dma_wr 22222164 00F0FEEF
+dma_wr 22222168 D373FFF1
+dma_wr 2222216c 000073E4
+
+
+
+dma_wr fffff08c 800085ee  -- broadcast, E0F, length
+dma_wr fffff088 22222101
+
+
+-- supply the receive buffer location
+dma_rd fffff090 22222100 -- dma reads pointer of 22222100
+
+
+
+--******************************************************************************
+-- Test 3.8
+--    Broadcast frame, Min length IP, VLAN, SNAP, no IP options, UDP,
+--    incorrect IP checksum.
+--    The frame should be discarded, with bad status, and a bad IP checksum
+--    recorded in the statistics registers.
+--******************************************************************************
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0024         -- Length/typeID
+rxd        AAAA         -- DSAP and SSAP
+rxd        0300         -- Control / Protocol ID[7:0]
+rxd        0000         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        001C         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A11         -- time to live and protocol
+rxd        81DE         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        0000         -- UDP source port
+rxd        0000         -- UDP destination port
+rxd        0008         -- UDP length
+rxd        D5EB         -- UDP checksum
+rxd        00000000     -- UDP data
+rxd        00000000     -- UDP data
+rxd        0000         -- UDP data
+rxd        C549EB6B     -- Good FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 vid 0001 ipsa 520BBF86 ipda 2216BF86
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 FFFFFFFF -- store frame to memory
+dma_wr 22222104 0008FFFF
+dma_wr 22222108 56341239
+dma_wr 2222210c 01000081
+dma_wr 22222110 AAAA2400
+dma_wr 22222114 00000003
+dma_wr 22222118 00450008
+dma_wr 2222211c 00001C00
+dma_wr 22222120 110A0000
+dma_wr 22222124 BF86DE81
+dma_wr 22222128 BF86520B
+dma_wr 2222212c 00002216
+dma_wr 22222130 08000000
+dma_wr 22222134 0000EBD5
+dma_wr 22222138 00000000
+dma_wr 2222213c 00000000
+dma_wr 22222140 6BEB49C5
+
+dma_wr fffff094 8020c044   -- broadcast, VLAN tagged, SOF, EOF, length
+dma_wr fffff090 22222101
+
+
+-- supply the receive buffer location
+dma_rd fffff098 22222100 -- dma reads pointer of 22222100
+
+
+
+--******************************************************************************
+--  4. Receive a good frame to trigger an interrupt and check stats.
+--******************************************************************************
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98F2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1376         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        ACACDBDBB0B0 -- options or padding
+rxd        589E112F     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800 ipsa 0100A8C0 ipda 9100A8C0
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 FFFFFFFF -- store frame to memory
+dma_wr 22222104 0008FFFF
+dma_wr 22222108 56341239
+dma_wr 2222210c 00450008
+dma_wr 22222110 FADF2800
+dma_wr 22222114 06800040
+dma_wr 22222118 A8C0F298
+dma_wr 2222211c A8C00100
+dma_wr 22222120 15009100
+dma_wr 22222124 BB3D8A04
+dma_wr 22222128 22EA605C
+dma_wr 2222212c 1050764D
+dma_wr 22222130 76132844
+dma_wr 22222134 ACAC0000
+dma_wr 22222138 B0B0DBDB
+dma_wr 2222213c 2F119E58
+
+dma_wr fffff09c 8000c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff098 22222101 -- dma writes ownership bit
+
+
+-- check status on reception of receive complete interrupt
+apbrd(11000) 24 00000002  "Test 3.1 to 3.7 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+-- supply the next receive buffer location
+dma_rd fffff0a0 22222200 -- dma reads pointer of 22222200
+
+
+
+--******************************************************************************
+--  5. Check statistics for correct values from above tests.
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000816  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000009  -- check frames received ok
+apbrd     15C 00000009  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000003  -- check frames received 64
+apbrd     16C 00000005  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000001  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+apbrd     1A8 00000000  -- check receive IP checksum errors
+apbrd     1AC 00000000  -- check receive TCP checksum errors
+apbrd     1B0 00000000  -- check receive UDP checksum errors
+
+end(12000)
+
+

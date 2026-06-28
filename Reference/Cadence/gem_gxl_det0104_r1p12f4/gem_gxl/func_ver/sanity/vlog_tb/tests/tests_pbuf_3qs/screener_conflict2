@@ -1,0 +1,96 @@
+-- this tesrt matches against two type2  screeners - the type 2 screener at
+-- lower APB address wins
+-- ************************************************************************** --
+
+wait_states 0
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 f0000000  -- write receive queue pointer
+apbrd      18 f0000000  -- check receive queue pointer
+apbwr     480 f0010000  -- write receive queue pointer
+apbwr     484 f0020000  -- write receive queue pointer
+apbwr     488 f0030000  -- write receive queue pointer
+apbwr     48c f0040000  -- write receive queue pointer
+apbwr     490 f0050000  -- write receive queue pointer
+apbwr     494 f0060000  -- write receive queue pointer
+apbwr     498 f0070000  -- write receive queue pointer
+apbwr      10  000107c4  -- set buffer size to 64
+apbwr      4a0 00000001  -- Buffer size Q1
+apbwr      4a4 00000001  -- Buffer size Q2
+apbwr      540 00000111  -- Screener - Priorty 1 goes to Q1 - VLAN 
+apbwr      544 00000112  -- Screener - Priorty 1 goes to Q2 - VLAN 
+apbwr      548 00000110  -- Screener - Priorty 1 goes to Q0 - VLAN 
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      600 ffffffff -- enable q1 interrupts
+apbwr      604 ffffffff -- enable q2 interrupts
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      90 abababab  -- specific address register 2 bottom (multicast)
+apbwr      94 0000abab  -- specific address register 2 top
+apbwr      98 abcdef10  -- specific address register 3 bottom (unicast)
+apbwr      9C 0000a5a5  -- specific address register 3 top
+apbwr      a0 cccccccc  -- specific address register 3 bottom (unicast)
+apbwr      a4 00005a5a  -- specific address register 3 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 01080001  -- indicate 100M operation, will check pin l8r.
+apbrd      04 01080001  -- verify write to speed register..
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+
+---------------------------------------
+-- TEST 1: FRAME SIZE 64 BYTES (PADDED)
+---------------------------------------
+
+rx_frame (apb)  5
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           broadcast
+      src_addr            111122222222
+      vlan1_en            1
+      #vlan1_type          random
+      vlan1_field         2000
+      type_len_field      0080
+
+      #------------------------------
+      # Level 3 Stuff
+      ipv4_en             1
+        num_ipv4_options  random
+        ipv4_tos          bb
+        ipv6_tc           bb
+     ipv6_en             1
+
+      #------------------------------
+      # Level 4 Stuff
+      udp_en              1
+        udp_sport         1234
+        udp_dport         2345
+      tcp_en              0
+      icmp_en             0
+      
+      #------------------------------
+      # Payload
+      data_size           16-32
+      data                random
+
+      #------------------------------
+      debug_print_frame   0
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(100000)
+

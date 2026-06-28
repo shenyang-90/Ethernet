@@ -1,0 +1,139 @@
+
+--------------------------------------------------------------------------------
+--
+--                                       Copyright (c) 2002
+--            CADENCE                    Cadence Design Systems
+--                                       All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : pfc_rx_dis_fifo
+--
+--   Authors        : Andreas Bode (abode@cadence.com)
+--
+--   Date           : 22 February 2010
+--
+--   Description    : The tests checks that the PFC timer counter will be reset
+--                    when rx_enable is set low.
+--
+--------------------------------------------------------------------------------
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- ************************************************************************** --
+-- Initialize
+-- ************************************************************************** --
+apbwr(60)  4c 00000001  -- enable soft config fifo port bit when available
+apbrd      4c 00000001  -- check enable soft config bit when available
+
+apbrd(100) 00 00000000  -- check reset value of receive control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      00 0001020C  -- start transmission
+                        -- enable receive/transmit and PFC pause frame reception
+
+apbwr      04 00083003 -- disable copy of pause frame bit(23) = 0,
+                         -- reset retry test bit(12) = 1, 
+                         -- keep enable pause time bit(13) = 1,
+                         -- copy all frames bit(4) = 0
+                         -- full-duplex bit(1) = 1,
+                         -- 100Mbps speed bit(0) = 1
+                        
+
+apbwr      88 76543210  -- set exact match reg 1
+apbwr      8c 0000dcba  -- set exact match reg 1
+apbwr      90 11111111  -- set exact match reg 2
+apbwr      94 00001111  -- set exact match reg 2
+apbwr      98 11111111  -- set exact match reg 3
+apbwr      9c 00001111  -- set exact match reg 3
+apbwr      a0 11111111  -- set exact match reg 4
+apbwr      a4 00001111  -- set exact match reg 4
+apbrd      88 76543210  -- 
+apbrd      8c 0000dcba  -- 
+
+
+
+-- ************************************************************************** --
+-- #1
+-- receive a PFC frame with DA matching exact match 1
+-- PFC timer counter are loaded
+-- pfc_negotiate is set high and rx_pfc_paused to 8'hff
+-- ************************************************************************** --
+
+rxd(112)       55d5
+rxd            10325476badc22222222333388080101
+rxd            00ff123456789abcdef0123456789abc
+rxd            def0888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    76543210   -- store frame to memory 
+fifo_wr      1000     0   xxxxxxxxxx    2222dcba
+fifo_wr      1000     0   xxxxxxxxxx    33332222
+fifo_wr      1000     0   xxxxxxxxxx    01010888
+fifo_wr      1000     0   xxxxxxxxxx    3412ff00
+fifo_wr      1000     0   xxxxxxxxxx    bc9a7856
+fifo_wr      1000     0   xxxxxxxxxx    3412f0de
+fifo_wr      1000     0   xxxxxxxxxx    bc9a7856
+fifo_wr      1000     0   xxxxxxxxxx    8888f0de
+fifo_wr      1000     0   xxxxxxxxxx    99999999
+fifo_wr      1000     0   xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    00000000
+fifo_wr      1001     0   0010000040    6459e932
+
+
+apbrd(int)   24 00001002 -- check interrupt status - non-zero pause frame received
+apbwr        24 00001002 -- Clear it 
+apbrd        38 00000000 -- check pause counter not overloaded
+apbrd       158 00000001 -- check frames rxed OK (register 1 match)
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+pinsc(int)  pfc_negotiate 1 rx_pfc_paused 11111111
+
+
+-- ************************************************************************** --
+-- #2
+-- disable receive, pfc_negotiate is still high but rx_pfc_paused are 8'00
+-- after receiving a new PFC frame the output signals haven't changed
+-- ************************************************************************** --
+
+apbwr(500) 00 00010208  -- start transmission
+                        -- disable receive/transmit and PFC pause frame reception
+								
+pinsc(510)  pfc_negotiate 1 rx_pfc_paused 00000000
+
+rxd(550)       55d5
+rxd            10325476badc22222222333388080101
+rxd            00ff123456789abcdef0123456789abc
+rxd            def0888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+								
+pinsc(850)  pfc_negotiate 1 rx_pfc_paused 00000000
+
+
+-- ************************************************************************** --
+-- #3
+-- enable receive, pfc_negotiate and rx_pfc_paused unchanged
+-- after receiving a new PFC frame rx_pfc_paused is 8'ff again
+-- ************************************************************************** --
+
+apbwr(1000) 00 0001020c  -- start transmission
+                         -- enable receive/transmit and PFC pause frame reception
+								
+pinsc(1050)  pfc_negotiate 1 rx_pfc_paused 00000000
+
+rxd(1100)      55d5
+rxd            10325476badc22222222333388080101
+rxd            00ff123456789abcdef0123456789abc
+rxd            def0888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+								
+pinsc(int)  pfc_negotiate 1 rx_pfc_paused 11111111				
+
+
+end(10000)

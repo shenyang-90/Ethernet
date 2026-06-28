@@ -1,0 +1,778 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2009
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : pause_schedule3_fifo
+--
+--   Author         : Andreas Bode (abode@cadence.com)
+--
+--   Date           : 25 February 2010
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This checks transmission of pause frames (PFC and classic) controlled by
+-- register. A second and third pause frames are triggered while the first pause is
+-- transmitted. So only the third pause trigger is transmitted after the first
+-- pause frame.
+--
+--
+-- Functional Coverage
+----------------------
+-- 
+--
+-- Detailed Test Description
+----------------------------
+--
+-- Different combinations of zero, non zero and PFC pause frames.
+-- Only the first and last trigger will be used to transmit a pause frame.
+--
+-- ************************************************************************** --
+
+-- Configuration Requirements ..
+requires ext_fifo_interface 1
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+pinsd(60) tx_pfc_sel        0         -- pause frame
+pinsd(61) tx_pfc_pause      00000000  -- priority_enable
+pinsd(62) tx_pfc_pause_zero 00000000  -- all timers non zero
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+
+-- this is the event count that will initialize the scaler for event counts. it will cause any future scaling to only scale
+-- the counts after start_scale
+start_scale
+
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+
+-- # Initialize the network configuration register
+-- #   -eam      <1|0|random>, default = 0. This is external address matching
+-- #   -duplex   <full|half|random>, default = random
+-- #   -speed    <1g|100m|10m|random>, default = random
+-- #   -jumbo    <1|0|random>, default = random. This wont affect the RX transactor below, but will automatically cause jumbos to be dropped.
+-- #   -copy_all <1|0|random>, default = 0. If 0, ensure you initialize the dest_addr in the rx transactor to something that will match
+-- #   -databus  <32|64|128|take_from_cfg|random>, default = random, bus <= config.  The max value is the value set in dma_bus_width in gem_defs.v
+-- #   -rx_toe   <1|0|random>, default = 0. Enables RX TCP/IP checksum offload
+-- #   -pcs_en   <1|0|random>, default = 0. Enables SGMII PCS
+-- #   -pause_en <1|0|random>, default = 0. Enables pausing of transmission
+-- #   -dont_copy_pause <1|0|random>, default = 0. Controls whether pause frames are copied
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 0 -copy_all 0 -duplex full -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 0 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+
+apbwr      00 00000208  -- write tx_go and enable tx (apb trigger to trigger FIFO)
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbwrf     3c 0000dead  -- write pause quantum register
+
+pinsd(apb) tx_pause 0   -- drive tx_pause low 
+
+------------------------------------------------------------------------------------
+-- scenario 1
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(195)   c4 0000ffff  -- zero for all timers and priority_enable = 0xff
+
+apbwr(200)   00 00001008  -- trigger zero
+apbwr(210)   00 00020008  -- trigger PFC
+apbwr(218)   00 00000808  -- trigger non zero
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+------------------------------------------------------------------------------------
+-- scenario 2
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(1200)   00 00020008  -- trigger PFC
+apbwr(1212)   00 00000808  -- trigger non zero
+apbwr(1226)   00 00001008  -- trigger zero
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ff0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000007923519e
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 3
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(2200)   00 00001008  -- trigger zero
+apbwr(2210)   00 00001008  -- trigger zero
+apbwr(2220)   00 00020008  -- trigger PFC
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ff0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000007923519e
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 4
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(3190)   c4 000000ff  -- non zero for all timers and priority_enable = 0xff
+apbwr(3200)   00 00020008  -- trigger PFC
+apbwr(3240)   00 00020008  -- trigger PFC
+apbwr(3270)   00 00000808  -- trigger non zero
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 5
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(4200)   00 00001008  -- trigger zero
+apbwr(4240)   00 00001008  -- trigger zero
+apbwr(4280)   00 00000808  -- trigger non zero
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 6
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(5200)   00 00001008  -- trigger zero
+apbwr(5240)   00 00000808  -- trigger non zero
+apbwr(5260)   00 00001008  -- trigger zero
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 7
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(6200)   00 00001008  -- trigger zero
+apbwr(6210)   00 00020008  -- trigger PFC
+apbwr(6220)   00 00001008  -- trigger zero
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 8
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(7200)   00 00001008  -- trigger zero
+apbwr(7210)   00 00000808  -- trigger non zero
+apbwr(7220)   00 00000808  -- trigger non zero
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 9
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(8200)   00 00001008  -- trigger zero
+apbwr(8210)   00 00020008  -- trigger PFC
+apbwr(8220)   00 00020008  -- trigger PFC
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 10
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(9200)   00 00001008  -- trigger zero
+apbwr(9210)   00 00000808  -- trigger non zero
+apbwr(9220)   00 00020008  -- trigger PFC
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 11
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(10200)   00 00000808  -- trigger non zero
+apbwr(10220)   00 00001008  -- trigger zero
+apbwr(10230)   00 00001008  -- trigger zero
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 12
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(11200)   00 00020008  -- trigger PFC
+apbwr(11220)   00 00001008  -- trigger zero
+apbwr(11230)   00 00001008  -- trigger zero
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 13
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(12200)   00 00000808  -- trigger non zero
+apbwr(12220)   00 00001008  -- trigger zero
+apbwr(12230)   00 00000808  -- trigger non zero
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 14
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(13200)   00 00020008  -- trigger PFC
+apbwr(13220)   00 00001008  -- trigger zero
+apbwr(13260)   00 00020008  -- trigger PFC
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 15
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(14200)   00 00000808  -- trigger non zero
+apbwr(14220)   00 00001008  -- trigger zero
+apbwr(14260)   00 00020008  -- trigger PFC
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+------------------------------------------------------------------------------------
+-- scenario 16
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(15200)   00 00020008  -- trigger PFC
+apbwr(15220)   00 00001008  -- trigger zero
+apbwr(15260)   00 00000808  -- trigger non zero
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 17
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(16200)   00 00000808  -- trigger non zero
+apbwr(16220)   00 00000808  -- trigger non zero
+apbwr(16260)   00 00001008  -- trigger zero
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 18
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(17200)   00 00020008  -- trigger PFC
+apbwr(17220)   00 00020008  -- trigger PFC
+apbwr(17260)   00 00001008  -- trigger zero
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 19
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(18200)   00 00000808  -- trigger non zero
+apbwr(18220)   00 00020008  -- trigger PFC
+apbwr(18260)   00 00001008  -- trigger zero
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000266bae0a
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 20
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(19200)   00 00000808  -- trigger non zero
+apbwr(19220)   00 00000808  -- trigger non zero
+apbwr(19260)   00 00020008  -- trigger PFC
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 21
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(20200)   00 00000808  -- trigger non zero
+apbwr(20220)   00 00020008  -- trigger PFC
+apbwr(20260)   00 00000808  -- trigger non zero
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 22
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(21200)   00 00020008  -- trigger PFC
+apbwr(21220)   00 00000808  -- trigger non zero
+apbwr(21260)   00 00000808  -- trigger non zero
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 23
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(22200)   00 00000808  -- trigger non zero
+apbwr(22220)   00 00020008  -- trigger PFC
+apbwr(22260)   00 00020008  -- trigger PFC
+
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  dead0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000009c5211fd
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+------------------------------------------------------------------------------------
+-- scenario 24
+-- three different pause frames triggered, first and last are transmitted
+------------------------------------------------------------------------------------
+apbwr(23200)   00 00020008  -- trigger PFC
+apbwr(23220)   00 00000808  -- trigger non zero
+apbwr(23260)   00 00020008  -- trigger PFC
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 ffffffff  -- clear interrupt
+apbwr       24 00004000  -- clear interrupt status
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(100000)

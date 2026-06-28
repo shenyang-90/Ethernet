@@ -1,0 +1,301 @@
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+bus_grant_delay 3
+randomize_hready -descr_max 5 
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 32-bit DMA data bus.
+--******************************************************************************
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 01080001  -- enable RX TCP offload engine.
+apbwr      18 f0000000  -- write receive queue pointer for Q0
+apbrd      18 f0000000  -- check receive queue pointer for Q0
+apbwr     480 f0010000  -- write receive queue pointer for Q1
+apbwr     484 fffff000  -- write receive queue pointer for Q2
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      600 ffffffff  -- enable q1 interrupts
+apbwr      604 ffffffff  -- enable q2 interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      00 00000004  -- enable receive
+apbwr      10 00010724  -- enable header data splitting enable
+apbrd      58 00000000  -- check reset value
+apbwr      58 aaaaaaaa  -- check read/write
+apbrd      58 0000aaaa  -- check read/write
+apbwr      58 55555555  -- check read/write
+apbrd      58 00015554  -- check read/write
+apbwr      58 0000ffff  -- enable rsc on all queues
+apbrd      58 0000fffe  -- check write was effective
+apbwr     4a0 000000ff  -- Buffer size Q1
+apbwr     4a4 000000ff  -- Buffer size Q2
+
+apbrd      58 0000fffe  -- check enable rsc
+
+
+-- Setup a screener , using compare reg 0, vlan match disabled, queue = 2
+apbwr      540 00040002  
+
+-- Setup compare reg, offset = 0, comparing from end of L3 header
+apbwr      700 8A041500  -- Compare value
+apbwr      704 00000300  -- Compare control, dont use mask
+
+apbrdf     20 00000000  
+
+# Lets receive 2 frames that will match on compare reg 0, therefore
+# match screener 0. Queue 2 will therefore receive this frame.
+# Since RSC is enabled on queue 2, we will expect these to be coalesced.
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service, #2
+rxd        004d         -- total length (77 bytes), #4
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98cd         -- IP Header checksum, #12
+rxd        C0A80001     -- IP SA, #16
+rxd        C0A80091     -- IP DA, #20
+rxd        0015         -- TCP source port, #22
+rxd        048A         -- TCP destination port, #24
+rxd        00000001     -- Sequence number, #28
+rxd        EA224D76     -- Acknowledgement Number, #32
+rxd        50104428     -- Flags and window, #36
+rxd        ae6a         -- TCP checksum, #38
+rxd        0000         -- TCP urgent pointer, #40
+
+rxd        ffffffffffffffffffffffffffffffff -- Data #56
+rxd        ffffffffffffffffffffffffffffffff -- Data #72
+rxd        ffffffffff                       -- Data #77
+rxd        00112233                         -- PAD
+rxd        0011                             -- PAD
+
+rxd        gggggggg     -- FCS
+
+
+# Receive frame 2
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service, #2
+rxd        004c         -- total length (76 bytes), #4
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98ce         -- IP Header checksum, #12
+rxd        C0A80001     -- IP SA, #16
+rxd        C0A80091     -- IP DA, #20
+rxd        0015         -- TCP source port, #22
+rxd        048A         -- TCP destination port, #24
+rxd        00000026     -- Sequence number, (+37) #28
+rxd        EA224D76     -- Acknowledgement Number, #32
+rxd        50104428     -- Flags and window, #36
+rxd        ad47         -- TCP checksum, #38
+rxd        0000         -- TCP urgent pointer, #40
+
+rxd        ffffffffffffffffffffffffffffffff -- Data #56
+rxd        ffffffffffffffffffffffffffffffff -- Data #72
+rxd        ffffffff                         -- Data #76
+rxd        998877                           -- PAD
+
+rxd        gggggggg     -- FCS
+
+# Receive frame 3 - This one has a flag set
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service, #2
+rxd        004c         -- total length (76 bytes), #4
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98ce         -- IP Header checksum, #12
+rxd        C0A80001     -- IP SA, #16
+rxd        C0A80091     -- IP DA, #20
+rxd        0015         -- TCP source port, #22
+rxd        048A         -- TCP destination port, #24
+rxd        0000004a     -- Sequence number, (+36) #28
+rxd        EA224D76     -- Acknowledgement Number, #32
+rxd        50144428     -- Flags and window (RST), #36
+rxd        ad1f         -- TCP checksum, #38
+rxd        0000         -- TCP urgent pointer, #40
+
+rxd        ffffffffffffffffffffffffffffffff -- Data #56
+rxd        ffffffffffffffffffffffffffffffff -- Data #72
+rxd        ffffffff                         -- Data #76
+rxd        998877                           -- PAD
+
+rxd        gggggggg     -- FCS
+
+# Receive the same frame again ...
+
+
+
+----------------------------------------------------------
+-- Frame 1 (ETH, IP HEADER)
+
+-- descriptor read
+dma_rd fffff000 22222102 -- dma reads pointer of 22222100
+
+-- payload write
+dma_wr 22222100 FFFFFFFF -- store frame to memory
+dma_wr 22222104 0008FFFF
+dma_wr 22222108 56341239
+dma_wr 2222210c 00450008
+dma_wr 22222110 fadf4d00  -- total length field here
+dma_wr 22222114 06800040
+dma_wr 22222118 a8c0cd98  -- IP checksum field here
+dma_wr 2222211c a8c00100
+dma_wr 22222120 15009100
+dma_wr 22222124 00008a04
+dma_wr 22222128 22ea0100  -- ACK_NUM 1st half here
+dma_wr 2222212c 1050764d  -- ACK_NUM 2nd half here
+dma_wr 22222130 6aae2844  -- TCP checksum field here
+dma_wr 22222134 ffff0000
+
+-- descriptor write
+dma_wr rx_descr fffff004 00034036 
+dma_wr rx_descr fffff000 22222102 -- dma writes ownership bit not set
+----------------------------------------------------------
+
+
+----------------------------------------------------------
+-- Frame 1 (PAYLOAD)
+
+-- descriptor read
+dma_rd fffff000 22222126 -- dma reads pointer of 22222100
+
+-- payload write
+dma_wr 22222124 ffffffff
+dma_wr 22222128 ffffffff
+dma_wr 2222212c ffffffff
+dma_wr 22222130 ffffffff
+dma_wr 22222134 ffffffff
+dma_wr 22222138 ffffffff
+dma_wr 2222213c ffffffff
+dma_wr 22222140 ffffffff
+dma_wr 22222144 ffffffff
+dma_wr 22222148 221100ff 1
+-- dma_wr 22222148 b8d10a62 -- CRC and pad dropped
+
+-- descriptor write
+dma_wr rx_descr fffff004 80808065 
+dma_wr rx_descr fffff000 22222126 -- dma writes descriptor, but without used bit!
+
+----------------------------------------------------------------------------
+-- Frame 2  (PAYLOAD)
+-- will continue from the end of the last ... Note the byte strobes
+
+dma_wr 22222148 ffffff00 e
+dma_wr 2222214c ffffffff
+dma_wr 22222150 ffffffff
+dma_wr 22222154 ffffffff
+dma_wr 22222158 ffffffff
+dma_wr 2222215c ffffffff
+dma_wr 22222160 ffffffff
+dma_wr 22222164 ffffffff
+dma_wr 22222168 ffffffff
+dma_wr 2222216c 7788ffff 1
+
+-- update cycle
+-- ,IPv4 Total Length, then Ipv4 checksum, then TCP seq num, then TCP checksum - 
+dma_wr rx_descr 22222110 fadf7100 3  -- Update total length field here (77 + 36 = 113)
+dma_wr rx_descr 22222118 a8c0a998 3  -- Update IP checksum field here
+dma_wr rx_descr 22222130 46ae0000 c  -- Update TCP checksum field here
+dma_wr rx_descr 22222128 22ea0000 c  -- Update ACK_NUM 1st half here
+dma_wr rx_descr 2222212c 0000764d 3  -- ACK_NUM 2nd half here
+dma_wr rx_descr 2222212c 10000000 8  -- ACK bit
+
+
+-- TCP flag was detected in the 3rd frame, so we should stop coalescing and 
+-- send descriptor writeback update.
+-- All we need to do is update the descriptor length and set the last,used
+-- bits
+
+dma_wr rx_descr fffff004 0000807f 3 -- update total length (total length + eth hdr = 113 + 14 = 127)
+dma_wr rx_descr fffff000 00000003 1 -- dma writes ownership bit Header
+dma_wr rx_descr fffff000 00000027 1 -- dma writes ownership bit Payload
+
+apbrd(int2) 404 00000002  -- check interrupt status - receive complete
+apbwr       404 00000002  
+apbrd       20 00000002  
+apbwr       20 00000002 
+apbrd       20 00000000  
+
+
+----------------------------------------------------------------------------
+-- Frame 3 (HEADER) 
+-- This frame has a flag set and is therefore not coalesced. Should pass
+-- through as normal
+-- descriptor read
+
+dma_rd fffff000 22222102 -- dma reads pointer of 22222100
+
+dma_wr 22222100 FFFFFFFF -- store frame to memory
+dma_wr 22222104 0008FFFF
+dma_wr 22222108 56341239
+dma_wr 2222210c 00450008
+dma_wr 22222110 fadf4c00  -- total length field here
+dma_wr 22222114 06800040
+dma_wr 22222118 a8c0ce98  -- IP checksum field here
+dma_wr 2222211c a8c00100
+dma_wr 22222120 15009100
+dma_wr 22222124 00008a04
+dma_wr 22222128 22ea4a00  -- ACK_NUM 1st half here
+dma_wr 2222212c 1450764d  -- ACK_NUM 2nd half here
+dma_wr 22222130 1fad2844  -- TCP checksum field here
+dma_wr 22222134 ffff0000
+
+-- descriptor write
+dma_wr rx_descr fffff004 00034036 
+dma_wr rx_descr fffff000 22222103 -- dma writes ownership bit
+
+----------------------------------------------------------
+-- Frame 3 (PAYLOAD)
+-- descriptor read
+dma_rd fffff000 22222126 -- dma reads pointer of 22222100
+
+dma_wr 22222124 ffffffff
+dma_wr 22222128 ffffffff
+dma_wr 2222212c ffffffff
+dma_wr 22222130 ffffffff
+dma_wr 22222134 ffffffff
+dma_wr 22222138 ffffffff
+dma_wr 2222213c ffffffff
+dma_wr 22222140 ffffffff
+dma_wr 22222144 ffffffff
+dma_wr 22222148 b8778899 f  -- pad/crc
+dma_wr 2222214c 008706f7 f  -- crc
+
+
+dma_wr rx_descr fffff004 80808061 -- 
+dma_wr rx_descr fffff000 22222127 -- dma writes ownership bit
+
+apbrd(int2) 404 00000002  -- check interrupt status - receive complete
+apbwr       404 00000002  
+apbrd       20  00000002  
+apbwr       20  00000002 
+apbrd       20  00000000  
+
+
+
+----------------------------------------------------------
+-- Check the enable has been cleared at the end of the test
+apbrd      58 0000fffa  -- check enable rsc
+
+
+
+
+end(160000)
+
+

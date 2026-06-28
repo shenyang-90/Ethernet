@@ -1,0 +1,2684 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : stats
+--
+--   Author         : Mike MacGillis (mikema@tality.com)/ Arthur Marris 
+--                    (arthurm@tality.com)
+--
+--   Date           : 13 Febuary 2002
+--
+--------------------------------------------------------------------------------
+--   Test Description
+--   Tests the events that cause the statistics registers to increment during  
+--   100-mode operation.
+--
+--   Functional Coverage
+--   � Check that various events are recorded in the stats registers.
+--   � Ensure proper operation of crs (carrier sense) bit.
+--   � Ensure proper checking of crc errors in received frames.
+--   � Ensure proper checking of length field errors in received frames.
+--   � Ensure invalid frames are dealt with properly and proper statistics logged.
+--
+--   Detailed Test Description
+--   1.  Transmit frame without asserting crs.  This will cause a crs error to be counted.
+--   2.  Transmit a frame with a single collision and without asserting coll at the end of
+--       transmission. This will cause a single collision error.
+--   3.  Receive a frame one byte below minimum length with bad crc. This is a frame fragment
+--       and will not affect the statistics registers.
+--   4.  Receive a frame of minimum length with bad crc. This will be counted as a crc error.
+--   5.  Receive a good frame to trigger an interrupt and check statistics.
+--   6.  Receive an undersize frame (smaller than 64 bytes) with good crc and then receive
+--       a good frame. Check for undersize frame statistic.
+--   7.  Receive a jabber (a long frame with bad crc), then a code error frame,
+--       then an alignment error frame (extra nibble and bad crc) and finally a good
+--       frame with an extra nibble (good crc when rounded down to the nearest byte).
+--   8.  Receive a proper sized frame that is 65 bytes in length with the length field
+--       indicating 64 bytes. Next, receive a proper sized frame that is 64 bytes in length
+--       with the length field indicating 65 bytes. Finally, receive a proper sized frame that
+--       is 64 bytes in length with the length field indicating 64 bytes.  Check for length field
+--       error statistic. Ensure frames with length field errors are discarded.
+--       (Note: Must set bit 16 in the network configuration register to enable
+--       length field detection.)
+--   9.  Receive a minimum sized frame that is 63 bytes long with the length field
+--       indicating 64 bytes.  (The frame should be discarded and no length error
+--       statistic should set)
+--   10. Receive a minimum sized frame with padding with a correct length field.
+--       The length field should indicate the length of the frame to the end of the
+--       data field and not include padding.  The frame should be written properly to
+--       memory with no length error statistics set.
+--   11. Receive a  minimum sized frame with the length field indicating 1536.  
+--       (The frame should be discarded and a length error statistic set)
+--   12. Receive a  minimum sized frame with the length field indicating 1537 bytes. 
+--       The length of the frame should not be checked. The frame should be written to memory 
+--       and no length error statistic should be set. (If the length field indicates more than 
+--       1536 bytes, then the frame should not be checked for length and should be written 
+--       to memory)
+--   13. Receive a frame that is 1518 bytes long with the length field 
+--       indicating 1519 bytes. The length of the frame should not be 
+--       checked. The frame should be dropped as the actual length
+--       is less than the indicated length
+--   14. Receive a maximum sized frame of 1518 bytes with the length field 
+--       indicating 1517.  (The frame should be received without a length 
+--       error statistic). 
+--   15. Enable 1536 byte length frames.
+--       Receive a frame that is 1536 bytes long with the length field 
+--       indicating 1537 bytes. 
+--       The actual length is less than the indicated length.  The frame
+--       should be dropped and a receive length error indicated
+--   16. Receive a maximum sized frame of 1536 bytes with the length field 
+--       indicating 1535.  (The frame should be received without a length 
+--       error statistic)
+--   17. Check the statistics
+--   18. Receive a frame that is less than minimum frame size and has a symbol 
+--       error.
+--   19. Check the statistics and ensure the above operations were carried out
+--       properly.
+--   20. Receive a frame that is 1537 bytes with a length field error.
+--   21. Check the statistics and ensure the above operations were carried out
+--       properly.
+-------------------------------------------------------------------------------
+
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 01234000  -- write receive queue pointer
+apbrd      18 01234000  -- check receive queue pointer
+apbrd      1C 00000000  -- check reset value of transmit queue pointer
+apbwr      1C 11111000  -- write transmit queue pointer
+apbrd      1C 11111000  -- check transmit queue pointer
+apbwr      00 0000000C  -- enable transmit and receive
+apbrd      00 0000000C  -- verify proper write to network control.
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      14 00000000  -- read transmit status register
+apbwr      00 0000020C  -- write tx_start
+
+-- ******************************************************************************** --
+-- Transmit frame without asserting crs.  This will cause a crs error to be counted.
+-- ******************************************************************************** --
+
+pinsd(100) tx_en_crs 0 -- disable driving crs during tx_en - should cause carrier sense error
+
+
+-- read the transmit queue descriptor
+dma_rd 11111004 00008030
+dma_rd 11111000 77777000
+
+dma_rd 77777000 12345678
+dma_rd 77777004 11111111
+dma_rd 77777008 22222222
+dma_rd 7777700c 33333333
+dma_rd 77777010 44444444
+dma_rd 77777014 55555555
+dma_rd 77777018 66666666
+dma_rd 7777701c 77777777
+dma_rd 77777020 88888888
+dma_rd 77777024 99999999
+dma_rd 77777028 aaaaaaaa
+dma_rd 7777702c bbbbbbbb
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    0000000000000000000000002638309b
+
+dma_rd 1111100c 80008030
+dma_rd 11111008 77777000
+
+-- write used bit
+dma_wr 11111004 80008030
+
+pinsd(int) tx_en_crs 1 col_sqe_en 0 -- disable driving col after tx finishes
+
+apbrd(int) 24 00000088  -- check interrupt status - transmit complete
+apbwr      24 00000088  -- Clear it
+apbrd      14 00000021  -- read transmit status register
+apbwr      14 00000021  -- read transmit status register
+apbrd      20 00000000  -- check contents of the receive status register
+apbrd      08 00000006  -- check reset value of network status register
+
+-- check transmit statistics
+apbrd	  100 00000040  -- check octets transmitted bottom
+apbrd	  104 00000000  -- check octets transmitted top
+apbrd	  108 00000001  -- check frames transmitted ok
+apbrd	  10C 00000000  -- check broadcast frames transmitted
+apbrd	  110 00000000  -- check multicast frames transmitted
+apbrd	  114 00000000  -- check pause frames transmitted
+apbrd	  118 00000001  -- check frames transmitted 64
+apbrd	  11C 00000000  -- check frames transmitted 65-127
+apbrd	  120 00000000  -- check frames transmitted 128-255
+apbrd	  124 00000000  -- check frames transmitted 256-511
+apbrd	  128 00000000  -- check frames transmitted 512-1023
+apbrd	  12C 00000000  -- check frames transmitted 1024-1518
+apbrd	  130 00000000  -- check frames transmitted 1519
+apbrd	  134 00000000  -- check transmit underruns errors
+apbrd	  138 00000000  -- check single collisions frames
+apbrd	  13C 00000000  -- check multiple collisions frames
+apbrd	  140 00000000  -- check excessive collisions frames
+apbrd	  144 00000000  -- check late collisions frames
+apbrd	  148 00000000  -- check deferred frames
+apbrd	  14C 00000001  -- check carrier sense errors
+
+-- check receive statistics
+apbrd	  150 00000000  -- check octets received bottom
+apbrd	  154 00000000  -- check octets received top
+apbrd	  158 00000000  -- check frames received ok
+apbrd	  15C 00000000  -- check broadcast frames received
+apbrd	  160 00000000  -- check multicast frames received
+apbrd	  164 00000000  -- check pause frames received
+apbrd	  168 00000000  -- check frames received 64
+apbrd	  16C 00000000  -- check frames received 65-127
+apbrd	  170 00000000  -- check frames received 128-255
+apbrd	  174 00000000  -- check frames received 256-511
+apbrd	  178 00000000  -- check frames received 512-1023
+apbrd	  17C 00000000  -- check frames received 1024-1518
+apbrd	  180 00000000  -- check frames received 1519
+apbrd	  184 00000000  -- check undersize frame errors
+apbrd	  188 00000000  -- check excessive receive length errors
+apbrd	  18C 00000000  -- check receive jabbers errors
+apbrd	  190 00000000  -- check FCS errors
+apbrd	  194 00000000  -- check receive length errors
+apbrd	  198 00000000  -- check receive symbol errors
+apbrd	  19C 00000000  -- check alignment errors
+apbrd	  1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+apbwr      00 0000020C  -- write tx_start
+
+
+-- ******************************************************************************** --
+--   Transmit a frame with a single collision and without asserting coll at the end of
+--   transmission. This will cause a single collision error.
+-- ******************************************************************************** --
+
+-- supply the transmit data to the AHB interface
+-- emac reads the transmit queue descriptor
+dma_rd 1111100C 00008030
+dma_rd 11111008 99999000
+
+-- assert collision to test single collision statistic register
+txd    55x555555555555d588888888
+
+dma_rd 99999000 12345678
+dma_rd 99999004 11111111
+dma_rd 99999008 22222222
+dma_rd 9999900c 33333333
+dma_rd 99999010 44444444
+dma_rd 99999014 55555555
+dma_rd 99999018 66666666
+dma_rd 9999901c 77777777
+dma_rd 99999020 88888888
+dma_rd 99999024 99999999
+dma_rd 99999028 aaaaaaaa
+dma_rd 9999902c bbbbbbbb
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    0000000000000000000000002638309b
+
+-- write used bit
+dma_wr 1111100C 80008030
+
+dma_rd 11111014 80008030 -- halt transmission
+dma_rd 11111010 80008030 
+
+
+apbrd(int) 24 00000088  -- check interrupt status - transmit complete
+apbwr      24 00000088  -- Clear it
+apbrd      14 00000023  -- read transmit status register- tx comp and col
+apbwr      14 00000003  -- clear collision occured status
+apbrd      20 00000000  -- check contents of the receive status register
+apbrd      08 00000006  -- check reset value of network status register
+
+-- check transmit statistics
+apbrd	  100 00000040  -- check octets transmitted bottom
+apbrd	  104 00000000  -- check octets transmitted top
+apbrd	  108 00000001  -- check frames transmitted ok
+apbrd	  10C 00000000  -- check broadcast frames transmitted
+apbrd	  110 00000000  -- check multicast frames transmitted
+apbrd	  114 00000000  -- check pause frames transmitted
+apbrd	  118 00000001  -- check frames transmitted 64
+apbrd	  11C 00000000  -- check frames transmitted 65-127
+apbrd	  120 00000000  -- check frames transmitted 128-255
+apbrd	  124 00000000  -- check frames transmitted 256-511
+apbrd	  128 00000000  -- check frames transmitted 512-1023
+apbrd	  12C 00000000  -- check frames transmitted 1024-1518
+apbrd	  130 00000000  -- check frames transmitted 1519
+apbrd	  134 00000000  -- check transmit underruns errors
+apbrd	  138 00000001  -- check single collisions frames
+apbrd	  13C 00000000  -- check multiple collisions frames
+apbrd	  140 00000000  -- check excessive collisions frames
+apbrd	  144 00000000  -- check late collisions frames
+apbrd	  148 00000000  -- check deferred frames
+apbrd	  14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd	  150 00000000  -- check octets received bottom
+apbrd	  154 00000000  -- check octets received top
+apbrd	  158 00000000  -- check frames received ok
+apbrd	  15C 00000000  -- check broadcast frames received
+apbrd	  160 00000000  -- check multicast frames received
+apbrd	  164 00000000  -- check pause frames received
+apbrd	  168 00000000  -- check frames received 64
+apbrd	  16C 00000000  -- check frames received 65-127
+apbrd	  170 00000000  -- check frames received 128-255
+apbrd	  174 00000000  -- check frames received 256-511
+apbrd	  178 00000000  -- check frames received 512-1023
+apbrd	  17C 00000000  -- check frames received 1024-1518
+apbrd	  180 00000000  -- check frames received 1519
+apbrd	  184 00000000  -- check undersize frame errors
+apbrd	  188 00000000  -- check excessive receive length errors
+apbrd	  18C 00000000  -- check receive jabbers errors
+apbrd	  190 00000000  -- check FCS errors
+apbrd	  194 00000000  -- check receive length errors
+apbrd	  198 00000000  -- check receive symbol errors
+apbrd	  19C 00000000  -- check alignment errors
+apbrd	  1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+apbrdf     24 00000000  -- check interrupt status all clear
+
+
+
+-- ******************************************************************************** --
+--  Receive a frame one byte below minimum length with bad crc. This is a frame fragment
+--  and will not affect the statistics registers.
+-- ******************************************************************************** --
+
+rxd(apb)   55d578563412111111112222222233333333   -- short bad crc
+rxd            44444444555555556666666677777777   -- frame fragment will be completely ignored
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            00000000000000000000002638309b
+
+
+
+-- ******************************************************************************** --
+-- Receive a frame of minimum length with bad crc. This will be counted as a crc error.
+-- ******************************************************************************** --
+
+rxd(gap)   55d578563412111111112222222233333333   -- bad crc
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309c
+
+-- ******************************************************************************** --
+-- Receive a good frame to trigger an interrupt and check statistics.
+-- ******************************************************************************** --
+
+rxd(gap)   55d578563412111111112222222233333333   -- good
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- supply the receive buffer location
+dma_rd 01234000 22222004 -- dma reads pointer of 22222004
+
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 9b303826
+
+dma_wr 01234004 0800c040 -- dma writes rx status, local address match and 64 bytes received and SOF EOF
+dma_wr 01234000 22222005 -- dma writes ownership bit
+
+dma_rd 01234008 44440004 -- reads location of next rx buffer
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+
+-- check transmit statistics
+apbrd	  100 00000000  -- check octets transmitted bottom
+apbrd	  104 00000000  -- check octets transmitted top
+apbrd	  108 00000000  -- check frames transmitted ok
+apbrd	  10C 00000000  -- check broadcast frames transmitted
+apbrd	  110 00000000  -- check multicast frames transmitted
+apbrd	  114 00000000  -- check pause frames transmitted
+apbrd	  118 00000000  -- check frames transmitted 64
+apbrd	  11C 00000000  -- check frames transmitted 65-127
+apbrd	  120 00000000  -- check frames transmitted 128-255
+apbrd	  124 00000000  -- check frames transmitted 256-511
+apbrd	  128 00000000  -- check frames transmitted 512-1023
+apbrd	  12C 00000000  -- check frames transmitted 1024-1518
+apbrd	  130 00000000  -- check frames transmitted 1519
+apbrd	  134 00000000  -- check transmit underruns errors
+apbrd	  138 00000000  -- check single collisions frames
+apbrd	  13C 00000000  -- check multiple collisions frames
+apbrd	  140 00000000  -- check excessive collisions frames
+apbrd	  144 00000000  -- check late collisions frames
+apbrd	  148 00000000  -- check deferred frames
+apbrd	  14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd	  150 00000040  -- check octets received bottom
+apbrd	  154 00000000  -- check octets received top
+apbrd	  158 00000001  -- check frames received ok
+apbrd	  15C 00000000  -- check broadcast frames received
+apbrd	  160 00000000  -- check multicast frames received
+apbrd	  164 00000000  -- check pause frames received
+apbrd	  168 00000001  -- check frames received 64
+apbrd	  16C 00000000  -- check frames received 65-127
+apbrd	  170 00000000  -- check frames received 128-255
+apbrd	  174 00000000  -- check frames received 256-511
+apbrd	  178 00000000  -- check frames received 512-1023
+apbrd	  17C 00000000  -- check frames received 1024-1518
+apbrd	  180 00000000  -- check frames received 1519
+apbrd	  184 00000000  -- check undersize frame errors
+apbrd	  188 00000000  -- check excessive receive length errors
+apbrd	  18C 00000000  -- check receive jabbers errors
+apbrd	  190 00000001  -- check FCS errors - only one because one frame was short
+apbrd	  194 00000000  -- check receive length errors
+apbrd	  198 00000000  -- check receive symbol errors
+apbrd	  19C 00000000  -- check alignment errors
+apbrd	  1A0 00000000  -- check receive resource errors
+apbrdf     1A4 00000000  -- check receive overrun errors
+
+-- ******************************************************************************** --
+--  Receive an undersize frame (smaller than 64 bytes) with good crc and then receive
+--  a good frame. Check for undersize frame statistic.
+-- ******************************************************************************** --
+
+rxd(apb)     d578563412111111112222222233333333   -- short good crc
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000gggggggg
+
+
+rxd(gap)   55d578563412111111112222222233333333   -- good
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+dma_wr 44440004 12345678 -- store frame to memory
+dma_wr 44440008 11111111
+dma_wr 4444000c 22222222
+dma_wr 44440010 33333333
+dma_wr 44440014 44444444
+dma_wr 44440018 55555555
+dma_wr 4444001c 66666666
+dma_wr 44440020 77777777
+dma_wr 44440024 88888888
+dma_wr 44440028 99999999
+dma_wr 4444002c aaaaaaaa
+dma_wr 44440030 bbbbbbbb
+dma_wr 44440034 00000000
+dma_wr 44440038 00000000
+dma_wr 4444003c 00000000
+dma_wr 44440040 9b303826
+
+
+
+dma_wr 0123400c 0800c040 -- dma writes rx status, local address match, SOF EOF, and 64 bytes received
+dma_wr 01234008 44440005 -- dma writes ownership bit
+
+dma_rd 01234010 55550580 -- reads locations of next rx buffer
+
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+
+-- check transmit statistics
+apbrd	  100 00000000  -- check octets transmitted bottom
+apbrd	  104 00000000  -- check octets transmitted top
+apbrd	  108 00000000  -- check frames transmitted ok
+apbrd	  10C 00000000  -- check broadcast frames transmitted
+apbrd	  110 00000000  -- check multicast frames transmitted
+apbrd	  114 00000000  -- check pause frames transmitted
+apbrd	  118 00000000  -- check frames transmitted 64
+apbrd	  11C 00000000  -- check frames transmitted 65-127
+apbrd	  120 00000000  -- check frames transmitted 128-255
+apbrd	  124 00000000  -- check frames transmitted 256-511
+apbrd	  128 00000000  -- check frames transmitted 512-1023
+apbrd	  12C 00000000  -- check frames transmitted 1024-1518
+apbrd	  130 00000000  -- check frames transmitted 1519
+apbrd	  134 00000000  -- check transmit underruns errors
+apbrd	  138 00000000  -- check single collisions frames
+apbrd	  13C 00000000  -- check multiple collisions frames
+apbrd	  140 00000000  -- check excessive collisions frames
+apbrd	  144 00000000  -- check late collisions frames
+apbrd	  148 00000000  -- check deferred frames
+apbrd	  14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd	  150 00000040  -- check octets received bottom
+apbrd	  154 00000000  -- check octets received top
+apbrd	  158 00000001  -- check frames received ok
+apbrd	  15C 00000000  -- check broadcast frames received
+apbrd	  160 00000000  -- check multicast frames received
+apbrd	  164 00000000  -- check pause frames received
+apbrd	  168 00000001  -- check frames received 64
+apbrd	  16C 00000000  -- check frames received 65-127
+apbrd	  170 00000000  -- check frames received 128-255
+apbrd	  174 00000000  -- check frames received 256-511
+apbrd	  178 00000000  -- check frames received 512-1023
+apbrd	  17C 00000000  -- check frames received 1024-1518
+apbrd	  180 00000000  -- check frames received 1519
+apbrd	  184 00000001  -- check undersize frame errors
+apbrd	  188 00000000  -- check excessive receive length errors
+apbrd	  18C 00000000  -- check receive jabbers errors
+apbrd	  190 00000000  -- check FCS errors
+apbrd	  194 00000000  -- check receive length errors
+apbrd	  198 00000000  -- check receive symbol errors
+apbrd	  19C 00000000  -- check alignment errors
+apbrd	  1A0 00000000  -- check receive resource errors
+apbrdf     1A4 00000000  -- check receive overrun errors
+
+-- ******************************************************************************** --
+-- Receive a jabber (a long frame with bad crc), then a code error frame,
+-- then an alignment error frame (extra nibble and bad crc) and finally a good
+-- frame with an extra nibble (good crc when rounded down to the nearest byte).
+-- ******************************************************************************** --
+
+rxd(apb)     d578563412111111112222222233333333   -- jabber (just too long with bad crc)
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            44444444555555556666666677777777
+rxd            444444445555555566666666777777
+
+
+rxd(gap)   55d578563412111111112222222233333333   -- rxer
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000x0000000000002638309b
+
+
+
+rxd(gap)   55d578563412111111112222222233333333   -- bad crc with extra nibble (alignment error)
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            00000000000000000000000002638309b
+
+
+rxd(gap)   55d578563412111111112222222233333333   -- good crc with extra nibble (good frame)
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b0
+
+dma_wr 55550580 12345678 -- store frame to memory
+dma_wr 55550584 11111111
+dma_wr 55550588 22222222
+dma_wr 5555058c 33333333
+dma_wr 55550590 44444444
+dma_wr 55550594 55555555
+dma_wr 55550598 66666666
+dma_wr 5555059c 77777777
+dma_wr 555505a0 88888888
+dma_wr 555505a4 99999999
+dma_wr 555505a8 aaaaaaaa
+dma_wr 555505ac bbbbbbbb
+dma_wr 555505b0 00000000
+dma_wr 555505b4 00000000
+dma_wr 555505b8 00000000
+dma_wr 555505bc 9b303826
+
+
+dma_wr 01234014 0800c040 -- dma writes rx status, local address match, SOF EOF and 64 bytes received
+dma_wr 01234010 55550581 -- dma writes ownership bit
+
+dma_rd 01234018 66660000 -- reads locations of next rx buffer
+
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbwr      04 00090000  -- enable length field checking
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      14 00000020  -- read transmit status register
+apbrd      08 00000006  -- check reset value of network status register
+
+-- ******************************************************************************** --
+-- Receive a proper sized frame that is 65 bytes in length (47 bytes of data including padding) 
+-- with the length field indicating 46 bytes(Frame should be written to memory). Next, 
+-- receive a proper sized frame that is 64 bytes in length (46 bytes of data including padding) 
+-- with the length field indicating 47 bytes (Frame should be discarded). Finally, receive 
+-- a proper sized frame that is 64 bytes in length (46 bytes of data including padding) with  
+-- the length field indicating 46 bytes.  Check for length field error statistic. Ensure 
+-- frames with length field errors are discarded.
+-- (Note: Must set bit 16 in the network configuration register to enable
+-- length field detection.)
+-- ******************************************************************************** --
+
+-- drive a good frame of 65 bytes with a length field indicating 
+-- 64 bytes total length = 64 - 4(crc) - 12(addresses) - 2(type id)
+-- = 46 bytes = 0x2e bytes
+
+rxd(gap)     d5785634121111111122222222002e3333   -- bad length (one under)
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            00000000000000000000000000gggggggg
+
+dma_wr 66660000 12345678 -- store frame to memory
+dma_wr 66660004 11111111
+dma_wr 66660008 22222222
+dma_wr 6666000c 33332e00
+dma_wr 66660010 44444444
+dma_wr 66660014 55555555
+dma_wr 66660018 66666666
+dma_wr 6666001c 77777777
+dma_wr 66660020 88888888
+dma_wr 66660024 99999999
+dma_wr 66660028 aaaaaaaa
+dma_wr 6666002c bbbbbbbb
+dma_wr 66660030 00000000
+dma_wr 66660034 00000000
+dma_wr 66660038 00000000
+dma_wr 6666003c c8b1b500
+dma_wr 66660040 000000a8
+
+
+dma_wr 0123401c 0800c041 -- dma writes rx status, local address match, SOF EOF and 64 bytes received
+dma_wr 01234018 66660001 -- dma writes ownership bit
+
+dma_rd 01234020 77770000 -- reads locations of next rx buffer
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      14 00000020  -- read transmit status register
+apbrd      08 00000006  -- check reset value of network status register
+
+-- drive a good frame of 64 bytes with a length field indicating 
+-- 65 bytes total length = 65 - 4(crc) - 12(addresses) - 2(type id)
+-- = 47 bytes = 0x2f bytes
+
+rxd(gap)     d5785634121111111122222222002f3333   -- bad length (one over)
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- stop length error (one over)
+
+-- drive a good frame of 64 bytes with a length field indicating 
+-- 64 bytes total length = 65 - 4(crc) - 12(addresses) - 2(type id)
+-- = 47 bytes = 0x2e bytes
+
+rxd(gap)     d5785634121111111122222222002e3333   -- good length
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+dma_wr 77770000 12345678 -- store frame to memory
+dma_wr 77770004 11111111
+dma_wr 77770008 22222222
+dma_wr 7777000c 33332e00
+dma_wr 77770010 44444444
+dma_wr 77770014 55555555
+dma_wr 77770018 66666666
+dma_wr 7777001c 77777777
+dma_wr 77770020 88888888
+dma_wr 77770024 99999999
+dma_wr 77770028 aaaaaaaa
+dma_wr 7777002c bbbbbbbb
+dma_wr 77770030 00000000
+dma_wr 77770034 00000000
+dma_wr 77770038 00000000
+dma_wr 7777003c a004908b
+
+dma_wr 01234024 0800c040 -- dma writes rx status, local address match, SOF EOF and 64 bytes received
+dma_wr 01234020 77770001 -- dma writes ownership bit
+
+dma_rd 01234028 77770000 -- reads locations of next rx buffer
+
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+-- Check these early as they are about to change from next test
+apbrd	  184 00000000  -- check undersize frame errors
+apbrd	  194 00000001  -- check receive length errors
+
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      14 00000020  -- read transmit status register
+apbrd      08 00000006  -- check reset value of network status register
+
+-- check transmit statistics
+apbrd	  100 00000000  -- check octets transmitted bottom
+apbrd	  104 00000000  -- check octets transmitted top
+apbrd	  108 00000000  -- check frames transmitted ok
+apbrd	  10C 00000000  -- check broadcast frames transmitted
+apbrd	  110 00000000  -- check multicast frames transmitted
+apbrd	  114 00000000  -- check pause frames transmitted
+apbrd	  118 00000000  -- check frames transmitted 64
+apbrd	  11C 00000000  -- check frames transmitted 65-127
+apbrd	  120 00000000  -- check frames transmitted 128-255
+apbrd	  124 00000000  -- check frames transmitted 256-511
+apbrd	  128 00000000  -- check frames transmitted 512-1023
+apbrd	  12C 00000000  -- check frames transmitted 1024-1518
+apbrd	  130 00000000  -- check frames transmitted 1519
+apbrd	  134 00000000  -- check transmit underruns errors
+apbrd	  138 00000000  -- check single collisions frames
+apbrd	  13C 00000000  -- check multiple collisions frames
+apbrd	  140 00000000  -- check excessive collisions frames
+apbrd	  144 00000000  -- check late collisions frames
+apbrd	  148 00000000  -- check deferred frames
+apbrd	  14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd	  150 000000C1  -- check octets received bottom
+apbrd	  154 00000000  -- check octets received top
+apbrd	  158 00000003  -- check frames received ok
+apbrd	  15C 00000000  -- check broadcast frames received
+apbrd	  160 00000000  -- check multicast frames received
+apbrd	  164 00000000  -- check pause frames received
+apbrd	  168 00000002  -- check frames received 64
+apbrd	  16C 00000001  -- check frames received 65-127
+apbrd	  170 00000000  -- check frames received 128-255
+apbrd	  174 00000000  -- check frames received 256-511
+apbrd	  178 00000000  -- check frames received 512-1023
+apbrd	  17C 00000000  -- check frames received 1024-1518
+apbrd	  180 00000000  -- check frames received 1519
+apbrd	  188 00000000  -- check excessive receive length errors
+apbrd	  18C 00000001  -- check receive jabbers errors
+apbrd	  190 00000001  -- check FCS errors
+apbrd	  198 00000001  -- check receive symbol errors
+apbrd	  19C 00000001  -- check alignment errors
+apbrd	  1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- ******************************************************************************** --
+-- Receive a  frame that is 63 bytes long (45 bytes of data including padding) 
+-- with the length field indicating 46 bytes.  (The frame should be discarded and a length error
+-- statistic should  be set)
+-- ******************************************************************************** --
+
+-- drive a good frame of 63 bytes with a length field indicating 
+-- 64 bytes total length = 64 - 4(crc) - 12(addresses) - 2(type id)
+-- = 46 bytes = 0x2e bytes
+
+rxd(gap)     d5785634121111111122222222002e3333 -- length < 64 d
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000gggggggg
+
+-- ******************************************************************************** --
+-- Receive a  minimum sized frame with the length field indicating 1519.  
+-- (The frame should be discarded and a length error statistic set)
+-- ******************************************************************************** --
+rxd(gap)     d578563412111111112222222205ef3333 -- length field < 1535 and wrong so error
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+
+-- ******************************************************************************** --
+-- Receive a  minimum sized frame with the length field indicating 1536 bytes. 
+-- The length of the frame should not be checked. The frame should be written to memory 
+-- and no length error statistic should be set. (If the length field indicates equal or more than 
+-- 1536 bytes, then the frame should not be checked for length and should be written 
+-- to memory)
+-- ******************************************************************************** --
+
+
+rxd(gap)     d578563412111111112222222206003333 -- length field >= 1536 not checked
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+dma_wr 77770000 12345678 -- store frame to memory
+dma_wr 77770004 11111111
+dma_wr 77770008 22222222
+dma_wr 7777000c 33330006
+dma_wr 77770010 44444444
+dma_wr 77770014 55555555
+dma_wr 77770018 66666666
+dma_wr 7777001c 77777777
+dma_wr 77770020 88888888
+dma_wr 77770024 99999999
+dma_wr 77770028 aaaaaaaa
+dma_wr 7777002c bbbbbbbb
+dma_wr 77770030 00000000
+dma_wr 77770034 00000000
+dma_wr 77770038 00000000
+dma_wr 7777003c 3ea6c2dc
+
+dma_wr 0123402c 0800c040 -- dma writes rx status, local address match, SOF EOF and 64 bytes received
+dma_wr 01234028 77770001 -- dma writes ownership bit
+
+dma_rd 01234030 99990000 -- reads locations of next rx buffer
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      14 00000020  -- read transmit status register
+apbrd      08 00000006  -- check reset value of network status register
+
+-- ******************************************************************************** --
+-- Receive a minimum sized frame with padding with a correct length field.
+-- The length field should indicate the length of the frame to the end of the
+-- data field and not include padding.  The frame should be written properly to
+-- memory with no length error statistics set.
+-- ******************************************************************************** --
+
+rxd(gap)     d5785634121111111122222222002e3333 
+rxd            44444444555555556666666677777777
+rxd            88888888999999990000000000000000
+rxd            000000000000000000000000gggggggg
+
+dma_wr 99990000 12345678 -- store frame to memory
+dma_wr 99990004 11111111
+dma_wr 99990008 22222222
+dma_wr 9999000c 33332e00
+dma_wr 99990010 44444444
+dma_wr 99990014 55555555
+dma_wr 99990018 66666666
+dma_wr 9999001c 77777777
+dma_wr 99990020 88888888
+dma_wr 99990024 99999999
+dma_wr 99990028 00000000
+dma_wr 9999002c 00000000
+dma_wr 99990030 00000000
+dma_wr 99990034 00000000
+dma_wr 99990038 00000000
+dma_wr 9999003c 8c9abbc9
+
+dma_wr 01234034 0800c040 -- dma writes rx status, local address match, SOF EOF and 64 bytes received
+dma_wr 01234030 99990001 -- dma writes ownership bit
+
+dma_rd 01234038 aaaa0000 -- reads locations of next rx buffer
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      14 00000020  -- read transmit status register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      00 00000000  -- disable transmit and receive
+apbwr      18 498b3910  -- write receive queue pointer
+apbrd      18 498b3910  -- check receive queue pointer
+apbwr      00 0000000C  -- enable transmit and receive
+
+-- check transmit statistics
+apbrd	  100 00000000  -- check octets transmitted bottom
+apbrd	  104 00000000  -- check octets transmitted top
+apbrd	  108 00000000  -- check frames transmitted ok
+apbrd	  10C 00000000  -- check broadcast frames transmitted
+apbrd	  110 00000000  -- check multicast frames transmitted
+apbrd	  114 00000000  -- check pause frames transmitted
+apbrd	  118 00000000  -- check frames transmitted 64
+apbrd	  11C 00000000  -- check frames transmitted 65-127
+apbrd	  120 00000000  -- check frames transmitted 128-255
+apbrd	  124 00000000  -- check frames transmitted 256-511
+apbrd	  128 00000000  -- check frames transmitted 512-1023
+apbrd	  12C 00000000  -- check frames transmitted 1024-1518
+apbrd	  130 00000000  -- check frames transmitted 1519
+apbrd	  134 00000000  -- check transmit underruns errors
+apbrd	  138 00000000  -- check single collisions frames
+apbrd	  13C 00000000  -- check multiple collisions frames
+apbrd	  140 00000000  -- check excessive collisions frames
+apbrd	  144 00000000  -- check late collisions frames
+apbrd	  148 00000000  -- check deferred frames
+apbrd	  14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd	  150 00000080  -- check octets received bottom
+apbrd	  154 00000000  -- check octets received top
+apbrd	  158 00000002  -- check frames received ok
+apbrd	  15C 00000000  -- check broadcast frames received
+apbrd	  160 00000000  -- check multicast frames received
+apbrd	  164 00000000  -- check pause frames received
+apbrd	  168 00000002  -- check frames received 64
+apbrd	  16C 00000000  -- check frames received 65-127
+apbrd	  170 00000000  -- check frames received 128-255
+apbrd	  174 00000000  -- check frames received 256-511
+apbrd	  178 00000000  -- check frames received 512-1023
+apbrd	  17C 00000000  -- check frames received 1024-1518
+apbrd	  180 00000000  -- check frames received 1519
+apbrd	  184 00000001  -- check undersize frame errors
+apbrd	  188 00000000  -- check excessive receive length errors
+apbrd	  18C 00000000  -- check receive jabbers errors
+apbrd	  190 00000000  -- check FCS errors
+apbrd	  194 00000002  -- check receive length errors
+apbrd	  198 00000000  -- check receive symbol errors
+apbrd	  19C 00000000  -- check alignment errors
+apbrd	  1A0 00000000  -- check receive resource errors
+apbrdf    1A4 00000000  -- check receive overrun errors
+
+-- ******************************************************************************** --
+--  Receive a frame that is 1518 bytes long with the length field 
+--  indicating 1519 bytes. The length of the frame should not be 
+--  checked. The frame should be dropped as the actual length
+--  is less than the indicated length
+-- ******************************************************************************** --
+
+rxd(apb)    555555d57856341211112b59171aad4a05ef2c95
+rxd                 59eee2e32c815a1442ebb6ca7eb447df
+rxd                 a466f64d47c93ecb151ff5d81d34d668
+rxd                 72a64c9562341ce5234e81a73314d1eb
+rxd                 cfdf1d6a2f4a64ed781d82e9e82f77f6
+rxd                 997dbb4c4b3ea5379c2fd16873742779
+rxd                 4c7ab9ae67a8eda64cbef17913e4975e
+rxd                 ed9b2ba1baf31731d18b75a1126b561d
+rxd                 193c48ba253f8efd47f427d73c6edc56
+rxd                 ca4c965315ff211b8fb1db8e35c257d8
+rxd                 c1e61c8ecaaf7aaaceed9c37824b95f6
+rxd                 2461ac2ed6ad675656e28b3f1f29478c
+rxd                 691831da35acbac76d131bfe853f5db9
+rxd                 be1dd864cb8338958643da27b5a57d27
+rxd                 5d6e6c6cbd9df49bba5da3f9f8b7f66e
+rxd                 34e21d7e5c151a959c63e9ac2c7b948e
+rxd                 8f5ebcea949a41dacfd752de44c4c3b1
+rxd                 a2ffa7cb1db6229f9dd6a86de984b1de
+rxd                 8e6b89e9222382f64c55e7ebcb335112
+rxd                 43cc8ba6c25225ad98e3976ebb856d72
+rxd                 d28ac619fde18bd2f746ef8e1495b648
+rxd                 1b5bb2d463fc3d72b7d242355bb835fc
+rxd                 6147a247389b1f6e21c979a3837b1cf3
+rxd                 87d7853c51db649e8bf85b14849bf89f
+rxd                 5cd32f26ebdb882826c4173bc4a75af1
+rxd                 aecc472e5e5e3b3e289ffefef9a44d76
+rxd                 3ea82bf2c99d435925bf21245ae132e9
+rxd                 dc437559158a5c21e356c3548424cdb2
+rxd                 5787fe2441dbe57d8768ad1f57be655d
+rxd                 fbb11d715fc1b343f9ca463647b65ea4
+rxd                 55368b5e9ce3538c34a2f8f9766f3c8b
+rxd                 527f8c5c63de1dd1778b1796a14bfac1
+rxd                 aeea65548e3c18cb2d2fb489899214a2
+rxd                 1b553d42b1eaef4e67aac95322de9b69
+rxd                 51469b34c2b925693ca37dc2afa1d98e
+rxd                 2ca2da8d8b122d32eebce9a2429bffa4
+rxd                 8b84f6325f8db5a8b5a7e17b4ab3db8a
+rxd                 2a8ed9863be755a335fc1fd16af53b55
+rxd                 be9ad89c5c9adf872cc735fb47e26ad1
+rxd                 85a6237b9c8da1b22c63784a3bab957b
+rxd                 1c64a4fec2af292f73178943134f88ce
+rxd                 ee9b973e83cce92e2c6a99ed8937f29e
+rxd                 eecce7ad44ed288574d1e93235d631b7
+rxd                 fb48c9319471e25ee4a43cda85a985da
+rxd                 ceeba462e73eb22e678184fd424729a8
+rxd                 4bbce41f8a5ceda93c6899d37fd769cf
+rxd                 144afa9a77eeb7bfc8ed875acaeeb8e8
+rxd                 8755c8284a9f992cc458ee31df3af4e8
+rxd                 e78ca83119132675bdbd5aaba18f8ef2
+rxd                 16c35522c39ec6c2799d13d9b7967a22
+rxd                 338623479bb1c375fd34b7a19c5c8bda
+rxd                 64cd5886d7df4af31b588d1e94d4da78
+rxd                 d53f39ee39564e3a2ae2aa45df69d965
+rxd                 51eb28a1fdcff49cd1eb9acd21dda68b
+rxd                 a439f1ffdab3486acc6b14218e63fce1
+rxd                 284e1b8433c5c56eba69fbb296cb494c
+rxd                 b54c2d788cdadd735e2aa1ff8824f865
+rxd                 dd3c8e6e288aec1a279b5491b795caec
+rxd                 b28d9ddb4896437df5a1c4696b438255
+rxd                 4e87e43b75cad5c64fae431351ad97e9
+rxd                 5ff723ecc4bcb9f597359544fcd37179
+rxd                 7f616bab52d62e17fa98b836f2d51e7b
+rxd                 aede98cf1f6fa5ee3518113166c91a76
+rxd                 8d55fdfa5315149c98ab428f79c1a56a
+rxd                 194bc6e1944863d9bf2eda1a7cf2b78e
+rxd                 7b782199b8d2c49b7e42bdfa1c78996d
+rxd                 6ebfaadb33ee4efdc66734174ef449f5
+rxd                 62f1456683a8a76a277b8f8b327d4bfb
+rxd                 141c7ab8dd6d2e35edf2df2dbee9c692
+rxd                 144da41c6c26bfe2744f75a784a7dc79
+rxd                 dbff1f4f7ea35b85c38166e1eda9692f
+rxd                 6431b29b3f4ea53d5bb47776b6ee2e54
+rxd                 9e7d243e7957fcaaf66fe5ce38e2f679
+rxd                 c1485c496e879ed722e729897ce529d1
+rxd                 67ecd39f583be43bdb92d313c92c2cad
+rxd                 a46a6d7f2165a1711a4defbc7b9836d4
+rxd                 a71271782878624fac623589966a5975
+rxd                 b946d36c41dc68963bf21392267b9aab
+rxd                 179973ecfde28b39fa12695f321e8f1d
+rxd                 fea9cc858379ac5c19615466c65afbb5
+rxd                 28a69e6156ab63f241bc89db34dde1da
+rxd                 38abf64c7985af236f6d86fd2fa85fc6
+rxd                 49b3eb14e9c9f78bccb7a724c5c5d2c3
+rxd                 a945665e14682ab333329abd1558ec1d
+rxd                 4ddef57f8b5c3759b4d979726a8247ce
+rxd                 1cb8e7f1dd39367be6b3a3991366112d
+rxd                 d1226d976ed6a519d96cc1e2dd3fb36d
+rxd                 b752ff9574f5ceab22a2c1ad46a91638
+rxd                 52e47f3c78b4842e87861da9cdd4d9a8
+rxd                 f9c18b82f974148ff32a68b5c6d119cd
+rxd                 cc849b2b8c14e6e84e558cf1d23aa69d
+rxd                 2688f35ce8dc882b7872512362d1ff96
+rxd                 9f5e23f7bbca19237a5ddd34f2465b34
+rxd                 13ebedb77b52957db88332f7bee72458
+rxd                 8f3b2b693fc35624f312gggggggg
+
+-- read the first receive queue descriptor
+dma_rd          498b3910    e2df2b28
+
+
+-- setup the dma interface
+apbwr(25000) 00 00000000  -- disable transmit and receive
+apbwr        18 5d7e1cdc  -- write receive queue pointer
+apbwr        00 0000000C  -- enable transmit and receive
+apbrdf       18 5d7e1cdc  -- check receive queue pointer
+
+
+-- ******************************************************************************** --
+--  Receive a maximum sized frame of 1518 bytes with the length field 
+--  indicating 1517.  (The frame should be received without a length 
+--  error statistic). 
+-- ******************************************************************************** --
+
+rxd(apb)    5555555555d5785634121111e1d8f56857b205ed2461
+rxd                     347625928785ab669ebc6739f7f2557a
+rxd                     d5e7333b75f9f32b37b95c7261f5fab4
+rxd                     8cb39e488fc3ad55cc3cf824998e6d48
+rxd                     387b95657885111f4cb8187f84fe4168
+rxd                     6d8274e1fec195c2b6aecb2e78a8997a
+rxd                     62397981a53148f5ba4c12ea862d341e
+rxd                     dae5adc872739a8b2f98883cd135fedb
+rxd                     b13c146b3943d2d85e276c1929f6ae4c
+rxd                     d894be28fd998afaecaea3bf925864f6
+rxd                     43595915cb75cc558e385fbc5b2943cc
+rxd                     432b5442bc4f1a3b9f5caa25f993b775
+rxd                     ea33154b5f649a6bcfe5f565a2d4e6a7
+rxd                     983c331c199d8b3cee3cda6795a4499e
+rxd                     a5c9c6de66838967f539eb68a285db51
+rxd                     39216b8a1a58b539ba384cedd6d24271
+rxd                     859539af53e14edff5dc7f6892b6aa71
+rxd                     1a88918e1286bbc6db59d7c9c951d462
+rxd                     892d7b34a5f9433b8b95117bec2948cc
+rxd                     f282d8fb6f83779ba43c125149f557f5
+rxd                     578d22292c9de3237ab1aaaef6f53f18
+rxd                     e8cc624d9fd5f3b6e5656f4ea97525d5
+rxd                     1a91219cff4faabc1f4eb9d416aece77
+rxd                     153fd394ec43a817b2be89651e5ef97d
+rxd                     518e2cfd7cb45d48b3e351dbccb151a6
+rxd                     36b49b42a79eea44a2ab83cba6813842
+rxd                     d6c6e5f96adcf2f49f18584a7c96eebe
+rxd                     8f2a714e297fa6a8af7efa64845f577b
+rxd                     498867c662a1e6523b78439f2c8bad22
+rxd                     a488afe4baa7c5816cf2735354d11b85
+rxd                     5a614744d386684e5aa8cdae75a61ebe
+rxd                     83dfbd827d8639846929661ccf156a3b
+rxd                     1ff9ac27a5bfacd3184b1acc114afe43
+rxd                     5f84411364b37674645e6ca2b252cbe9
+rxd                     75c66babb8564c425cf225151b989371
+rxd                     b5715f5c7cbc9381f7ae18bb5cf32afc
+rxd                     2c462c242e6b2dc3572547cccc6c9f4f
+rxd                     f48b8a38aeb93b13ddadcdd922d83892
+rxd                     c683b6cd3fe6af3bb833d961e195887a
+rxd                     62d9d58f765c9ea46c98dba94eb129a2
+rxd                     e47d7f532da33fa68efdb871d9ebe631
+rxd                     5ac98aa961dea4719254bf7cfe82b11c
+rxd                     1e42871782b9cf1d6fde5ec41f4eea75
+rxd                     49bf5abda79f525ebef82ea6fe79ec15
+rxd                     1ffcb5ffc7de1adebff24d5df8e6bde7
+rxd                     977a99c1aeb3db2de2f5336aaaabb777
+rxd                     916aca6ccfa94dbef62e2d9917241c9c
+rxd                     b4df64c71b291f2b9d93341621bf62e3
+rxd                     29233957c7162ecf68d9d9d7244fbcb3
+rxd                     b15fe51d6b8aeefd1535ef22bfc5ce71
+rxd                     b55e3aecdf27dbfeb536b782b44113de
+rxd                     f1392484fcdc3268bb51d5117ef61875
+rxd                     a1f93d5f5d41ddc97ca7247d2c159fa3
+rxd                     1ba2943e463ff9a74ac3363352764188
+rxd                     e4c52e864d4e5eda65bc5e1e36fa2b11
+rxd                     f556c774a47a451628e4bc78fd8ecdd2
+rxd                     e4b1446cc43ce493d293c5dacea3feaf
+rxd                     9a55745da289579367f5e4d8bd8485ff
+rxd                     abd56da63ede6cd426ca15547b7b44c5
+rxd                     6fff273878fabc12a37b717b79d5b154
+rxd                     1d8ec1243a15a149f54ae9fbcf3c38d8
+rxd                     63332d5ddd7e153469b43a967ae28c73
+rxd                     8cf73cd8fedabfb1ba739d6ed87f46fe
+rxd                     47e5bb7134c1bb336d79a62eba6d6c4c
+rxd                     a45a2b8e39136e8a12d6824f8de96a6c
+rxd                     e918a1b95a1c13c5996cba32178b39af
+rxd                     9f7d319fe22fc3f6ca7639638ee38de4
+rxd                     3a7b887adefe72a9f9e7bf48333c424c
+rxd                     1835524531143bd25241d5c6e25e39fe
+rxd                     a4ebd7f838d61e48f6766ce84194a3b1
+rxd                     1e533e84f6f89a2783c78cca88a9de18
+rxd                     e2253ec8b1198fd7198792ae5ebbdda1
+rxd                     bcfe11e9fb5eb176ea26ed87a384c6bb
+rxd                     4a13a6a5b9ae3dbe1a62f87e6c8ed78b
+rxd                     7cb3faadd214e95be85fbb227d12c6b8
+rxd                     d16653a2f79d4fbcb3effb75b82ac43e
+rxd                     e159cfd6cc373eb4bf6d8d52bff7cd78
+rxd                     274a7d73d35c63e9abc5bc68ee6fc96f
+rxd                     11bfbca4f6a71c1512943edeeeac18da
+rxd                     e5596223dee77fd8eca6f2d7e3685695
+rxd                     affd579a22824f3c45ea5929854c2ae1
+rxd                     d613e8ab2a39b863c7ad882aa4b442de
+rxd                     7be14ac82cc571f2c2786dd5acabbf65
+rxd                     c52f5e5f66ee39a1d38d36c68f969c72
+rxd                     88aec6d5b49bf7bedbf48233bd5bf1cf
+rxd                     568bbcddb9deda7df87135347a35832a
+rxd                     c1414ef28c7f3f431f86171b631cf46f
+rxd                     96fec54b7f66eb9344837db2dcb86c73
+rxd                     e562d2e295b7b5c9e654ea4d2ecb95ee
+rxd                     ace4ad774bd18bad65466b5c593ad2f4
+rxd                     4f56647dc68c6392fa2cc82ea9c933fd
+rxd                     8779e98b73f65f2cff76dcdcf68fe69f
+rxd                     63ad396775cce17fa584b1949ced4672
+rxd                     f1716cc4bf5bbf999f376f92e6529244
+rxd                     6f63db57c65c5f8edacagggggggg
+
+-- check the recieve data as it is written
+
+-- read the first receive queue descriptor
+dma_rd          5d7e1cdc    5cd68d78
+
+
+-- ******************************************************************************** --
+--  Enable 1536 byte length frames.
+-- ******************************************************************************** --
+
+apbwr(41000) 00 00000000  -- disable transmit and receive
+apbwr        18 cf78a99c  -- write receive queue pointer
+apbwr        04 00090100  -- enable length field checking and receiving 1536 Byte frames
+apbwr        00 0000000C  -- enable transmit and receive
+apbrdf       18 cf78a99c  -- check receive queue pointer
+
+-- ******************************************************************************** --
+--  Receive a frame that is 1536 bytes long with the length field 
+--  indicating 1537 bytes. 
+--  The actual length is less than the indicated length.  The frame
+--  should be written to memory and no receive length error indicated.
+-- ******************************************************************************** --
+
+rxd(apb)    555555d5785634121111be6bcdd89ae706014653
+rxd                 ff973e51dc3c17b22462e27816bd6c7d
+rxd                 e46ab6ee1d3f79e794224d4b727622fa
+rxd                 593e62168185b3fc3d572c5a66eda814
+rxd                 4f96b1682e4a6d532fd63ffdcd226253
+rxd                 5cfac38dfda26e7f85fdf25db2ff5f41
+rxd                 eedf9e825f162b647362a78f7fe9731c
+rxd                 3af6f159a1f9e976e17a51746db3cae2
+rxd                 986cfa5e9c39b8b24f38b6db617962ef
+rxd                 7146c3f82dcadaff37189ecd4f23ff83
+rxd                 957c5a453afdb992abe1adbba4183288
+rxd                 45837c211b9ebfb49e1534a5ebd73cd2
+rxd                 65ce14589c6e897b31a3964de62ce741
+rxd                 72b745f296dda23ccdb19bb1f667d444
+rxd                 2d6f15cc126f3e3673dc2ac7d4db257d
+rxd                 e14bb3d16fee123aa8a5b968f5f19eea
+rxd                 8b23a3aaad6e18135d5a84a6fad8b7ca
+rxd                 e4192df97b26cbe1ca82a2792fdfbf3c
+rxd                 b9ba6cdb5c5865d16c355fefb9b9bf4c
+rxd                 b84aed82b76e918c7aa7a91774cfceaf
+rxd                 c87d7e63bd7c5c13779f635c8caefbaa
+rxd                 84dad84c6bae55a7476b6eca6d6d964e
+rxd                 6b354fa575bc14189c5b5aaef3e73a28
+rxd                 18fd29ac542d1aca3a2e88344721f35a
+rxd                 5e92f886917b35fbf6911452a321d563
+rxd                 6cb6945c6ffcec46de36255745e19863
+rxd                 e62dd1b886dd9f74e3ad93fb359148b9
+rxd                 22f2829a97519feeee58b1b6a2e64ec7
+rxd                 fc2856e87c683cac9bc15ae5a67bc98c
+rxd                 4431b534ff9dd87bde32ec7f4161ea12
+rxd                 cb96835c72c121dcb56211c2d8dd37cc
+rxd                 3c72369e4b52315a646c4bd8eff7b2e2
+rxd                 952e45fd2cfa58f451b7e5a38812a37a
+rxd                 5a44223beaa513c9dc2545bd93288d13
+rxd                 ff91c27cdb6d27842625e173ec219f27
+rxd                 c3dcf214baa53182c7fb8896813658b5
+rxd                 c68639437e8a398a58995b5381eed4cc
+rxd                 614ddd7a3fd7eda5d25684be94d85628
+rxd                 2547f523ceb8b9466b64968f3a227489
+rxd                 85c96a79875e523645177583cdc6ea52
+rxd                 f8ecc2edc943cb6c3e1c9d646e9af96c
+rxd                 25e939d2cbc52eddcdd8d662a2fcf859
+rxd                 24df627ab8b33b835b8ea996ae1fe57b
+rxd                 196daeefd4f7ef27c363775cf58fdf6f
+rxd                 dc5923d6846b5c9c19ba74e7b7cfbf77
+rxd                 e22e734cc6abb37f36db6156667dbb73
+rxd                 44423ac5ae2334dbc13aa6af11f54997
+rxd                 bb2158f2c41f2fab4a3de6a6fd743d16
+rxd                 1d8a9da53f5641fa6af824fdaadec6fa
+rxd                 c12cedb4284befdc3572d3a45e895883
+rxd                 d1891becbb96998ed8fa33183f8ccc76
+rxd                 f28eafd7c3c6948f4eeea17278af873d
+rxd                 444589f133b83e825c653b941d922b81
+rxd                 3cb7a684a71ce4681125914ba5142cb1
+rxd                 a9cb753d531725468f5e79b14286be5a
+rxd                 c5afe5a91f78ca5ef5e366ef9ef5bf88
+rxd                 b1389ad6ebedc987c8b666f2d2d34d9f
+rxd                 1d73ac75d86422d8e28b8a32a99e95ff
+rxd                 fecc4fc3bca1b2ef1cc1ae7769db2594
+rxd                 d8cae9a9e7dd4d7455e7d1eb226929be
+rxd                 b4244d4a5e9d73963237e79fa241b1d2
+rxd                 8da39fd6e2d5995c9d38fa5a29abb867
+rxd                 9a93c7b58912f1ff36fe9bb7f1a5cda2
+rxd                 395a661388b4466562ccab15feff26dd
+rxd                 c89edce3798eab18c86ce47d12b29818
+rxd                 35c194cd67f75fbc7e27a52688928c31
+rxd                 a5fba5e3c4a67f87a93684621caa4839
+rxd                 aa1137a1becbf7ccd4564db3ac6a6a24
+rxd                 65f68b24712b66c5fafd9943fe479a7f
+rxd                 8f436a5481de2a77cb6b575fa8543f45
+rxd                 629eb3b2ce564985a8f7355eee1d6f68
+rxd                 e92f3291e91637bb8297bf46ad7e8a4b
+rxd                 22171bce555882c3e314f488448611b2
+rxd                 5a1b3a9cc5ea3f4be3d32d38e4beb2c8
+rxd                 5727fab8354c45b24cd8c5c532dbc42b
+rxd                 7ea5fdbb69be259d87dec74fae392cb8
+rxd                 21c2daf94ed434d89b341ca8c6989a42
+rxd                 15735ae9db8b7b56dde11be1c3873ed4
+rxd                 e13179197b5ba437a2dbc3b98c1e3fe3
+rxd                 5d291e955fcbc491df42aea84ad888b4
+rxd                 b599d3c1fe424b269a9d7c2527813856
+rxd                 4f8789f192ab2ad1a1df477b4ab45177
+rxd                 b4f4489463243925bf52ba8bb5b9b235
+rxd                 316d7bc3e18443c7bc2fdadd3646fa79
+rxd                 6fa15c7f346abf2728648adde6e21438
+rxd                 1fe4942e247deeb8dbe2ace529adb174
+rxd                 fbe518dc7623d35773916eb18a13b794
+rxd                 432fe72226561519fe1376dda4e63d23
+rxd                 92a7efc1e61f17b7eac11df12dd2965f
+rxd                 6d97513e35e79eefc8bbcb828e277a25
+rxd                 e948798c3bdcdff32e7563919bb573e1
+rxd                 d783a8865869e873ae688975f717a859
+rxd                 fda36f261ab5bd9729d76a64b65d155c
+rxd                 a6216619c8cf44b9fed33bf9356b23d1
+rxd                 4acddf6b832e8938e1fb72b454f67546
+rxd                 eff33478e732a36de7a3758dgggggggg
+
+-- read the first receive queue descriptor
+dma_rd          cf78a99c    8b723660
+
+-- check writes to the receive buffer
+dma_wr          8b723660    12345678
+dma_wr          8b723664    6bbe1111
+dma_wr          8b723668    e79ad8cd
+dma_wr          8b72366c    53460106
+dma_wr          8b723670    513e97ff
+dma_wr          8b723674    b2173cdc
+dma_wr          8b723678    78e26224
+dma_wr          8b72367c    7d6cbd16
+dma_wr          8b723680    eeb66ae4
+dma_wr          8b723684    e7793f1d
+dma_wr          8b723688    4b4d2294
+dma_wr          8b72368c    fa227672
+dma_wr          8b723690    16623e59
+dma_wr          8b723694    fcb38581
+dma_wr          8b723698    5a2c573d
+dma_wr          8b72369c    14a8ed66
+dma_wr          8b7236a0    68b1964f
+dma_wr          8b7236a4    536d4a2e
+dma_wr          8b7236a8    fd3fd62f
+dma_wr          8b7236ac    536222cd
+dma_wr          8b7236b0    8dc3fa5c
+dma_wr          8b7236b4    7f6ea2fd
+dma_wr          8b7236b8    5df2fd85
+dma_wr          8b7236bc    415fffb2
+dma_wr          8b7236c0    829edfee
+dma_wr          8b7236c4    642b165f
+dma_wr          8b7236c8    8fa76273
+dma_wr          8b7236cc    1c73e97f
+dma_wr          8b7236d0    59f1f63a
+dma_wr          8b7236d4    76e9f9a1
+dma_wr          8b7236d8    74517ae1
+dma_wr          8b7236dc    e2cab36d
+
+-- write back the intermediate queue descriptor's status
+dma_wr          cf78a9a0    00004000 -- dma writes an intermediate buffer's status
+dma_wr          cf78a99c    8b723661 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          cf78a9a4    8b7236e0
+
+-- check writes to the receive buffer
+dma_wr          8b7236e0    5efa6c98
+dma_wr          8b7236e4    b2b8399c
+dma_wr          8b7236e8    dbb6384f
+dma_wr          8b7236ec    ef627961
+dma_wr          8b7236f0    f8c34671
+dma_wr          8b7236f4    ffdaca2d
+dma_wr          8b7236f8    cd9e1837
+dma_wr          8b7236fc    83ff234f
+dma_wr          8b723700    455a7c95
+dma_wr          8b723704    92b9fd3a
+dma_wr          8b723708    bbade1ab
+dma_wr          8b72370c    883218a4
+dma_wr          8b723710    217c8345
+dma_wr          8b723714    b4bf9e1b
+dma_wr          8b723718    a534159e
+dma_wr          8b72371c    d23cd7eb
+dma_wr          8b723720    5814ce65
+dma_wr          8b723724    7b896e9c
+dma_wr          8b723728    4d96a331
+dma_wr          8b72372c    41e72ce6
+dma_wr          8b723730    f245b772
+dma_wr          8b723734    3ca2dd96
+dma_wr          8b723738    b19bb1cd
+dma_wr          8b72373c    44d467f6
+dma_wr          8b723740    cc156f2d
+dma_wr          8b723744    363e6f12
+dma_wr          8b723748    c72adc73
+dma_wr          8b72374c    7d25dbd4
+dma_wr          8b723750    d1b34be1
+dma_wr          8b723754    3a12ee6f
+dma_wr          8b723758    68b9a5a8
+dma_wr          8b72375c    ea9ef1f5
+
+-- write back the intermediate queue descriptor's status
+dma_wr          cf78a9a8    00000000 -- dma writes an intermediate buffer's status
+dma_wr          cf78a9a4    8b7236e1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          cf78a9ac    8b723760
+
+-- check writes to the receive buffer
+dma_wr          8b723760    aaa3238b
+dma_wr          8b723764    13186ead
+dma_wr          8b723768    a6845a5d
+dma_wr          8b72376c    cab7d8fa
+dma_wr          8b723770    f92d19e4
+dma_wr          8b723774    e1cb267b
+dma_wr          8b723778    79a282ca
+dma_wr          8b72377c    3cbfdf2f
+dma_wr          8b723780    db6cbab9
+dma_wr          8b723784    d165585c
+dma_wr          8b723788    ef5f356c
+dma_wr          8b72378c    4cbfb9b9
+dma_wr          8b723790    82ed4ab8
+dma_wr          8b723794    8c916eb7
+dma_wr          8b723798    17a9a77a
+dma_wr          8b72379c    afcecf74
+dma_wr          8b7237a0    637e7dc8
+dma_wr          8b7237a4    135c7cbd
+dma_wr          8b7237a8    5c639f77
+dma_wr          8b7237ac    aafbae8c
+dma_wr          8b7237b0    4cd8da84
+dma_wr          8b7237b4    a755ae6b
+dma_wr          8b7237b8    ca6e6b47
+dma_wr          8b7237bc    4e966d6d
+dma_wr          8b7237c0    a54f356b
+dma_wr          8b7237c4    1814bc75
+dma_wr          8b7237c8    ae5a5b9c
+dma_wr          8b7237cc    283ae7f3
+dma_wr          8b7237d0    ac29fd18
+dma_wr          8b7237d4    ca1a2d54
+dma_wr          8b7237d8    34882e3a
+dma_wr          8b7237dc    5af32147
+
+-- write back the intermediate queue descriptor's status
+dma_wr          cf78a9b0    00000000 -- dma writes an intermediate buffer's status
+dma_wr          cf78a9ac    8b723761 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          cf78a9b4    8b7237e0
+
+-- check writes to the receive buffer
+dma_wr          8b7237e0    86f8925e
+dma_wr          8b7237e4    fb357b91
+dma_wr          8b7237e8    521491f6
+dma_wr          8b7237ec    63d521a3
+dma_wr          8b7237f0    5c94b66c
+dma_wr          8b7237f4    46ecfc6f
+dma_wr          8b7237f8    572536de
+dma_wr          8b7237fc    6398e145
+dma_wr          8b723800    b8d12de6
+dma_wr          8b723804    749fdd86
+dma_wr          8b723808    fb93ade3
+dma_wr          8b72380c    b9489135
+dma_wr          8b723810    9a82f222
+dma_wr          8b723814    ee9f5197
+dma_wr          8b723818    b6b158ee
+dma_wr          8b72381c    c74ee6a2
+dma_wr          8b723820    e85628fc
+dma_wr          8b723824    ac3c687c
+dma_wr          8b723828    e55ac19b
+dma_wr          8b72382c    8cc97ba6
+dma_wr          8b723830    34b53144
+dma_wr          8b723834    7bd89dff
+dma_wr          8b723838    7fec32de
+dma_wr          8b72383c    12ea6141
+dma_wr          8b723840    5c8396cb
+dma_wr          8b723844    dc21c172
+dma_wr          8b723848    c21162b5
+dma_wr          8b72384c    cc37ddd8
+dma_wr          8b723850    9e36723c
+dma_wr          8b723854    5a31524b
+dma_wr          8b723858    d84b6c64
+dma_wr          8b72385c    e2b2f7ef
+
+-- write back the intermediate queue descriptor's status
+dma_wr          cf78a9b8    00000000 -- dma writes an intermediate buffer's status
+dma_wr          cf78a9b4    8b7237e1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          cf78a9bc    8b723860
+
+-- check writes to the receive buffer
+dma_wr          8b723860    fd452e95
+dma_wr          8b723864    f458fa2c
+dma_wr          8b723868    a3e5b751
+dma_wr          8b72386c    7aa31288
+dma_wr          8b723870    3b22445a
+dma_wr          8b723874    c913a5ea
+dma_wr          8b723878    bd4525dc
+dma_wr          8b72387c    138d2893
+dma_wr          8b723880    7cc291ff
+dma_wr          8b723884    84276ddb
+dma_wr          8b723888    73e12526
+dma_wr          8b72388c    279f21ec
+dma_wr          8b723890    14f2dcc3
+dma_wr          8b723894    8231a5ba
+dma_wr          8b723898    9688fbc7
+dma_wr          8b72389c    b5583681
+dma_wr          8b7238a0    433986c6
+dma_wr          8b7238a4    8a398a7e
+dma_wr          8b7238a8    535b9958
+dma_wr          8b7238ac    ccd4ee81
+dma_wr          8b7238b0    7add4d61
+dma_wr          8b7238b4    a5edd73f
+dma_wr          8b7238b8    be8456d2
+dma_wr          8b7238bc    2856d894
+dma_wr          8b7238c0    23f54725
+dma_wr          8b7238c4    46b9b8ce
+dma_wr          8b7238c8    8f96646b
+dma_wr          8b7238cc    8974223a
+dma_wr          8b7238d0    796ac985
+dma_wr          8b7238d4    36525e87
+dma_wr          8b7238d8    83751745
+dma_wr          8b7238dc    52eac6cd
+
+-- write back the intermediate queue descriptor's status
+dma_wr          cf78a9c0    00000000 -- dma writes an intermediate buffer's status
+dma_wr          cf78a9bc    8b723861 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          cf78a9c4    8b7238e0
+
+-- check writes to the receive buffer
+dma_wr          8b7238e0    edc2ecf8
+dma_wr          8b7238e4    6ccb43c9
+dma_wr          8b7238e8    649d1c3e
+dma_wr          8b7238ec    6cf99a6e
+dma_wr          8b7238f0    d239e925
+dma_wr          8b7238f4    dd2ec5cb
+dma_wr          8b7238f8    62d6d8cd
+dma_wr          8b7238fc    59f8fca2
+dma_wr          8b723900    7a62df24
+dma_wr          8b723904    833bb3b8
+dma_wr          8b723908    96a98e5b
+dma_wr          8b72390c    7be51fae
+dma_wr          8b723910    efae6d19
+dma_wr          8b723914    27eff7d4
+dma_wr          8b723918    5c7763c3
+dma_wr          8b72391c    6fdf8ff5
+dma_wr          8b723920    d62359dc
+dma_wr          8b723924    9c5c6b84
+dma_wr          8b723928    e774ba19
+dma_wr          8b72392c    77bfcfb7
+dma_wr          8b723930    4c732ee2
+dma_wr          8b723934    7fb3abc6
+dma_wr          8b723938    5661db36
+dma_wr          8b72393c    73bb7d66
+dma_wr          8b723940    c53a4244
+dma_wr          8b723944    db3423ae
+dma_wr          8b723948    afa63ac1
+dma_wr          8b72394c    9749f511
+dma_wr          8b723950    f25821bb
+dma_wr          8b723954    ab2f1fc4
+dma_wr          8b723958    a6e63d4a
+dma_wr          8b72395c    163d74fd
+
+-- write back the intermediate queue descriptor's status
+dma_wr          cf78a9c8    00000000 -- dma writes an intermediate buffer's status
+dma_wr          cf78a9c4    8b7238e1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          cf78a9cc    8b723960
+
+-- check writes to the receive buffer
+dma_wr          8b723960    a59d8a1d
+dma_wr          8b723964    fa41563f
+dma_wr          8b723968    fd24f86a
+dma_wr          8b72396c    fac6deaa
+dma_wr          8b723970    b4ed2cc1
+dma_wr          8b723974    dcef4b28
+dma_wr          8b723978    a4d37235
+dma_wr          8b72397c    8358895e
+dma_wr          8b723980    ec1b89d1
+dma_wr          8b723984    8e9996bb
+dma_wr          8b723988    1833fad8
+dma_wr          8b72398c    76cc8c3f
+dma_wr          8b723990    d7af8ef2
+dma_wr          8b723994    8f94c6c3
+dma_wr          8b723998    72a1ee4e
+dma_wr          8b72399c    3d87af78
+dma_wr          8b7239a0    f1894544
+dma_wr          8b7239a4    823eb833
+dma_wr          8b7239a8    943b655c
+dma_wr          8b7239ac    812b921d
+dma_wr          8b7239b0    84a6b73c
+dma_wr          8b7239b4    68e41ca7
+dma_wr          8b7239b8    4b912511
+dma_wr          8b7239bc    b12c14a5
+dma_wr          8b7239c0    3d75cba9
+dma_wr          8b7239c4    46251753
+dma_wr          8b7239c8    b1795e8f
+dma_wr          8b7239cc    5abe8642
+dma_wr          8b7239d0    a9e5afc5
+dma_wr          8b7239d4    5eca781f
+dma_wr          8b7239d8    ef66e3f5
+dma_wr          8b7239dc    88bff59e
+
+-- write back the intermediate queue descriptor's status
+dma_wr          cf78a9d0    00000000 -- dma writes an intermediate buffer's status
+dma_wr          cf78a9cc    8b723961 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          cf78a9d4    8b7239e0
+
+-- check writes to the receive buffer
+dma_wr          8b7239e0    d69a38b1
+dma_wr          8b7239e4    87c9edeb
+dma_wr          8b7239e8    f266b6c8
+dma_wr          8b7239ec    9f4dd3d2
+dma_wr          8b7239f0    75ac731d
+dma_wr          8b7239f4    d82264d8
+dma_wr          8b7239f8    328a8be2
+dma_wr          8b7239fc    ff959ea9
+dma_wr          8b723a00    c34fccfe
+dma_wr          8b723a04    efb2a1bc
+dma_wr          8b723a08    77aec11c
+dma_wr          8b723a0c    9425db69
+dma_wr          8b723a10    a9e9cad8
+dma_wr          8b723a14    744ddde7
+dma_wr          8b723a18    ebd1e755
+dma_wr          8b723a1c    be296922
+dma_wr          8b723a20    4a4d24b4
+dma_wr          8b723a24    96739d5e
+dma_wr          8b723a28    9fe73732
+dma_wr          8b723a2c    d2b141a2
+dma_wr          8b723a30    d69fa38d
+dma_wr          8b723a34    5c99d5e2
+dma_wr          8b723a38    5afa389d
+dma_wr          8b723a3c    67b8ab29
+dma_wr          8b723a40    b5c7939a
+dma_wr          8b723a44    fff11289
+dma_wr          8b723a48    b79bfe36
+dma_wr          8b723a4c    a2cda5f1
+dma_wr          8b723a50    13665a39
+dma_wr          8b723a54    6546b488
+dma_wr          8b723a58    15abcc62
+dma_wr          8b723a5c    dd26fffe
+
+-- write back the intermediate queue descriptor's status
+dma_wr          cf78a9d8    00000000 -- dma writes an intermediate buffer's status
+dma_wr          cf78a9d4    8b7239e1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          cf78a9dc    8b723a60
+
+-- check writes to the receive buffer
+dma_wr          8b723a60    e3dc9ec8
+dma_wr          8b723a64    18ab8e79
+dma_wr          8b723a68    7de46cc8
+dma_wr          8b723a6c    1898b212
+dma_wr          8b723a70    cd94c135
+dma_wr          8b723a74    bc5ff767
+dma_wr          8b723a78    26a5277e
+dma_wr          8b723a7c    318c9288
+dma_wr          8b723a80    e3a5fba5
+dma_wr          8b723a84    877fa6c4
+dma_wr          8b723a88    628436a9
+dma_wr          8b723a8c    3948aa1c
+dma_wr          8b723a90    a13711aa
+dma_wr          8b723a94    ccf7cbbe
+dma_wr          8b723a98    b34d56d4
+dma_wr          8b723a9c    246a6aac
+dma_wr          8b723aa0    248bf665
+dma_wr          8b723aa4    c5662b71
+dma_wr          8b723aa8    4399fdfa
+dma_wr          8b723aac    7f9a47fe
+dma_wr          8b723ab0    546a438f
+dma_wr          8b723ab4    772ade81
+dma_wr          8b723ab8    5f576bcb
+dma_wr          8b723abc    453f54a8
+dma_wr          8b723ac0    b2b39e62
+dma_wr          8b723ac4    854956ce
+dma_wr          8b723ac8    5e35f7a8
+dma_wr          8b723acc    686f1dee
+dma_wr          8b723ad0    91322fe9
+dma_wr          8b723ad4    bb3716e9
+dma_wr          8b723ad8    46bf9782
+dma_wr          8b723adc    4b8a7ead
+
+-- write back the intermediate queue descriptor's status
+dma_wr          cf78a9e0    00000000 -- dma writes an intermediate buffer's status
+dma_wr          cf78a9dc    8b723a61 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          cf78a9e4    8b723ae0
+
+-- check writes to the receive buffer
+dma_wr          8b723ae0    ce1b1722
+dma_wr          8b723ae4    c3825855
+dma_wr          8b723ae8    88f414e3
+dma_wr          8b723aec    b2118644
+dma_wr          8b723af0    9c3a1b5a
+dma_wr          8b723af4    4b3feac5
+dma_wr          8b723af8    382dd3e3
+dma_wr          8b723afc    c8b2bee4
+dma_wr          8b723b00    b8fa2757
+dma_wr          8b723b04    b2454c35
+dma_wr          8b723b08    c5c5d84c
+dma_wr          8b723b0c    2bc4db32
+dma_wr          8b723b10    bbfda57e
+dma_wr          8b723b14    9d25be69
+dma_wr          8b723b18    4fc7de87
+dma_wr          8b723b1c    b82c39ae
+dma_wr          8b723b20    f9dac221
+dma_wr          8b723b24    d834d44e
+dma_wr          8b723b28    a81c349b
+dma_wr          8b723b2c    429a98c6
+dma_wr          8b723b30    e95a7315
+dma_wr          8b723b34    567b8bdb
+dma_wr          8b723b38    e11be1dd
+dma_wr          8b723b3c    d43e87c3
+dma_wr          8b723b40    197931e1
+dma_wr          8b723b44    37a45b7b
+dma_wr          8b723b48    b9c3dba2
+dma_wr          8b723b4c    e33f1e8c
+dma_wr          8b723b50    951e295d
+dma_wr          8b723b54    91c4cb5f
+dma_wr          8b723b58    a8ae42df
+dma_wr          8b723b5c    b488d84a
+
+-- write back the intermediate queue descriptor's status
+dma_wr          cf78a9e8    00000000 -- dma writes an intermediate buffer's status
+dma_wr          cf78a9e4    8b723ae1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          cf78a9ec    8b723b60
+
+-- check writes to the receive buffer
+dma_wr          8b723b60    c1d399b5
+dma_wr          8b723b64    264b42fe
+dma_wr          8b723b68    257c9d9a
+dma_wr          8b723b6c    56388127
+dma_wr          8b723b70    f189874f
+dma_wr          8b723b74    d12aab92
+dma_wr          8b723b78    7b47dfa1
+dma_wr          8b723b7c    7751b44a
+dma_wr          8b723b80    9448f4b4
+dma_wr          8b723b84    25392463
+dma_wr          8b723b88    8bba52bf
+dma_wr          8b723b8c    35b2b9b5
+dma_wr          8b723b90    c37b6d31
+dma_wr          8b723b94    c74384e1
+dma_wr          8b723b98    ddda2fbc
+dma_wr          8b723b9c    79fa4636
+dma_wr          8b723ba0    7f5ca16f
+dma_wr          8b723ba4    27bf6a34
+dma_wr          8b723ba8    dd8a6428
+dma_wr          8b723bac    3814e2e6
+dma_wr          8b723bb0    2e94e41f
+dma_wr          8b723bb4    b8ee7d24
+dma_wr          8b723bb8    e5ace2db
+dma_wr          8b723bbc    74b1ad29
+dma_wr          8b723bc0    dc18e5fb
+dma_wr          8b723bc4    57d32376
+dma_wr          8b723bc8    b16e9173
+dma_wr          8b723bcc    94b7138a
+dma_wr          8b723bd0    22e72f43
+dma_wr          8b723bd4    19155626
+dma_wr          8b723bd8    dd7613fe
+dma_wr          8b723bdc    233de6a4
+
+-- write back the intermediate queue descriptor's status
+dma_wr          cf78a9f0    00000000 -- dma writes an intermediate buffer's status
+dma_wr          cf78a9ec    8b723b61 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          cf78a9f4    8b723be2 -- wrap bit set
+
+-- check writes to the receive buffer
+dma_wr          8b723be0    c1efa792
+dma_wr          8b723be4    b7171fe6
+dma_wr          8b723be8    f11dc1ea
+dma_wr          8b723bec    5f96d22d
+dma_wr          8b723bf0    3e51976d
+dma_wr          8b723bf4    ef9ee735
+dma_wr          8b723bf8    82cbbbc8
+dma_wr          8b723bfc    257a278e
+dma_wr          8b723c00    8c7948e9
+dma_wr          8b723c04    f3dfdc3b
+dma_wr          8b723c08    9163752e
+dma_wr          8b723c0c    e173b59b
+dma_wr          8b723c10    86a883d7
+dma_wr          8b723c14    73e86958
+dma_wr          8b723c18    758968ae
+dma_wr          8b723c1c    59a817f7
+dma_wr          8b723c20    266fa3fd
+dma_wr          8b723c24    97bdb51a
+dma_wr          8b723c28    646ad729
+dma_wr          8b723c2c    5c155db6
+dma_wr          8b723c30    196621a6
+dma_wr          8b723c34    b944cfc8
+dma_wr          8b723c38    f93bd3fe
+dma_wr          8b723c3c    d1236b35
+dma_wr          8b723c40    6bdfcd4a
+dma_wr          8b723c44    38892e83
+dma_wr          8b723c48    b472fbe1
+dma_wr          8b723c4c    4675f654
+dma_wr          8b723c50    7834f3ef
+dma_wr          8b723c54    6da332e7
+dma_wr          8b723c58    8d75a3e7
+dma_wr          8b723c5c    97e50f7c
+
+dma_wr          cf78a9f8    08008600
+dma_wr          cf78a9f4    8b723be3
+
+dma_rd          cf78a99c    8b723be0
+
+apbwr(55000) 00 00000000  -- disable transmit and receive
+apbwr        18 2c28c75c  -- write receive queue pointer
+apbwr        04 00090100  -- enable length field checking and receiving 1536 Byte frames
+apbwr        00 0000000C  -- enable transmit and receive
+apbrdf       18 2c28c75c  -- check receive queue pointer
+
+
+-- ******************************************************************************** --
+-- Receive a maximum sized frame of 1536 bytes with the length field 
+-- indicating 1535.  (The frame should be received without a length 
+-- error statistic)
+-- ******************************************************************************** --
+
+rxd(apb)    555555d578563412111153e4db53611406006a65
+rxd                 b31854ce6a4d71aee4a2d7fe2d3512f2
+rxd                 1f5da787b1b5addaf2dfa99245b574d5
+rxd                 be1729e25654bde94d257c2f1bd38d2d
+rxd                 652e95faeb1cfcece5dfb4e79bc2373c
+rxd                 b2f65d4a23a638562bf8efe87b84d14f
+rxd                 783fe68a95c21a79785d8721b91583d2
+rxd                 4d336181ef3a722bab9546d7c9cd5b75
+rxd                 8c6dedeae595267b3a8be54a1546e233
+rxd                 ef715c9d33efa6444879599912afdc76
+rxd                 c2627d719be9e39a6ec7fb34614cd7a4
+rxd                 42a566819ae52761ac47daf5d2979a4e
+rxd                 6161831276e4f7e18b179231fadab845
+rxd                 4dbde6cfff6183f5f551887f12f3dd65
+rxd                 571fa8a33ea187c723844f992b938912
+rxd                 2d2f861aec5cfbdfabc59ec941244938
+rxd                 ddb9ab5c15c92ab21bb7fde2e187947b
+rxd                 46b67fe453ad341a9f66678fbcec265d
+rxd                 e68896988f423d23f1a31523689a8c2d
+rxd                 33ba4ddad8e15fbfcbd88b41aa3ec788
+rxd                 896a4e6c889516de94364c4bbf6b6c97
+rxd                 6e37c6eac6df178236a512439c5c1ce4
+rxd                 c7be95ea2ecd12e8e3ceeb1fe1a457a2
+rxd                 c83f381eba1112d75c9fd693e4c2aa2d
+rxd                 61815ee99c68f9ac6591cf11544366c2
+rxd                 cbd5671a69a64df74c223ce1fe5c3fb7
+rxd                 55ff491bc2a3e755e68499f821f9321a
+rxd                 2738c2a3ab3ae5b42965285b3cfb5989
+rxd                 48e35f9d5f4ad18feaa4aa26f37a8265
+rxd                 198438d28bae7eccfb5b6f9e77e316f2
+rxd                 3cb856b7912136f51524885f6a1db7a7
+rxd                 4efba9926f84277cdcafdb7ab5cf613c
+rxd                 1cac834176321ffa54e62ebca47d4f59
+rxd                 6439536eb7651219cff26b6921d52ef2
+rxd                 18f7a6acca3eeeaf8b59454b9541e2d4
+rxd                 b154eec926e18e38b928c27de75c31e4
+rxd                 14d99a44b78fab58adf8f142689731d6
+rxd                 536e756d137dbaf5abbaf4931ab3a23d
+rxd                 a522249b81fa8ad458ed93ff62964344
+rxd                 e9d8929d7c9f5d5e83f167ced4c3de66
+rxd                 af53a7636fcfed5c4b7cb4d6c67a5196
+rxd                 ac2b167343b3bee685b4dbdfcd42b37f
+rxd                 917d633319c3cbc73b5b9ab1c7593cc6
+rxd                 84e837a25e471e436af55491d33756ee
+rxd                 873f4c19c243a49c4c389f529dedcf5b
+rxd                 7445f21d88915eabaa5a7263aa88e9ec
+rxd                 3e1bf689744cc98fe6663a2963b178e6
+rxd                 a837e838d57389effeb58e4983c6f85a
+rxd                 22792eb46578a5ad2bbcfb59a58fdaa8
+rxd                 cc66cbed74d43d4b22addaf928df9d93
+rxd                 a1361cfd938f9b1f9ced473dde96ced2
+rxd                 d14e2b1a46be9ed6eeb12651aebbdd37
+rxd                 2cd122ad6a52d82fbac7147ecb25a2dd
+rxd                 e74121f1f4411a8f4683e838677a4f11
+rxd                 9f2d65bfd1549bb5185d9c7148e4c283
+rxd                 c254c318c9753e3727644aca351346c9
+rxd                 94713d6926396efceb49f6bbdad74533
+rxd                 c7c353b66758894febacfd9893c6fcfc
+rxd                 56c449616f4fe413668bbe65ba91e8da
+rxd                 37f9d116a58833f286b81727d3f1c78e
+rxd                 be183dbd86f11c833a994721646e87ca
+rxd                 7c4e511fdab94ad2dcdbb3f35ebf1a33
+rxd                 634b86abb9f1c8425433c75c98315eef
+rxd                 e5a69d15cce5768f2ab8a87c6c94622a
+rxd                 1159edf772abb3a18f7a797dc5eeeb36
+rxd                 4a6bdec9db3a94238f172e3b28acef83
+rxd                 e9ac1454cf1cf6f87ade8c7abf491638
+rxd                 c769575228667be17257b3e351b91b6e
+rxd                 d9ece1fef5c1d51452ae3b14f487ca38
+rxd                 c4b81f9e7ae9aae5d1ae9ec389b92b78
+rxd                 15ae3f35dd8927d8e21a298c49795a79
+rxd                 756132c3de4b58f95eb2e392fb84c8b8
+rxd                 b9ad6a991a619224959decfc94179e41
+rxd                 8f775a4af59427cb39be9eadf5e33feb
+rxd                 4326618957bd745eab99266ed8c72c24
+rxd                 1ed847c327cacdcb92764dade2dfaf51
+rxd                 9ab62641cf699d8149b7f55983b57665
+rxd                 f3faa6cf3d9753988a9575a2dc1786bc
+rxd                 caedf537caca9f2bde996298ee7e968b
+rxd                 cea36aca3e273e4752a55cb5b6826ae7
+rxd                 b99982d6c3881b1ab1b79e5e4bb2c372
+rxd                 aa8e128bc938fe28bfe8d566ec8c5b4e
+rxd                 474978a3cf499d2239a8e85f589967aa
+rxd                 2a9e33e4ffb61be596e936c8f735936a
+rxd                 9eb4355b97c172b449af4e6254dc3d75
+rxd                 61eaab6dbc98fade43f9ec9b1c847855
+rxd                 bdd81a27b9f6eaa19137ce9dadbf1eda
+rxd                 3396949f7b3f56632b1a458ad1aa78b9
+rxd                 75f437fc4e15a73c64e45f849f567369
+rxd                 4849caf6a1f8bd916796dc2b344187a2
+rxd                 571eacee189246a54123377d86857d8e
+rxd                 361a5668f6c92f7edf51f47e7b49ce2f
+rxd                 e66aadd366f376c94dd67422d15955b5
+rxd                 654784d1954b93288a756d62f61a7161
+rxd                 99b61387a4f64cd151b12e2d167d6475
+rxd                 fc624e79a635ad36d9ad221fgggggggg
+
+
+-- read the first receive queue descriptor
+dma_rd          2c28c75c    543c5d58
+
+-- check writes to the receive buffer
+dma_wr          543c5d58    12345678
+dma_wr          543c5d5c    e4531111
+dma_wr          543c5d60    146153db
+dma_wr          543c5d64    656a0006
+dma_wr          543c5d68    ce5418b3
+dma_wr          543c5d6c    ae714d6a
+dma_wr          543c5d70    fed7a2e4
+dma_wr          543c5d74    f212352d
+dma_wr          543c5d78    87a75d1f
+dma_wr          543c5d7c    daadb5b1
+dma_wr          543c5d80    92a9dff2
+dma_wr          543c5d84    d574b545
+dma_wr          543c5d88    e22917be
+dma_wr          543c5d8c    e9bd5456
+dma_wr          543c5d90    2f7c254d
+dma_wr          543c5d94    2d8dd31b
+dma_wr          543c5d98    fa952e65
+dma_wr          543c5d9c    ecfc1ceb
+dma_wr          543c5da0    e7b4dfe5
+dma_wr          543c5da4    3c37c29b
+dma_wr          543c5da8    4a5df6b2
+dma_wr          543c5dac    5638a623
+dma_wr          543c5db0    e8eff82b
+dma_wr          543c5db4    4fd1847b
+dma_wr          543c5db8    8ae63f78
+dma_wr          543c5dbc    791ac295
+dma_wr          543c5dc0    21875d78
+dma_wr          543c5dc4    d28315b9
+dma_wr          543c5dc8    8161334d
+dma_wr          543c5dcc    2b723aef
+dma_wr          543c5dd0    d74695ab
+dma_wr          543c5dd4    755bcdc9
+
+-- write back the intermediate queue descriptor's status
+dma_wr          2c28c760    00004000 -- dma writes an intermediate buffer's status
+dma_wr          2c28c75c    543c5d59 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          2c28c764    543c5dd8
+
+-- check writes to the receive buffer
+dma_wr          543c5dd8    eaed6d8c
+dma_wr          543c5ddc    7b2695e5
+dma_wr          543c5de0    4ae58b3a
+dma_wr          543c5de4    33e24615
+dma_wr          543c5de8    9d5c71ef
+dma_wr          543c5dec    44a6ef33
+dma_wr          543c5df0    99597948
+dma_wr          543c5df4    76dcaf12
+dma_wr          543c5df8    717d62c2
+dma_wr          543c5dfc    9ae3e99b
+dma_wr          543c5e00    34fbc76e
+dma_wr          543c5e04    a4d74c61
+dma_wr          543c5e08    8166a542
+dma_wr          543c5e0c    6127e59a
+dma_wr          543c5e10    f5da47ac
+dma_wr          543c5e14    4e9a97d2
+dma_wr          543c5e18    12836161
+dma_wr          543c5e1c    e1f7e476
+dma_wr          543c5e20    3192178b
+dma_wr          543c5e24    45b8dafa
+dma_wr          543c5e28    cfe6bd4d
+dma_wr          543c5e2c    f58361ff
+dma_wr          543c5e30    7f8851f5
+dma_wr          543c5e34    65ddf312
+dma_wr          543c5e38    a3a81f57
+dma_wr          543c5e3c    c787a13e
+dma_wr          543c5e40    994f8423
+dma_wr          543c5e44    1289932b
+dma_wr          543c5e48    1a862f2d
+dma_wr          543c5e4c    dffb5cec
+dma_wr          543c5e50    c99ec5ab
+dma_wr          543c5e54    38492441
+
+-- write back the intermediate queue descriptor's status
+dma_wr          2c28c768    00000000 -- dma writes an intermediate buffer's status
+dma_wr          2c28c764    543c5dd9 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          2c28c76c    543c5e58
+
+-- check writes to the receive buffer
+dma_wr          543c5e58    5cabb9dd
+dma_wr          543c5e5c    b22ac915
+dma_wr          543c5e60    e2fdb71b
+dma_wr          543c5e64    7b9487e1
+dma_wr          543c5e68    e47fb646
+dma_wr          543c5e6c    1a34ad53
+dma_wr          543c5e70    8f67669f
+dma_wr          543c5e74    5d26ecbc
+dma_wr          543c5e78    989688e6
+dma_wr          543c5e7c    233d428f
+dma_wr          543c5e80    2315a3f1
+dma_wr          543c5e84    2d8c9a68
+dma_wr          543c5e88    da4dba33
+dma_wr          543c5e8c    bf5fe1d8
+dma_wr          543c5e90    418bd8cb
+dma_wr          543c5e94    88c73eaa
+dma_wr          543c5e98    6c4e6a89
+dma_wr          543c5e9c    de169588
+dma_wr          543c5ea0    4b4c3694
+dma_wr          543c5ea4    976c6bbf
+dma_wr          543c5ea8    eac6376e
+dma_wr          543c5eac    8217dfc6
+dma_wr          543c5eb0    4312a536
+dma_wr          543c5eb4    e41c5c9c
+dma_wr          543c5eb8    ea95bec7
+dma_wr          543c5ebc    e812cd2e
+dma_wr          543c5ec0    1febcee3
+dma_wr          543c5ec4    a257a4e1
+dma_wr          543c5ec8    1e383fc8
+dma_wr          543c5ecc    d71211ba
+dma_wr          543c5ed0    93d69f5c
+dma_wr          543c5ed4    2daac2e4
+
+-- write back the intermediate queue descriptor's status
+dma_wr          2c28c770    00000000 -- dma writes an intermediate buffer's status
+dma_wr          2c28c76c    543c5e59 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          2c28c774    543c5ed8
+
+-- check writes to the receive buffer
+dma_wr          543c5ed8    e95e8161
+dma_wr          543c5edc    acf9689c
+dma_wr          543c5ee0    11cf9165
+dma_wr          543c5ee4    c2664354
+dma_wr          543c5ee8    1a67d5cb
+dma_wr          543c5eec    f74da669
+dma_wr          543c5ef0    e13c224c
+dma_wr          543c5ef4    b73f5cfe
+dma_wr          543c5ef8    1b49ff55
+dma_wr          543c5efc    55e7a3c2
+dma_wr          543c5f00    f89984e6
+dma_wr          543c5f04    1a32f921
+dma_wr          543c5f08    a3c23827
+dma_wr          543c5f0c    b4e53aab
+dma_wr          543c5f10    5b286529
+dma_wr          543c5f14    8959fb3c
+dma_wr          543c5f18    9d5fe348
+dma_wr          543c5f1c    8fd14a5f
+dma_wr          543c5f20    26aaa4ea
+dma_wr          543c5f24    65827af3
+dma_wr          543c5f28    d2388419
+dma_wr          543c5f2c    cc7eae8b
+dma_wr          543c5f30    9e6f5bfb
+dma_wr          543c5f34    f216e377
+dma_wr          543c5f38    b756b83c
+dma_wr          543c5f3c    f5362191
+dma_wr          543c5f40    5f882415
+dma_wr          543c5f44    a7b71d6a
+dma_wr          543c5f48    92a9fb4e
+dma_wr          543c5f4c    7c27846f
+dma_wr          543c5f50    7adbafdc
+dma_wr          543c5f54    3c61cfb5
+
+-- write back the intermediate queue descriptor's status
+dma_wr          2c28c778    00000000 -- dma writes an intermediate buffer's status
+dma_wr          2c28c774    543c5ed9 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          2c28c77c    543c5f58
+
+-- check writes to the receive buffer
+dma_wr          543c5f58    4183ac1c
+dma_wr          543c5f5c    fa1f3276
+dma_wr          543c5f60    bc2ee654
+dma_wr          543c5f64    594f7da4
+dma_wr          543c5f68    6e533964
+dma_wr          543c5f6c    191265b7
+dma_wr          543c5f70    696bf2cf
+dma_wr          543c5f74    f22ed521
+dma_wr          543c5f78    aca6f718
+dma_wr          543c5f7c    afee3eca
+dma_wr          543c5f80    4b45598b
+dma_wr          543c5f84    d4e24195
+dma_wr          543c5f88    c9ee54b1
+dma_wr          543c5f8c    388ee126
+dma_wr          543c5f90    7dc228b9
+dma_wr          543c5f94    e4315ce7
+dma_wr          543c5f98    449ad914
+dma_wr          543c5f9c    58ab8fb7
+dma_wr          543c5fa0    42f1f8ad
+dma_wr          543c5fa4    d6319768
+dma_wr          543c5fa8    6d756e53
+dma_wr          543c5fac    f5ba7d13
+dma_wr          543c5fb0    93f4baab
+dma_wr          543c5fb4    3da2b31a
+dma_wr          543c5fb8    9b2422a5
+dma_wr          543c5fbc    d48afa81
+dma_wr          543c5fc0    ff93ed58
+dma_wr          543c5fc4    44439662
+dma_wr          543c5fc8    9d92d8e9
+dma_wr          543c5fcc    5e5d9f7c
+dma_wr          543c5fd0    ce67f183
+dma_wr          543c5fd4    66dec3d4
+
+-- write back the intermediate queue descriptor's status
+dma_wr          2c28c780    00000000 -- dma writes an intermediate buffer's status
+dma_wr          2c28c77c    543c5f59 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          2c28c784    543c5fd8
+
+-- check writes to the receive buffer
+dma_wr          543c5fd8    63a753af
+dma_wr          543c5fdc    5cedcf6f
+dma_wr          543c5fe0    d6b47c4b
+dma_wr          543c5fe4    96517ac6
+dma_wr          543c5fe8    73162bac
+dma_wr          543c5fec    e6beb343
+dma_wr          543c5ff0    dfdbb485
+dma_wr          543c5ff4    7fb342cd
+dma_wr          543c5ff8    33637d91
+dma_wr          543c5ffc    c7cbc319
+dma_wr          543c6000    b19a5b3b
+dma_wr          543c6004    c63c59c7
+dma_wr          543c6008    a237e884
+dma_wr          543c600c    431e475e
+dma_wr          543c6010    9154f56a
+dma_wr          543c6014    ee5637d3
+dma_wr          543c6018    194c3f87
+dma_wr          543c601c    9ca443c2
+dma_wr          543c6020    529f384c
+dma_wr          543c6024    5bcfed9d
+dma_wr          543c6028    1df24574
+dma_wr          543c602c    ab5e9188
+dma_wr          543c6030    63725aaa
+dma_wr          543c6034    ece988aa
+dma_wr          543c6038    89f61b3e
+dma_wr          543c603c    8fc94c74
+dma_wr          543c6040    293a66e6
+dma_wr          543c6044    e678b163
+dma_wr          543c6048    38e837a8
+dma_wr          543c604c    ef8973d5
+dma_wr          543c6050    498eb5fe
+dma_wr          543c6054    5af8c683
+
+-- write back the intermediate queue descriptor's status
+dma_wr          2c28c788    00000000 -- dma writes an intermediate buffer's status
+dma_wr          2c28c784    543c5fd9 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          2c28c78c    543c6058
+
+-- check writes to the receive buffer
+dma_wr          543c6058    b42e7922
+dma_wr          543c605c    ada57865
+dma_wr          543c6060    59fbbc2b
+dma_wr          543c6064    a8da8fa5
+dma_wr          543c6068    edcb66cc
+dma_wr          543c606c    4b3dd474
+dma_wr          543c6070    f9daad22
+dma_wr          543c6074    939ddf28
+dma_wr          543c6078    fd1c36a1
+dma_wr          543c607c    1f9b8f93
+dma_wr          543c6080    3d47ed9c
+dma_wr          543c6084    d2ce96de
+dma_wr          543c6088    1a2b4ed1
+dma_wr          543c608c    d69ebe46
+dma_wr          543c6090    5126b1ee
+dma_wr          543c6094    37ddbbae
+dma_wr          543c6098    ad22d12c
+dma_wr          543c609c    2fd8526a
+dma_wr          543c60a0    7e14c7ba
+dma_wr          543c60a4    dda225cb
+dma_wr          543c60a8    f12141e7
+dma_wr          543c60ac    8f1a41f4
+dma_wr          543c60b0    38e88346
+dma_wr          543c60b4    114f7a67
+dma_wr          543c60b8    bf652d9f
+dma_wr          543c60bc    b59b54d1
+dma_wr          543c60c0    719c5d18
+dma_wr          543c60c4    83c2e448
+dma_wr          543c60c8    18c354c2
+dma_wr          543c60cc    373e75c9
+dma_wr          543c60d0    ca4a6427
+dma_wr          543c60d4    c9461335
+
+-- write back the intermediate queue descriptor's status
+dma_wr          2c28c790    00000000 -- dma writes an intermediate buffer's status
+dma_wr          2c28c78c    543c6059 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          2c28c794    543c60d8
+
+-- check writes to the receive buffer
+dma_wr          543c60d8    693d7194
+dma_wr          543c60dc    fc6e3926
+dma_wr          543c60e0    bbf649eb
+dma_wr          543c60e4    3345d7da
+dma_wr          543c60e8    b653c3c7
+dma_wr          543c60ec    4f895867
+dma_wr          543c60f0    98fdaceb
+dma_wr          543c60f4    fcfcc693
+dma_wr          543c60f8    6149c456
+dma_wr          543c60fc    13e44f6f
+dma_wr          543c6100    65be8b66
+dma_wr          543c6104    dae891ba
+dma_wr          543c6108    16d1f937
+dma_wr          543c610c    f23388a5
+dma_wr          543c6110    2717b886
+dma_wr          543c6114    8ec7f1d3
+dma_wr          543c6118    bd3d18be
+dma_wr          543c611c    831cf186
+dma_wr          543c6120    2147993a
+dma_wr          543c6124    ca876e64
+dma_wr          543c6128    1f514e7c
+dma_wr          543c612c    d24ab9da
+dma_wr          543c6130    f3b3dbdc
+dma_wr          543c6134    331abf5e
+dma_wr          543c6138    ab864b63
+dma_wr          543c613c    42c8f1b9
+dma_wr          543c6140    5cc73354
+dma_wr          543c6144    ef5e3198
+dma_wr          543c6148    159da6e5
+dma_wr          543c614c    8f76e5cc
+dma_wr          543c6150    7ca8b82a
+dma_wr          543c6154    2a62946c
+
+-- write back the intermediate queue descriptor's status
+dma_wr          2c28c798    00000000 -- dma writes an intermediate buffer's status
+dma_wr          2c28c794    543c60d9 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          2c28c79c    543c6158
+
+-- check writes to the receive buffer
+dma_wr          543c6158    f7ed5911
+dma_wr          543c615c    a1b3ab72
+dma_wr          543c6160    7d797a8f
+dma_wr          543c6164    36ebeec5
+dma_wr          543c6168    c9de6b4a
+dma_wr          543c616c    23943adb
+dma_wr          543c6170    3b2e178f
+dma_wr          543c6174    83efac28
+dma_wr          543c6178    5414ace9
+dma_wr          543c617c    f8f61ccf
+dma_wr          543c6180    7a8cde7a
+dma_wr          543c6184    381649bf
+dma_wr          543c6188    525769c7
+dma_wr          543c618c    e17b6628
+dma_wr          543c6190    e3b35772
+dma_wr          543c6194    6e1bb951
+dma_wr          543c6198    fee1ecd9
+dma_wr          543c619c    14d5c1f5
+dma_wr          543c61a0    143bae52
+dma_wr          543c61a4    38ca87f4
+dma_wr          543c61a8    9e1fb8c4
+dma_wr          543c61ac    e5aae97a
+dma_wr          543c61b0    c39eaed1
+dma_wr          543c61b4    782bb989
+dma_wr          543c61b8    353fae15
+dma_wr          543c61bc    d82789dd
+dma_wr          543c61c0    8c291ae2
+dma_wr          543c61c4    795a7949
+dma_wr          543c61c8    c3326175
+dma_wr          543c61cc    f9584bde
+dma_wr          543c61d0    92e3b25e
+dma_wr          543c61d4    b8c884fb
+
+-- write back the intermediate queue descriptor's status
+dma_wr          2c28c7a0    00000000 -- dma writes an intermediate buffer's status
+dma_wr          2c28c79c    543c6159 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          2c28c7a4    543c61d8
+
+-- check writes to the receive buffer
+dma_wr          543c61d8    996aadb9
+dma_wr          543c61dc    2492611a
+dma_wr          543c61e0    fcec9d95
+dma_wr          543c61e4    419e1794
+dma_wr          543c61e8    4a5a778f
+dma_wr          543c61ec    cb2794f5
+dma_wr          543c61f0    ad9ebe39
+dma_wr          543c61f4    eb3fe3f5
+dma_wr          543c61f8    89612643
+dma_wr          543c61fc    5e74bd57
+dma_wr          543c6200    6e2699ab
+dma_wr          543c6204    242cc7d8
+dma_wr          543c6208    c347d81e
+dma_wr          543c620c    cbcdca27
+dma_wr          543c6210    ad4d7692
+dma_wr          543c6214    51afdfe2
+dma_wr          543c6218    4126b69a
+dma_wr          543c621c    819d69cf
+dma_wr          543c6220    59f5b749
+dma_wr          543c6224    6576b583
+dma_wr          543c6228    cfa6faf3
+dma_wr          543c622c    9853973d
+dma_wr          543c6230    a275958a
+dma_wr          543c6234    bc8617dc
+dma_wr          543c6238    37f5edca
+dma_wr          543c623c    2b9fcaca
+dma_wr          543c6240    986299de
+dma_wr          543c6244    8b967eee
+dma_wr          543c6248    ca6aa3ce
+dma_wr          543c624c    473e273e
+dma_wr          543c6250    b55ca552
+dma_wr          543c6254    e76a82b6
+
+-- write back the intermediate queue descriptor's status
+dma_wr          2c28c7a8    00000000 -- dma writes an intermediate buffer's status
+dma_wr          2c28c7a4    543c61d9 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          2c28c7ac    543c6258
+
+-- check writes to the receive buffer
+dma_wr          543c6258    d68299b9
+dma_wr          543c625c    1a1b88c3
+dma_wr          543c6260    5e9eb7b1
+dma_wr          543c6264    72c3b24b
+dma_wr          543c6268    8b128eaa
+dma_wr          543c626c    28fe38c9
+dma_wr          543c6270    66d5e8bf
+dma_wr          543c6274    4e5b8cec
+dma_wr          543c6278    a3784947
+dma_wr          543c627c    229d49cf
+dma_wr          543c6280    5fe8a839
+dma_wr          543c6284    aa679958
+dma_wr          543c6288    e4339e2a
+dma_wr          543c628c    e51bb6ff
+dma_wr          543c6290    c836e996
+dma_wr          543c6294    6a9335f7
+dma_wr          543c6298    5b35b49e
+dma_wr          543c629c    b472c197
+dma_wr          543c62a0    624eaf49
+dma_wr          543c62a4    753ddc54
+dma_wr          543c62a8    6dabea61
+dma_wr          543c62ac    defa98bc
+dma_wr          543c62b0    9becf943
+dma_wr          543c62b4    5578841c
+dma_wr          543c62b8    271ad8bd
+dma_wr          543c62bc    a1eaf6b9
+dma_wr          543c62c0    9dce3791
+dma_wr          543c62c4    da1ebfad
+dma_wr          543c62c8    9f949633
+dma_wr          543c62cc    63563f7b
+dma_wr          543c62d0    8a451a2b
+dma_wr          543c62d4    b978aad1
+
+-- write back the intermediate queue descriptor's status
+dma_wr          2c28c7b0    00000000 -- dma writes an intermediate buffer's status
+dma_wr          2c28c7ac    543c6259 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          2c28c7b4    543c62d8
+
+-- check writes to the receive buffer
+dma_wr          543c62d8    fc37f475
+dma_wr          543c62dc    3ca7154e
+dma_wr          543c62e0    845fe464
+dma_wr          543c62e4    6973569f
+dma_wr          543c62e8    f6ca4948
+dma_wr          543c62ec    91bdf8a1
+dma_wr          543c62f0    2bdc9667
+dma_wr          543c62f4    a2874134
+dma_wr          543c62f8    eeac1e57
+dma_wr          543c62fc    a5469218
+dma_wr          543c6300    7d372341
+dma_wr          543c6304    8e7d8586
+dma_wr          543c6308    68561a36
+dma_wr          543c630c    7e2fc9f6
+dma_wr          543c6310    7ef451df
+dma_wr          543c6314    2fce497b
+dma_wr          543c6318    d3ad6ae6
+dma_wr          543c631c    c976f366
+dma_wr          543c6320    2274d64d
+dma_wr          543c6324    b55559d1
+dma_wr          543c6328    d1844765
+dma_wr          543c632c    28934b95
+dma_wr          543c6330    626d758a
+dma_wr          543c6334    61711af6
+dma_wr          543c6338    8713b699
+dma_wr          543c633c    d14cf6a4
+dma_wr          543c6340    2d2eb151
+dma_wr          543c6344    75647d16
+dma_wr          543c6348    794e62fc
+dma_wr          543c634c    36ad35a6
+dma_wr          543c6350    1f22add9
+dma_wr          543c6354    4c2fe6bf
+
+-- write back the final queue descriptor's status
+dma_wr          2c28c7b8    08008600 -- dma writes the final buffer's status
+dma_wr          2c28c7b4    543c62d9 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          2c28c7bc    543c6358
+
+-- check transmit statistics
+apbwr(70000) 00  00000000    -- disable receive
+apbrd	  100 00000000  -- check octets transmitted bottom
+apbrd	  104 00000000  -- check octets transmitted top
+apbrd	  108 00000000  -- check frames transmitted ok
+apbrd	  10C 00000000  -- check broadcast frames transmitted
+apbrd	  110 00000000  -- check multicast frames transmitted
+apbrd	  114 00000000  -- check pause frames transmitted
+apbrd	  118 00000000  -- check frames transmitted 64
+apbrd	  11C 00000000  -- check frames transmitted 65-127
+apbrd	  120 00000000  -- check frames transmitted 128-255
+apbrd	  124 00000000  -- check frames transmitted 256-511
+apbrd	  128 00000000  -- check frames transmitted 512-1023
+apbrd	  12C 00000000  -- check frames transmitted 1024-1518
+apbrd	  130 00000000  -- check frames transmitted 1519
+apbrd	  134 00000000  -- check transmit underruns errors
+apbrd	  138 00000000  -- check single collisions frames
+apbrd	  13C 00000000  -- check multiple collisions frames
+apbrd	  140 00000000  -- check excessive collisions frames
+apbrd	  144 00000000  -- check late collisions frames
+apbrd	  148 00000000  -- check deferred frames
+apbrd	  14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd	  150 00000C00  -- check octets received bottom
+apbrd	  154 00000000  -- check octets received top
+apbrd	  158 00000002  -- check frames received ok
+apbrd	  15C 00000000  -- check broadcast frames received
+apbrd	  160 00000000  -- check multicast frames received
+apbrd	  164 00000000  -- check pause frames received
+apbrd	  168 00000000  -- check frames received 64
+apbrd	  16C 00000000  -- check frames received 65-127
+apbrd	  170 00000000  -- check frames received 128-255
+apbrd	  174 00000000  -- check frames received 256-511
+apbrd	  178 00000000  -- check frames received 512-1023
+apbrd	  17C 00000000  -- check frames received 1024-1518
+apbrd	  180 00000002  -- check frames received 1519
+apbrd	  184 00000000  -- check undersize frame errors
+apbrd	  188 00000000  -- check excessive receive length errors
+apbrd	  18C 00000000  -- check receive jabbers errors
+apbrd	  190 00000000  -- check FCS errors
+apbrd	  194 00000002  -- check receive length errors
+apbrd	  198 00000000  -- check receive symbol errors
+apbrd	  19C 00000000  -- check alignment errors
+apbrd	  1A0 00000000  -- check receive resource errors
+apbrd    1A4 00000000  -- check receive overrun errors
+
+-- setup the dma interface
+
+-- ******************************************************************************** --
+-- Receive a frame that is less than minimum frame size and has a symbol 
+-- error.
+-- ******************************************************************************** --
+
+-- setup the dma interface
+apbwr           18  153f6470    -- set address of the receive queue descriptor
+apbwr           00  00000004    -- enable receive
+
+-- add the destination address to a local address match register
+apbwr           98  9145df8f    -- specific address register 3 bottom
+apbwrf           9c  0000baae    -- specific address register 3 top
+
+rxd(apb)         5555555555d58fdf4591aebaf4843c7e7e86000c8dfa
+rxd                     dbdx48dfec64b2e973514000000000000
+rxd                     00000000000000000000000000000000
+rxd                     gggggggg
+
+-- read the first receive queue descriptor
+dma_rd          153f6470    a5a11498
+
+-- no DMA writes due to error
+
+-- check transmit statistics
+apbwr(75000) 00  00000000    -- disable receive
+apbrd	  100 00000000  -- check octets transmitted bottom
+apbrd	  104 00000000  -- check octets transmitted top
+apbrd	  108 00000000  -- check frames transmitted ok
+apbrd	  10C 00000000  -- check broadcast frames transmitted
+apbrd	  110 00000000  -- check multicast frames transmitted
+apbrd	  114 00000000  -- check pause frames transmitted
+apbrd	  118 00000000  -- check frames transmitted 64
+apbrd	  11C 00000000  -- check frames transmitted 65-127
+apbrd	  120 00000000  -- check frames transmitted 128-255
+apbrd	  124 00000000  -- check frames transmitted 256-511
+apbrd	  128 00000000  -- check frames transmitted 512-1023
+apbrd	  12C 00000000  -- check frames transmitted 1024-1518
+apbrd	  130 00000000  -- check frames transmitted 1519
+apbrd	  134 00000000  -- check transmit underruns errors
+apbrd	  138 00000000  -- check single collisions frames
+apbrd	  13C 00000000  -- check multiple collisions frames
+apbrd	  140 00000000  -- check excessive collisions frames
+apbrd	  144 00000000  -- check late collisions frames
+apbrd	  148 00000000  -- check deferred frames
+apbrd	  14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd	  150 00000000  -- check octets received bottom
+apbrd	  154 00000000  -- check octets received top
+apbrd	  158 00000000  -- check frames received ok
+apbrd	  15C 00000000  -- check broadcast frames received
+apbrd	  160 00000000  -- check multicast frames received
+apbrd	  164 00000000  -- check pause frames received
+apbrd	  168 00000000  -- check frames received 64
+apbrd	  16C 00000000  -- check frames received 65-127
+apbrd	  170 00000000  -- check frames received 128-255
+apbrd	  174 00000000  -- check frames received 256-511
+apbrd	  178 00000000  -- check frames received 512-1023
+apbrd	  17C 00000000  -- check frames received 1024-1518
+apbrd	  180 00000000  -- check frames received 1519
+apbrd	  184 00000001  -- check undersize frame errors
+apbrd	  188 00000000  -- check excessive receive length errors
+apbrd	  18C 00000000  -- check receive jabbers errors
+apbrd	  190 00000000  -- check FCS errors
+apbrd	  194 00000000  -- check receive length errors
+apbrd	  198 00000001  -- check receive symbol errors
+apbrd	  19C 00000000  -- check alignment errors
+apbrd	  1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- ******************************************************************************** --
+-- Receive a frame that is 1537 bytes with a length field error.
+-- ******************************************************************************** --
+-- setup the dma interface
+apbwr           18  72254694    -- set address of the receive queue descriptor
+apbwr           00  00000004    -- enable receive
+apbwr           04  00090100    -- enable length field checking and receiving 1536 Byte frames
+
+-- add the destination address to a local address match register
+apbwr           88  d134db7c    -- specific address register 1 bottom
+apbwrf          8c  000035a3    -- specific address register 1 top
+
+rxd(apb)        55d57cdb34d1a335a437d12fceaf05f8eab3
+rxd             649763fa468f4b811e193975162d76e5
+rxd             9c844859bcd7121e6b54751b13a14d7c
+rxd             391c8c49345c34b933c1746c66c3f58b
+rxd             4b7d93c1cf4ab9eca5563436c46925c4
+rxd             76fed2d7227a5455c445b3eb9e7fb893
+rxd             d7ad8321b2544a815d2d5ece7974ac2e
+rxd             7153d8dce976ac1481ef3d7bb1a268e6
+rxd             bb3668eefda66a58f6fcf1aa42e846bf
+rxd             e683359893d9e425a5a63a31694918b1
+rxd             d2c737c31a87fceec9294fc5b6286833
+rxd             bac2dc78ae8b7b13c7ffe7ba53f4fbff
+rxd             ae9348c856916c8a216ab4fb569bfbf3
+rxd             3d3253a1debdb6878dbe4868c47f4da9
+rxd             beeaee9fa2bf4286c9bd25c9ed54738a
+rxd             15224cdd7d5efac1d96cb9e15662826f
+rxd             859ae2d8cdceac84e14954281af68d3d
+rxd             873bd3cfb4a93bee642b3319b22cc4fe
+rxd             99fc8fcd4d4de8fef49c7b378c6319da
+rxd             88398adc5e7a46e1ebfba529872e4ecb
+rxd             78fc5aa46daf516ae4e993e55ea8ed9c
+rxd             343c524a43b546557f53622c557687d9
+rxd             8da5332fff1e22e5d61e1695d4f3b48a
+rxd             e46c4f9c4db563b4551a2388aa62385d
+rxd             ba8c4e9c6994c1227d34de2e54694af8
+rxd             28627c1ab3d8a1f94641cb18146f989f
+rxd             25d34c28b46e9687693158c162c14711
+rxd             cdbba4ada73a286261eb23fc3875ca25
+rxd             eb4d6357c8227c3c36d24fced4658d16
+rxd             edbae9d6cf87491bffe2346e87647cb8
+rxd             a99f3662962bf3511bd2ce4a5b5571db
+rxd             481acc6fd89bb3c39f9dfdc714de134d
+rxd             725355a291f8b7216f8b3ed3f95b7c69
+rxd             a1df7d87edae67282123c5286cc2bb41
+rxd             f173569df72cacd8cc2b56b3cf2dfdd2
+rxd             fd2f28d295d32a5ff36d641ee5611533
+rxd             37984b3679441d4e8d26ad1d197688cd
+rxd             199758a8c411a524a2f885d361c8c481
+rxd             767c56acad368e3acf348418a61dc64e
+rxd             12c4f51fff2cc95ec6a3f3b2be849886
+rxd             386f16abb8a7637181bead6d8b1bc314
+rxd             ffe7bc91e7e1c8cf9ade6f17fbc679cd
+rxd             9f6f12226619faca7b8692a2456832fd
+rxd             c519a12b912943cc8657defec9562c9f
+rxd             27ed4ff27a87a1875dc5cfdef227b8c1
+rxd             d63e73c49d228957489621a29551d2d3
+rxd             4ad3c7d7e2f5ebd45b3fe23b98ee85a2
+rxd             d199367a45ce921e9bc8c7f6b9b27317
+rxd             9c666ccff8294824f28c4134ef1a74d8
+rxd             e613dc78caefae2cd6a127333c776fd1
+rxd             9d98c4c439a75469fcfc5a66ec3a71de
+rxd             ea658ce7dd43cb85bc21b7824a9258e6
+rxd             84faedfa35cd375883c2dd35c9432136
+rxd             dffd816b269fc368d65b781376e8c7c6
+rxd             a97b5e8cab36be7dc677fb9ce59b7927
+rxd             d63d1fe47e2c4c26314627b415394dbc
+rxd             a243fe6a3edfbf42c451b5dac2dc5732
+rxd             2c36bd97c7595cde29eac7298fe57632
+rxd             7b92dedcb185831c3e2eca7ba7754d55
+rxd             6fcfe872f679fa3c61579892f8ce9b65
+rxd             ee1c56ae3e3db1a29af7539bbc7ca1c4
+rxd             3ed1acb558544967ba9bf1a2e8c852d7
+rxd             17a16ec766a15cb429ba298ff26721ab
+rxd             15d67fc3741d371d2f64e9c4a55c74ea
+rxd             bde7789fcbf8e3d24ee86547125be7a9
+rxd             4259db229447668c132b85dd9cc5a775
+rxd             232fe1cf357f7751692ffec1337f23fc
+rxd             4d4fafd153929c9f471ec61e614b6f1b
+rxd             961ee8fa473ea7fabc76bb66c5d68557
+rxd             5b14d515ca2eb4646457d7889b751c37
+rxd             19ffea984b2d67774ee46dc345e3f791
+rxd             124186f22eafd1ec9e461a6243efa3de
+rxd             6b9a355b139adc229f9f575e54552562
+rxd             d9225ba34d71f53135d6c38133a3436e
+rxd             f78db8ecd6361a375cf5f1b914eb22f4
+rxd             f7aa7fb9b3282546f2b12cfeea849a7a
+rxd             b5b97a5a5bccbc66bc1ae98d575cd46f
+rxd             28156d8134b3d4c8a216f9d7a2b53251
+rxd             52c8bc41c6b14ef2b2492e7156523943
+rxd             25dbbd629a39f82b2bec748198793b84
+rxd             88cc868c1f992d3e68425854b3d8b1ac
+rxd             7c2a725c161a88a9dbfc53e747cedfa1
+rxd             1173111bdc9249ebe168b9fc67ff76f8
+rxd             fb2cb4aba165949e6a39d56ca74e6846
+rxd             4f66f159a625ef73fdc2eda487771e71
+rxd             d9934c6ed7d8272d7dea4d69f8b9d842
+rxd             747ce6e51163d1a24c4b3b514ee623f6
+rxd             549ba957f51c6e75d22625a724d19c9a
+rxd             66e2c71b4dc2556c2c48d5acce49d245
+rxd             7bb55cada795e26ce7433fb7d85117db
+rxd             ef4fd4f159ce17fe88d62fe3564cef87
+rxd             f19599e41352dd11289d2978f6c8cf55
+rxd             d939432d8bb9883c7c97cf43945a63d4
+rxd             7ed89cf5f62d18f714bf3bf341b1a38f
+rxd             322e7c6b76736c714aa7b95367bf6d66
+rxd             2ac7336b6d21e42365bf57d487gggggggg
+
+-- check the 1537 (0x601) byte frame as it is recieved:
+-- rxdqd:     '0x72254694' 
+-- dmawr buf: '0x51f27ac0' 128 bytes
+-- preamble:  '0x55' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x35a3d134db7c' unicast
+-- srcaddr:   '0xafce2fd137a4' 
+-- idfield:   '0x05ef'  length field
+-- data:       1519 bytes
+-- crc:       '0xde409891' 
+--
+-- check the recieve data as it is written
+
+-- read the first receive queue descriptor
+dma_rd          72254694    51f27ac0
+
+-- check writes to the receive buffer
+-- No writes due to error
+
+-- check transmit statistics
+apbrd(90000)	  100 00000000  -- check octets transmitted bottom
+apbrd	  104 00000000  -- check octets transmitted top
+apbrd	  108 00000000  -- check frames transmitted ok
+apbrd	  10C 00000000  -- check broadcast frames transmitted
+apbrd	  110 00000000  -- check multicast frames transmitted
+apbrd	  114 00000000  -- check pause frames transmitted
+apbrd	  118 00000000  -- check frames transmitted 64
+apbrd	  11C 00000000  -- check frames transmitted 65-127
+apbrd	  120 00000000  -- check frames transmitted 128-255
+apbrd	  124 00000000  -- check frames transmitted 256-511
+apbrd	  128 00000000  -- check frames transmitted 512-1023
+apbrd	  12C 00000000  -- check frames transmitted 1024-1518
+apbrd	  130 00000000  -- check frames transmitted 1519
+apbrd	  134 00000000  -- check transmit underruns errors
+apbrd	  138 00000000  -- check single collisions frames
+apbrd	  13C 00000000  -- check multiple collisions frames
+apbrd	  140 00000000  -- check excessive collisions frames
+apbrd	  144 00000000  -- check late collisions frames
+apbrd	  148 00000000  -- check deferred frames
+apbrd	  14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd	  150 00000000  -- check octets received bottom
+apbrd	  154 00000000  -- check octets received top
+apbrd	  158 00000000  -- check frames received ok
+apbrd	  15C 00000000  -- check broadcast frames received
+apbrd	  160 00000000  -- check multicast frames received
+apbrd	  164 00000000  -- check pause frames received
+apbrd	  168 00000000  -- check frames received 64
+apbrd	  16C 00000000  -- check frames received 65-127
+apbrd	  170 00000000  -- check frames received 128-255
+apbrd	  174 00000000  -- check frames received 256-511
+apbrd	  178 00000000  -- check frames received 512-1023
+apbrd	  17C 00000000  -- check frames received 1024-1518
+apbrd	  180 00000000  -- check frames received 1519
+apbrd	  184 00000000  -- check undersize frame errors
+apbrd	  188 00000001  -- check excessive receive length errors
+apbrd	  18C 00000000  -- check receive jabbers errors
+apbrd	  190 00000000  -- check FCS errors
+apbrd	  194 00000000  -- check receive length errors
+apbrd	  198 00000000  -- check receive symbol errors
+apbrd	  19C 00000000  -- check alignment errors
+apbrd	  1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(100000)
+
+bus_grant_delay 0

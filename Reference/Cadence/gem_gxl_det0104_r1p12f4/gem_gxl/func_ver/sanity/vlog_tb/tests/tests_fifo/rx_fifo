@@ -1,0 +1,1035 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_fifo
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 20 March 2002
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- This test checks the operation of the RX exposed FIFO interface (write).
+-- 
+-- Functional Coverage
+-- * Checks the operation of the rx_w_mod signal
+-- * Checks the operation of the rx_w_flush signal
+-- * Checks the operation of the rx_w_status signal
+-- * Checks the operation of the rx_w_overflow signal
+-- * Checks the operation of the rx_w_err signal
+-- 
+-- Detailed Test Description
+--  1. Initialise suitable wait states for the test.
+--  2. Check reset values of registers and setup interrupts, specific addresses
+--     and then enable receive in 100M mode into a 128-bit FIFO data bus.
+--  3. Receive a frame of length 64 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--  4. Receive a frame of length 65 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--  5. Receive a frame of length 66 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--  6. Receive a frame of length 67 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--  7. Receive a frame of length 68 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--  8. Receive a frame of length 69 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--  9. Receive a frame of length 70 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+-- 10. Receive a frame of length 71 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+-- 11. Receive a frame of length 72 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+-- 12. Receive a frame of length 73 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+-- 13. Receive a frame of length 74 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+-- 14. Receive a frame of length 75 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+-- 15. Receive a frame of length 76 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+-- 16. Receive a frame of length 77 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+-- 17. Receive a frame of length 78 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+-- 18. Receive a frame of length 79 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+-- 19. Receive a frame of length 80 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+-- 20. Check statistics for above operations.
+-- 21. Setup all address matching registers to the broadcast address 
+--     (0xffffffffffff).
+-- 22. Setup all type matching registers on the VLAN frame.
+--     Note that the type field is after the VLAN tag and has value (0x4444)
+--     in this example.
+-- 23. Activate all four external match signals.
+-- 24. Receive a 64 byte, broadcast, VLAN type frame. Verify that the 
+--     rx_w_status output indicates matches on all address, type and external
+--     bits. Also check that a broadcast frame is indicated, and that the
+--     correct VLAN information is indicated on rx_w_status.
+-- 25. Setup for multicast hash address matching. Set hash index register
+--     to all ones and set the multicast hash enable in the network config
+--     register. This will enable reception of all multicast addresses.
+-- 26. Receive a 64 byte, multicast, VLAN type frame. Verify that the 
+--     rx_w_status output indicates matches on all address, type and 
+--     external bits. Also check that a multicast frame is indicated, and 
+--     that the correct VLAN information is indicated on rx_w_status.
+-- 27. Setup for unicast hash address matching. Set hash index register
+--     to all ones and set the unicast hash enable in the network config
+--     register.
+-- 28. Receive a 64 byte, unicast, VLAN type frame. Verify that the rx_w_status
+--     output indicates matches on all address, type and external bits. Also
+--     check that a unicast frame is indicated, and that the correct VLAN
+--     information is indicated on rx_w_status.
+-- 29. Receive a 64 byte frame, but some point during reception force an
+--     overflow indication using the rx_w_overflow external FIFO input.
+--     Verify that the design indicates bad status on the final write and that
+--     the rx_w_err signal is also forced high. Also check that an RX overflow
+--     interrupt and status are reported.
+-- 30. Check statistics for above operations.
+--------------------------------------------------------------------------------
+
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 3
+bus_grant_delay 3
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts, specific addresses
+--     and then enable receive in 100M mode into a 128-bit FIFO data bus.
+--******************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbrd      30 00000000  -- check that all interrupts are now enabled
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      04 00680000  -- enable 100M mode into 128-bit bus
+apbwr      00 00000004  -- enable receive
+
+
+
+--******************************************************************************
+--  3. Receive a frame of length 64 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 1: Check rx_w_mod - 64 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d5785634121111c6fc722e3de5002e5dd9
+rxd               b9ca2c1842aa591d8c33ef121529e15f
+rxd               638ad6c112fb96d1ed442266c7bc999f
+rxd               8edba36c7891ab2ad9bbd3d2gggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      d95d2e00e53d2e72fcc6111112345678
+fifo_wr         01000         0     0000000000      5fe1291512ef338c1d59aa42182ccab9
+fifo_wr         01000         0     0000000000      9f99bcc7662244edd196fb12c1d68a63
+fifo_wr         01001         0     0010000040      1a587d13d2d3bbd92aab91786ca3db8e
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 1: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+--  4. Receive a frame of length 65 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 2: Check rx_w_mod - 65 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d578563412111112c4e4366b75002fe18b
+rxd               858b5f1d3a43b9e316bf5baea79cefb2
+rxd               52e644616a533b3ce6535a8d918a73b3
+rxd               46caa644ad65e89e99fd5d2795gggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      8be12f00756b36e4c412111112345678
+fifo_wr         01000         0     0000000000      b2ef9ca7ae5bbf16e3b9433a1d5f8b85
+fifo_wr         01000         0     0000000000      b3738a918d5a53e63c3b536a6144e652
+fifo_wr         01000         0     0000000000      759d1f95275dfd999ee865ad44a6ca46
+fifo_wr         01001         1     0010000041      0000000000000000000000000000005c
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 2: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+--  5. Receive a frame of length 66 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 3: Check rx_w_mod - 66 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d5785634121111d4aa558514571c9596fe
+rxd               8ac26a9a258df2d54bd2fbbdf83b3aa1
+rxd               1d517ef1ee4429cf4e8c564de12879ca
+rxd               b1753fbdbdbd39238219eaff2b95gggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      fe96951c57148555aad4111112345678
+fifo_wr         01000         0     0000000000      a13a3bf8bdfbd24bd5f28d259a6ac28a
+fifo_wr         01000         0     0000000000      ca7928e14d568c4ecf2944eef17e511d
+fifo_wr         01000         0     0000000000      145e952bffea19822339bdbdbd3f75b1
+fifo_wr         01001         2     0010000042      0000000000000000000000000000ef68
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+--  6. Receive a frame of length 67 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 4: Check rx_w_mod - 67 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d57856341211119cda826875540031c648
+rxd               2e527e133d436b241c5b57f122fadfc3
+rxd               3ee941c66258a6742f8d8a64d7997656
+rxd               5f444c2cf98e7d8f72e7a4d59d6e12gggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      48c6310054756882da9c111112345678
+fifo_wr         01000         0     0000000000      c3dffa22f1575b1c246b433d137e522e
+fifo_wr         01000         0     0000000000      567699d7648a8d2f74a65862c641e93e
+fifo_wr         01000         0     0000000000      cf126e9dd5a4e7728f7d8ef92c4c445f
+fifo_wr         01001         3     0010000043      00000000000000000000000000138e56
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 4: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+--  7. Receive a frame of length 68 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 5: Check rx_w_mod - 68 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d5785634121111a84f338d646200321abf
+rxd               5f93c53adb9b4e96bef18961f1a4c5cc
+rxd               2b3dc8a17fb4b92f3ae86a3b966d5a1e
+rxd               4adbb3d4154fcedf1836e1af353cc94egggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      bf1a320062648d334fa8111112345678
+fifo_wr         01000         0     0000000000      ccc5a4f16189f1be964e9bdb3ac5935f
+fifo_wr         01000         0     0000000000      1e5a6d963b6ae83a2fb9b47fa1c83d2b
+fifo_wr         01000         0     0000000000      4ec93c35afe13618dfce4f15d4b3db4a
+fifo_wr         01001         4     0010000044      000000000000000000000000111f5dcb
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 5: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+--  8. Receive a frame of length 69 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 6: Check rx_w_mod - 69 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d5785634121111ca56e4723d4a003361aa
+rxd               617f967a9b8bf942ae7ba9e8ce51e743
+rxd               42198f88336e7675cda3d48f9bf58554
+rxd               67f1cd2bbc2ddf61abb313a652cf3c9a
+rxd               cdgggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      aa6133004a3d72e456ca111112345678
+fifo_wr         01000         0     0000000000      43e751cee8a97bae42f98b9b7a967f61
+fifo_wr         01000         0     0000000000      5485f59b8fd4a3cd75766e33888f1942
+fifo_wr         01000         0     0000000000      9a3ccf52a613b3ab61df2dbc2bcdf167
+fifo_wr         01001         5     0010000045      00000000000000000000001288319ccd
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 6: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+--  9. Receive a frame of length 70 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 7: Check rx_w_mod - 70 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d57856341211114481f485f25700343b5b
+rxd               31febc5a18c1bbcadf5737ab1852373b
+rxd               abf9ae411d566b4697dd788ab93226d6
+rxd               8c9c359aaf1c77a672b7ceedb795ab99
+rxd               6b6fgggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      5b3b340057f285f48144111112345678
+fifo_wr         01000         0     0000000000      3b375218ab3757dfcabbc1185abcfe31
+fifo_wr         01000         0     0000000000      d62632b98a78dd97466b561d41aef9ab
+fifo_wr         01000         0     0000000000      99ab95b7edceb772a6771caf9a359c8c
+fifo_wr         01001         6     0010000046      00000000000000000000473de9736f6b
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 7: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+-- 10. Receive a frame of length 71 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 8: Check rx_w_mod - 71 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d5785634121111b2b7e992ae8d00354ff6
+rxd               4937cf2bdeea44f5c3adb8afe6683663
+rxd               666b38bdef8aaee6db4a67b6e797aa17
+rxd               15594e41f6f288ba797b47d495472195
+rxd               49e69dgggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      f64f35008dae92e9b7b2111112345678
+fifo_wr         01000         0     0000000000      633668e6afb8adc3f544eade2bcf3749
+fifo_wr         01000         0     0000000000      17aa97e7b6674adbe6ae8aefbd386b66
+fifo_wr         01000         0     0000000000      95214795d4477b79ba88f2f6414e5915
+fifo_wr         01001         7     0010000047      000000000000000000172b27009de649
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 8: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+-- 11. Receive a frame of length 72 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 9: Check rx_w_mod - 72 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d5785634121111885dc5c7b11653745c5c
+rxd               de1d95d3e7dbb31c228b15a5888b1a34
+rxd               d2b34f774643f9b918b33335e2caa325
+rxd               c22b77814be82843e8286c86b85ea59b
+rxd               84a289bcgggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      5c5c745316b1c7c55d88111112345678
+fifo_wr         01000         0     0000000000      341a8b88a5158b221cb3dbe7d3951dde
+fifo_wr         01000         0     0000000000      25a3cae23533b318b9f94346774fb3d2
+fifo_wr         01000         0     0000000000      9ba55eb8866c28e84328e84b81772bc2
+fifo_wr         01001         8     0010000048      0000000000000000826c5b65bc89a284
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 9: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+-- 12. Receive a frame of length 73 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 10: Check rx_w_mod - 73 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d578563412111192412754d53900377df5
+rxd               639475d4ab72576a2318f9d141ccc762
+rxd               12193aaa3e6c8d81ded8921bc78cae5b
+rxd               c6f4e899bbc435465633c89c71d773d6
+rxd               2dda466db3gggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      f57d370039d554274192111112345678
+fifo_wr         01000         0     0000000000      62c7cc41d1f918236a5772abd4759463
+fifo_wr         01000         0     0000000000      5bae8cc71b92d8de818d6c3eaa3a1912
+fifo_wr         01000         0     0000000000      d673d7719cc833564635c4bb99e8f4c6
+fifo_wr         01001         9     0010000049      00000000000000483f653fb36d46da2d
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 10: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+-- 13. Receive a frame of length 74 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 11: Check rx_w_mod - 74 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d5785634121111f8ff5bb555abd33adb2d
+rxd               9629ab258ed46e4c9463c2b9cf8639bb
+rxd               6b4d1bd96ebd28923eec357f2911a97d
+rxd               fb525815369dd6d6c57cc8deb68e5253
+rxd               4e28932ba3b3gggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      2ddb3ad3ab55b55bfff8111112345678
+fifo_wr         01000         0     0000000000      bb3986cfb9c263944c6ed48e25ab2996
+fifo_wr         01000         0     0000000000      7da911297f35ec3e9228bd6ed91b4d6b
+fifo_wr         01000         0     0000000000      53528eb6dec87cc5d6d69d36155852fb
+fifo_wr         01001         a     001000004a      000000000000c12b07e1b3a32b93284e
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 11: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+-- 14. Receive a frame of length 75 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 12: Check rx_w_mod - 75 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d5785634121111d2b56e3ae3b31f86ff37
+rxd               5b24571bfce5263cde557c89a3c48a17
+rxd               8a8a1917526feed83fe52ff983d75333
+rxd               57ad6e5a46c84b313974913a474e9684
+rxd               17ee78d916c636gggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      37ff861fb3e33a6eb5d2111112345678
+fifo_wr         01000         0     0000000000      178ac4a3897c55de3c26e5fc1b57245b
+fifo_wr         01000         0     0000000000      3353d783f92fe53fd8ee6f5217198a8a
+fifo_wr         01000         0     0000000000      84964e473a917439314bc8465a6ead57
+fifo_wr         01001         b     001000004b      000000000000aa9bcc36c616d978ee17
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 12: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+-- 15. Receive a frame of length 76 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 13: Check rx_w_mod - 76 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d5785634121111b8aa576a6b58541f37d4
+rxd               557e55fe947c6326ca82895681c6c944
+rxd               d91ee41b33a1a72ce6c9b7158ae33ea2
+rxd               475f2b8278d94cd5361291f988be4448
+rxd               3ca2723c3cde475dgggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      d4371f54586b6a57aab8111112345678
+fifo_wr         01000         0     0000000000      44c9c681568982ca26637c94fe557e55
+fifo_wr         01000         0     0000000000      a23ee38a15b7c9e62ca7a1331be41ed9
+fifo_wr         01000         0     0000000000      4844be88f9911236d54cd978822b5f47
+fifo_wr         01001         c     001000004c      0000000046e584ec5d47de3c3c72a23c
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 13: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+-- 16. Receive a frame of length 77 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 14: Check rx_w_mod - 77 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d5785634121111985cb6d3b7e6003bb78d
+rxd               bc96889f1ed48679f61eb5ba131d671a
+rxd               7abee395b837ca6e6b478493a9e14563
+rxd               937cf782f1ac8a2f62973b7cf19dfcdf
+rxd               e89bcfdbc933ab1b31gggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      8db73b00e6b7d3b65c98111112345678
+fifo_wr         01000         0     0000000000      1a671d13bab51ef67986d41e9f8896bc
+fifo_wr         01000         0     0000000000      6345e1a99384476b6eca37b895e3be7a
+fifo_wr         01000         0     0000000000      dffc9df17c3b97622f8aacf182f77c93
+fifo_wr         01001         d     001000004d      0000000bd27de9311bab33c9dbcf9be8
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 14: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+-- 17. Receive a frame of length 78 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 15: Check rx_w_mod - 78 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d57856341211113892fc29ee82731c66ea
+rxd               dafd411927325e3db499d9d38f7235a6
+rxd               7689af769a485ddabbcbcbc32cacdac8
+rxd               4b1e242e56a98ca546e93fcb3f2e2bf3
+rxd               7dc7a6bae8f154b4899egggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      ea661c7382ee29fc9238111112345678
+fifo_wr         01000         0     0000000000      a635728fd3d999b43d5e32271941fdda
+fifo_wr         01000         0     0000000000      c8daac2cc3cbcbbbda5d489a76af8976
+fifo_wr         01000         0     0000000000      f32b2e3fcb3fe946a58ca9562e241e4b
+fifo_wr         01001         e     001000004e      00009be2181d9e89b454f1e8baa6c77d
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 15: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+-- 18. Receive a frame of length 79 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 16: Check rx_w_mod - 79 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d5785634121111f896cb97f66a003d2b3a
+rxd               85a136c1b6d1a723f5afa4ec27a1a9d6
+rxd               1e953cfa5b4ea4a4d8f899b24898381e
+rxd               12eaf7f6858557c75d4d3959934a7a8b
+rxd               e26de18bd815b61a5695fcgggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      3a2b3d006af697cb96f8111112345678
+fifo_wr         01000         0     0000000000      d6a9a127eca4aff523a7d1b6c136a185
+fifo_wr         01000         0     0000000000      1e389848b299f8d8a4a44e5bfa3c951e
+fifo_wr         01000         0     0000000000      8b7a4a9359394d5dc7578585f6f7ea12
+fifo_wr         01001         f     001000004f      007560472afc95561ab615d88be16de2
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 16: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+-- 19. Receive a frame of length 80 bytes, and verify that the rx_w_mod
+--     signal indicates the correct number of bytes valid on the final write.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 17: Check rx_w_mod - 80 bytes frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)    5555d5785634121111849cc22e6789003e3393
+rxd               fea37a3eacbf785a4525348bee1f58f9
+rxd               f67d9ec15765d8fe6dcce66d7b4cc69c
+rxd               13d3f5fde1a1b4373b3cce4cd4e3ed47
+rxd               ec3e3f5965a94bfeebce16cfgggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      93333e0089672ec29c84111112345678
+fifo_wr         01000         0     0000000000      f9581fee8b3425455a78bfac3e7aa3fe
+fifo_wr         01000         0     0000000000      9cc64c7b6de6cc6dfed86557c19e7df6
+fifo_wr         01000         0     0000000000      47ede3d44cce3c3b37b4a1e1fdf5d313
+fifo_wr         01001         0     0010000050      3078f1cacf16ceebfe4ba965593f3eec
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 17: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+-- 20. Check statistics for above operations.
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 000004c8  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000011  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000001  -- check frames received 64
+apbrd     16C 00000010  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+--******************************************************************************
+-- 21. Setup all address matching registers to the broadcast address 
+--     (0xffffffffffff).
+--******************************************************************************
+apbwr      00 00000000  -- first disable receive
+apbwr      88 ffffffff  -- specific address register 1 bottom
+apbwr      8C 0000ffff  -- specific address register 1 top
+apbwr      90 ffffffff  -- specific address register 2 bottom
+apbwr      94 0000ffff  -- specific address register 2 top
+apbwr      98 ffffffff  -- specific address register 3 bottom
+apbwr      9C 0000ffff  -- specific address register 3 top
+apbwr      A0 ffffffff  -- specific address register 4 bottom
+apbwr      A4 0000ffff  -- specific address register 4 top
+
+
+--******************************************************************************
+-- 22. Setup all type matching registers on the VLAN frame.
+--     Note that the type field is after the VLAN tag and has value (0x4444)
+--     in this example.
+--******************************************************************************
+apbwr      A8 80004444  -- specific type register 1
+apbwr      AC 80004444  -- specific type register 2
+apbwr      B0 80004444  -- specific type register 3
+apbwr      B4 80004444  -- specific type register 4
+
+
+--******************************************************************************
+-- 23. Activate all four external match signals.
+--******************************************************************************
+filterd(6600) ext_match1 1 ext_match2 1 ext_match3 1 ext_match4 1
+apbwr      04 00680200  -- enable external address match
+
+
+--******************************************************************************
+-- 24. Receive a 64 byte, broadcast, VLAN type frame. Verify that the 
+--     rx_w_status output indicates matches on all address, type and external
+--     bits. Also check that a broadcast frame is indicated, and that the
+--     correct VLAN information is indicated on rx_w_status.
+--******************************************************************************
+
+apbwr      00 00000004  -- enable receive
+apbrdf     20 00000000  "Scenario 18: Check matching status on rx_w_status- broad"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5ffffffffffff1111222222228100f000
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      00f00081222222221111ffffffffffff
+fifo_wr         01000         0     0000000000      77777777666666665555555544444444
+fifo_wr         01000         0     0000000000      bbbbbbbbaaaaaaaa9999999988888888
+fifo_wr         01001         0     0fff3f8040      4235df5b000000000000000000000000
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 18: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+
+--******************************************************************************
+-- 25. Setup for multicast hash address matching. Set hash index register
+--     to all ones and set the multicast hash enable in the network config
+--     register. This will enable reception of all multicast addresses.
+--******************************************************************************
+apbwr      00 00000000  -- first disable receive
+apbwr      04 00680240  -- enable multicast hash in network config register
+apbwr      80 ffffffff  -- write hash index value bottom (rx all multicast)
+apbwr      84 ffffffff  -- write hash index value top (rx all multicast)
+apbwr      88 11111111  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      90 11111111  -- specific address register 2 bottom
+apbwr      94 00001111  -- specific address register 2 top
+apbwr      98 11111111  -- specific address register 3 bottom
+apbwr      9C 00001111  -- specific address register 3 top
+apbwr      A0 11111111  -- specific address register 4 bottom
+apbwr      A4 00001111  -- specific address register 4 top
+
+
+--******************************************************************************
+-- 26. Receive a 64 byte, multicast, VLAN type frame. Verify that the 
+--     rx_w_status output indicates matches on all address, type and 
+--     external bits. Also check that a multicast frame is indicated, and 
+--     that the correct VLAN information is indicated on rx_w_status.
+--******************************************************************************
+
+apbwr      00 00000004  -- enable receive
+apbrdf     20 00000000  "Scenario 19: Check matching status on rx_w_status- multi"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d51111111111111111222222228100f000
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      00f00081222222221111111111111111
+fifo_wr         01000         0     0000000000      77777777666666665555555544444444
+fifo_wr         01000         0     0000000000      bbbbbbbbaaaaaaaa9999999988888888
+fifo_wr         01001         0     0fff5f8040      9ad76829000000000000000000000000
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 19: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+--******************************************************************************
+-- 27. Setup for unicast hash address matching. Set hash index register
+--     to all ones and set the unicast hash enable in the network config
+--     register.
+--******************************************************************************
+apbwr      00 00000000  -- first disable receive
+apbwr      04 00680280  -- enable unicast hash in network config register
+apbwr      80 ffffffff  -- write hash index value bottom
+apbwr      84 ffffffff  -- write hash index value top
+apbwr      88 22222222  -- specific address register 1 bottom
+apbwr      8C 00002222  -- specific address register 1 top
+apbwr      90 22222222  -- specific address register 2 bottom
+apbwr      94 00002222  -- specific address register 2 top
+apbwr      98 22222222  -- specific address register 3 bottom
+apbwr      9C 00002222  -- specific address register 3 top
+apbwr      A0 22222222  -- specific address register 4 bottom
+apbwr      A4 00002222  -- specific address register 4 top
+
+
+--******************************************************************************
+-- 28. Receive a 64 byte, unicast, VLAN type frame. Verify that the rx_w_status
+--     output indicates matches on all address, type and external bits. Also
+--     check that a unicast frame is indicated, and that the correct VLAN
+--     information is indicated on rx_w_status.
+--******************************************************************************
+
+apbwr      00 00000004  -- enable receive
+apbrdf     20 00000000  "Scenario 20: Check matching status on rx_w_status- uni"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)     d52222222222221111222222228100f000
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      00f00081222222221111222222222222
+fifo_wr         01000         0     0000000000      77777777666666665555555544444444
+fifo_wr         01000         0     0000000000      bbbbbbbbaaaaaaaa9999999988888888
+fifo_wr         01001         0     0fff9f8040      e3f790c7000000000000000000000000
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 19: Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check rx status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+--******************************************************************************
+-- 29. Receive a 64 byte frame, but some point during reception force an
+--     overflow indication using the rx_w_overflow external FIFO input.
+--     Verify that the design indicates bad status on the final write and that
+--     the rx_w_err signal is also forced high. Also check that an RX overflow
+--     interrupt and status are reported.
+--******************************************************************************
+
+apbrdf     20 00000000  "Scenario 20: RX FIFO overflow"
+                        -- check contents of the receive status register 
+                        -- and trigger reception of frame
+
+-- drive in receive frame with carrier extension
+rxd(apb)     d52222222222221111222222228100f000
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written
+--
+-- CONTROL =  OVFLW, WS, ERR, SOP, EOP
+--              CONTROL     MOD     STATUS[39:0]    DATA
+fifo_wr         01010         0     0000000000      00f00081222222221111222222222222
+fifo_wr         11000         0     0000000000      77777777666666665555555544444444 -- overflow
+fifo_wr         01000         0     0000000000      bbbbbbbbaaaaaaaa9999999988888888
+fifo_wr         01101         0     0fff9fc040      e3f790c7000000000000000000000000 -- error
+
+
+-- Check overflow status and interrupt
+apbrd(int) 24 00000400  "Scenario 20: Complete"
+                        -- check interrupt status - Receive overrun
+apbrd      20 00000004  -- check receive status register - Receive overrun
+apbwr      20 00000004  -- clear Receive overrun
+
+
+
+--******************************************************************************
+-- 30. Check statistics for above operations.
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 000000c0  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000003  -- check frames received ok
+apbrd     15C 00000001  -- check broadcast frames received
+apbrd     160 00000001  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000003  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000001  -- check receive overrun errors
+
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(10000)
+

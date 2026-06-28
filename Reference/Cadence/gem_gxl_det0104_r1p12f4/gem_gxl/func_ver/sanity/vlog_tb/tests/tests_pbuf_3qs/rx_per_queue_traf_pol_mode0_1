@@ -1,0 +1,362 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_traf_pol_mode0_1
+--
+--   Author         : fmalaspi@cadence.com
+--
+--   Date           : 6 Feb 2017
+--
+--------------------------------------------------------------------------------
+--
+--   Test Description
+--   This test checks the functionality of Mode0 of the per queue rx traffic policing
+--   In particular for each queue a frame will be received with mode0 not set
+--   then the bit will be set and the frame will be discarded, hence no DMA activity
+--   will be performed as result of this
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+
+-- *****************************************************************************
+-- Initialise the GEM for 10 or 100-mode operation.
+-- Check the receive status and control registers.
+-- Write an address to specific address register one.
+-- *****************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 f0000000  -- write receive queue pointer
+apbwr     480 f0010000  -- write receive queue pointer
+apbwr     484 f0020000  -- write receive queue pointer
+apbwr     488 f0030000  -- write receive queue pointer
+apbwr     48c f0040000  -- write receive queue pointer
+apbwr     490 f0050000  -- write receive queue pointer
+apbwr     494 f0060000  -- write receive queue pointer
+apbwr     498 f0070000  -- write receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      98 12345678  -- specific address register 3 bottom
+apbwr      9C 00001111  -- specific address register 3 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+-- Setup the screeners
+-- [3:0]  - Selected Queue
+-- [7:4]  - VLAN priority 
+-- [8]    - VLAN enable 
+-- [11:9] - ethertype reg#
+-- [12]   - ethertype match enable
+-- [17:13]- compa reg#
+-- [18]   - compa match enable
+-- [23:19]- compb reg#
+-- [24]   - compb match enable
+-- [29:25]- compc reg#
+-- [30]   - compc match enable
+apbwr      540 00000102  -- Screener2 reg 0, vlan enabled, pri = 0
+apbwr      544 00000111  -- Screener2 reg 1, vlan enabled, pri = 1
+apbwr      548 00000121  -- Screener2 reg 2, vlan enabled, pri = 2
+apbwr      54c 00000131  -- Screener2 reg 3, vlan enabled, pri = 3
+apbwr      550 00000141  -- Screener2 reg 4, vlan enabled, pri = 4
+apbwr      554 00000151  -- Screener2 reg 5, vlan enabled, pri = 5
+apbwr      558 00000160  -- Screener2 reg 6, vlan enabled, pri = 6
+apbwr      55c 00000170  -- Screener2 reg 7, vlan enabled, pri = 7
+
+apbwr      6e0 0000ffff  -- Ethtype reg 0
+apbwr      6e4 00005a5a  -- Ethtype reg 1
+apbwr      6e8 0000a5a5  -- Ethtype reg 2
+apbwr      6ec 0000def0  -- Ethtype reg 3
+apbwr      6f0 00009abc  -- Ethtype reg 4
+apbwr      6f4 00005678  -- Ethtype reg 5
+apbwr      6f8 00001234  -- Ethtype reg 6
+apbwr      6fc 00000080  -- Ethtype reg 7
+
+apbwr      700 2211ffff  -- Compare reg 0a
+apbwr      704 00000007  -- Compare reg 0b
+apbwr      708 a334ffff  -- Compare reg 1a
+apbwr      70c 00000022  -- Compare reg 1b
+
+-- rx traffic policing registers
+apbwr     b00  00000000 -- initially mode0 is disabled for queue0
+apbwr     b04  00000000 -- initially mode0 is disabled for queue1
+apbwr     b08  00000000 -- initially mode0 is disabled for queue2
+
+apbrdf 20 00000000 
+
+-- *****************************************************************************
+-- Testing functionality for queue2 
+-- *****************************************************************************
+
+-- drive the receive frame into the interface
+-- this should be routed to queue2
+rxd(apb) 555555d5FFFFFFFFFFFF11112222222281000000ffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333gggggggg 
+
+-- supply the receive buffer location
+dma_rd f0020000 22222004  -- dma reads pointer of 22222004
+
+dma_wr 22222004 FFFFFFFF -- store frame to memory
+dma_wr 22222008 1111FFFF
+dma_wr 2222200c 22222222
+dma_wr 22222010 00000081
+dma_wr 22222014 4444ffff
+dma_wr 22222018 55554444
+dma_wr 2222201c 66665555
+dma_wr 22222020 77776666
+dma_wr 22222024 88887777
+dma_wr 22222028 99998888
+dma_wr 2222202c aaaa9999
+dma_wr 22222030 bbbbaaaa
+dma_wr 22222034 ccccbbbb
+dma_wr 22222038 11111111
+dma_wr 2222203c 22222222
+dma_wr 22222040 33333333
+dma_wr 22222044 cf023b60
+
+dma_wr f0020004 8030c044 -- dma writes rx status, broadcast and bytes received
+dma_wr f0020000 22222005 -- dma writes ownership bit
+
+-- drive the receive frame into the interface
+-- this should be routed to queue2
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281000000ffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333gggggggg 
+
+dma_rd f0020008 44440004 -- reads locations of next rx buffer
+
+dma_wr 44440004 FFFFFFFF -- store frame to memory
+dma_wr 44440008 1111FFFF
+dma_wr 4444000c 22222222
+dma_wr 44440010 00000081
+dma_wr 44440014 4444ffff
+dma_wr 44440018 55554444
+dma_wr 4444001c 66665555
+dma_wr 44440020 77776666
+dma_wr 44440024 88887777
+dma_wr 44440028 99998888
+dma_wr 4444002c aaaa9999
+dma_wr 44440030 bbbbaaaa
+dma_wr 44440034 ccccbbbb
+dma_wr 44440038 11111111
+dma_wr 4444003c 22222222
+dma_wr 44440040 33333333
+dma_wr 44440044 cf023b60
+
+dma_wr f002000c 8030c044 -- dma writes rx status, broadcast and bytes received
+dma_wr f0020008 44440005 -- dma writes ownership bit
+
+apbwr(1000) b08  00000001 -- Enable mode0 for queue2. The following frame, which should be routed
+                          -- to queue2, will be discarded, hence there will be no dma activity for it
+
+-- drive the receive frame into the interface
+-- this should be routed to queue2 and discarded because 
+-- Mode0 of per-queue rx traffic policing has been set
+
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281000000ffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333gggggggg 
+
+-- *****************************************************************************
+-- Testing functionality for queue1 
+-- *****************************************************************************
+
+-- drive the receive frame into the interface
+-- This should be routed to queue1 and since Mode0 is not
+-- set for this queue, then a DMA activity will be performed 
+-- for this frame
+
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281005a5affff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333gggggggg 
+
+dma_rd f0010000 66666004
+
+dma_wr 66666004 FFFFFFFF -- store frame to memory
+dma_wr 66666008 1111FFFF
+dma_wr 6666600c 22222222
+dma_wr 66666010 5a5a0081
+dma_wr 66666014 4444ffff
+dma_wr 66666018 55554444
+dma_wr 6666601c 66665555
+dma_wr 66666020 77776666
+dma_wr 66666024 88887777
+dma_wr 66666028 99998888
+dma_wr 6666602c aaaa9999
+dma_wr 66666030 bbbbaaaa
+dma_wr 66666034 ccccbbbb
+dma_wr 66666038 11111111
+dma_wr 6666603c 22222222
+dma_wr 66666040 33333333
+dma_wr 66666044 83d43dd7
+
+dma_wr f0010004 8025c044
+dma_wr f0010000 66666005
+
+apbwr(1700) b04 00000001  -- Enable mode0 for queue1. The following frame, which should be routed
+                          -- to queue1, will be discarded, hence there will be no dma activity for it
+
+-- This frame should be routed to queue1 and since the 
+-- mode0 has been set for this queue, this should be discarded
+
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281005a5affff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333gggggggg 
+
+-- *****************************************************************************
+-- Testing functionality for queue0 
+-- *****************************************************************************
+
+-- drive the receive frame into the interface
+-- This should be routed to queue1 and since Mode0 is not
+-- set for this queue, then a DMA activity will be performed 
+-- for this frame
+
+rxd(gap) 555555d5FFFFFFFFFFFF1111222222228100ffffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333gggggggg 
+
+dma_rd f0000000 88888004
+
+dma_wr 88888004 FFFFFFFF -- store frame to memory
+dma_wr 88888008 1111FFFF
+dma_wr 8888800c 22222222
+dma_wr 88888010 ffff0081
+dma_wr 88888014 4444ffff
+dma_wr 88888018 55554444
+dma_wr 8888801c 66665555
+dma_wr 88888020 77776666
+dma_wr 88888024 88887777
+dma_wr 88888028 99998888
+dma_wr 8888802c aaaa9999
+dma_wr 88888030 bbbbaaaa
+dma_wr 88888034 ccccbbbb
+dma_wr 88888038 11111111
+dma_wr 8888803c 22222222
+dma_wr 88888040 33333333
+dma_wr 88888044 a782687b
+
+dma_wr f0000004 802fc044
+dma_wr f0000000 88888005
+
+apbwr(2500) b00 00000001  -- Enable mode0 for queue0. The following frame, which should be routed
+                          -- to queue0, will be discarded, hence there will be no dma activity for it
+
+
+rxd(gap) 555555d5FFFFFFFFFFFF1111222222228100ffffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333gggggggg 
+
+-- Disabling Mode0 for all 3 queues and making sure the frames are 
+-- no longer dropped
+
+apbwr(2640) b00 00000000  
+apbwr       b04 00000000  
+apbwr       b08 00000000  
+
+-- Frame to queue0
+                          
+rxd(gap) 555555d5FFFFFFFFFFFF1111222222228100ffffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333gggggggg 
+
+dma_rd f0000008 88888004
+
+dma_wr 88888004 FFFFFFFF -- store frame to memory
+dma_wr 88888008 1111FFFF
+dma_wr 8888800c 22222222
+dma_wr 88888010 ffff0081
+dma_wr 88888014 4444ffff
+dma_wr 88888018 55554444
+dma_wr 8888801c 66665555
+dma_wr 88888020 77776666
+dma_wr 88888024 88887777
+dma_wr 88888028 99998888
+dma_wr 8888802c aaaa9999
+dma_wr 88888030 bbbbaaaa
+dma_wr 88888034 ccccbbbb
+dma_wr 88888038 11111111
+dma_wr 8888803c 22222222
+dma_wr 88888040 33333333
+dma_wr 88888044 a782687b
+
+dma_wr f000000c 802fc044
+dma_wr f0000008 88888005
+
+-- Frame to queue1
+
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281005a5affff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333gggggggg 
+
+dma_rd f0010008 66666004
+
+dma_wr 66666004 FFFFFFFF -- store frame to memory
+dma_wr 66666008 1111FFFF
+dma_wr 6666600c 22222222
+dma_wr 66666010 5a5a0081
+dma_wr 66666014 4444ffff
+dma_wr 66666018 55554444
+dma_wr 6666601c 66665555
+dma_wr 66666020 77776666
+dma_wr 66666024 88887777
+dma_wr 66666028 99998888
+dma_wr 6666602c aaaa9999
+dma_wr 66666030 bbbbaaaa
+dma_wr 66666034 ccccbbbb
+dma_wr 66666038 11111111
+dma_wr 6666603c 22222222
+dma_wr 66666040 33333333
+dma_wr 66666044 83d43dd7
+
+dma_wr f001000c 8025c044
+dma_wr f0010008 66666005
+
+-- Frame to queue2
+
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281000000ffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333gggggggg 
+
+-- supply the receive buffer location
+dma_rd f0020010 22222004  -- dma reads pointer of 22222004
+
+dma_wr 22222004 FFFFFFFF -- store frame to memory
+dma_wr 22222008 1111FFFF
+dma_wr 2222200c 22222222
+dma_wr 22222010 00000081
+dma_wr 22222014 4444ffff
+dma_wr 22222018 55554444
+dma_wr 2222201c 66665555
+dma_wr 22222020 77776666
+dma_wr 22222024 88887777
+dma_wr 22222028 99998888
+dma_wr 2222202c aaaa9999
+dma_wr 22222030 bbbbaaaa
+dma_wr 22222034 ccccbbbb
+dma_wr 22222038 11111111
+dma_wr 2222203c 22222222
+dma_wr 22222040 33333333
+dma_wr 22222044 cf023b60
+
+dma_wr f0020014 8030c044 -- dma writes rx status, broadcast and bytes received
+dma_wr f0020010 22222005 -- dma writes ownership bit
+
+-- force end of test in case it doesn't stop of its own accord
+end(50000)

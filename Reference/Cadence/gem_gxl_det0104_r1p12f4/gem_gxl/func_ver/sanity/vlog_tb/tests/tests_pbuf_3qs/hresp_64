@@ -1,0 +1,841 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : hresp
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 13 February 2002
+--
+--------------------------------------------------------------------------------
+--
+-- Description
+-- -----------
+-- This tests the GEM modules response to HRESP not being OK in 10M or 
+-- 100M mode operation.
+-- 
+-- Functional Coverage
+-- -------------------
+-- Receive several frames with hresp not ok set at various points in the RX DMA
+-- operation. Check for correct status.
+-- Transmit several frames with hresp not ok set at various points in the TX DMA
+-- operation. Check for correct status.
+--
+-- Detailed Test Description
+-- -------------------------
+-- � Initialize GEM for 10 or 100 mode operation
+-- � Check reset value of status registers.
+-- � Enable the GEM for receive and transmit. Also, enable all interrupts.
+--
+-- � Receive a frame and get an hresp error in the data.
+--   Check that this generates an hresp not ok interrupt.
+-- � Receive a frame and get an hresp error in the first management write.
+--   Check that this generates an hresp not ok interrupt.
+-- � Receive a frame and get an hresp error in the second management write.
+--   Check that this generates an hresp not ok interrupt.
+-- � Receive a frame and get an hresp error in the management read for the next
+--   buffer.
+--   Check that this generates an hresp not ok interrupt and that the next frame
+--   is dropped.
+-- � Receive a correct frame.
+-- � Check the statistics registers and ensure that the above operations were 
+--   handled properly.
+--
+-- � Transmit a frame with an hresp error during data in the first buffer.
+--   Check that this causes an underrun, hresp error is reported in the
+--   interrupt and status register and that the tx halts.
+-- � Transmit a frame with a hresp error in the first word of the second read
+--   descriptor in the frame, check that it causes an underrun, hresp error is
+--   reported in the interrupt and status register and that the tx halts.
+-- � Transmit a frame with a hresp error in the second word of the first read
+--   descriptor in the frame,  check that an hresp error & buffers exhausted is
+--   reported in the interrupt and status register and that the tx halts.
+-- � Transmit a frame with a hresp error in the second word of the second read
+--   descriptor in the frame, check that it causes an underrun, hresp error is
+--   reported in the interrupt and status register and that the tx halts.
+-- � Re-transmit the frame. This time it sees a hresp error in the writeback
+--   Check that it causes an underrun, hresp error is
+--   reported in the interrupt and status register and that the tx halts.
+-- � Re-transmit the frame. This time it sees a hresp error on the last
+--   data phase of a burst (during the AHB DMA hold off state).
+--   Check that it causes an underrun, hresp error is
+--   reported in the interrupt and status register and that the tx halts.
+-- � Re-transmit the frame. This time it completes successfully.
+-- � Check the status and statistics registers and ensure that the above 
+--   operations were handled properly.
+--------------------------------------------------------------------------------
+
+--******************************************************************************
+-- initialise the GEM
+--******************************************************************************
+--wait_states 4
+
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      18 01234000  -- write receive queue pointer
+apbwr      480 88000000  -- write receive queue pointer 1
+apbwr      484 99000000  -- write receive queue pointer 2
+apbwr      440 88000000  -- write transmit queue pointer 1
+apbwr      444 99000000  -- write transmit queue pointer 2
+apbwr      10 000207c4  -- DMA configuration reg - set burst length to 1 to avoid HBURST errors
+apbwr	     1c ffffff00  -- write address of tx buffer descriptor in memory
+apbrd	     1c ffffff00  -- check transmit queue pointer
+apbrd      04 00080000  
+apbwr      04 00280000  
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      98 12345678  -- specific address register 1 bottom
+apbwr      9C 00001111  -- specific address register 1 top
+apbwr      00 0000000C  -- enable transmit and receive
+
+
+--******************************************************************************
+-- Receive a frame and get an hresp error in the data.
+-- Check that this generates an hresp not ok interrupt.
+--******************************************************************************
+
+apbrdf     20 00000000  "RX scenario 1: hresp error in data"
+                        -- check contents of the receive status register 
+                        -- and trigger reception of frame
+
+rxd(apb)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- supply the receive buffer location
+dma_rd 01234000 22222004 -- dma reads pointer of 22222004
+
+dma_wr 22222000 00000000 -- pad
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999  not_ok
+dma_wr 2222202c aaaaaaaa  
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+
+
+apbrd(int) 24 00000800  "RX scenario 1: Complete"
+                        -- check interrupt status - HRESP not OK
+apbwr      24 00000840  -- clear interrupt status register
+apbrd      20 00000008  -- check receive status register - rx hresp error
+apbwr      20 00000008  -- clear rx hresp error
+apbrd     1A0 00000000  -- check receive resource errors
+
+
+--******************************************************************************
+-- Receive a frame and get an hresp error in the first management write.
+-- Check that this generates an hresp not ok interrupt.
+--******************************************************************************
+
+apbrd      20 00000000  "RX scenario 2: hresp error in 1st man write"
+                        -- check contents of the receive status register 
+
+dma_rd 01234000 22222004 -- dma reads pointer of 22222004
+
+dma_wr 22222000 00000000 -- pad
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 9b303826
+dma_wr 22222044 00000000
+
+dma_wr 01234000 22222005 not_ok     -- dma writes ownership bit
+dma_wr 01234004 0c00c040            -- dma writeback, local match 1 and 64 bytes received
+dma_rd 01234008 98760000 -- dma reads pointer for Queue 2
+
+apbrd(int) 24 00000800  "RX scenario 2: Complete"
+                        -- check interrupt status - HRESP not OK
+apbwr      24 00000840  -- clear interrupt status register
+apbrd      20 00000008  -- check receive status register - rx hresp error
+apbwr      20 00000008  -- clear rx hresp error
+apbrd      20 00000000  -- check now clear
+apbrd     1A0 00000000  -- check receive resource errors
+
+
+--******************************************************************************
+-- Receive a frame and get an hresp error in the second management write.
+-- Check that this generates an hresp not ok interrupt.
+--******************************************************************************
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000011gggggggg
+
+dma_rd 01234008 22222004        -- reads locations of next rx buffer
+
+apbrd      20 00000000  "RX scenario 3: hresp error in 2nd man write"
+                        -- check contents of the receive status register 
+
+
+dma_wr 22222000 00000000 -- pad
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 11000000
+dma_wr 22222040 f18018d4
+dma_wr 22222044 00000000
+
+dma_wr 01234008 22222005 not_ok -- dma writes ownership bit
+dma_wr 0123400c 0c00c040        -- dma writeback, local match 1 and 64 bytes received
+dma_rd 01234010 98760000 -- dma reads pointer for Queue 2
+
+-- the next buffer descriptor will be read again due to hresp error
+dma_rd 01234010 22222004        -- reads locations of next rx buffer
+
+apbrd(int) 24 00000800  "RX scenario 3: Complete"
+                        -- check interrupt status - HRESP not OK
+apbwr      24 00000840  -- clear interrupt status register
+apbrd      20 00000008  -- check receive status register - rx hresp error
+apbwr      20 00000008  -- clear rx hresp error
+apbrd      20 00000000  -- check now clear
+apbrd     1A0 00000000  -- check receive resource errors
+
+
+--******************************************************************************
+-- Receive a frame and get an hresp error in the management read for the next
+-- buffer.
+-- Check that this generates an hresp not ok interrupt and that the next frame 
+-- is dropped.
+--******************************************************************************
+
+apbrd      20 00000000  "RX scenario 4: hresp error in man read for next buffer"
+                        -- check contents of the receive status register 
+
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000022gggggggg
+
+
+dma_wr 22222000 00000000 -- pad
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 22000000
+dma_wr 22222040 4e5079c2
+dma_wr 22222044 00000000
+
+dma_wr 01234010 22222005        -- dma writes ownership bit
+dma_wr 01234014 0c00c040        -- dma writeback, local match 1 and 64 bytes received
+dma_rd 01234018 22222004 not_ok -- reads locations of next rx buffer
+
+-- first get an interrupt for the good complete frame
+apbrd(int) 24 00000002  "RX scenario 4: Received a good frame"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check receive status register- frame received
+apbwr      20 00000002  -- clear receive status register
+
+
+-- this frame is used as a trigger to start a DMA wr of the previous pkt
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- once this frame is cleared an HRESP interrupt will be raised
+apbrd(int) 24 00000800  "RX scenario 4: Complete"
+                        -- check interrupt status - HRESP not OK
+apbwr      24 00000840  -- clear interrupt status register
+apbrd      20 00000008  -- check receive status register - rx hresp error
+apbwr      20 00000008  -- clear rx hresp error
+apbrd      20 00000000  -- check now clear
+apbrd     1A0 00000000  -- check receive resource errors
+
+
+-- re-read desciptor, but this time OK
+dma_rd 01234018 22222004 -- reads locations of next rx buffer
+
+
+--******************************************************************************
+-- Receive a correct frame.
+--******************************************************************************
+
+apbrd      20 00000000  "RX scenario 5: Good frame"
+                        -- check contents of the receive status register 
+
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+
+dma_wr 22222000 00000000 -- pad
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999  
+dma_wr 2222202c aaaaaaaa  
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000  
+dma_wr 2222203c 00000000  
+dma_wr 22222040 9b303826  
+dma_wr 22222044 00000000
+
+dma_wr 01234018 22222005 -- dma writes ownership bit
+dma_wr 0123401c 0c00c040 -- dma writeback, local match 1 and 64 bytes received
+dma_rd 01234020 22222004 -- reads locations of next rx buffer
+
+-- the last frame
+dma_wr 22222000 00000000 -- pad
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999  
+dma_wr 2222202c aaaaaaaa  
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000  
+dma_wr 2222203c 00000000  
+dma_wr 22222040 9b303826  
+dma_wr 22222044 00000000
+
+dma_wr 01234020 22222005 -- dma writes ownership bit
+dma_wr 01234024 0c00c040 -- dma writeback, local match 1 and 64 bytes received
+
+apbrd(int) 24 00000002  "RX scenario 5: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check receive status register- frame received
+apbwr      20 00000002  -- clear receive status register
+apbrd      20 00000000  -- check now clear
+
+apbrd(int) 24 00000002  "RX scenario 5: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check receive status register- frame received
+apbwr      20 00000002  -- clear receive status register
+apbrd      20 00000000  -- check now clear
+
+
+--******************************************************************************
+-- Check the statistics registers and ensure that the above operations were 
+-- handled properly.
+--******************************************************************************
+
+apbrd     150 00000140  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000005  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000005  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors (already read above)
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+
+
+--******************************************************************************
+-- Transmit a frame with an hresp error during data in the first buffer.
+-- Check that this causes an underrun, hresp error is reported in the
+-- interrupt and status register and that the tx halts.
+--******************************************************************************
+
+-- Start the transmission by setting the go bit in network control register
+apbwr      00 0000020c  "TX scenario 1: hresp error during data (1st buffer)"
+                        -- start transmission
+
+-- supply the transmit buffer location
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+dma_rd ffffff04 00000028 -- reads no eof and length
+
+
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222 
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666 not_ok
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888 
+dma_rd 98765024 99999999 
+-- no more data reads after this point because of hresp error.
+
+
+-- With the packet buffer included, no transmit will occur as packet has
+-- not been successfully stored in the buffer.
+-- txd    55555555555555d578563412111111112222222233333333
+-- txd                    44444444555555556666666677
+-- txd                    77777777 -- jam (underrun)
+
+
+
+-- write used bit and tx error
+dma_wr ffffff04 90000028 
+
+
+apbrd(int) 24 00000840  "TX scenario 1: Complete"
+                        -- check interrupt status - HRESP not OK & buffers exh.
+apbwr      24 00000840  -- clear interrupt status register
+apbrd      14 00000110  -- read tx status register - HRESP not OK & buffers exh.
+apbwr      14 00000110  -- clear status register
+apbrd      14 00000000  -- clear status register
+apbrd     134 00000000  -- check transmit underruns errors (none with pkt buff)
+
+
+
+--******************************************************************************
+-- Transmit a frame with a hresp error in the first word of the second read
+-- descriptor in the frame, check that it causes an underrun, hresp error is
+-- reported in the interrupt and status register and that the tx halts.
+--******************************************************************************
+
+-- Start the transmission by setting the go bit in network control register
+apbwr      00 00000208  "TX scenario 2: hresp error in 1st man read (2nd buffer)"
+                        -- start transmission
+
+-- supply the transmit buffer location
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+dma_rd ffffff04 00000028 -- reads no eof and length
+
+
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222 
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777 
+dma_rd 98765020 88888888  
+dma_rd 98765024 99999999  
+
+-- supply the transmit buffer location
+dma_rd ffffff08 98765000 not_ok -- dma reads pointer of 98765000
+dma_rd ffffff0c 00000024        -- reads eof and length
+
+
+
+-- With the packet buffer included, no transmit will occur as packet has
+-- not been successfully stored in the buffer.
+-- txd    55555555555555d578563412111111112222222233333333
+-- txd                    44444444555555556666666677777777
+-- txd                    88888888
+-- txd                    9999999999 -- jam (underrun)
+
+
+
+-- write used bit and tx error
+dma_wr ffffff04 90000028 
+
+
+apbrd(int) 24 00000840  "TX scenario 2: Complete"
+                        -- check interrupt status - HRESP not OK & buffers exh.
+apbwr      24 00000840  -- clear interrupt status register
+apbrd      14 00000110  -- read tx status register - HRESP not OK & buffers exh.
+apbwr      14 00000110  -- clear status register
+apbrd      14 00000000  -- clear status register
+apbrd     134 00000000  -- check transmit underruns errors (none with pkt buff)
+
+
+
+--******************************************************************************
+-- Transmit a frame with a hresp error in the second word of the first read
+-- descriptor in the frame,  check that an hresp error & buffers exhausted is
+-- reported in the interrupt and status register and that the tx halts.
+--******************************************************************************
+
+-- Start the transmission by setting the go bit in network control register
+apbwr      00 00000208  "TX scenario 3: hresp error in 2nd man read (1st buffer)"
+                        -- start transmission
+
+-- supply the transmit buffer location
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff00 98765000 not_ok        -- dma reads pointer of 98765000
+dma_rd ffffff04 00000028 -- reads eof and length
+
+-- no data reads because of hresp error.
+
+-- no txd because of hresp error.
+
+-- write used bit and tx error
+dma_wr ffffff04 90000028 
+
+
+
+apbrd(int) 24 00000840  "TX scenario 3: Complete"
+                        -- check interrupt status - HRESP not OK & buffers exh.
+apbwr      24 00000840  -- clear interrupt status register
+apbrd      14 00000110  -- read tx status register - HRESP not OK & buffers exh.
+apbwr      14 00000110  -- clear status register
+apbrd      14 00000000  -- check status register
+apbrd     134 00000000  -- check transmit underruns errors (none with pkt buff)
+
+
+
+--******************************************************************************
+-- Transmit a frame with a hresp error in the second word of the second read
+-- descriptor in the frame, check that it causes an underrun, hresp error is
+-- reported in the interrupt and status register and that the tx halts.
+--******************************************************************************
+
+-- Start the transmission by setting the go bit in network control register
+apbwr      00 00000208  "TX scenario 4: hresp error in 2nd man read (2nd buffer)"
+                        -- start transmission
+
+-- supply the transmit buffer location
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+dma_rd ffffff04 00000028 -- reads eof and length
+
+
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222 
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777 
+dma_rd 98765020 88888888  
+dma_rd 98765024 99999999  
+
+-- supply the transmit buffer location
+dma_rd ffffff08 98765000 not_ok        -- dma reads pointer of 98765000
+dma_rd ffffff0c 00000024 -- reads eof and length
+
+
+
+-- With the packet buffer included, no transmit will occur as packet has
+-- not been successfully stored in the buffer.
+-- txd    55555555555555d578563412111111112222222233333333
+-- txd                    44444444555555556666666677777777
+-- txd                    88888888
+-- txd                    9999999999 -- jam (underrun)
+
+
+
+-- write used bit and tx error
+dma_wr ffffff04 90000028 
+
+
+apbrd(int) 24 00000840  "TX scenario 4: Complete"
+                        -- check interrupt status - HRESP not OK & buffers exh.
+apbwr      24 00000840  -- clear interrupt status register
+apbrd      14 00000110  -- read tx status register - HRESP not OK & buffers exh.
+apbwr      14 00000110  -- clear status register
+apbrd      14 00000000  -- check status register
+apbrd     134 00000000  -- check transmit underruns errors (none with pkt buff)
+
+
+
+--******************************************************************************
+-- Re-transmit the frame. This time it sees a hresp error in the writeback
+-- Check that it causes an underrun, hresp error is
+-- reported in the interrupt and status register and that the tx halts.
+--******************************************************************************
+
+apbwr      00 00000208  "TX scenario 5: hresp error in man write (1st buffer)"
+                        -- restart transmission
+
+-- supply the transmit buffer location
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff00 22222000 -- dma reads pointer of 22222000
+dma_rd ffffff04 00008040 -- reads eof and length
+
+
+dma_rd 22222000 12345678
+dma_rd 22222004 11111111
+dma_rd 22222008 22222222
+dma_rd 2222200c 33333333
+dma_rd 22222010 44444444
+dma_rd 22222014 55555555
+dma_rd 22222018 66666666
+dma_rd 2222201c 77777777
+dma_rd 22222020 88888888  
+dma_rd 22222024 99999999
+dma_rd 22222028 aaaaaaaa
+dma_rd 2222202c bbbbbbbb
+dma_rd 22222030 88888888  
+dma_rd 22222034 99999999
+dma_rd 22222038 aaaaaaaa
+dma_rd 2222203c bbbbbbbb
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb1c8945d8
+
+-- write used bit
+dma_wr ffffff04 80008040 not_ok
+
+-- supply the transmit buffer location
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff08 22222040 -- dma reads pointer of 22222000
+dma_rd ffffff0c 80008040 -- used bit set, tx stops
+
+
+apbrd(int) 24 000008c8  "TX scenario 5: Complete"
+                        -- check interrupt status - complete, hresp
+apbwr      24 000008c8  -- clear interrupt status register
+apbrd      14 00000131  -- read tx status register- complete, hresp
+apbwr      14 00000131  -- clear tx status register
+apbrd      14 00000000  -- check that tx status register now clear
+
+
+
+--******************************************************************************
+-- Re-transmit the frame. This time it sees a hresp error on the last
+-- data phase of a burst (during the AHB DMA hold off state).
+-- Check that it causes an underrun, hresp error is
+-- reported in the interrupt and status register and that the tx halts.
+--******************************************************************************
+
+apbwr      00 00000208  "TX scenario 6: hresp error in last phase of burst"
+                        -- restart transmission
+
+-- supply the transmit buffer location
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff08 98765000 -- dma reads pointer of 98765000
+dma_rd ffffff0c 00000028 -- reads eof and length
+
+
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222 not_ok 
+dma_rd 9876500c 33333333
+dma_rd 98765010 11111111
+dma_rd 98765014 22222222 
+dma_rd 98765018 22222222 
+dma_rd 9876501c 22222222 
+-- dma_rd 98765018 66666666
+-- dma_rd 9876501c 77777777 
+-- dma_rd 98765020 88888888
+
+
+-- With the packet buffer included, no transmit will occur as packet has
+-- not been successfully stored in the buffer.
+-- txd    55555555555555d578563412111111112222222233
+-- txd                    33333333 -- JAM
+
+
+-- write used bit and tx error
+dma_wr ffffff0c 90000028 
+
+
+apbrd(int) 24 00000840  "TX scenario 6: Complete"
+                        -- check interrupt status - hresp
+apbwr      24 00000840  -- clear interrupt status register
+apbrd      14 00000110  -- read tx status register- hresp
+apbwr      14 00000110  -- clear tx status register
+apbrd      14 00000000  -- check status register
+apbrd     134 00000000  -- check transmit underruns errors (none with pkt buff)
+
+
+
+--******************************************************************************
+-- Re-transmit the frame. This time it completes successfully.
+--******************************************************************************
+
+apbwr      00 00000208  "TX scenario 7: Good frame"
+                        -- restart transmission
+
+-- supply the transmit buffer location
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff08 22222000 -- dma reads pointer of 22222000
+dma_rd ffffff0c 00008040 -- reads eof and length
+
+
+dma_rd 22222000 12345678
+dma_rd 22222004 11111111
+dma_rd 22222008 22222222
+dma_rd 2222200c 33333333
+dma_rd 22222010 44444444
+dma_rd 22222014 55555555
+dma_rd 22222018 66666666
+dma_rd 2222201c 77777777
+dma_rd 22222020 88888888  
+dma_rd 22222024 99999999
+dma_rd 22222028 aaaaaaaa
+dma_rd 2222202c bbbbbbbb
+dma_rd 22222030 88888888  
+dma_rd 22222034 99999999
+dma_rd 22222038 aaaaaaaa
+dma_rd 2222203c bbbbbbbb
+
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    8888888899999999aaaaaaaabbbbbbbb1c8945d8
+
+-- write used bit
+dma_wr ffffff0c 80008040
+
+-- supply the transmit buffer location
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd ffffff10 22222040 -- dma reads pointer of 22222000
+dma_rd ffffff14 80008040 -- used bit set, tx stops
+
+
+apbrd(int) 24 00000088  "TX scenario 7: Complete"
+                        -- check interrupt status - frame transmitted tx used bit read
+apbwr      24 00000088  -- clear interrupt status register
+apbrd      14 00000021  -- read tx status register -frame transmitted and 
+                        -- used bit read
+apbwr      14 00000021  -- clear tx status register
+apbrd      14 00000000  -- check that tx status register now clear
+
+
+
+--******************************************************************************
+-- Check the status and statistics registers and ensure that the above 
+-- operations were handled properly.
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000088  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000002  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000002  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors (previously read)
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(8000)
+
+bus_grant_delay 0

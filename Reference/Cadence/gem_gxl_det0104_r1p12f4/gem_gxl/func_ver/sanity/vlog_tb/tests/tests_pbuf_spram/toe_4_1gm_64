@@ -1,0 +1,2079 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : toe_4_1gm_64
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 5 October 2002
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- This test checks the operation of the RX TCP offload engine, with IP frames
+-- which have flaws in them so that the checksums should not be checked.
+-- This test is run in gigabit GMII DMA mode.
+-- 
+-- Functional Coverage
+-- * Checks that the TOE recognises that these are not proper IP, TCP or UDP 
+--   frames and therefore does not validate the checksum.
+-- 
+-- Detailed Test Description
+--  1. Initialise suitable wait states for the test.
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 1GM mode into a 64-bit DMA data bus.
+--  3. Send several IP frames which have flaws in them so that the checksums
+--     should not be checked.
+--
+-- Test 4.1
+--    Broadcast frame, No VLAN, type not 0800 (ARP)
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.2
+--    Broadcast frame, No VLAN, type/len = 0x0024, not SNAP (DSAP, 
+--    SSAP = 0x5555).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.3
+--    Broadcast frame, No VLAN, type/len = 0x0024, not SNAP (Next 2 octets
+--    not equal to 0x0300 actually 0x00C0).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.4
+--    Broadcast frame, No VLAN, type/len = 0x0024, not SNAP (Next 2 octets 
+--    not equal to 0x0000).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.5
+--    Broadcast frame, No VLAN, type/len = 0x0024, SNAP but not IP (Next 
+--    2 octets not equal to 0x0800).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and SNAP (bit 24 high).
+-- Test 4.6
+--    Broadcast frame, VLAN tag > 4 octets.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.7
+--    Broadcast frame, VLAN tag = 4 octets, type/len = 0x0806.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.8
+--    Broadcast frame, VLAN tag = 4 octets, type/len = 0x0010, not SNAP.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.9
+--    Broadcast frame, Not IPv4 (IPv6 flag in IP header).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.10
+--    Broadcast frame, IP header length too short.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.11
+--    Broadcast frame, TCP, No VLAN or SNAP, IP and TCP checksums OK, 
+--    but TOE is disabled in network config register.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.12
+--    Broadcast frame, TCP, VLAN, no SNAP, IP and TCP checksums OK, 
+--    but TOE is disabled in network config register.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.13
+--    Broadcast frame, TCP, VLAN, SNAP, IP and TCP checksums OK, 
+--    but TOE is disabled in network config register.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.14
+--    Broadcast frame, TCP, No VLAN, SNAP, IP and TCP checksums OK, 
+--    but TOE is disabled in network config register.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.15
+--    Broadcast frame, TCP, VLAN with CFI, no SNAP, IP and TCP checksums OK.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.16
+--    Broadcast frame, TCP, VLAN with CFI, SNAP, IP and TCP checksums OK.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.17
+--    Broadcast frame, TCP, no VLAN, bad SNAP (DSAP OK, SSAP bad).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.18
+--    Broadcast frame, TCP, no VLAN, bad SNAP (SSAP OK, DSAP bad).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.19
+--    Broadcast frame, TCP, no VLAN, bad SNAP (CONTROL OK, ID[7:0] bad).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.20
+--    Broadcast frame, TCP, no VLAN, bad SNAP (ID[7:0] OK, CONTROL bad).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.21
+--    Broadcast frame, TCP, no VLAN, bad SNAP (ID[15:8] OK, ID[23:16] bad).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+-- Test 4.22
+--    Broadcast frame, TCP, VLAN, SNAP, good checksum values, to prove we 
+--    are setup to accept a good frame.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked OK (bits [23:22] = 11) and SNAP (bit 24 high).
+--
+--  4. Check statistics for correct values from above tests.
+--
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 0
+bus_grant_delay 0
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 1GM mode into a 64-bit DMA data bus.
+--******************************************************************************
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 01280401  -- enable RX TCP offload engine, 1G, 64 bit.
+apbrd      04 01280401  -- verify write to network config register.
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      18 fffff000  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+
+
+
+--******************************************************************************
+--  3. Send several IP frames which have flaws in them so that the checksums
+--     should not be checked.
+--******************************************************************************
+
+
+
+
+--******************************************************************************
+-- Test 4.1
+--    Broadcast frame, No VLAN, type not 0800 (ARP)
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.1 : No VLAN, type not 0800 (ARP)"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0806         -- Length/typeID
+rxd        00010800     -- data
+rxd        06040001     -- data
+rxd        08003912     -- data
+rxd        345686BF     -- data
+rxd        0B520000     -- data
+rxd        00000000     -- data
+rxd        86BF1622     -- data
+rxd        00000000     -- data
+rxd        00000000     -- data
+rxd        00000000     -- data
+rxd        00000000     -- data
+rxd        0000         -- data
+rxd        63190C67     -- FCS
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0806
+
+
+-- supply the receive buffer location
+dma_rd fffff000 22222100 -- dma reads pointer of 22222100
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 FFFFFFFF -- store frame to memory
+dma_wr 22222104 0008FFFF
+dma_wr 22222108 56341239
+dma_wr 2222210c 01000608
+dma_wr 22222110 04060008
+dma_wr 22222114 00080100
+dma_wr 22222118 56341239
+dma_wr 2222211c 520BBF86
+dma_wr 22222120 00000000
+dma_wr 22222124 BF860000
+dma_wr 22222128 00002216
+dma_wr 2222212c 00000000
+dma_wr 22222130 00000000
+dma_wr 22222134 00000000
+dma_wr 22222138 00000000
+dma_wr 2222213c 670C1963
+
+dma_wr fffff000 22222101 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no IP & TCP checksums OK
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff004 8000c040 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.1 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Test 4.2
+--    Broadcast frame, No VLAN, type/len = 0x0024, not SNAP (DSAP, 
+--    SSAP = 0x5555).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.2 : No VLAN, type/len = 0x0024, not SNAP (DSAP, SSAP = 0x5555)"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0024         -- Length/typeID
+rxd        5555         -- DSAP and SSAP
+rxd        0300         -- Control / Protocol ID[7:0]
+rxd        0000         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        001C         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A11         -- time to live and protocol
+rxd        81DF         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        0000         -- UDP source port
+rxd        0000         -- UDP destination port
+rxd        0008         -- UDP length
+rxd        D0EB         -- UDP checksum
+rxd        00000000     -- UDP data
+rxd        00000000     -- UDP data
+rxd        0000         -- UDP data
+rxd        6D7006DD     -- Good FCS
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0024
+
+
+-- supply the receive buffer location
+dma_rd fffff008 22222200 -- dma reads pointer of 22222200
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222200 FFFFFFFF -- store frame to memory
+dma_wr 22222204 0008FFFF
+dma_wr 22222208 56341239
+dma_wr 2222220c 55552400
+dma_wr 22222210 00000003
+dma_wr 22222214 00450008
+dma_wr 22222218 00001C00
+dma_wr 2222221c 110A0000
+dma_wr 22222220 BF86DF81
+dma_wr 22222224 BF86520B
+dma_wr 22222228 00002216
+dma_wr 2222222c 08000000
+dma_wr 22222230 0000EBD0
+dma_wr 22222234 00000000
+dma_wr 22222238 00000000
+dma_wr 2222223c DD06706D
+
+dma_wr fffff008 22222201 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no IP & TCP checksums OK
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff00c 8000c040 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.2 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Test 4.3
+--    Broadcast frame, No VLAN, type/len = 0x0024, not SNAP (Next 2 octets
+--    not equal to 0x0300 actually 0x00C0).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.3 : No VLAN, type/len = 0x0024, not SNAP protocol"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0024         -- Length/typeID
+rxd        AAAA         -- DSAP and SSAP
+rxd        00C0         -- Control / Protocol ID[7:0]
+rxd        0000         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        001C         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A11         -- time to live and protocol
+rxd        81DF         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        0000         -- UDP source port
+rxd        0000         -- UDP destination port
+rxd        0008         -- UDP length
+rxd        D0EB         -- UDP checksum
+rxd        00000000     -- UDP data
+rxd        00000000     -- UDP data
+rxd        0000         -- UDP data
+rxd        37849BB3     -- Good FCS
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0024
+
+
+-- supply the receive buffer location
+dma_rd fffff010 22222300 -- dma reads pointer of 22222300
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222300 FFFFFFFF -- store frame to memory
+dma_wr 22222304 0008FFFF
+dma_wr 22222308 56341239
+dma_wr 2222230c AAAA2400
+dma_wr 22222310 0000C000
+dma_wr 22222314 00450008
+dma_wr 22222318 00001C00
+dma_wr 2222231c 110A0000
+dma_wr 22222320 BF86DF81
+dma_wr 22222324 BF86520B
+dma_wr 22222328 00002216
+dma_wr 2222232c 08000000
+dma_wr 22222330 0000EBD0
+dma_wr 22222334 00000000
+dma_wr 22222338 00000000
+dma_wr 2222233c B39B8437
+
+dma_wr fffff010 22222301 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no IP & TCP checksums OK
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff014 8000c040 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.3 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Test 4.4
+--    Broadcast frame, No VLAN, type/len = 0x0024, not SNAP (Next 2 octets 
+--    not equal to 0x0000).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.4 : No VLAN, type/len = 0x0024, not SNAP protocol"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0024         -- Length/typeID
+rxd        AAAA         -- DSAP and SSAP
+rxd        0300         -- Control / Protocol ID[7:0]
+rxd        675F         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        001C         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A11         -- time to live and protocol
+rxd        81DF         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        0000         -- UDP source port
+rxd        0000         -- UDP destination port
+rxd        0008         -- UDP length
+rxd        D0EB         -- UDP checksum
+rxd        00000000     -- UDP data
+rxd        00000000     -- UDP data
+rxd        0000         -- UDP data
+rxd        00B2BBD1     -- Good FCS
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0024
+
+
+-- supply the receive buffer location
+dma_rd fffff018 22222400 -- dma reads pointer of 22222400
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222400 FFFFFFFF -- store frame to memory
+dma_wr 22222404 0008FFFF
+dma_wr 22222408 56341239
+dma_wr 2222240c AAAA2400
+dma_wr 22222410 5F670003
+dma_wr 22222414 00450008
+dma_wr 22222418 00001C00
+dma_wr 2222241c 110A0000
+dma_wr 22222420 BF86DF81
+dma_wr 22222424 BF86520B
+dma_wr 22222428 00002216
+dma_wr 2222242c 08000000
+dma_wr 22222430 0000EBD0
+dma_wr 22222434 00000000
+dma_wr 22222438 00000000
+dma_wr 2222243c D1BBB200
+
+dma_wr fffff018 22222401 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no IP & TCP checksums OK
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff01c 8000c040 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.4 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Test 4.5
+--    Broadcast frame, No VLAN, type/len = 0x0024, SNAP but not IP (Next 
+--    2 octets not equal to 0x0800).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and SNAP (bit 24 high).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.5 : No VLAN, type/len = 0x0024, SNAP but not IP"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0024         -- Length/typeID
+rxd        AAAA         -- DSAP and SSAP
+rxd        0300         -- Control / Protocol ID[7:0]
+rxd        0000         -- Protocol ID [23:8]
+rxd        0010         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        001C         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A11         -- time to live and protocol
+rxd        81DF         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        0000         -- UDP source port
+rxd        0000         -- UDP destination port
+rxd        0008         -- UDP length
+rxd        D0EB         -- UDP checksum
+rxd        00000000     -- UDP data
+rxd        00000000     -- UDP data
+rxd        0000         -- UDP data
+rxd        14C24C11     -- Good FCS
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0010
+
+
+-- supply the receive buffer location
+dma_rd fffff020 22222500 -- dma reads pointer of 22222500
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222500 FFFFFFFF -- store frame to memory
+dma_wr 22222504 0008FFFF
+dma_wr 22222508 56341239
+dma_wr 2222250c AAAA2400
+dma_wr 22222510 00000003
+dma_wr 22222514 00451000
+dma_wr 22222518 00001C00
+dma_wr 2222251c 110A0000
+dma_wr 22222520 BF86DF81
+dma_wr 22222524 BF86520B
+dma_wr 22222528 00002216
+dma_wr 2222252c 08000000
+dma_wr 22222530 0000EBD0
+dma_wr 22222534 00000000
+dma_wr 22222538 00000000
+dma_wr 2222253c 114CC214
+
+dma_wr fffff020 22222501 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no IP & TCP checksums OK
+                         -- SNAP detected
+                         -- no VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff024 8100c040 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.5 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Test 4.6
+--    Broadcast frame, VLAN tag > 4 octets.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.6 : VLAN tag > 4 octets"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        1001         -- VLAN tag
+rxd        23456789     -- 4 extra bytes in VLAN tag
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        001C         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A11         -- time to live and protocol
+rxd        81DF         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        0000         -- UDP source port
+rxd        0000         -- UDP destination port
+rxd        0008         -- UDP length
+rxd        D0EB         -- UDP checksum
+rxd        00000000     -- UDP data
+rxd        00000000     -- UDP data
+rxd        00000000     -- UDP data
+rxd        0000         -- UDP data
+rxd        DE916A57     -- Good FCS
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 vid 1001 type 2345
+
+
+-- supply the receive buffer location
+dma_rd fffff028 22222600 -- dma reads pointer of 22222600
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222600 FFFFFFFF -- store frame to memory
+dma_wr 22222604 0008FFFF
+dma_wr 22222608 56341239
+dma_wr 2222260c 01100081
+dma_wr 22222610 89674523
+dma_wr 22222614 00450008
+dma_wr 22222618 00001C00
+dma_wr 2222261c 110A0000
+dma_wr 22222620 BF86DF81
+dma_wr 22222624 BF86520B
+dma_wr 22222628 00002216
+dma_wr 2222262c 08000000
+dma_wr 22222630 0000EBD0
+dma_wr 22222634 00000000
+dma_wr 22222638 00000000
+dma_wr 2222263c 00000000
+dma_wr 22222640 576A91DE
+dma_wr 22222644 00000000
+
+dma_wr fffff028 22222601 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no IP & TCP checksums OK
+                         -- no SNAP detected
+                         -- VLAN tag detected, CFI, no priority
+                         -- 68 bytes received
+dma_wr fffff02c 8021c044 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.6 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Test 4.7
+--    Broadcast frame, VLAN tag = 4 octets, type/len = 0x0806.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.7 : VLAN tag = 4 octets, type/len = 0x0806"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0806         -- Length/typeID
+rxd        00010800     -- data
+rxd        06040001     -- data
+rxd        08003912     -- data
+rxd        345686BF     -- data
+rxd        0B520000     -- data
+rxd        00000000     -- data
+rxd        86BF1622     -- data
+rxd        00000000     -- data
+rxd        00000000     -- data
+rxd        00000000     -- data
+rxd        0000         -- data
+rxd        3E10B9F4     -- Good FCS
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 vid 0001 type 0806
+
+
+-- supply the receive buffer location
+dma_rd fffff030 22222700 -- dma reads pointer of 22222700
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222700 FFFFFFFF -- store frame to memory
+dma_wr 22222704 0008FFFF
+dma_wr 22222708 56341239
+dma_wr 2222270c 01000081
+dma_wr 22222710 01000608
+dma_wr 22222714 04060008
+dma_wr 22222718 00080100
+dma_wr 2222271c 56341239
+dma_wr 22222720 520BBF86
+dma_wr 22222724 00000000
+dma_wr 22222728 BF860000
+dma_wr 2222272c 00002216
+dma_wr 22222730 00000000
+dma_wr 22222734 00000000
+dma_wr 22222738 00000000
+dma_wr 2222273c F4B9103E
+
+dma_wr fffff030 22222701 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no IP & TCP checksums OK
+                         -- no SNAP detected
+                         -- VLAN tag detected, no CFI, no priority
+                         -- 64 bytes received
+dma_wr fffff034 8020c040 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.7 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+--******************************************************************************
+-- Test 4.8
+--    Broadcast frame, VLAN tag = 4 octets, type/len = 0x0010, not SNAP.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.8 : VLAN tag = 4 octets, type/len = 0x0010, not SNAP"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0010         -- Length/typeID
+rxd        0001         -- DSAP and SSAP
+rxd        0800         -- Control / Protocol ID[7:0]
+rxd        0604         -- Protocol ID [23:8]
+rxd        0001         -- Length/typeID
+rxd        08003912     -- data
+rxd        345686BF     -- data
+rxd        0B520000     -- data
+rxd        00000000     -- data
+rxd        86BF1622     -- data
+rxd        00000000     -- data
+rxd        00000000     -- data
+rxd        00000000     -- data
+rxd        0000         -- data
+rxd        029F899D     -- Good FCS
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 vid 0001 type 0010
+
+
+-- supply the receive buffer location
+dma_rd fffff038 22222800 -- dma reads pointer of 22222800
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222800 FFFFFFFF -- store frame to memory
+dma_wr 22222804 0008FFFF
+dma_wr 22222808 56341239
+dma_wr 2222280c 01000081
+dma_wr 22222810 01001000
+dma_wr 22222814 04060008
+dma_wr 22222818 00080100
+dma_wr 2222281c 56341239
+dma_wr 22222820 520BBF86
+dma_wr 22222824 00000000
+dma_wr 22222828 BF860000
+dma_wr 2222282c 00002216
+dma_wr 22222830 00000000
+dma_wr 22222834 00000000
+dma_wr 22222838 00000000
+dma_wr 2222283c 9D899F02
+
+dma_wr fffff038 22222801 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no IP & TCP checksums OK
+                         -- no SNAP detected
+                         -- VLAN tag detected, no CFI, no priority
+                         -- 64 bytes received
+dma_wr fffff03c 8020c040 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.8 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Test 4.9
+--    Broadcast frame, Not IPv4 (IPv6 flag in IP header).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.9 : Not IPv4 (IPv6 flag in IP header)"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        6500         -- Version, IHL, type of service
+rxd        002E         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81DD         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        0800         -- UDP source port
+rxd        BA8F         -- UDP destination port
+rxd        0001         -- UDP length
+rxd        0001         -- UDP checksum
+rxd        01234567     -- UDP data
+rxd        89ABCDEF     -- UDP data
+rxd        01234567     -- UDP data
+rxd        89ABCDEF     -- UDP data
+rxd        0123         -- UDP data
+rxd        912614D2     -- Good FCS
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800
+
+
+-- supply the receive buffer location
+dma_rd fffff040 22222900 -- dma reads pointer of 22222900
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222900 FFFFFFFF -- store frame to memory
+dma_wr 22222904 0008FFFF
+dma_wr 22222908 56341239
+dma_wr 2222290c 00650008
+dma_wr 22222910 00002E00
+dma_wr 22222914 010A0000
+dma_wr 22222918 BF86DD81
+dma_wr 2222291c BF86520B
+dma_wr 22222920 00082216
+dma_wr 22222924 01008FBA
+dma_wr 22222928 23010100
+dma_wr 2222292c AB896745
+dma_wr 22222930 2301EFCD
+dma_wr 22222934 AB896745
+dma_wr 22222938 2301EFCD
+dma_wr 2222293c D2142691
+
+dma_wr fffff040 22222901 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no IP & TCP checksums OK
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff044 8000c040 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.9 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+--******************************************************************************
+-- Test 4.10
+--    Broadcast frame, IP header length too short.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.10 : IP header length too short"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4300         -- Version, IHL, type of service
+rxd        002E         -- total length
+rxd        0000         -- ID
+rxd        0000         -- flags & fragmentation
+rxd        0A01         -- time to live and protocol
+rxd        81DD         -- IP Header checksum
+rxd        86BF0B52     -- IP SA
+rxd        86BF1622     -- IP DA
+rxd        0800         -- UDP source port
+rxd        BA8F         -- UDP destination port
+rxd        0001         -- UDP length
+rxd        0001         -- UDP checksum
+rxd        01234567     -- UDP data
+rxd        89ABCDEF     -- UDP data
+rxd        01234567     -- UDP data
+rxd        89ABCDEF     -- UDP data
+rxd        0123         -- UDP data
+rxd        933F1AF0     -- Good FCS
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800
+
+
+-- supply the receive buffer location
+dma_rd fffff048 22222a00 -- dma reads pointer of 22222a00
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222a00 FFFFFFFF -- store frame to memory
+dma_wr 22222a04 0008FFFF
+dma_wr 22222a08 56341239
+dma_wr 22222a0c 00430008
+dma_wr 22222a10 00002E00
+dma_wr 22222a14 010A0000
+dma_wr 22222a18 BF86DD81
+dma_wr 22222a1c BF86520B
+dma_wr 22222a20 00082216
+dma_wr 22222a24 01008FBA
+dma_wr 22222a28 23010100
+dma_wr 22222a2c AB896745
+dma_wr 22222a30 2301EFCD
+dma_wr 22222a34 AB896745
+dma_wr 22222a38 2301EFCD
+dma_wr 22222a3c F01A3F93
+
+dma_wr fffff048 22222a01 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no IP & TCP checksums OK
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff04c 8000c040 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.10 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+--******************************************************************************
+-- Test 4.11
+--    Broadcast frame, TCP, No VLAN or SNAP, IP and TCP checksums OK, 
+--    but TOE is disabled in network config register.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+
+-- disable TOE for next few tests (tests 4.11 to 4.14)
+apbwr      04 00280401  -- disable TOE
+apbrdf     20 00000000  "Test 4.11 : Valid TCP, no VLAN, no SNAP, TOE disabled"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98F2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1376         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        ACACDBDBB0B0 -- options or padding
+rxd        589E112F     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800
+
+
+-- supply the receive buffer location
+dma_rd fffff050 22222b00 -- dma reads pointer of 22222b00
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222b00 FFFFFFFF -- store frame to memory
+dma_wr 22222b04 0008FFFF
+dma_wr 22222b08 56341239
+dma_wr 22222b0c 00450008
+dma_wr 22222b10 FADF2800
+dma_wr 22222b14 06800040
+dma_wr 22222b18 A8C0F298
+dma_wr 22222b1c A8C00100
+dma_wr 22222b20 15009100
+dma_wr 22222b24 BB3D8A04
+dma_wr 22222b28 22EA605C
+dma_wr 22222b2c 1050764D
+dma_wr 22222b30 76132844
+dma_wr 22222b34 ACAC0000
+dma_wr 22222b38 B0B0DBDB
+dma_wr 22222b3c 2F119E58
+
+dma_wr fffff050 22222b01 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- IP & TCP checksums not checked
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff054 8000c040 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.11 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+--******************************************************************************
+-- Test 4.12
+--    Broadcast frame, TCP, VLAN, no SNAP, IP and TCP checksums OK, 
+--    but TOE is disabled in network config register.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.12 : Valid TCP, VLAN, no SNAP, TOE disabled"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98F2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1376         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        ACACDBDBB0B0 -- options or padding
+rxd        31575CEA     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 vid 0001 type 0800
+
+
+-- supply the receive buffer location
+dma_rd fffff058 22222c00 -- dma reads pointer of 22222c00
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222c00 FFFFFFFF -- store frame to memory
+dma_wr 22222c04 0008FFFF
+dma_wr 22222c08 56341239
+dma_wr 22222c0c 01000081
+dma_wr 22222c10 00450008
+dma_wr 22222c14 FADF2800
+dma_wr 22222c18 06800040
+dma_wr 22222c1c A8C0F298
+dma_wr 22222c20 A8C00100
+dma_wr 22222c24 15009100
+dma_wr 22222c28 BB3D8A04
+dma_wr 22222c2c 22EA605C
+dma_wr 22222c30 1050764D
+dma_wr 22222c34 76132844
+dma_wr 22222c38 ACAC0000
+dma_wr 22222c3c B0B0DBDB
+dma_wr 22222c40 ea5c5731
+dma_wr 22222c44 00000000
+
+dma_wr fffff058 22222c01 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- IP & TCP checksums not checked
+                         -- no SNAP detected
+                         -- VLAN tag detected, no priority or CFI
+                         -- 68 bytes received
+dma_wr fffff05c 8020c044 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.12 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Test 4.13
+--    Broadcast frame, TCP, VLAN, SNAP, IP and TCP checksums OK, 
+--    but TOE is disabled in network config register.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.13 : Valid TCP, VLAN, SNAP, TOE disabled"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0024         -- Length/typeID
+rxd        AAAA         -- DSAP and SSAP
+rxd        0300         -- Control / Protocol ID[7:0]
+rxd        0000         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98F2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1376         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        ACACDBDBB0B0 -- options or padding
+rxd        B26A937A     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 vid 0001 type 0800
+
+
+-- supply the receive buffer location
+dma_rd fffff060 22222d00 -- dma reads pointer of 22222d00
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222d00 FFFFFFFF -- store frame to memory
+dma_wr 22222d04 0008FFFF
+dma_wr 22222d08 56341239
+dma_wr 22222d0c 01000081
+dma_wr 22222d10 AAAA2400
+dma_wr 22222d14 00000003
+dma_wr 22222d18 00450008
+dma_wr 22222d1c FADF2800
+dma_wr 22222d20 06800040
+dma_wr 22222d24 A8C0F298
+dma_wr 22222d28 A8C00100
+dma_wr 22222d2c 15009100
+dma_wr 22222d30 BB3D8A04
+dma_wr 22222d34 22EA605C
+dma_wr 22222d38 1050764D
+dma_wr 22222d3c 76132844
+dma_wr 22222d40 ACAC0000
+dma_wr 22222d44 B0B0DBDB
+dma_wr 22222d48 7a936ab2
+dma_wr 22222d4c 00000000
+
+dma_wr fffff060 22222d01 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- IP & TCP checksums not checked
+                         -- no SNAP detected
+                         -- VLAN tag detected, no priority or CFI
+                         -- 76 bytes received
+dma_wr fffff064 8020c04c -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.13 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+--******************************************************************************
+-- Test 4.14
+--    Broadcast frame, TCP, No VLAN, SNAP, IP and TCP checksums OK, 
+--    but TOE is disabled in network config register.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.14 : Valid TCP, no VLAN, SNAP, TOE disabled"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0024         -- Length/typeID
+rxd        AAAA         -- DSAP and SSAP
+rxd        0300         -- Control / Protocol ID[7:0]
+rxd        0000         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98F2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1376         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        ACACDBDBB0B0 -- options or padding
+rxd        6375817e     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0800
+
+
+-- supply the receive buffer location
+dma_rd fffff068 22222e00 -- dma reads pointer of 22222e00
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222e00 FFFFFFFF -- store frame to memory
+dma_wr 22222e04 0008FFFF
+dma_wr 22222e08 56341239
+dma_wr 22222e0c AAAA2400
+dma_wr 22222e10 00000003
+dma_wr 22222e14 00450008
+dma_wr 22222e18 FADF2800
+dma_wr 22222e1c 06800040
+dma_wr 22222e20 A8C0F298
+dma_wr 22222e24 A8C00100
+dma_wr 22222e28 15009100
+dma_wr 22222e2c BB3D8A04
+dma_wr 22222e30 22EA605C
+dma_wr 22222e34 1050764D
+dma_wr 22222e38 76132844
+dma_wr 22222e3c ACAC0000
+dma_wr 22222e40 B0B0DBDB
+dma_wr 22222e44 7e817563
+
+dma_wr fffff068 22222e01 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- IP & TCP checksums not checked
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 72 bytes received
+dma_wr fffff06c 8000c048 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.14 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+-- enable TOE again
+apbwr      04 01280401  -- enable TOE
+
+
+
+
+--******************************************************************************
+-- Test 4.15
+--    Broadcast frame, TCP, VLAN with CFI, no SNAP, IP and TCP checksums OK.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.15 : Valid TCP, VLAN, no SNAP, CFI set"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        1001         -- VLAN tag
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98F2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1376         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        ACACDBDBB0B0 -- options or padding
+rxd        6CE570C4     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 vid 1001 type 0800
+
+
+-- supply the receive buffer location
+dma_rd fffff070 22222f00 -- dma reads pointer of 22222f00
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222f00 FFFFFFFF -- store frame to memory
+dma_wr 22222f04 0008FFFF
+dma_wr 22222f08 56341239
+dma_wr 22222f0c 01100081
+dma_wr 22222f10 00450008
+dma_wr 22222f14 FADF2800
+dma_wr 22222f18 06800040
+dma_wr 22222f1c A8C0F298
+dma_wr 22222f20 A8C00100
+dma_wr 22222f24 15009100
+dma_wr 22222f28 BB3D8A04
+dma_wr 22222f2c 22EA605C
+dma_wr 22222f30 1050764D
+dma_wr 22222f34 76132844
+dma_wr 22222f38 ACAC0000
+dma_wr 22222f3c B0B0DBDB
+dma_wr 22222f40 c470e56c
+dma_wr 22222f44 00000000
+
+dma_wr fffff070 22222f01 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- IP & TCP checksums not checked
+                         -- no SNAP detected
+                         -- VLAN tag detected, CFI set
+                         -- 68 bytes received
+dma_wr fffff074 8021c044 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.15 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+--******************************************************************************
+-- Test 4.16
+--    Broadcast frame, TCP, VLAN with CFI, SNAP, IP and TCP checksums OK.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.16 : Valid TCP, VLAN, SNAP, CFI set"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        1001         -- VLAN tag
+rxd        0024         -- Length/typeID
+rxd        AAAA         -- DSAP and SSAP
+rxd        0300         -- Control / Protocol ID[7:0]
+rxd        0000         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98F2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1376         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        ACACDBDBB0B0 -- options or padding
+rxd        0486c50d     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 vid 1001 type 0024 -- SNAP not decoded
+
+
+-- supply the receive buffer location
+dma_rd fffff078 22223000 -- dma reads pointer of 22223000
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22223000 FFFFFFFF -- store frame to memory
+dma_wr 22223004 0008FFFF
+dma_wr 22223008 56341239
+dma_wr 2222300c 01100081
+dma_wr 22223010 AAAA2400
+dma_wr 22223014 00000003
+dma_wr 22223018 00450008
+dma_wr 2222301c FADF2800
+dma_wr 22223020 06800040
+dma_wr 22223024 A8C0F298
+dma_wr 22223028 A8C00100
+dma_wr 2222302c 15009100
+dma_wr 22223030 BB3D8A04
+dma_wr 22223034 22EA605C
+dma_wr 22223038 1050764D
+dma_wr 2222303c 76132844
+dma_wr 22223040 ACAC0000
+dma_wr 22223044 B0B0DBDB
+dma_wr 22223048 0dc58604
+dma_wr 2222304c 00000000
+
+dma_wr fffff078 22223001 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- IP & TCP checksums not checked
+                         -- no SNAP detected
+                         -- VLAN tag detected, CFI set
+                         -- 76 bytes received
+dma_wr fffff07c 8021c04c -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.16 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+--******************************************************************************
+-- Test 4.17
+--    Broadcast frame, TCP, no VLAN, bad SNAP (DSAP OK, SSAP bad).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.17 : Valid TCP, no VLAN, bad SNAP (SSAP bad)"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0024         -- Length/typeID
+rxd        AA00         -- DSAP and SSAP
+rxd        0300         -- Control / Protocol ID[7:0]
+rxd        0000         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98F2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1376         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        ACACDBDBB0B0 -- options or padding
+rxd        245AA6C1     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0024 -- SNAP not decoded
+
+
+-- supply the receive buffer location
+dma_rd fffff080 22223100 -- dma reads pointer of 22223100
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22223100 FFFFFFFF -- store frame to memory
+dma_wr 22223104 0008FFFF
+dma_wr 22223108 56341239
+dma_wr 2222310c 00AA2400
+dma_wr 22223110 00000003
+dma_wr 22223114 00450008
+dma_wr 22223118 FADF2800
+dma_wr 2222311c 06800040
+dma_wr 22223120 A8C0F298
+dma_wr 22223124 A8C00100
+dma_wr 22223128 15009100
+dma_wr 2222312c BB3D8A04
+dma_wr 22223130 22EA605C
+dma_wr 22223134 1050764D
+dma_wr 22223138 76132844
+dma_wr 2222313c ACAC0000
+dma_wr 22223140 B0B0DBDB
+dma_wr 22223144 C1A65A24
+
+dma_wr fffff080 22223101 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- IP & TCP checksums not checked
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 72 bytes received
+dma_wr fffff084 8000c048 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.17 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+--******************************************************************************
+-- Test 4.18
+--    Broadcast frame, TCP, no VLAN, bad SNAP (SSAP OK, DSAP bad).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.18 : Valid TCP, no VLAN, bad SNAP (DSAP bad)"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0024         -- Length/typeID
+rxd        00AA         -- DSAP and SSAP
+rxd        0300         -- Control / Protocol ID[7:0]
+rxd        0000         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98F2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1376         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        ACACDBDBB0B0 -- options or padding
+rxd        7F868696     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0024 -- SNAP not decoded
+
+
+-- supply the receive buffer location
+dma_rd fffff088 22223200 -- dma reads pointer of 22223200
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22223200 FFFFFFFF -- store frame to memory
+dma_wr 22223204 0008FFFF
+dma_wr 22223208 56341239
+dma_wr 2222320c AA002400
+dma_wr 22223210 00000003
+dma_wr 22223214 00450008
+dma_wr 22223218 FADF2800
+dma_wr 2222321c 06800040
+dma_wr 22223220 A8C0F298
+dma_wr 22223224 A8C00100
+dma_wr 22223228 15009100
+dma_wr 2222322c BB3D8A04
+dma_wr 22223230 22EA605C
+dma_wr 22223234 1050764D
+dma_wr 22223238 76132844
+dma_wr 2222323c ACAC0000
+dma_wr 22223240 B0B0DBDB
+dma_wr 22223244 9686867F
+
+dma_wr fffff088 22223201 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- IP & TCP checksums not checked
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 72 bytes received
+dma_wr fffff08c 8000c048 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.18 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Test 4.19
+--    Broadcast frame, TCP, no VLAN, bad SNAP (CONTROL OK, ID[7:0] bad).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.19 : Valid TCP, no VLAN, bad SNAP (ID[7:0] bad)"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0024         -- Length/typeID
+rxd        AAAA         -- DSAP and SSAP
+rxd        0301         -- Control / Protocol ID[7:0]
+rxd        0000         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98F2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1376         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        ACACDBDBB0B0 -- options or padding
+rxd        F086BFB4     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0024 -- SNAP not decoded
+
+
+-- supply the receive buffer location
+dma_rd fffff090 22223300 -- dma reads pointer of 22223300
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22223300 FFFFFFFF -- store frame to memory
+dma_wr 22223304 0008FFFF
+dma_wr 22223308 56341239
+dma_wr 2222330c AAAA2400
+dma_wr 22223310 00000103
+dma_wr 22223314 00450008
+dma_wr 22223318 FADF2800
+dma_wr 2222331c 06800040
+dma_wr 22223320 A8C0F298
+dma_wr 22223324 A8C00100
+dma_wr 22223328 15009100
+dma_wr 2222332c BB3D8A04
+dma_wr 22223330 22EA605C
+dma_wr 22223334 1050764D
+dma_wr 22223338 76132844
+dma_wr 2222333c ACAC0000
+dma_wr 22223340 B0B0DBDB
+dma_wr 22223344 B4BF86F0
+
+dma_wr fffff090 22223301 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- IP & TCP checksums not checked
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 72 bytes received
+dma_wr fffff094 8000c048 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.19 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+--******************************************************************************
+-- Test 4.20
+--    Broadcast frame, TCP, no VLAN, bad SNAP (ID[7:0] OK, CONTROL bad).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.20 : Valid TCP, no VLAN, bad SNAP (CONTROL bad)"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0024         -- Length/typeID
+rxd        AAAA         -- DSAP and SSAP
+rxd        0100         -- Control / Protocol ID[7:0]
+rxd        0000         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98F2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1376         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        ACACDBDBB0B0 -- options or padding
+rxd        798D18AD     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0024 -- SNAP not decoded
+
+
+-- supply the receive buffer location
+dma_rd fffff098 22223400 -- dma reads pointer of 22223400
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22223400 FFFFFFFF -- store frame to memory
+dma_wr 22223404 0008FFFF
+dma_wr 22223408 56341239
+dma_wr 2222340c AAAA2400
+dma_wr 22223410 00000001
+dma_wr 22223414 00450008
+dma_wr 22223418 FADF2800
+dma_wr 2222341c 06800040
+dma_wr 22223420 A8C0F298
+dma_wr 22223424 A8C00100
+dma_wr 22223428 15009100
+dma_wr 2222342c BB3D8A04
+dma_wr 22223430 22EA605C
+dma_wr 22223434 1050764D
+dma_wr 22223438 76132844
+dma_wr 2222343c ACAC0000
+dma_wr 22223440 B0B0DBDB
+dma_wr 22223444 AD188D79
+
+dma_wr fffff098 22223401 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- IP & TCP checksums not checked
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 72 bytes received
+dma_wr fffff09c 8000c048 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.20 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+--******************************************************************************
+-- Test 4.21
+--    Broadcast frame, TCP, no VLAN, bad SNAP (ID[15:8] OK, ID[23:16] bad).
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums not checked (bits [23:22] = 00) and no SNAP (bit 24 low).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.21 : Valid TCP, no VLAN, bad SNAP (ID[23:16] bad)"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        0024         -- Length/typeID
+rxd        AAAA         -- DSAP and SSAP
+rxd        0300         -- Control / Protocol ID[7:0]
+rxd        00AA         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98F2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1376         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        ACACDBDBB0B0 -- options or padding
+rxd        CF0871EE     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 type 0024 -- SNAP not decoded
+
+
+-- supply the receive buffer location
+dma_rd fffff0a0 22223500 -- dma reads pointer of 22223500
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22223500 FFFFFFFF -- store frame to memory
+dma_wr 22223504 0008FFFF
+dma_wr 22223508 56341239
+dma_wr 2222350c AAAA2400
+dma_wr 22223510 AA000003
+dma_wr 22223514 00450008
+dma_wr 22223518 FADF2800
+dma_wr 2222351c 06800040
+dma_wr 22223520 A8C0F298
+dma_wr 22223524 A8C00100
+dma_wr 22223528 15009100
+dma_wr 2222352c BB3D8A04
+dma_wr 22223530 22EA605C
+dma_wr 22223534 1050764D
+dma_wr 22223538 76132844
+dma_wr 2222353c ACAC0000
+dma_wr 22223540 B0B0DBDB
+dma_wr 22223544 EE7108CF
+
+dma_wr fffff0a0 22223501 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- IP & TCP checksums not checked
+                         -- no SNAP detected
+                         -- no VLAN tag detected
+                         -- 72 bytes received
+dma_wr fffff0a4 8000c048 -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.21 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+--******************************************************************************
+-- Test 4.22
+--    Broadcast frame, TCP, VLAN, SNAP, good checksum values, to prove we 
+--    are setup to accept a good frame.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked OK (bits [23:22] = 10) and SNAP (bit 24 high).
+--******************************************************************************
+
+apbrdf     20 00000000  "Test 4.22 : Valid TCP, VLAN, SNAP, good checksum"
+                        -- trigger reception of frame
+
+
+rxd(apb_x) 55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        080039123456 -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0024         -- Length/typeID
+rxd        AAAA         -- DSAP and SSAP
+rxd        0300         -- Control / Protocol ID[7:0]
+rxd        0000         -- Protocol ID [23:8]
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        0028         -- total length
+rxd        DFFA         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        8006         -- time to live and protocol
+rxd        98F2         -- IP Header checksum
+rxd        C0A80001     -- IP SA
+rxd        C0A80091     -- IP DA
+rxd        0015         -- TCP source port
+rxd        048A         -- TCP destination port
+rxd        3DBB5C60     -- Sequence number
+rxd        EA224D76     -- Acknowledgement Number
+rxd        50104428     -- Flags and window
+rxd        1376         -- TCP checksum
+rxd        0000         -- TCP urgent pointer
+rxd        ACACDBDBB0B0 -- options or padding
+rxd        B26A937A     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa 563412390008 vid 0001 type 0800 ipsa 0100A8C0 ipda 9100A8C0
+
+
+-- supply the receive buffer location
+dma_rd fffff0a8 22223600 -- dma reads pointer of 22223600
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22223600 FFFFFFFF -- store frame to memory
+dma_wr 22223604 0008FFFF
+dma_wr 22223608 56341239
+dma_wr 2222360c 01000081
+dma_wr 22223610 AAAA2400
+dma_wr 22223614 00000003
+dma_wr 22223618 00450008
+dma_wr 2222361c FADF2800
+dma_wr 22223620 06800040
+dma_wr 22223624 A8C0F298
+dma_wr 22223628 A8C00100
+dma_wr 2222362c 15009100
+dma_wr 22223630 BB3D8A04
+dma_wr 22223634 22EA605C
+dma_wr 22223638 1050764D
+dma_wr 2222363c 76132844
+dma_wr 22223640 ACAC0000
+dma_wr 22223644 B0B0DBDB
+dma_wr 22223648 7A936AB2
+dma_wr 2222364c 00000000
+
+dma_wr fffff0a8 22223601 -- dma writes ownership bit
+                         -- start & end of frame
+                         -- broadcast match
+                         -- IP & TCP checksums checked OK
+                         -- SNAP detected
+                         -- VLAN tag detected, no priority or CFI
+                         -- 76 bytes received
+dma_wr fffff0ac 81a0c04c -- dma writes rx status,
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4.22 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+
+-- supply the receive buffer location
+dma_rd fffff0b0 22223700 -- dma reads pointer of 22223700
+
+
+
+--******************************************************************************
+--  4. Check statistics for correct values from above tests.
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 000005e0  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000016  -- check frames received ok
+apbrd     15C 00000016  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 0000000a  -- check frames received 64
+apbrd     16C 0000000c  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+apbrd     1A8 00000000  -- check receive IP checksum errors
+apbrd     1AC 00000000  -- check receive TCP checksum errors
+apbrd     1B0 00000000  -- check receive UDP checksum errors
+
+end(11000)
+
+
+
+

@@ -1,0 +1,966 @@
+
+--------------------------------------------------------------------------------
+--
+--                                       Copyright (c) 2002
+--            CADENCE                    Cadence Design Systems
+--                                       All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : pfc_pipe_fifo
+--
+--   Authors        : Andreas Bode (abode@cadence.com)
+--
+--   Date           : 24 February 2010
+--
+--   Description    : Tests different variants of pause frames (PFC or classic)
+
+-- 1) all 5 frames are PFC, non-errored, none copied to memory, all with pause
+--    frame interrupt
+-- 2) all 5 frames are PFC, non-errored, all copied to memory, all with pause
+--     and frame receive interrupt
+-- 3) all 5 frames are PFC, some are errored, none copied to memory, only
+--    non-errored frames with pause frame interrupt
+-- 4) all 5 frames are PFC, some are errored, all copied to memory, only
+--    non-errored frames with pause and frame received interrupt
+-- 5) mix 5 frames of PFC and classic, non-errored, none copied to memory, only
+--    PFC frames with pause frame interrupt
+-- 6) mix 5 frames of PFC and classic, non-errored, all copied to memory, PFC
+--    frames with pause and frame received interrupt, classic pause frames only
+--    with frame received interrupt
+-- 7) mix 5 frames of PFC and classic, some are errored, none copied to memory,
+--   only non-errored PFC frames with pause frame interrupt
+-- 8) mix 5 frames of PFC and classic, some are errored, all copied to memory,
+--    only non-errored PFC frames with pause and frame received interrupt,
+--		non-errored classic pause frame with frame received interrupt
+ 
+
+--------------------------------------------------------------------------------
+
+
+-- Configuration Requirements ..
+requires ext_fifo_interface 1
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- ************************************************************************** --
+-- Initialize
+-- ************************************************************************** --
+apbrd(100) 00 00000000  -- check reset value of receive control register
+
+-- this is the event count that will initialize the scaler for event counts. it will cause any future scaling to only scale
+-- the counts after start_scale
+start_scale
+
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      00 0001020C  -- start transmission
+                        -- enable receive/transmit and PFC pause frame reception
+
+-- # Initialize the network configuration register
+-- #   -eam      <1|0|random>, default = 0. This is external address matching
+-- #   -duplex   <full|half|random>, default = random
+-- #   -speed    <1g|100m|10m|random>, default = random
+-- #   -jumbo    <1|0|random>, default = random. This wont affect the RX transactor below, but will automatically cause jumbos to be dropped.
+-- #   -copy_all <1|0|random>, default = 0. If 0, ensure you initialize the dest_addr in the rx transactor to something that will match
+-- #   -databus  <32|64|128|take_from_cfg|random>, default = random, bus <= config.  The max value is the value set in dma_bus_width in gem_defs.v
+-- #   -rx_toe   <1|0|random>, default = 0. Enables RX TCP/IP checksum offload
+-- #   -pcs_en   <1|0|random>, default = 0. Enables SGMII PCS
+-- #   -pause_en <1|0|random>, default = 0. Enables pausing of transmission
+-- #   -dont_copy_pause <1|0|random>, default = 0. Controls whether pause frames are copied
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 1 -copy_all 0 -duplex full -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 1 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+                         -- reset retry test bit(12) = 1, 
+                         -- keep enable pause time bit(13) = 1,
+                         -- copy all frames bit(4) = 0
+                         -- full-duplex bit(1) = 1,
+                         -- 100Mbps speed bit(0) = 1
+                        
+
+apbwr      88 76543210  -- set exact match reg 1
+apbwr      8c 0000dcba  -- set exact match reg 1
+apbwr      90 11111111  -- set exact match reg 2
+apbwr      94 00001111  -- set exact match reg 2
+apbwr      98 11111111  -- set exact match reg 3
+apbwr      9c 00001111  -- set exact match reg 3
+apbwr      a0 11111111  -- set exact match reg 4
+apbwr      a4 00001111  -- set exact match reg 4
+apbrd      88 76543210  -- 
+apbrd      8c 0000dcba  -- 
+
+
+-- ************************************************************************** --
+-- #1 Receive 5 consecutive non-errored PFC pause frames where the destination
+-- address matches pause frame address 0x0180C2000001, type field = 0x8808,
+-- Pause op-code = 0x0101 and priority enable is 0x00FF.
+-- (Frames should not be copied to memory)
+-- 
+-- ************************************************************************** --
+rxd(400)     d50180C200000111112222222288080101
+rxd            00FF0511051205130514051505160517
+rxd            0518888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(677)     d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(953)     d50180C200000111112222222288080101
+rxd            00FF0050005000500050005000500050
+rxd            0050888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(1229)    d50180C200000111112222222288080101
+rxd            00FF1200130014001500160017001800
+rxd            1900888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(1505)    d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(int)   24 00001000 -- check interrupt status - pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001000 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001000 -- check interrupt status - pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001000 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001000 -- check interrupt status - pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001000 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001000 -- check interrupt status - pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001000 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001000 -- check interrupt status - pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001000 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd       158 00000000 -- check no frames rxed OK
+apbrd       164 00000005 -- check pause frames rxed
+
+
+-- ************************************************************************** --
+-- #2 Receive 5 consecutive non-errored PFC pause frames where the destination
+-- address matches pause frame address 0x0180C2000001, type field = 0x8808,
+-- Pause op-code = 0x0101 and priority enable is 0x00FF.
+-- (Frames should be copied to memory)
+-- 
+-- ************************************************************************** --
+
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 1 -copy_all 1 -duplex full -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 1 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+
+
+rxd(2500)    d50180C200000111112222222288080101
+rxd            00FF0511051205130514051505160517
+rxd            0518888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(2777)    d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(3053)    d50180C200000111112222222288080101
+rxd            00FF0050005000500050005000500050
+rxd            0050888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(3329)    d50180C200000111112222222288080101
+rxd            00FF1200130014001500160017001800
+rxd            1900888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(3605)    d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    1105ff00
+fifo_wr      1000     0   00xxxxxxxxxx    13051205
+fifo_wr      1000     0   00xxxxxxxxxx    15051405
+fifo_wr      1000     0   00xxxxxxxxxx    17051605
+fifo_wr      1000     0   00xxxxxxxxxx    88881805
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    ae8e5ec6
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    0000ff00
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    88880000
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    e9bf409a
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    5000ff00
+fifo_wr      1000     0   00xxxxxxxxxx    50005000
+fifo_wr      1000     0   00xxxxxxxxxx    50005000
+fifo_wr      1000     0   00xxxxxxxxxx    50005000
+fifo_wr      1000     0   00xxxxxxxxxx    88885000
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    8184f17b
+
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    0012ff00
+fifo_wr      1000     0   00xxxxxxxxxx    00140013
+fifo_wr      1000     0   00xxxxxxxxxx    00160015
+fifo_wr      1000     0   00xxxxxxxxxx    00180017
+fifo_wr      1000     0   00xxxxxxxxxx    88880019
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    1b1b102a
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    0000ff00
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    88880000
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    e9bf409a
+
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd       158 00000005 -- check no frames rxed OK
+apbrd       164 00000005 -- check pause frames rxed
+
+
+-- ************************************************************************** --
+-- #3 Receive 5 consecutive PFC pause frames where the destination
+-- address matches pause frame address 0x0180C2000001, type field = 0x8808,
+-- Pause op-code = 0x0101 and priority enable is 0x00FF.
+-- First and third frame are errored.
+-- (Frames should not be copied to memory)
+-- 
+-- ************************************************************************** --
+
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 1 -copy_all 0 -duplex full -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 1 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+
+
+rxd(5000)    d50180C200000111112222222288080101
+rxd            00FF0511051205130514051505160517
+rxd            0518888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000ae8e5ec6
+
+rxd(5277)    d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(5553)    d50180C200000111112222222288080101
+rxd            00FF0050005000500050005000500050
+rxd            0050888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000ae8e5ec6
+
+rxd(5829)    d50180C200000111112222222288080101
+rxd            00FF1200130014001500160017001800
+rxd            1900888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(6105)    d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(5300)  24 00000000 -- check interrupt status - no interrupt
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001000 -- check interrupt status - pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001000 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(6000)  24 00000000 -- check interrupt status - pause frame received
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001000 -- check interrupt status - pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001000 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001000 -- check interrupt status - pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001000 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd       158 00000000 -- check no frames rxed OK
+apbrd       164 00000003 -- check pause frames rxed
+
+
+-- ************************************************************************** --
+-- #4 Receive 5 consecutive PFC pause frames where the destination
+-- address matches pause frame address 0x0180C2000001, type field = 0x8808,
+-- Pause op-code = 0x0101 and priority enable is 0x00FF.
+-- First and third frame are errored.
+-- (Frames should be copied to memory)
+-- 
+-- ************************************************************************** --
+
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 1 -copy_all 1 -duplex full -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 1 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+
+
+rxd(7000)    d50180C200000111112222222288080101
+rxd            00FF0511051205130514051505160517
+rxd            0518888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000ae8e5ec6
+
+rxd(7277)    d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(7553)    d50180C200000111112222222288080101
+rxd            00FF0050005000500050005000500050
+rxd            0050888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000ae8e5ec6
+
+rxd(7829)    d50180C200000111112222222288080101
+rxd            00FF1200130014001500160017001800
+rxd            1900888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(8105)    d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    1105ff00
+fifo_wr      1000     0   00xxxxxxxxxx    13051205
+fifo_wr      1000     0   00xxxxxxxxxx    15051405
+fifo_wr      1000     0   00xxxxxxxxxx    17051605
+fifo_wr      1000     0   00xxxxxxxxxx    88881805
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1101     0   020000004040    c65e8eae
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    0000ff00
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    88880000
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    e9bf409a
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    5000ff00
+fifo_wr      1000     0   00xxxxxxxxxx    50005000
+fifo_wr      1000     0   00xxxxxxxxxx    50005000
+fifo_wr      1000     0   00xxxxxxxxxx    50005000
+fifo_wr      1000     0   00xxxxxxxxxx    88885000
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1101     0   020000004040    c65e8eae
+
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    0012ff00
+fifo_wr      1000     0   00xxxxxxxxxx    00140013
+fifo_wr      1000     0   00xxxxxxxxxx    00160015
+fifo_wr      1000     0   00xxxxxxxxxx    00180017
+fifo_wr      1000     0   00xxxxxxxxxx    88880019
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    1b1b102a
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    0000ff00
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    88880000
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    e9bf409a
+
+
+apbrd(7350)  24 00000000 -- check interrupt status - no interrupt
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(8000)  24 00000000 -- check interrupt status - no interrupt
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd       158 00000003 -- check no frames rxed OK
+apbrd       164 00000003 -- check pause frames rxed
+
+
+-- ************************************************************************** --
+-- #5 Receive 5 consecutive non-errored pause frames where the destination
+-- address matches pause frame address 0x0180C2000001, type field = 0x8808,
+-- Pause op-code = 0x0101 or 0x0001.
+-- (Frames should not be copied to memory)
+-- 
+-- ************************************************************************** --
+
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 1 -copy_all 0 -duplex full -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 1 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+
+rxd(9000)    d50180C200000111112222222288080001
+rxd            10FF0511051205130514051505160517
+rxd            0518888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+rxd(9277)     d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(9553)    d50180C200000111112222222288080001
+rxd            30FF0050005000500050005000500050
+rxd            0050888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(9829)    d50180C200000111112222222288080101
+rxd            00001200130014001500160017001800
+rxd            1900888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(10105)   d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(9350)  24 00000000 -- check interrupt status - no interrupt
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001000 -- check interrupt status - pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001000 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(10000) 24 00000000 -- check interrupt status - no interrupt
+
+-- this is the event count that will initialize the scaler for event counts. it will cause any future scaling to only scale
+-- the counts after start_scale
+start_scale
+
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001000 -- check interrupt status - pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001000 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001000 -- check interrupt status - pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001000 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd       158 00000000 -- check no frames rxed OK
+apbrd       164 00000003 -- check pause frames rxed
+
+
+-- ************************************************************************** --
+-- #6 Receive 5 consecutive non-errored pause frames where the destination
+-- address matches pause frame address 0x0180C2000001, type field = 0x8808,
+-- Pause op-code = 0x0101 or 0x0001
+-- (Frames should be copied to memory)
+-- 
+-- ************************************************************************** --
+
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 1 -copy_all 1 -duplex full -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 1 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+
+
+rxd(11500)   d50180C200000111112222222288080001
+rxd            00FF0511051205130514051505160517
+rxd            0518888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(11777)   d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(12053)   d50180C200000111112222222288080101
+rxd            00FF0050005000500050005000500050
+rxd            0050888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(12329)   d50180C200000111112222222288080001
+rxd            00FF1200130014001500160017001800
+rxd            1900888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(12605)   d50180C200000111112222222288080101
+rxd            00FF1000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01000888
+fifo_wr      1000     0   00xxxxxxxxxx    1105ff00
+fifo_wr      1000     0   00xxxxxxxxxx    13051205
+fifo_wr      1000     0   00xxxxxxxxxx    15051405
+fifo_wr      1000     0   00xxxxxxxxxx    17051605
+fifo_wr      1000     0   00xxxxxxxxxx    88881805
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    d147c555
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    0000ff00
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    88880000
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    e9bf409a
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    5000ff00
+fifo_wr      1000     0   00xxxxxxxxxx    50005000
+fifo_wr      1000     0   00xxxxxxxxxx    50005000
+fifo_wr      1000     0   00xxxxxxxxxx    50005000
+fifo_wr      1000     0   00xxxxxxxxxx    88885000
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    8184f17b
+
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01000888
+fifo_wr      1000     0   00xxxxxxxxxx    0012ff00
+fifo_wr      1000     0   00xxxxxxxxxx    00140013
+fifo_wr      1000     0   00xxxxxxxxxx    00160015
+fifo_wr      1000     0   00xxxxxxxxxx    00180017
+fifo_wr      1000     0   00xxxxxxxxxx    88880019
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    64d28bb9
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    0010ff00
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    88880000
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    fa8929f4
+
+
+apbrd(int)   24 00000002 -- check interrupt status - frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00000002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00000002 -- check interrupt status - frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00000002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd       158 00000005 -- check no frames rxed OK
+apbrd       164 00000003 -- check pause frames rxed
+
+
+-- ************************************************************************** --
+-- #7 Receive 5 consecutive pause frames where the destination
+-- address matches pause frame address 0x0180C2000001, type field = 0x8808,
+-- Pause op-code = 0x0101 or 0x0001. Some are errored.
+-- (Frames should not be copied to memory)
+-- 
+-- ************************************************************************** --
+
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 1 -copy_all 0 -duplex full -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 1 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+
+rxd(14000)   d50180C200000111112222222288080001
+rxd            10FF0511051205130514051505160517
+rxd            0518888899999999aaaaaaaabbbbbbbb
+rxd            00000000000000000000000012345678
+
+
+rxd(14277)   d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(14553)   d50180C200000111112222222288080001
+rxd            30FF0050005000500050005000500050
+rxd            0050888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(14829)   d50180C200000111112222222288080101
+rxd            00001200130014001500160017001800
+rxd            1900888899999999aaaaaaaabbbbbbbb
+rxd            00000000000000000000000011111111
+
+rxd(15105)   d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data is NOT written out on the AHB interface
+
+apbrd(14350)  24 00000000 -- check interrupt status - no interrupt
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001000 -- check interrupt status - pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001000 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(14950) 24 00000000 -- check interrupt status - no interrupt
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(15250) 24 00000000 -- check interrupt status - no interrupt
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001000 -- check interrupt status - pause frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001000 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd       158 00000000 -- check no frames rxed OK
+apbrd       164 00000002 -- check pause frames rxed
+
+
+-- ************************************************************************** --
+-- #7 Receive 5 consecutive pause frames where the destination
+-- address matches pause frame address 0x0180C2000001, type field = 0x8808,
+-- Pause op-code = 0x0101 or 0x0001.Some are errored.
+-- (Frames should be copied to memory)
+-- 
+-- ************************************************************************** --
+
+init_ncr -sgmii_en 0 -pcs_en 0 -retry_test 1 -copy_all 1 -duplex full -speed 100m -jumbo 0 -databus 32 -eam 0 -rx_toe 0 -pause_en 1 -dont_copy_pause 0 -multicast_hash 0 -unicast_hash 0
+
+
+
+rxd(16000)   d50180C200000111112222222288080001
+rxd            00FF0511051205130514051505160517
+rxd            0518888899999999aaaaaaaabbbbbbbb
+rxd            00000000000000000000000011111111
+
+rxd(16277)   d50180C200000111112222222288080101
+rxd            00FF0000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(16553)   d50180C200000111112222222288080101
+rxd            00FF0050005000500050005000500050
+rxd            0050888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(16829)   d50180C200000111112222222288080001
+rxd            00FF1200130014001500160017001800
+rxd            1900888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(17105)   d50180C200000111112222222288080101
+rxd            00FF1000000000000000000000000000
+rxd            0000888899999999aaaaaaaabbbbbbbb
+rxd            00000000000000000000000011111111
+
+
+-- check the receive data as it is written out on the AHB interface
+--          CONTROL  MOD  STATUS[47:0]    DATA
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01000888
+fifo_wr      1000     0   00xxxxxxxxxx    1105ff00
+fifo_wr      1000     0   00xxxxxxxxxx    13051205
+fifo_wr      1000     0   00xxxxxxxxxx    15051405
+fifo_wr      1000     0   00xxxxxxxxxx    17051605
+fifo_wr      1000     0   00xxxxxxxxxx    88881805
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1101     0   020000004040    11111111
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    0000ff00
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    88880000
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    e9bf409a
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    5000ff00
+fifo_wr      1000     0   00xxxxxxxxxx    50005000
+fifo_wr      1000     0   00xxxxxxxxxx    50005000
+fifo_wr      1000     0   00xxxxxxxxxx    50005000
+fifo_wr      1000     0   00xxxxxxxxxx    88885000
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    8184f17b
+
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01000888
+fifo_wr      1000     0   00xxxxxxxxxx    0012ff00
+fifo_wr      1000     0   00xxxxxxxxxx    00140013
+fifo_wr      1000     0   00xxxxxxxxxx    00160015
+fifo_wr      1000     0   00xxxxxxxxxx    00180017
+fifo_wr      1000     0   00xxxxxxxxxx    88880019
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1001     0   000000000040    64d28bb9
+
+fifo_wr      1010     0   00xxxxxxxxxx    00c28001   -- store frame to memory 
+fifo_wr      1000     0   00xxxxxxxxxx    11110100
+fifo_wr      1000     0   00xxxxxxxxxx    22222222
+fifo_wr      1000     0   00xxxxxxxxxx    01010888
+fifo_wr      1000     0   00xxxxxxxxxx    0010ff00
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    88880000
+fifo_wr      1000     0   00xxxxxxxxxx    99999999
+fifo_wr      1000     0   00xxxxxxxxxx    aaaaaaaa
+fifo_wr      1000     0   00xxxxxxxxxx    bbbbbbbb
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1000     0   00xxxxxxxxxx    00000000
+fifo_wr      1101     0   020000004040    11111111
+
+
+apbrd(16350) 24 00000000 -- check interrupt status - no interrupt
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00001002 -- check interrupt status - pause & frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00001002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(int)   24 00000002 -- check interrupt status - frame received
+apbwr       24 ffffffff  -- clear interrupt
+apbwr        24 00000002 -- Clear it
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd(17600) 24 00000000 -- check interrupt status - no interrupt
+apbrd        08 00000046 -- check pfc_negotiate = 1
+
+apbrd       158 00000003 -- check no frames rxed OK
+apbrd       164 00000002 -- check pause frames rxed
+
+
+end(100000)

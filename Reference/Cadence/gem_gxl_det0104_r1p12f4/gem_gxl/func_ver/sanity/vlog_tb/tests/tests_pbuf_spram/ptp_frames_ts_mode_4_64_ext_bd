@@ -1,0 +1,259 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2006
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : ptp_frames_ts_mode_4_64_ext_bd
+--
+--   Author         : Brian Torley
+--
+--   Date           : June 2013
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- receive ptp frame and capture enhanced TS if ts_mode is set for frame type
+--
+-- Receive frames:-
+-- RX Frame : PTP sync frame and ts_mode set for ptp event frames
+-- check extension bit is set in WORD bit[2] 
+--------------------------------------------------------------------------------
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 0
+bus_grant_delay 0
+
+
+--******************************************************************************
+--  check reset state of PTP output flags
+--******************************************************************************
+pinsc(50) sof_tx         0
+pinsc     sync_frame_tx  0
+pinsc     delay_req_tx   0
+pinsc     sof_rx         0
+pinsc     sync_frame_rx  0
+pinsc     delay_req_rx   0
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 32-bit DMA data bus.
+--******************************************************************************
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 00280013  -- copy all & full duplex
+apbrd      04 00280013  -- verify write to network config register.
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      18 fffff000  -- check receive queue pointer
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- delay - check interrupt status
+apbrd      24 00000000  -- delay - check interrupt status
+apbrd      24 00000000  -- delay - check interrupt status
+
+-- setup extended BD mode
+apbrd      10 000207c4  -- check dma config reg initial value
+apbwr      10 300207c4  -- enable ext BD (tx: set bit[29] = 1, rx: set bit[28] = 1)
+
+apbwr     4cc 00000004  -- tx_bd_control_reg  where last 6 bits are: ts_mode[1;0], bd_size_words
+apbwr     4d0 00000014  -- rx_bd_control_reg  where last 6 bits are: ts_mode[1:0], bd_size_words
+                        -- ts_mode
+                        -- 00 = disabled,
+                        -- 01 = ptp event frames only,
+                        -- 10 = all ptp frames,
+                        -- 11 = all frames
+
+
+apbwr     1d0 0000003f  -- Timer seconds register  (6 bits of seconds xfered in enhanced ts)
+apbwr     1d4 12345678  -- Timer nanoseconds register
+--apbwr     1dc 00000002  -- Timer increment register
+
+
+
+--******************************************************************************
+-- RX Frame : PTP sync frame
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 1 : PTP sync frame"
+                        -- trigger reception of frame
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        011b19000000 -- MAC DA
+rxd        00e0f7263fe9 -- MAC SA
+rxd        88f7         -- Length/typeID
+rxd        60           -- transportSpecific, messageType  60 = sych message
+rxd        656c6c       -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        abababab     -- other stuff
+rxd        abababab     -- other stuff
+rxd        abababab     -- UUID, sequenceID
+rxd        00000000     -- sync frame control field, flags, reserved
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        gggggggg     -- FCS
+
+
+--  check state of PTP output flags
+pinsc(500) sof_tx        0
+pinsc      sync_frame_tx 0
+pinsc      delay_req_tx  0
+pinsc      sof_rx        1
+pinsc      sync_frame_rx 1
+pinsc      delay_req_rx  0
+
+
+-- supply the receive buffer location
+dma_rd fffff000 22222100 -- dma reads pointer of 22222100
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 00191b01 -- store frame to memory
+dma_wr 22222104 e0000000
+dma_wr 22222108 e93f26f7
+dma_wr 2222210c 6560f788  -- 60 = synch frame
+dma_wr 22222110 686f6c6c
+dma_wr 22222114 686f6c65
+dma_wr 22222118 686f6c65
+dma_wr 2222211c 686f6c65
+dma_wr 22222120 abab6c65
+dma_wr 22222124 abababab
+dma_wr 22222128 abababab
+dma_wr 2222212c 0000abab
+dma_wr 22222130 00000000
+dma_wr 22222134 00000000
+dma_wr 22222138 00000000
+dma_wr 2222213c 00000000
+dma_wr 22222140 00000000
+dma_wr 22222144 00000000
+dma_wr 22222148 00000000
+dma_wr 2222214c 00000000
+dma_wr 22222150 00000000
+dma_wr 22222154 00000000
+dma_wr 22222158 00000000
+dma_wr 2222215c 00000000
+dma_wr 22222160 00000000
+dma_wr 22222164 00000000
+dma_wr 22222168 00000000
+dma_wr 2222216c 00000000
+dma_wr 22222170 00000000
+dma_wr 22222174 00000000
+dma_wr 22222178 ee220000
+dma_wr 2222217c 0000ea9d
+
+
+dma_wr fffff008 d2345678 -- TS lsw  (bits[31:30] are lower 2 bits of seconds [1:0])
+dma_wr fffff00c 0000000f -- TS msw seconds[5:2]
+dma_wr fffff000 22222105 -- dma writes ownership bit and ts valid bit[2] is 1
+dma_wr fffff004 0000c07e -- dma writes rx status,
+
+
+
+-- supply the receive buffer location of next frame
+dma_rd fffff010 22222100 -- dma reads pointer of 22222100
+
+
+
+
+-- check status on detection of receive sync frame
+apbrd(int) 24 00080000  "Rx Frame detected"
+                        -- check interrupt status - receive sync frame
+apbwr      24 00080000  -- clear interrupt status register
+apbrd      20 00000000  -- check RX status register
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Rx Frame complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+-- check transmit statistics
+apbrd(11000)     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 0000007e  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000001  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000001  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000001  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+apbrd     1A8 00000000  -- check receive IP checksum errors
+apbrd     1AC 00000000  -- check receive TCP checksum errors
+apbrd     1B0 00000000  -- check receive UDP checksum errors
+
+
+
+
+
+
+
+
+
+end(12000)
+

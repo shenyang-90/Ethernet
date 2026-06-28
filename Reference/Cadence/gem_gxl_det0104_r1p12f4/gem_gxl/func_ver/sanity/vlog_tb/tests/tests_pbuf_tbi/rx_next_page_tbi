@@ -1,0 +1,785 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_nex_page_tbi
+--
+--   Author         : Mike MacGillis (mikema@tality.com)
+--
+--   Date           : May 22 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--   This test ensures that the GEM Next Page functionality works properly.
+
+-- Detailed Test Description
+--
+-- ********************************************************************************************* --
+-- GEM has to exchange 6 next pages while the Link Partner 6 next pages to exchange.
+-- ********************************************************************************************* --
+--
+-- 1.  Initialise the GEM for Gigabit Operation with PCS enabled. Furthermore, Auto-Negotiation is 
+--     enabled.
+-- 2.  Once the GEM enters AN_ENABLE state, it should start transmitting alternating /C/ codes with 
+--     the Config_Reg field all zeros.
+-- 3.  After the link timer in the GEM finishes counting, the GEM should then transmit alternating /C/
+--     codes with the Conf_Reg field incdicating the same values that are in the PCS auto-negotiation 
+--     advertisement register.  Bit 15 in the auto-negotiation advertisment register will be set to allow the 
+--     exchange of next pages between the GEM and the link partner. (Enter into ABILITY_DETECT state)
+-- 4.  Provide a link of /C/ codes corresponding to the abilities of the link partner (Bits 6(HD) and 5(FD) set
+--     high in the Conf_Reg. and bit 15 (NP)).  The link partner must have the next page bit set
+--     when it transmits its base page abilities in order to allow the exchange next page information
+--     with the GEM. 
+-- 5.  The GEM should then transmit alternating /C/ codes with the Conf_Reg field indicating the 
+--     same values that are in the PCS auto-negotiation advertisement register plus bit 14 should be set high.
+--     This bit tells the link partner that the GEM has successfully received the link partner's base
+--     page information. (Enter into ACKNOWLEDGE_DETECT state)
+-- 6.  Provide a link of /C/ codes which correspond to the link partner sending the contents of
+--     its Auto-Neg. Advertisment register.  Furthermore, bit 14 will be set to indicate that
+--     the link partner has successfully received the GEM's acknowledge. (Enter into COMPLETE_ACK.
+--     state) 
+-- 7.  Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--     Then, load the PCS auto-nego. next page register with the desired value. Bit 15 should be set
+--     in the PCS Auto-Neg. Next Page register to tell the link partner it has next pages to exchange.
+-- 8.  The GEM should transmit the contents of the PCS Auto-Negotiation Next Page Register. 
+--     Note that the Link Partner has its NP bit set in it's base page advertisment register
+--     to allow the exchange of Next Pages with the GEM. (Enter NEXT_PAGE_WAIT state)
+--     (Message Page Field equals 0x7ff)
+-- 9.  Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--     (Enter ACKNOWLEDGE_DETECT state)
+--     (Message Page Field equals 0x7ff)
+-- 10. The GEM should then transmit alternating /C/ codes with the Conf_Reg field indicating the 
+--     same values that are in the PCS next page register plus bit 14 should be set high.
+--     This bit tells the link partner that the GEM has successfully received the link next
+--     page information. 
+--     (Message Page Field equals 0x7ff)
+-- 11. Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--     The link partner acknowledges the reception of the GEMs Next Page information. 
+--     (Enter COMPLETE_ACKNOWLEDGE state)
+--     (Message Page Field equals 0x7ff)
+-- 12. Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--     Then, load the PCS auto-nego. next page register with the desired value. Bit 15 should be set
+--     in the PCS Auto-Neg. Next Page register to tell the link partner it has next pages to exchange.
+--     Contents of PCS Auto. Neg Next Page  Register
+-- 13. The GEM should transmit the contents of the PCS Auto-Negotiation Next Page Register. 
+--     Note that the Link Partner has its NP bit set in it's base page advertisment register
+--     to allow the exchange of Next Pages with the GEM. (Enter NEXT_PAGE_WAIT state)
+--     (Message Page Field equals 0x2aa)
+-- 14. Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--     Link partner does have Next Pages to exchange. (Enter ACKNOWLEDGE_DETECT state)
+--     Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Next Page  Register
+--     (Message Page Field equals 0x2aa)
+-- 15. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--     same values that are in the PCS next page register plus bit 14 should be set high.
+--     This bit tells the link partner that the GEM has successfully received the link next
+--     page information. 
+--     (Message Page Field equals 0x2aa)
+-- 16. Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--     Link partner does have Next Pages to exchange. Furthermore, the link partner
+--     acknowledges the reception of the GEMs Next Page information. (Enter COMPLETE_ACKNOWLEDGE)
+--     (Message Page Field equals 0x2aa)
+-- 17. Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--     Then, load the PCS auto-nego. next page register with the desired value. Bit 15 should be set
+--     in the PCS Auto-Neg. Next Page register to tell the link partner it has next pages to exchange.
+--     Contents of PCS Auto. Neg Next Page  Register
+-- 18. The GEM should transmit the contents of the PCS Auto-Negotiation Next Page Register. 
+--     Note that the Link Partner has its NP bit set in it's base page advertisment register
+--     to allow the exchange of Next Pages with the GEM. (Enter NEXT_PAGE_WAIT state)
+--     (Message Page Field equals 0x000)
+-- 19. Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--     (Enter ACKNOWLEDGE_DETECT state)
+--     (Message Page Field equals 0x000)
+-- 20. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--     same values that are in the PCS next page register plus bit 14 should be set high.
+--     This bit tells the link partner that the GEM has successfully received the link partner next
+--     page information. 
+--     (Message Page Field equals 0x000)
+-- 21. Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--     The link partner acknowledges the reception of the GEMs Next Page information. 
+--     (Enter COMPLETE_ACKNOWLEDGE state)
+--     (Message Page Field equals 0x000)
+-- 22. Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--     Then, load the PCS auto-nego. next page register with the desired value. Bit 15 should be set
+--     in the PCS Auto-Neg. Next Page register to tell the link partner it has next pages to exchange.
+--     Contents of PCS Auto. Neg Next Page  Register
+-- 23. The GEM should transmit the contents of the PCS Auto-Negotiation Next Page Register. 
+--     Note that the Link Partner has its NP bit set in it's base page advertisment register
+--     to allow the exchange of Next Pages with the GEM. (Enter NEXT_PAGE_WAIT state)
+--     Contents of TX_CONFIG Register = PCS Auto. Neg Next Page  Register
+--     (Message Page Field equals 0x555)
+-- 24. Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--     Link partner does have Next Pages to exchange. (Enter ACKNOWLEDGE_DETECT state)
+--     Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Next Page  Register
+--     (Message Page Field equals 0x555)
+-- 25. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--     same values that are in the PCS next page register plus bit 14 should be set high.
+--     This bit tells the link partner that the GEM has successfully received the link next
+--     page information. 
+--     (Message Page Field equals 0x555)
+-- 26. Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--     Link partner does have Next Pages to exchange. Furthermore, the link partner
+--     acknowledges the reception of the GEMs Next Page information. (Enter COMPLETE_ACKNOWLEDGE)
+--     (Message Page Field equals 0x555)
+-- 27. Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--     Then, load the PCS auto-nego. next page register with the desired value. Bit 15 should be set
+--     in the PCS Auto-Neg. Next Page register to tell the link partner it has next pages to exchange.
+-- 28. The GEM should transmit the contents of the PCS Auto-Negotiation Next Page Register. 
+--     Note that the Link Partner has its NP bit set in it's base page advertisment register
+--     to allow the exchange of Next Pages with the GEM. (Enter NEXT_PAGE_WAIT state)
+--     Note: Since the link partner is tranmsitting its next page information before the GEM, the GEM
+--           will quickly go into the NEXT_PAGE_WAIT state. Then, proceed immediately into the 
+--           ACKNOWLEDGE_DETECT STATE.  Therefore, the GEM will immediately start transmitting its
+--           next page information with the acknowledge bit set.
+--     (Message Page Field equals 0x7ff)
+-- 29. Provide a link of /C/ codes which correspond to the link partner sending a Unformatted Page. 
+--     (Enter ACKNOWLEDGE_DETECT state)
+--     (Message Page Field equals 0x7ff)
+-- 30. The GEM should then transmit alternating /C/ codes with the Conf_Reg field indicating the 
+--     same values that are in the PCS next page register plus bit 14 should be set high.
+--     This bit tells the link partner that the GEM has successfully received the link partner next
+--     page information. 
+--     (Message Page Field equals 0x7ff)
+-- 31. Provide a link of /C/ codes which correspond to the link partner sending a Unformatted Page. 
+--     The link partner acknowledges the reception of the GEMs Next Page information. 
+--     (Enter COMPLETE_ACKNOWLEDGE state)
+--     (Message Page Field equals 0x7ff)
+-- 32. Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--     Then, load the PCS auto-nego. next page register with the desired value. Bit 15 should be set
+--     in the PCS Auto-Neg. Next Page register to tell the link partner it has next pages to exchange.
+-- 33. The GEM should transmit the contents of the PCS Auto-Negotiation Next Page Register. 
+--     Note that the Link Partner has its NP bit set in it's base page advertisment register
+--     to allow the exchange of Next Pages with the GEM. (Enter NEXT_PAGE_WAIT state)
+--     Note: Since the link partner is tranmsitting its next page information before the GEM, the GEM
+--           will quickly go into the NEXT_PAGE_WAIT state. Then, proceed immediately into the 
+--           ACKNOWLEDGE_DETECT STATE.  Therefore, the GEM will immediately start transmitting its
+--           next page information with the acknowledge bit set.
+--     (Message Page Field equals 0x555)
+-- 34. Provide a link of /C/ codes which correspond to the link partner sending a Unformatted Page. 
+--     Link partner does have Next Pages to exchange. (Enter ACKNOWLEDGE_DETECT state)
+--     (Message Page Field equals 0x7ff)
+-- 35. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--     same values that are in the PCS next page register plus bit 14 should be set high.
+--     This bit tells the link partner that the GEM has successfully received the link next
+--     page information. 
+--     (Message Page Field equals 0x7ff)
+-- 36. Provide a link of /C/ codes which correspond to the link partner sending a Unformatted Page. 
+--     Link partner does have Next Pages to exchange. Furthermore, the link partner
+--     acknowledges the reception of the GEMs Next Page information. (Enter COMPLETE_ACKNOWLEDGE)
+--     (Message Page Field equals 0x7ff)
+-- 37. Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--     No more next page information to exchange. Just check pcs registers.
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- ********************************************************************************************* --
+-- 1. Initialise the GEM for Gigabit Operation with PCS enabled. Furthermore, Auto-Negotiation is 
+--    enabled.
+-- ********************************************************************************************* --
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd     200 00009040  -- check value of pcs control register
+apbrd     210 00000020  -- check reset value of pcs auto-nego. adv. register
+apbwr     210 00008060  -- pcs auto-nego. adv. register - enable next page bit 
+apbrd     210 00008060  -- check pcs auto-nego. adv. register
+apbrd     21c 00000000  -- check reset value of pcs auto-nego. next page register
+
+apbwr      04 00081c00  -- Put MAC into gigabit mode with TBI. Retry test enabled
+apbrd      04 00081c00  -- Check value of network config register
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 03020100  -- specific address register 1 bottom
+apbwr      8C 00000504  -- specific address register 1 top
+apbrd     200 00001040  -- check value of pcs control register
+apbrd     204 00000109  -- check pcs status register
+apbrdf      20 00000000  -- check receive status register and trigger reception
+
+-- ********************************************************************************************* --
+-- ********************************************************************************************* --
+-- ********************************************************************************************* --
+-- GEM has to exchange 6 next pages while the Link Partner 6 next pages to exchange.
+-- ********************************************************************************************* --
+-- ********************************************************************************************* --
+-- ********************************************************************************************* --
+
+
+-- ********************************************************************************************* --
+-- 2. Once the GEM enters AN_ENABLE state, it should start transmitting alternating /C/ codes with the Config_Reg field all zeros.
+-- ********************************************************************************************* --
+
+pcs_an_tx          0000  
+
+-- ********************************************************************************************* --
+-- 3. After the link timer in the GEM finishes counting, the GEM should then transmit alternating /C/
+--    codes with the Conf_Reg field incdicating the same values that are in the PCS auto-negotiation 
+--    advertisement register.  Bit 15 in the auto-negotiation advertisment register will be set to allow the 
+--    exchange of next pages between the GEM and the link partner. (Enter into ABILITY_DETECT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_tx(trx)        6080
+
+-- ********************************************************************************************* --
+-- 4. Provide a link of /C/ codes corresponding to the abilities of the link partner (Bits 6(HD) and 5(FD) set
+--    high in the Conf_Reg. and bit 15 (NP)).  The link partner must have the next page bit set
+--    when it transmits its base page abilities in order to allow the exchange next page information
+--    with the GEM. 
+--    Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c16080c26080c16080c26080  8r
+pcs_an_rx             c16080c26080c16080c26080  8r
+pcs_an_rx             c16080c26080c16080c26080  8r
+
+-- ********************************************************************************************* --
+-- 5. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--    same values that are in the PCS auto-negotiation advertisement register plus bit 14 should be set high.
+--    This bit tells the link partner that the GEM has successfully received the link partner's base
+--    page information. (Enter into ACKNOWLEDGE_DETECT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        1       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+
+pcs_an_tx(trx)        60c0  
+
+
+-- ********************************************************************************************* --
+-- 6.  Provide a link of /C/ codes which correspond to the link partner sending the contents of
+--     its Auto-Neg. Advertisment register.  Furthermore, bit 14 will be set to indicate that
+--     the link partner has successfully received the GEM's acknowledge. (Enter into COMPLETE_ACK.
+--     state) 
+--     Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        1       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c160c0c260c0c160c0c260c0  2r
+pcs_an_rx             c160c0c260c0c160c0c260c0  8r
+
+-- ********************************************************************************************* --
+-- 7. Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--    Then, load the PCS auto-nego. next page register with the desired value. Bit 15 should be set
+--    in the PCS Auto-Neg. Next Page register to tell the link partner it has next pages to exchange.
+--    Contents of PCS Auto. Neg Next Page  Register 
+--    15------14------13------12------11------10------9------8      7------6------5------4------3------2------1------0
+--    NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/  Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/
+--                                          Unfo10  Unfo9  Unfo8   Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0
+--    1       0       1        0       0        1      1      1     1      1      1      1     1      1      1     1
+-- ********************************************************************************************* --
+
+apbwr(int)     21c 0000a7ff  -- setup pcs auto-nego. next page register
+apbrd          21c 0000a7ff  -- check pcs auto-nego. next page register
+apbrd           24 00020000  -- check interrupt status register - PCS next page request interrupt set 
+apbrd          200 00001040  -- check pcs control register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          210 00008060  -- check pcs auto-neg. advertisment register
+apbrd          214 00008060  -- check pcs auto-neg. link partner advertisment register
+apbrd          218 00000006  -- check pcs auto-neg. expansion register
+apbrd          220 00000000  -- check pcs auto-neg. link partner next page register
+apbrd          23C 00008000  -- check pcs auto-neg. extended status register
+                             
+
+-- ********************************************************************************************* --
+-- 8.  The GEM should transmit the contents of the PCS Auto-Negotiation Next Page Register. 
+--     Note that the Link Partner has its NP bit set in it's base page advertisment register
+--     to allow the exchange of Next Pages with the GEM. (Enter NEXT_PAGE_WAIT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Next Page  Register 
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- TX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              1      1      1      1     1      1      1     1       1       0       1        0       1        1      1      1 
+-- ********************************************************************************************* --
+
+pcs_an_tx                    60af -- intermediate step
+pcs_an_tx(trx)               ffaf
+
+
+-- ********************************************************************************************* --
+-- 9.  Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--     (Enter ACKNOWLEDGE_DETECT state)
+--    Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Next Page  Register 
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- RX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              1      1      1      1     1      1      1     1       1       0       1         0       1        1      1      1 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c1ffafc2ffafc1ffafc2ffaf  8r
+pcs_an_rx             c1ffafc2ffafc1ffafc2ffaf  8r
+pcs_an_rx             c1ffafc2ffafc1ffafc2ffaf  8r
+pcs_an_rx             c1ffafc2ffafc1ffafc2ffaf  8r
+
+-- ********************************************************************************************* --
+-- 10. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--     same values that are in the PCS next page register plus bit 14 should be set high.
+--     This bit tells the link partner that the GEM has successfully received the link next
+--     page information. 
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- TX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              1      1      1      1     1      1      1     1       1       1       1        0       1        1      1      1 
+-- ********************************************************************************************* --
+pcs_an_tx(trx)               ffef
+
+-- ********************************************************************************************* --
+-- 11.  Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--      The link partner acknowledges the reception of the GEMs Next Page information. 
+--      (Enter COMPLETE_ACKNOWLEDGE state)
+--    Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- RX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              1      1      1      1     1      1      1     1       1       1       1         0       1        1      1      1 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)             c1ffefc2ffefc1ffefc2ffef  8r
+pcs_an_rx                  c1ffefc2ffefc1ffefc2ffef  8r
+
+
+-- ********************************************************************************************* --
+-- 12. Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--    Then, load the PCS auto-nego. next page register with the desired value. Bit 15 should be set
+--    in the PCS Auto-Neg. Next Page register to tell the link partner it has next pages to exchange.
+--    Contents of PCS Auto. Neg Next Page  Register
+--    15------14------13------12------11------10------9------8      7------6------5------4------3------2------1------0
+--    NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/  Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/
+--                                          Unfo10  Unfo9  Unfo8   Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0
+--    1       0       1        0       0        0      1      0     1      0      1      0     1      0      1      0
+-- ********************************************************************************************* --
+
+apbwr(int)     21c 0000a2aa  -- setup pcs auto-nego. next page register
+apbrd          21c 0000a2aa  -- check pcs auto-nego. next page register
+apbrd           24 00020000  -- check interrupt status register - PCS next page request interrupt set 
+apbrd          200 00001040  -- check pcs control register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          210 00008060  -- check pcs auto-neg. advertisment register
+apbrd          214 00008060  -- check pcs auto-neg. link partner advertisment register
+apbrd          218 00000006  -- check pcs auto-neg. expansion register
+apbrd          220 0000afff  -- check pcs auto-neg. link partner next page register
+apbrd          23C 00008000  -- check pcs auto-neg. extended status register
+
+-- ********************************************************************************************* --
+-- 13.  The GEM should transmit the contents of the PCS Auto-Negotiation Next Page Register. 
+--      Note that the Link Partner has its NP bit set in it's base page advertisment register
+--      to allow the exchange of Next Pages with the GEM. (Enter NEXT_PAGE_WAIT state)
+--     Contents of TX_CONFIG Register = PCS Auto. Neg Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- TX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              1      0      1      0     1      0      1     0       1       0       1        0       0        0      1      0 
+-- ********************************************************************************************* --
+
+pcs_an_tx(trx)               aaa2
+
+-- ********************************************************************************************* --
+-- 14.  Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--      Link partner does have Next Pages to exchange. (Enter ACKNOWLEDGE_DETECT state)
+--      Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- RX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              1      0      1      0     1      0      1     0       1       0       1        0       0        0      1      0 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c1aaa2c2aaa2c1aaa2c2aaa2  8r
+pcs_an_rx             c1aaa2c2aaa2c1aaa2c2aaa2  8r
+
+-- ********************************************************************************************* --
+-- 15. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--     same values that are in the PCS next page register plus bit 14 should be set high.
+--     This bit tells the link partner that the GEM has successfully received the link next
+--     page information. 
+--     Contents of TX_CONFIG Register = PCS Auto. Neg Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- TX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              1      0      1      0     1      0      1     0       1       1      1        0       0        0      1      0 
+-- ********************************************************************************************* --
+
+pcs_an_tx(trx)               aae2
+
+-- ********************************************************************************************* --
+-- 16.  Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--      Link partner does have Next Pages to exchange. Furthermore, the link partner
+--      acknowledges the reception of the GEMs Next Page information. (Enter COMPLETE_ACKNOWLEDGE)
+--      Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- RX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              1      0      1      0     1      0      1     0       1       1      1        0       0        0      1      0 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)             c1aae2c2aae2c1aae2c2aae2  8r
+pcs_an_rx                  c1aae2c2aae2c1aae2c2aae2  8r
+
+-- ********************************************************************************************* --
+-- 17. Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--    Then, load the PCS auto-nego. next page register with the desired value. Bit 15 should be set
+--    in the PCS Auto-Neg. Next Page register to tell the link partner it has next pages to exchange.
+--    Contents of PCS Auto. Neg Next Page  Register
+--    15------14------13------12------11------10------9------8      7------6------5------4------3------2------1------0
+--    NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/  Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/
+--                                          Unfo10  Unfo9  Unfo8   Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0
+--    1       0       1        0       0        0      0      0     0      0      0      0     0       0      0     0
+-- ********************************************************************************************* --
+
+apbwr(int)     21c 0000a000  -- setup pcs auto-nego. next page register
+apbrd          21c 0000a000  -- check pcs auto-nego. next page register
+apbrd           24 00020000  -- check interrupt status register - PCS next page request interrupt set 
+apbrd          200 00001040  -- check pcs control register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          210 00008060  -- check pcs auto-neg. advertisment register
+apbrd          214 00008060  -- check pcs auto-neg. link partner advertisment register
+apbrd          218 00000006  -- check pcs auto-neg. expansion register
+apbrd          220 0000a2aa  -- check pcs auto-neg. link partner next page register
+apbrd          23C 00008000  -- check pcs auto-neg. extended status register
+                             
+
+-- ********************************************************************************************* --
+-- 18.  The GEM should transmit the contents of the PCS Auto-Negotiation Next Page Register. 
+--     Note that the Link Partner has its NP bit set in it's base page advertisment register
+--     to allow the exchange of Next Pages with the GEM. (Enter NEXT_PAGE_WAIT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- TX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              0      0      0      0     0       0      0     0      1       0       1        0       1        0      0      0
+-- ********************************************************************************************* --
+
+pcs_an_tx(trx)               00a8
+
+
+-- ********************************************************************************************* --
+-- 19.  Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--     (Enter ACKNOWLEDGE_DETECT state)
+--     Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- RX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              0      0      0      0     0       0      0     0      1       0       1        0       1        0      0      0
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c100a8c200a8c100a8c200a8  8r
+pcs_an_rx             c100a8c200a8c100a8c200a8  8r
+pcs_an_rx             c100a8c200a8c100a8c200a8  8r
+pcs_an_rx             c100a8c200a8c100a8c200a8  8r
+
+-- ********************************************************************************************* --
+-- 20. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--     same values that are in the PCS next page register plus bit 14 should be set high.
+--     This bit tells the link partner that the GEM has successfully received the link partner next
+--     page information. 
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- TX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              0      0      0      0     0       0      0     0      1       1       1        0       1        0      0      0
+-- ********************************************************************************************* --
+pcs_an_tx(trx)               00e8
+
+-- ********************************************************************************************* --
+-- 21.  Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--      The link partner acknowledges the reception of the GEMs Next Page information. 
+--      (Enter COMPLETE_ACKNOWLEDGE state)
+--    Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- RX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              0      0      0      0     0       0      0     0      1       1       1        0       1        0      0      0
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)             c100e8c200e8c100e8c200e8  8r
+pcs_an_rx                  c100e8c200e8c100e8c200e8  8r
+
+
+-- ********************************************************************************************* --
+-- 22. Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--    Then, load the PCS auto-nego. next page register with the desired value. Bit 15 should be set
+--    in the PCS Auto-Neg. Next Page register to tell the link partner it has next pages to exchange.
+--    Contents of PCS Auto. Neg Next Page  Register
+--    15------14------13------12------11------10------9------8      7------6------5------4------3------2------1------0
+--    NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/  Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/
+--                                          Unfo10  Unfo9  Unfo8   Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0
+--    0       0       1        0       0        1      0      1     0      1      0      1     0      1      0      1
+-- ********************************************************************************************* --
+
+apbwr(int)     21c 0000a555  -- setup pcs auto-nego. next page register
+apbrd          21c 0000a555  -- check pcs auto-nego. next page register
+apbrd           24 00020000  -- check interrupt status register - PCS next page request interrupt set 
+apbrd          200 00001040  -- check pcs control register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          210 00008060  -- check pcs auto-neg. advertisment register
+apbrd          214 00008060  -- check pcs auto-neg. link partner advertisment register
+apbrd          218 00000006  -- check pcs auto-neg. expansion register
+apbrd          220 0000a800  -- check pcs auto-neg. link partner next page register
+apbrd          23C 00008000  -- check pcs auto-neg. extended status register
+
+-- ********************************************************************************************* --
+-- 23.  The GEM should transmit the contents of the PCS Auto-Negotiation Next Page Register. 
+--      Note that the Link Partner has its NP bit set in it's base page advertisment register
+--      to allow the exchange of Next Pages with the GEM. (Enter NEXT_PAGE_WAIT state)
+--      Contents of TX_CONFIG Register = PCS Auto. Neg Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- TX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              0      1      0      1     0      1      0      1      1       0       1        0       0        1      0      1 
+-- ********************************************************************************************* --
+
+pcs_an_tx(trx)               55a5
+
+-- ********************************************************************************************* --
+-- 24.  Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--      Link partner does have Next Pages to exchange. (Enter ACKNOWLEDGE_DETECT state)
+--      Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- RX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              0      1      0      1     0      1      0      1      1       0       1        0       0        1      0      1 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c155a5ca55a5c155a5ca55a5  8r
+pcs_an_rx             c155a5ca55a5c155a5ca55a5  8r
+
+-- ********************************************************************************************* --
+-- 25. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--     same values that are in the PCS next page register plus bit 14 should be set high.
+--     This bit tells the link partner that the GEM has successfully received the link next
+--     page information. 
+--     Contents of TX_CONFIG Register = PCS Auto. Neg Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- TX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              0      1      0      1     0      1      0      1      1       1      1        0       0        1      0      1 
+-- ********************************************************************************************* --
+
+pcs_an_tx(trx)               55e5
+
+-- ********************************************************************************************* --
+-- 26.  Provide a link of /C/ codes which correspond to the link partner sending a Message Page. 
+--      Link partner does have Next Pages to exchange. Furthermore, the link partner
+--      acknowledges the reception of the GEMs Next Page information. (Enter COMPLETE_ACKNOWLEDGE)
+--      Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- RX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              0      1      0      1     0      1      0      1      1       1      1        0       0        1      0      1 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)             c155e5c255e5c155e5c255e5  
+
+
+
+-- ********************************************************************************************* --
+-- 27. Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--    Then, load the PCS auto-nego. next page register with the desired value. Bit 15 should be set
+--    in the PCS Auto-Neg. Next Page register to tell the link partner it has next pages to exchange.
+--    Contents of PCS Auto. Neg Next Page  Register
+--    15------14------13------12------11------10------9------8      7------6------5------4------3------2------1------0
+--    NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/  Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/
+--                                          Unfo10  Unfo9  Unfo8   Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0
+--    1       0       0        1       0        1      1      1     1      1      1      1     1       1      1     1
+-- ********************************************************************************************* --
+
+apbwr(int)     21c 000097ff  -- setup pcs auto-nego. next page register
+apbrd          21c 000097ff  -- check pcs auto-nego. next page register
+apbrd           24 00020000  -- check interrupt status register - PCS next page request interrupt set 
+apbrd          200 00001040  -- check pcs control register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          210 00008060  -- check pcs auto-neg. advertisment register
+apbrd          214 00008060  -- check pcs auto-neg. link partner advertisment register
+apbrd          218 00000006  -- check pcs auto-neg. expansion register
+apbrd          220 0000a555  -- check pcs auto-neg. link partner next page register
+apbrd          23C 00008000  -- check pcs auto-neg. extended status register
+                             
+
+-- ********************************************************************************************* --
+-- 28.  The GEM should transmit the contents of the PCS Auto-Negotiation Next Page Register. 
+--     Note that the Link Partner has its NP bit set in it's base page advertisment register
+--     to allow the exchange of Next Pages with the GEM. (Enter NEXT_PAGE_WAIT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- TX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              1      1      1      1     1       1      1     1      1       0       0        1       1        1      1      1
+-- Note: Since the link partner is tranmsitting its next page information before the GEM, the GEM
+--       will quickly go into the NEXT_PAGE_WAIT state. Then, proceed immediately into the 
+--       ACKNOWLEDGE_DETECT STATE.  Therefore, the GEM will immediately start transmitting its
+--       next page information with the acknowledge bit set.
+-- ********************************************************************************************* --
+
+-- pcs_an_tx                ff9f
+
+
+-- ********************************************************************************************* --
+-- 29.  Provide a link of /C/ codes which correspond to the link partner sending a Unformatted Page. 
+--     (Enter ACKNOWLEDGE_DETECT state)
+--     Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- RX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              1      1      1      1     1       1      1     1      1       0       0        1       1        1      1      1
+-- ********************************************************************************************* --
+
+pcs_an_rx             c1ff9fc2ff9fc1ff9fc2ff9f  8r
+pcs_an_rx             c1ff9fc2ff9fc1ff9fc2ff9f  8r
+
+
+-- ********************************************************************************************* --
+-- 30. The GEM should then transmit alternating /C/ codes with the Conf_Reg field indicating the 
+--     same values that are in the PCS next page register plus bit 14 should be set high.
+--     This bit tells the link partner that the GEM has successfully received the link partner next
+--     page information. 
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- TX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              1      1      1      1     1       1      1     1      1       1       0        1       1        1      1      1
+-- ********************************************************************************************* --
+
+pcs_an_tx(trx)               ffdf
+
+-- ********************************************************************************************* --
+-- 31.  Provide a link of /C/ codes which correspond to the link partner sending a Unformatted Page. 
+--      The link partner acknowledges the reception of the GEMs Next Page information. 
+--      (Enter COMPLETE_ACKNOWLEDGE state)
+--    Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- RX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              1      1      1      1     1       1      1     1      1       1       0        1       1        1      1      1
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)             c1ffdfc2ffdfc1ffdfc2ffdf  
+
+
+-- ********************************************************************************************* --
+-- 32. Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--    Then, load the PCS auto-nego. next page register with the desired value. Bit 15 should be set
+--    in the PCS Auto-Neg. Next Page register to tell the link partner it has next pages to exchange.
+--    Contents of PCS Auto. Neg Next Page  Register
+--    15------14------13------12------11------10------9------8      7------6------5------4------3------2------1------0
+--    NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/  Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/
+--                                          Unfo10  Unfo9  Unfo8   Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0
+--    0       0       0        1       0        1      0      1     0      1      0      1     0      1      0      1
+-- ********************************************************************************************* --
+
+apbwr(int)     21c 00001555  -- setup pcs auto-nego. next page register
+apbrd          21c 00001555  -- check pcs auto-nego. next page register
+apbrd           24 00020000  -- check interrupt status register - PCS next page request interrupt set 
+apbrd          200 00001040  -- check pcs control register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          210 00008060  -- check pcs auto-neg. advertisment register
+apbrd          214 00008060  -- check pcs auto-neg. link partner advertisment register
+apbrd          218 00000006  -- check pcs auto-neg. expansion register
+apbrd          220 00009fff  -- check pcs auto-neg. link partner next page register
+apbrd          23C 00008000  -- check pcs auto-neg. extended status register
+
+-- ********************************************************************************************* --
+-- 33.  The GEM should transmit the contents of the PCS Auto-Negotiation Next Page Register. 
+--      Note that the Link Partner has its NP bit set in it's base page advertisment register
+--      to allow the exchange of Next Pages with the GEM. (Enter NEXT_PAGE_WAIT state)
+--      Contents of TX_CONFIG Register = PCS Auto. Neg Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- TX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              0      1      0      1     0      1      0      1      0       0       0        1       0        1      0      1 
+-- Note: Since the link partner is tranmsitting its next page information before the GEM, the GEM
+--       will quickly go into the NEXT_PAGE_WAIT state. Then, proceed immediately into the 
+--       ACKNOWLEDGE_DETECT STATE.  Therefore, the GEM will immediately start transmitting its
+--       next page information with the acknowledge bit set.
+-- ********************************************************************************************* --
+
+-- pcs_an_tx                 5515
+
+-- ********************************************************************************************* --
+-- 34.  Provide a link of /C/ codes which correspond to the link partner sending a Unformatted Page. 
+--      Link partner does have Next Pages to exchange. (Enter ACKNOWLEDGE_DETECT state)
+--      Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- RX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              0      1      0      1     0      1      0      1      0       0       0        1       0        1      0      1 
+-- ********************************************************************************************* --
+
+pcs_an_rx             c15515c15515c15515c15515  8r
+pcs_an_rx             c15515c15515c15515c15515  8r
+
+-- ********************************************************************************************* --
+-- 35. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--     same values that are in the PCS next page register plus bit 14 should be set high.
+--     This bit tells the link partner that the GEM has successfully received the link next
+--     page information. 
+--     Contents of TX_CONFIG Register = PCS Auto. Neg Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- TX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              0      1      0      1     0      1      0      1      0       1      0        1       0        1      0      1 
+-- ********************************************************************************************* --
+
+pcs_an_tx(trx)               5555
+
+-- ********************************************************************************************* --
+-- 36.  Provide a link of /C/ codes which correspond to the link partner sending a Unformatted Page. 
+--      Link partner does have Next Pages to exchange. Furthermore, the link partner
+--      acknowledges the reception of the GEMs Next Page information. (Enter COMPLETE_ACKNOWLEDGE)
+--      Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Next Page  Register
+--              7------6------5------4------3------2------1------0     15------14------13------12------11------10------9------8    
+-- RX_CONFIG   Mess7/ Mess6/ Mess5/ Mess4/ Mess3/ Mess2 Mess1/ Mess0/  NP     ACK (MESS PG IND) ACK2 TOGGLE  Mess10/ Mess9/ Mess8/ 
+--             Unfo7  Unfo6  Unfo5  Unfo4  Unfo3  Unfo2 Unfo1  Unfo0                                         Unfo10  Unfo9  Unfo8
+--              0      1      0      1     0      1      0      1      0       1      0        1       0        1      0      1 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)                  c15555c25555c15555c25555  8r
+pcs_an_rx                  c15555c25555c15555c25555  8r
+
+
+-- ********************************************************************************************* --
+-- 37. Once the GEM enters COMPLETE_ACKNOWLEGE state, the GEM will trigger the PCS next page request interrupt.
+--     No more next page information to exchange. Just check pcs registers.
+-- ********************************************************************************************* --
+apbrd(int)     21c 00001555  -- check pcs auto-nego. next page register
+apbrd           24 00020000  -- check interrupt status register - PCS next page request interrupt set 
+apbrd          200 00001040  -- check pcs control register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          210 00008060  -- check pcs auto-neg. advertisment register
+apbrd          214 00008060  -- check pcs auto-neg. link partner advertisment register
+apbrd          218 00000006  -- check pcs auto-neg. expansion register
+apbrd          220 00001555  -- check pcs auto-neg. link partner next page register
+apbrd          23C 00008000  -- check pcs auto-neg. extended status register
+
+end(25000)

@@ -1,0 +1,611 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_buf_col_max_64
+--
+--   Authors        : Mike MacGillis (mikema@tality.com)/
+		      Martin James (martinj@tality.com)
+--
+--   Date           : 8 March 2002
+--
+--------------------------------------------------------------------------------
+-- Test Description
+-- This test ensures that the transmit functionality of the GEM properly 
+-- deals with sixteen collisions occurring during the transmission of a frame.  
+-- Also, ensures that the GEM can recover buffers after the collisions have occurred.
+--
+-- Functional Coverage
+-- · Ensures that the GEM works properly when a frame is trying to be 
+--   transmitted and a total of 16 collision occur.
+-- · Ensures back-off functionality is working properly.
+-- · Ensures that transmit buffer descriptor is written back with 
+--   correct data. (Bit  29 should be set in word 1 indicating the 
+--   retry limit was exceeded)
+--
+-- Detailed Test Description
+-- 1. Enable GEM for 100-mode operation and transmitting frames.
+--
+--    Test 1: 16 collisions during transmission
+--
+-- 2. Set retry test bit to speed up backoff count (bit 12 in network configuration register).
+-- 3. Queue up three 8-byte buffers. Then, start transmitting the frame.  
+--    However, a collision is detected during preamble (collision 1).  Therefore, the 
+--    rest of preamble and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 4. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--    However, a collision is detected during preamble (collision 2).  Therefore, the rest of preamble 
+--    and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 5. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--    However, a collision is detected during preamble (collision 3).  Therefore, the rest of preamble
+--    and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 6. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--    However, a collision is detected during preamble (collision 4).  Therefore, the rest of preamble 
+--    and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 7. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--    However, a collision is detected during preamble (collision 5).  Therefore, the rest of preamble 
+--    and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 8. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--    However, a collision is detected during preamble (collision 6).  Therefore, the rest of preamble
+--    and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 9. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--    However, a collision is detected during preamble (collision 7).  Therefore, the rest of preamble 
+--    and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 10. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 8).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 11. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 9).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 12. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision 10).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 13. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision11).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 14. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.
+--     However, a collision is detected during preamble (collision 12).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 15. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 13).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 16. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 14).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 17. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision115).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 18. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision 16).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 19. The GEM should now stop trying to re-transmit the frame and write back to the original transmit
+--      buffer descriptor indicating that excessive retries  (bit 29) have occurred.
+--
+-- Test 2: 15 collisions during transmission
+--
+-- 20. Enable transmit again because tx_go bit was reset because too many retries occurred.
+-- 21. Queue up three 8-byte buffers. Then, start transmitting the frame.  However, a collision
+--     is detected during preamble (collision 1).  Therefore, the rest of preamble and SFD should be 
+--     transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 22. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision 2).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 23. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 3).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 24. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 4).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 25. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 5).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 26. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 6).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 27. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 7).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 28. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision 8).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 29. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision 9).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 30. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 10).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 31. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 11).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 32. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision 12).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 33. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision 13).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 34. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 14).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 35. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.
+--     However, a collision is detected during preamble (collision 15).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- 36. After some back-off period, the frame should be re-transmitted properly.
+-- 37. Check status registers and statistic registers and ensure that the above operations occurred properly.
+--------------------------------------------------------------------------------
+--wait_states 1
+--bus_grant_delay 4
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      00 00000008  -- enable transmit 
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      04 00281000  -- set retry_test in network config register
+apbrd      04 00281000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+
+-- ************************************************************************** --
+-- Setup a multi-buffer transmit queue in memory
+
+apbwr      1c 55555000  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555000  -- check transmit queue pointer
+apbwr      00 00000208  -- Start the transmission by setting the go bit in network control register
+
+-- ************************************************************************** --
+--    Test 1: 16 collisions during transmission
+-- ************************************************************************** --
+
+-- With TX packet buffer included all of frame is read in once and retried
+-- from the packet buffer.
+
+-- Frame 1
+dma_rd 55555000 98765000 
+dma_rd 55555004 00010008 -- length 8 bytes, no CRC
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+
+dma_rd 55555008 98765008 
+dma_rd 5555500c 00010010 -- length 16 bytes, no CRC
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+
+dma_rd 55555010 98765010
+dma_rd 55555014 00010010 -- length 8 bytes, no CRC
+dma_rd 98765010 12345678
+dma_rd 98765014 11111111
+dma_rd 98765018 12345678
+dma_rd 9876501c 11111111
+
+dma_rd 55555018 98765018
+dma_rd 5555501c 00010008 -- length 8 bytes, no CRC
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+
+dma_rd 55555020 98765020
+dma_rd 55555024 40018008 -- length 8 bytes, EOF, no CRC
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+
+
+
+
+-- ************************************************************************** --
+-- 3. Queue up three 8-byte buffers. Then, start transmitting the frame.  
+--    However, a collision is detected during preamble (collision 1).  Therefore, the 
+--    rest of preamble and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 4. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--    However, a collision is detected during preamble (collision 2).  Therefore, the rest of preamble 
+--    and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 5. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--    However, a collision is detected during preamble (collision 3).  Therefore, the rest of preamble
+--    and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 6. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--    However, a collision is detected during preamble (collision 4).  Therefore, the rest of preamble 
+--    and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 7. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--    However, a collision is detected during preamble (collision 5).  Therefore, the rest of preamble 
+--    and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 8. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--    However, a collision is detected during preamble (collision 6).  Therefore, the rest of preamble
+--    and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 9. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--    However, a collision is detected during preamble (collision 7).  Therefore, the rest of preamble 
+--    and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 10. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 8).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 11. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 9).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 12. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision 10).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 13. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision11).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 14. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.
+--     However, a collision is detected during preamble (collision 12).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 15. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 13).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 16. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 14).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 17. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision115).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 18. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision 16).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 19. The GEM should now stop trying to re-transmit the frame and write back to the original transmit
+--      buffer descriptor indicating that excessive retries  (bit 29) have occurred
+-- ************************************************************************** --
+
+--write back original descriptor with too many retries set
+dma_rd 55555000 98765000 
+
+
+--Check for retry limit interrupt
+apbrd(int) 24 00000020  -- check interrupt status - retry limit
+apbwr      24 00000020  -- clear interrupt status
+apbrd      14 0000000e  -- read tx status - complete, retry limit & collision
+apbrd      14 0000000e  -- transmit status - read again to check tx_go now low
+apbwr      14 0000000e  -- clear the tx status register
+apbrd      14 00000008  -- check the tx status register is now cleared
+
+
+-- ************************************************************************** --
+-- Test 2: 15 collisions during transmission
+--
+-- 20. Enable transmit again because tx_go bit was reset because too many retries occurred.
+-- ************************************************************************** --
+
+
+-- With TX packet buffer included all of frame is read in once and retried
+-- from the packet buffer.
+
+dma_wr 55555004 a0010008 -- write back with too many retries & ownership set
+dma_rd 55555004 00010008 -- length 8 bytes, no CRC
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+
+dma_rd 55555008 98765008 
+dma_rd 5555500c 00010008 -- length 8 bytes, no CRC
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+
+dma_rd 55555010 98765010 
+dma_rd 55555014 00010008 -- length 8 bytes, no CRC
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+
+dma_rd 55555018 98765018 
+dma_rd 5555501c 00018008 -- EOF, length 8 bytes, no CRC
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+
+
+
+-- ************************************************************************** --
+-- 21. Queue up three 8-byte buffers. Then, start transmitting the frame.  However, a collision
+--     is detected during preamble (collision 1).  Therefore, the rest of preamble and SFD should be 
+--     transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 22. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision 2).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 23. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 3).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 24. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 4).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 25. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 5).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 26. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 6).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 27. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 7).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 28. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision 8).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 29. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision 9).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 30. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 10).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 31. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 11).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 32. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision 12).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 33. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame. 
+--     However, a collision is detected during preamble (collision 13).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 34. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.  
+--     However, a collision is detected during preamble (collision 14).  Therefore, the rest of preamble 
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 35. After some back-off period, queue up three 8-byte buffers. Then, start transmitting the frame.
+--     However, a collision is detected during preamble (collision 15).  Therefore, the rest of preamble
+--     and SFD should be transmitted. Then, a 32-bit jam sequence should be transmitted.
+-- ************************************************************************** --
+
+-- collision in the preamble, check for 32 bit jam sequence
+txd       555555555x55555d588888888
+
+-- ************************************************************************** --
+-- 36. After some back-off period, the frame should be re-transmitted properly.
+-- ************************************************************************** --
+
+-- Good txd
+txd       55555555555555d5
+txd       78563412
+txd       11111111
+txd       22222222
+txd       33333333
+txd       44444444
+txd       55555555
+txd       66666666
+txd       77777777
+
+--write back original descriptor
+dma_wr 55555004 80010008 -- write back with ownership set
+
+--Stop the tx from fetching more bufffers by setting the used bit
+dma_rd 55555020 98765018 
+dma_rd 55555024 80018000 -- EOF, length 0 bytes, no CRC
+
+
+--Check for retry limit interrupt
+-- check interrupt and status
+apbrd(int) 24 00000088  -- check interrupt status - transmit complete and halt bit set
+apbwr      24 00000088  -- clear interrupt status
+apbrd      14 00000023  -- read tx status register - complete, used bit set & collision
+apbrd      14 00000023  -- check the tx status register has not been cleared
+apbwr      14 00000023  -- clear the tx status register
+apbrd      14 00000000  -- tx status register is now cleared
+
+-- ************************************************************************** --
+-- 37. Check status registers and statistic registers and ensure that the above operations occurred properly.
+-- ************************************************************************** --
+
+apbrd      100 00000020  -- check value of octets_txed_bottom
+apbrd      104 00000000  -- check value of octets_txed_top
+apbrd      108 00000001  -- check value of frames_txed_ok
+apbrd      10c 00000000  -- check value of broadcast_txed
+apbrd      110 00000000  -- check value of multicast_txed
+apbrd      114 00000000  -- check value of pause_frames_txed
+apbrd      118 00000000  -- check value of frames_txed_64
+apbrd      11c 00000000  -- check value of frames_txed_65
+apbrd      120 00000000  -- check value of frames_txed_128
+apbrd      124 00000000  -- check value of frames_txed_256
+apbrd      128 00000000  -- check value of frames_txed_512
+apbrd      12c 00000000  -- check value of frames_txed_1024
+apbrd      130 00000000  -- check value of frames_txed_1519
+apbrd      134 00000000  -- check value of tx_underruns
+apbrd      138 00000000  -- check value of single_collisions
+apbrd      13c 00000001  -- check value of multiple_collisions
+apbrd      140 00000001  -- check value of excessive_collisions
+apbrd      144 00000000  -- check value of late_collisions
+apbrd      148 00000000  -- check value of deferred_frames
+apbrd      14c 00000000  -- check value of crs_errors
+apbrd      150 00000000  -- check value of octets_rxed_bottom
+apbrd      154 00000000  -- check value of octets_rxed_top
+apbrd      158 00000000  -- check value of frames_rxed_ok
+apbrd      15c 00000000  -- check value of broadcast_rxed
+apbrd      160 00000000  -- check value of multicast_rxed
+apbrd      164 00000000  -- check value of pause_frames_rxed
+apbrd      168 00000000  -- check value of frames_rxed_64
+apbrd      16c 00000000  -- check value of frames_rxed_65
+apbrd      170 00000000  -- check value of frames_rxed_128
+apbrd      174 00000000  -- check value of frames_rxed_256
+apbrd      178 00000000  -- check value of frames_rxed_512
+apbrd      17c 00000000  -- check value of frames_rxed_1024
+apbrd      180 00000000  -- check value of frames_rxed_1519
+apbrd      184 00000000  -- check value of undersize_frames
+apbrd      188 00000000  -- check value of excessive_rx_length
+apbrd      18c 00000000  -- check value of rx_jabbers
+apbrd      190 00000000  -- check value of fcs_errors
+apbrd      194 00000000  -- check value of rx_length_errors
+apbrd      198 00000000  -- check value of rx_symbol_errors
+apbrd      19c 00000000  -- check value of alignment_errors
+apbrd      1a0 00000000  -- check value of rx_resource_errors
+apbrd      1a4 00000000  -- check value of rx_overruns
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(30000)

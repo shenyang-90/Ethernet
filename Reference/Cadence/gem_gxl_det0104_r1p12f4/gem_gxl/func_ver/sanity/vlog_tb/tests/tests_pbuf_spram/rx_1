@@ -1,0 +1,553 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_1
+--
+--   Author         : Arthur Marris (arthurm@tality.com)
+--
+--   Date           : 3 March 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Test Description
+--   This test checks the receive status and network control registers.  
+--   Furthermore, the receive buffer locations starting on a 32-byte 
+--   boundary and the frame discard functionality are also tested.
+--
+--   Functional Coverage
+--   � Ensures the GEM receive functionality works properly with the DMA
+--   � Ensures the receive status and network control register are working 
+--     properly.
+--   � Tests buffer locations starting on a 32-byte boundary.
+--   � Ensures the frame discard functionality works properly.
+--
+--   Detailed Test Description
+--
+--    1. Initialise the GEM for 10 or 100-mode operation.
+--    2. Check the receive status and control registers.
+--    3. Write an address to specific address register one.
+--    4. Receive a specifically address matched frame with receive. (All 
+--       buffer locations start on the 32-byte boundary)
+--    5. Clear the receive status register.
+--    6. Receive a runt preamble for code coverage
+--    7. Receive a broadcast frame. (Frame should be stored to memory)
+--    8. Receive a broadcast frame with an incorrect destination address.
+--       This frame should be discarded.
+--    9. Receive a broadcast frame. This frame should be written to memory.
+--   10. Read another receive buffer descriptor with the used bit set. This
+--       should cause a rx used bit read interrupt to be set. Also, the
+--       receive status register should indicate that a receive buffer was
+--       not available.
+--   11. Receive a frame.  The buffer descriptor read has the ownership bit set.
+--       Therefore, this frame should be discarded. The rx used bit read
+--       interrupt should be set.
+--   12. Receive a frame. The buffer descriptor read does not have the
+--       ownership bit set. Therefore, this frame should be written to memory.
+--   13. Check the status and statistics registers and ensure the above
+--       operations were handled properly.
+--   14. Whilst receiving a frame, disable receive. The frame should be 
+--       discarded
+--   15. Enable the GEM to receive frames.
+--   16. Receive a frame. The frame should be written to memory.
+--   17. Check the status and statistics registers and ensure the above
+--       operations were handled properly.
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+
+-- *****************************************************************************
+--    1. Initialise the GEM for 10 or 100-mode operation.
+--    2. Check the receive status and control registers.
+--    3. Write an address to specific address register one.
+-- *****************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 01234000  -- write receive queue pointer
+apbwr      4ec 0000000f -- set the RX descriptor trigger rate to very slow, otherwise it changes the behaviour of this test.
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      98 12345678  -- specific address register 3 bottom
+apbwr      9C 00001111  -- specific address register 3 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+
+
+-- *****************************************************************************
+--    4. Receive a specifically address matched frame with receive. (All 
+--       buffer locations start on the 32-byte boundary)
+-- *****************************************************************************
+
+apbrdf     20 00000000  "Scenario 1: receive an address matched frame"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+-- drive the receive frame data into the MII interface
+rxd(apb)   55d578563412111111112222222233330001 -- (64 bytes)
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- supply the receive buffer location
+dma_rd 01234000 22222004 -- dma reads pointer of 22222004
+
+
+-- supply the receive buffer location
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 01003333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 a5f5c185
+
+dma_wr 01234004 0c00C040 -- dma writes rx status, local address 3 match and 64 bytes received
+dma_wr 01234000 22222005 -- dma writes ownership bit
+
+dma_rd 01234008 44440008 -- reads locations of next rx buffer
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 1: complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+
+
+-- *****************************************************************************
+--    5. Clear the receive status register.
+-- *****************************************************************************
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      18 01234008  -- check receive queue pointer
+
+
+
+-- *****************************************************************************
+--    6. Receive a runt preamble for code coverage
+-- *****************************************************************************
+
+apbrd      20 00000000  "Scenario 2: Receive an runt preamble"
+
+rxd(gap)     555555555555  -- runt preamble for code coverage
+
+apbrd      24 00000000  "Scenario 2: complete"
+
+
+-- *****************************************************************************
+--    7. Receive a broadcast frame. (Frame should be stored to memory)
+-- *****************************************************************************
+
+apbrd      20 00000000  "Scenario 3: Successfully receive an broadcast frame"
+                        -- check contents of the receive status register
+
+rxd(gap)     d5FFFFFFFFFFFF11112222222233330002   -- BROADCAST (65 bytes)
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            00000000000000000000000033gggggggg   -- autogenerate CRC
+
+
+
+dma_wr 44440008 FFFFFFFF -- store frame to memory
+dma_wr 4444000c 1111FFFF
+dma_wr 44440010 22222222
+dma_wr 44440014 02003333
+dma_wr 44440018 44444444
+dma_wr 4444001c 55555555
+dma_wr 44440020 66666666
+dma_wr 44440024 77777777
+dma_wr 44440028 88888888
+dma_wr 4444002c 99999999
+dma_wr 44440030 aaaaaaaa
+dma_wr 44440034 bbbbbbbb
+dma_wr 44440038 00000000
+dma_wr 4444003c 00000000
+dma_wr 44440040 00000000
+dma_wr 44440044 61aff133
+dma_wr 44440048 00000002
+
+dma_wr 0123400c 8000C041 -- dma writes rx status, broadcast and 65 bytes received
+dma_wr 01234008 44440009 -- dma writes ownership bit
+
+dma_rd 01234010 5555000e -- reads locations of next rx buffer - wrap bit set
+
+
+apbrd(int) 24 00000002  "Scenario 3: complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear rx status register
+apbrd      18 01234010  -- check receive queue pointer
+
+
+
+-- *****************************************************************************
+--    8. Receive a broadcast frame with an incorrect destination address.
+--       This frame should be discarded.
+-- *****************************************************************************
+
+apbrd      20 00000000  "Scenario 4: Receive an broadcast frame with wrong addr"
+
+rxd(gap)     d5FEFFFFFFFFFF11112222222233330003   -- Discard this one (66 bytes)
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            1000000002000000003000000004gggggggg   -- autogenerate CRC
+
+apbrd      24 00000000  "Scenario 4: complete"
+
+
+-- *****************************************************************************
+--    9. Receive a broadcast frame. This frame should be written to memory.
+-- *****************************************************************************
+
+apbrd      20 00000000  "Scenario 5: Receive an broadcast frame with wrong addr"
+
+rxd(gap)     d5FFFFFFFFFFFF11112222222233330004   -- BROADCAST (66 bytes)
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            1000000002000000003000000004gggggggg   -- autogenerate CRC
+
+
+
+dma_wr 5555000c FFFFFFFF -- store frame to memory
+dma_wr 55550010 1111FFFF
+dma_wr 55550014 22222222
+dma_wr 55550018 04003333
+dma_wr 5555001c 44444444
+dma_wr 55550020 55555555
+dma_wr 55550024 66666666
+dma_wr 55550028 77777777
+dma_wr 5555002c 88888888
+dma_wr 55550030 99999999
+dma_wr 55550034 aaaaaaaa
+dma_wr 55550038 bbbbbbbb
+dma_wr 5555003c 00000010
+dma_wr 55550040 00000002
+dma_wr 55550044 00003000
+dma_wr 55550048 84490400
+dma_wr 5555004c 000084bd
+
+dma_wr 01234014 8000C042 -- dma writes rx status, broadcast and 66 bytes received
+dma_wr 01234010 5555000f -- dma writes ownership bit
+
+apbrd(int) 24 00000002  "Scenario 5: complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+-- *****************************************************************************
+--   10. Read another receive buffer descriptor with the used bit set. This
+--       should cause a rx used bit read interrupt to be set. Also, the
+--       receive status register should indicate that a receive buffer was
+--       not available.
+-- *****************************************************************************
+
+dma_rd 01234000 66660001 -- next rx buffer ownership bit is set
+
+apbrd(int) 24 00000004  "Scenario 6: Read a used bit"
+                        -- check interrupt status - rx buffer not available
+apbwr      24 00000004  -- Clear it
+apbrd      24 00000000  -- check interrupt status clear
+apbrd      20 00000003  -- receive status register- frame received and buffer unavailable
+apbwr      20 00000001  -- receive status register- clear buffer unavailable
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- receive status register- clear frame received
+apbrd      18 01234000  -- check receive queue pointer
+
+apbrdf     20 00000000  "Scenario 6: complete"
+                        -- check contents of the receive status register
+                        -- and trigger reception of frame
+
+rxd(gap)     d578563412111111112222222233330007
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- *****************************************************************************
+--   11. Receive a frame.  The buffer descriptor read has the ownership bit set.
+--       Therefore, this frame should be discarded. The rx used bit read
+--       interrupt should be set.
+-- *****************************************************************************
+
+apbrd      20 00000000  "Scenario 7: Used bit again"
+
+dma_rd 01234000 55550001 -- still set 
+
+apbrd(int) 24 00000004  "Scenario 7: complete"
+                        -- check interrupt status - rx buffer not available
+apbwr      24 00000004  -- Clear it
+apbrdf     24 00000000  -- check interrupt status clear
+apbrd      20 00000001  -- receive status register- buffer unavailable
+apbwr      20 00000001  -- receive status register- clear buffer unavailable
+
+
+
+
+-- *****************************************************************************
+--   12. Receive a frame. The buffer descriptor read does not have the
+--       ownership bit set. Therefore, this frame should be written to memory.
+-- *****************************************************************************
+
+apbrd      20 00000000  "Scenario 8: Finaly no used bit, so good frame"
+
+
+dma_rd 01234000 77770002 -- next rx buffer ownership not set any more
+
+rxd(gap)     d578563412111111112222222233330007
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000001gggggggg
+
+
+dma_wr 77770000 12345678 -- store frame to memory
+dma_wr 77770004 11111111
+dma_wr 77770008 22222222
+dma_wr 7777000c 07003333
+dma_wr 77770010 44444444
+dma_wr 77770014 55555555
+dma_wr 77770018 66666666
+dma_wr 7777001c 77777777
+dma_wr 77770020 88888888
+dma_wr 77770024 99999999
+dma_wr 77770028 aaaaaaaa
+dma_wr 7777002c bbbbbbbb
+dma_wr 77770030 00000000
+dma_wr 77770034 00000000
+dma_wr 77770038 00000000
+dma_wr 7777003c da633caf
+
+dma_wr 01234004 0c00C040 -- dma writes rx status, local address match 3 and 64 bytes received
+dma_wr 01234000 77770003 -- dma writes ownership bit
+dma_rd 01234000 77770000 -- reads locations of next rx buffer
+apbrd(int) 24 00000002  "Scenario 8: ongoing"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear receive status register
+
+
+dma_wr 77770000 12345678 -- store frame to memory
+dma_wr 77770004 11111111
+dma_wr 77770008 22222222
+dma_wr 7777000c 07003333
+dma_wr 77770010 44444444
+dma_wr 77770014 55555555
+dma_wr 77770018 66666666
+dma_wr 7777001c 77777777
+dma_wr 77770020 88888888
+dma_wr 77770024 99999999
+dma_wr 77770028 aaaaaaaa
+dma_wr 7777002c bbbbbbbb
+dma_wr 77770030 00000000
+dma_wr 77770034 00000000
+dma_wr 77770038 01000000
+dma_wr 7777003c ad640c39
+
+dma_wr 01234004 0c00C040 -- dma writes rx status, local address match 3 and 64 bytes received
+dma_wr 01234000 77770001 -- dma writes ownership bit
+dma_rd 01234008 88880000 -- reads locations of next rx buffer
+
+apbrd(int) 24 00000002  "Scenario 8: complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear receive status register
+
+
+
+
+-- *****************************************************************************
+--   13. Check the status and statistics registers and ensure the above
+--       operations were handled properly.
+-- *****************************************************************************
+
+-- check receive statistics
+apbrd     150 00000143  -- check octets received bottom (259 bytes)
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000005  -- check frames received ok
+apbrd     15C 00000002  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000003  -- check frames received 64
+apbrd     16C 00000002  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000002  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+
+-- *****************************************************************************
+--   14. Whilst receiving a frame, disable receive. The frame should be 
+--       discarded
+-- *****************************************************************************
+
+apbrdf      20 00000000  "Scenario 9: Disable receive"
+
+apbwr(3078) 00 00000000  -- disable receive - should discard frame
+
+apbrd       20 00000000  "Scenario 9: Complete"
+
+rxd(apb)     d578563412111111112222222233330008
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+dma_wr 88880000 12345678 -- start storing frame to memory 
+dma_wr 88880004 11111111
+dma_wr 88880008 22222222
+dma_wr 8888000c 08003333
+-- no more data as the frame was discarded here
+
+-- *****************************************************************************
+--   15. Enable the GEM to receive frames.
+--   16. Receive a frame. The frame should be written to memory.
+-- *****************************************************************************
+
+apbrd      20 00000000  "Scenario 10: Re-enable RX and receive a frame"
+
+-- need to allow dma to finish before re-enabling so use several reads to delay
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+apbrd      20 00000000  -- check rx status
+
+apbwr      00 00000004  -- enable receive  - should receive next frame OK
+apbrdf     18 01234008  -- check receive queue pointer
+
+
+rxd(apb)     d578563412111111112222222233330009
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            cccccccc0000000000000000gggggggg
+
+dma_rd 01234008 88880000 -- re-reads locations of next rx buffer
+dma_wr 88880000 12345678 -- store frame to memory
+dma_wr 88880004 11111111
+dma_wr 88880008 22222222
+dma_wr 8888000c 09003333
+dma_wr 88880010 44444444
+dma_wr 88880014 55555555
+dma_wr 88880018 66666666
+dma_wr 8888001c 77777777
+dma_wr 88880020 88888888
+dma_wr 88880024 99999999
+dma_wr 88880028 aaaaaaaa
+dma_wr 8888002c bbbbbbbb
+dma_wr 88880030 cccccccc
+dma_wr 88880034 00000000
+dma_wr 88880038 00000000
+dma_wr 8888003c 7b7ea577
+
+dma_wr 0123400c 0c00c040 -- dma writes rx status, local address match and 64 bytes received
+dma_wr 01234008 88880001 -- dma writes ownership bit
+
+dma_rd 01234010 99990000 -- reads locations of next rx buffer
+
+
+apbrd(int) 24 00000002  "Scenario 10: complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+
+
+
+-- *****************************************************************************
+--   17. Check the status and statistics registers and ensure the above
+--       operations were handled properly.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000080  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000002  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000002  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(16000)

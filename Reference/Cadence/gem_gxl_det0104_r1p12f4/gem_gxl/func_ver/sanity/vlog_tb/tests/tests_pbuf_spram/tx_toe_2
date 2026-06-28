@@ -1,0 +1,1656 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_toe_2
+--
+--   Author         : Ewan McCulloch (ewanm@cadence.com)
+--
+--   Date           : 24 April 2006
+--
+--------------------------------------------------------------------------------
+--
+-- Detailed Test Description
+--  1. Initialise suitable wait states for the test.
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 32-bit DMA data bus.
+--  3. Send several IP frames with either SNAP or ethernet encapsulation, which
+--     have good IP checksum and are valid TCP or UDP with good checksums.
+--
+-- Test 2.1
+--    Broadcast frame, Valid TCP, even length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+-- Test 2.2
+--    Broadcast frame, Valid TCP, odd length, IP options, no VLAN or SNAP
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+-- Test 2.3
+--    Broadcast frame, Valid TCP, Max length IP options, IP header 60 bytes,
+--    VLAN, no SNAP.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+-- Test 2.4
+--    Broadcast frame, Valid UDP, odd length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & UDP
+--    checksums checked (bits [23:22] = 11) and no SNAP (bit 24 low).
+-- Test 2.5
+--    Broadcast frame, UDP null checksum, VLAN, SNAP (checksum is last data)
+--    The frame should be copied to memory, with status indicating IP & UDP
+--    checksums checked (bits [23:22] = 11) and SNAP (bit 24 high).
+-- Test 2.6
+--    Broadcast frame, Valid IP + TCP (no VLAN, no SNAP), Max length (1518
+--    octets including CRC)
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+-- Test 2.7
+--    Broadcast frame, Valid IP + TCP (no VLAN, with SNAP, type/length = 0x5DC)
+--    Long packet, consistent with type/length = 0x5DC.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and SNAP (bit 24 high).
+-- Test 2.8
+--    Broadcast frame, UDP null checksum, VLAN, SNAP (checksum is not last data)
+--    The frame should be copied to memory, with status indicating IP & UDP
+--    checksums checked (bits [23:22] = 11) and SNAP (bit 24 high).
+-- Test 2.9
+--    Broadcast frame, UDP null checksum, VLAN, SNAP, zero UDP length.
+--    The frame should be copied to memory, with status indicating IP & UDP
+--    checksums checked (bits [23:22] = 11) and SNAP (bit 24 high).
+-- Test 2.10
+--    Broadcast frame, Valid TCP, even length, no IP options, no VLAN, no SNAP.
+--    TCP sequence number field is 32'h00000000, which corresponds to NULL
+--    UDP checksum value. Test ensures NULL UDP is ignored.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      10 00020c04  -- enable 4k ram and tcp offload
+apbwr      00 00000208  -- write tx_go and enable tx
+
+
+--******************************************************************************
+-- Test 2.1
+--    Broadcast frame, Valid TCP, even length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+--******************************************************************************
+
+dma_rd 55555504 0000803c -- start of frame
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 FFFFFFFF -- store frame to memory
+dma_rd 98765004 0008FFFF
+dma_rd 98765008 56341239
+dma_rd 9876500c 00450008
+dma_rd 98765010 FADF2800
+dma_rd 98765014 06800040
+dma_rd 98765018 A8C0FFFF
+dma_rd 9876501c A8C00100
+dma_rd 98765020 15009100
+dma_rd 98765024 BB3D8A04
+dma_rd 98765028 22EA605C
+dma_rd 9876502c 1050764D
+dma_rd 98765030 FFFF2844
+dma_rd 98765034 ACAC0000
+dma_rd 98765038 B0B0DBDB
+
+txd         55555555555555d5 -- preamble & SDF
+txd         FFFFFFFFFFFF -- MAC DA
+txd         080039123456 -- MAC SA
+txd         0800         -- Length/typeID
+txd         4500         -- Version, IHL, type of service
+txd         0028         -- total length
+txd         DFFA         -- ID
+txd         4000         -- flags & fragmentation
+txd         8006         -- time to live and protocol
+txd         98F2         -- IP Header checksum
+txd         C0A80001     -- IP SA
+txd         C0A80091     -- IP DA
+txd         0015         -- TCP source port
+txd         048A         -- TCP destination port
+txd         3DBB5C60     -- Sequence number
+txd         EA224D76     -- Acknowledgement Number
+txd         50104428     -- Flags and window
+txd         1376         -- TCP checksum
+txd         0000         -- TCP urgent pointer
+txd         ACACDBDBB0B0 -- options or padding
+txd         589E112F     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 8000803c -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 2.2
+--    Broadcast frame, Valid TCP, odd length, IP options, no VLAN or SNAP
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+--******************************************************************************
+
+dma_rd 5555550c 0000803c -- start of frame
+dma_rd 55555508 22222100 -- dma reads pointer of 22222100
+
+dma_rd 22222100 FFFFFFFF -- store frame to memory
+dma_rd 22222104 0008FFFF
+dma_rd 22222108 56341239
+dma_rd 2222210c 00460008
+dma_rd 22222110 FADF2D00
+dma_rd 22222114 06800040
+dma_rd 22222118 A8C0FFFF
+dma_rd 2222211c A8C00100
+dma_rd 22222120 CDAB9100
+dma_rd 22222124 15003412
+dma_rd 22222128 BB3D8A04
+dma_rd 2222212c 22EA605C
+dma_rd 22222130 1050764D
+dma_rd 22222134 FFFF2844
+dma_rd 22222138 AA340000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        0800         -- Length/typeID
+txd        4600         -- Version, IHL, type of service
+txd        002D         -- total length
+txd        DFFA         -- ID
+txd        4000         -- flags & fragmentation
+txd        8006         -- time to live and protocol
+txd        D9EB         -- IP Header checksum
+txd        C0A80001     -- IP SA
+txd        C0A80091     -- IP DA
+txd        ABCD1234     -- IP options
+txd        0015         -- TCP source port
+txd        048A         -- TCP destination port
+txd        3DBB5C60     -- Sequence number
+txd        EA224D76     -- Acknowledgement Number
+txd        50104428     -- Flags and window
+txd        DF74         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        34AA         -- options or padding
+txd        3962BF6E     -- FCS
+
+
+
+dma_wr 5555550c 8000803c -- write used bit, not TCP or IP
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+
+--******************************************************************************
+-- Test 2.3
+--    Broadcast frame, Valid TCP, Max length IP options, IP header 60 bytes,
+--    VLAN, no SNAP.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+--******************************************************************************
+
+dma_rd 55555514 00008062 -- start of frame
+dma_rd 55555510 22222200 -- dma reads pointer of 22222200
+
+dma_rd 22222200 FFFFFFFF -- store frame to memory
+dma_rd 22222204 0008FFFF
+dma_rd 22222208 56341239
+dma_rd 2222220c 01000081
+dma_rd 22222210 004F0008
+dma_rd 22222214 FADF5000
+dma_rd 22222218 06800040
+dma_rd 2222221c A8C0babe
+dma_rd 22222220 A8C00100
+dma_rd 22222224 11119100
+dma_rd 22222228 33332222
+dma_rd 2222222c 55554444
+dma_rd 22222230 77776666
+dma_rd 22222234 99998888
+dma_rd 22222238 BBBBAAAA
+dma_rd 2222223c DDDDCCCC
+dma_rd 22222240 FFFFEEEE
+dma_rd 22222244 22221111
+dma_rd 22222248 44443333
+dma_rd 2222224c 15005555
+dma_rd 22222250 BB3D8A04
+dma_rd 22222254 22EA605C
+dma_rd 22222258 1050764D
+dma_rd 2222225c 00002844
+dma_rd 22222260 00000000
+
+
+txd        55555555555555d5         -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        8100         -- Length/typeID
+txd        0001         -- VLAN tag
+txd        0800         -- Length/typeID
+txd        4F00         -- Version, IHL, type of service
+txd        0050         -- total length
+txd        DFFA         -- ID
+txd        4000         -- flags & fragmentation
+txd        8006         -- time to live and protocol
+txd        8eca         -- IP Header checksum
+txd        C0A80001     -- IP SA
+txd        C0A80091     -- IP DA
+txd        11112222     -- IP options
+txd        33334444     -- IP options
+txd        55556666     -- IP options
+txd        77778888     -- IP options
+txd        9999AAAA     -- IP options
+txd        BBBBCCCC     -- IP options
+txd        DDDDEEEE     -- IP options
+txd        FFFF1111     -- IP options
+txd        22223333     -- IP options
+txd        44445555     -- IP options
+txd        0015         -- TCP source port
+txd        048A         -- TCP destination port
+txd        3DBB5C60     -- Sequence number
+txd        EA224D76     -- Acknowledgement Number
+txd        50104428     -- Flags and window
+txd        1376         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        167ccc26     -- FCS
+
+
+dma_wr 55555514 80008062 -- write used bit, not TCP or IP
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 2.4
+--    Broadcast frame, Valid UDP, odd length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & UDP
+--    checksums checked (bits [23:22] = 11) and no SNAP (bit 24 low).
+--******************************************************************************
+
+dma_rd 5555551c 00008052 -- start of frame
+dma_rd 55555518 22222300 -- dma reads pointer of 22222300
+
+-- check the receive data as it is written out on the AHB interface
+dma_rd 22222300 FFFFFFFF -- store frame to memory
+dma_rd 22222304 0008FFFF
+dma_rd 22222308 56341239
+dma_rd 2222230c 00450008
+dma_rd 22222310 00001F00
+dma_rd 22222314 110A0000
+dma_rd 22222318 BF86b00b
+dma_rd 2222231c BF86520B
+dma_rd 22222320 00002216
+dma_rd 22222324 0B000000
+dma_rd 22222328 3412babe
+dma_rd 2222232c BC9A7856
+dma_rd 22222330 0000F0DE
+dma_rd 22222334 00000000
+dma_rd 22222338 00000000
+dma_rd 2222233c A50038B0
+dma_rd 22222340 00000000
+dma_rd 22222344 00000000
+dma_rd 22222348 00000000
+dma_rd 2222234c 00000000
+dma_rd 22222350 00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        001F         -- total length
+txd        0000         -- ID
+txd        0000         -- flags & fragmentation
+txd        0A11         -- time to live and protocol
+txd        81DC         -- IP Header checksum
+txd        86BF0B52     -- IP SA
+txd        86BF1622     -- IP DA
+txd        0000         -- UDP source port
+txd        0000         -- UDP destination port
+txd        000B         -- UDP length
+txd        68B1         -- UDP checksum
+txd        12345678     -- UDP data
+txd        9ABCDEF0     -- UDP data
+txd        00000000     -- UDP data
+txd        00000000     -- UDP data
+txd        0000B038     -- UDP data
+txd        00A50000     -- UDP data
+txd        00000000     -- UDP data
+txd        00000000     -- UDP data
+txd        00000000     -- UDP data
+txd        00000000     -- UDP data
+txd        78C294FD     -- Good FCS
+
+
+dma_wr 5555551c 80008052 -- write used bit, not TCP or IP
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 2.5
+--    Broadcast frame, UDP null checksum, VLAN, SNAP (checksum is last data)
+--    The frame should be copied to memory, with status indicating IP & UDP
+--    checksums checked (bits [23:22] = 11) and SNAP (bit 24 high).
+--******************************************************************************
+
+
+dma_rd 55555524 00008040 -- start of frame
+dma_rd 55555520 22222400 -- dma reads pointer of 22222400
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_rd 22222400 FFFFFFFF -- store frame to memory
+dma_rd 22222404 0008FFFF
+dma_rd 22222408 56341239
+dma_rd 2222240c 01000081
+dma_rd 22222410 AAAA2400
+dma_rd 22222414 00000003
+dma_rd 22222418 00450008
+dma_rd 2222241c 00001C00
+dma_rd 22222420 110A0000
+dma_rd 22222424 BF86FFFF
+dma_rd 22222428 BF86520B
+dma_rd 2222242c 00002216
+dma_rd 22222430 08000000
+dma_rd 22222434 00000000
+dma_rd 22222438 00000000
+dma_rd 2222243c 00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        8100         -- Length/typeID
+txd        0001         -- VLAN tag
+txd        0024         -- Length/typeID
+txd        AAAA         -- DSAP and SSAP
+txd        0300         -- Control / Protocol ID[7:0]
+txd        0000         -- Protocol ID [23:8]
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        001C         -- total length
+txd        0000         -- ID
+txd        0000         -- flags & fragmentation
+txd        0A11         -- time to live and protocol
+txd        81DF         -- IP Header checksum
+txd        86BF0B52     -- IP SA
+txd        86BF1622     -- IP DA
+txd        0000         -- UDP source port
+txd        0000         -- UDP destination port
+txd        0008         -- UDP length
+txd        d0eb         -- UDP checksum
+txd        00000000     -- UDP data
+txd        00000000     -- UDP data
+txd        0000         -- UDP data
+txd        9425c49d     -- Good FCS
+
+dma_wr 55555524 80008040 -- write used bit, not TCP or IP
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 2.6
+--    Broadcast frame, Valid IP + TCP (no VLAN, no SNAP), Max length (1518
+--    octets including CRC)
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+--******************************************************************************
+
+dma_rd 5555552c 000085ea -- start of frame
+dma_rd 55555528 22222500 -- dma reads pointer of 22222500
+
+dma_rd 22222500 FFFFFFFF
+dma_rd 22222504 0008FFFF
+dma_rd 22222508 56341239
+dma_rd 2222250c 00450008
+dma_rd 22222510 FADFDC05
+dma_rd 22222514 06800040
+dma_rd 22222518 A8C0b00b
+dma_rd 2222251c A8C00100
+dma_rd 22222520 15009100
+dma_rd 22222524 BB3D8A04
+dma_rd 22222528 22EA605C
+dma_rd 2222252c 1050764D
+dma_rd 22222530 12342844
+dma_rd 22222534 FFFA0000
+dma_rd 22222538 BBBECEBA
+dma_rd 2222253c BBFABEBA
+dma_rd 22222540 CEFAFECA
+dma_rd 22222544 00F0FEEF
+dma_rd 22222548 BBBAFFF1
+dma_rd 2222254c 00B00F00
+dma_rd 22222550 85013487
+dma_rd 22222554 33332938
+dma_rd 22222558 43441978
+dma_rd 2222255c FFFA9999
+dma_rd 22222560 BBBECEBA
+dma_rd 22222564 BBFABEBA
+dma_rd 22222568 CEFAFECA
+dma_rd 2222256c 00F0FEEF
+dma_rd 22222570 BBBAFFF1
+dma_rd 22222574 00B00F00
+dma_rd 22222578 85013487
+dma_rd 2222257c 33332938
+
+dma_rd 22222580 43441978
+dma_rd 22222584 FFFA9999
+dma_rd 22222588 BBBECEBA
+dma_rd 2222258c BBFABEBA
+dma_rd 22222590 CEFAFECA
+dma_rd 22222594 00F0FEEF
+dma_rd 22222598 BBBAFFF1
+dma_rd 2222259c 00B00F00
+dma_rd 222225a0 85013487
+dma_rd 222225a4 33332938
+dma_rd 222225a8 43441978
+dma_rd 222225ac FFFA9999
+dma_rd 222225b0 BBBECEBA
+dma_rd 222225b4 BBFABEBA
+dma_rd 222225b8 CEFAFECA
+dma_rd 222225bc 00F0FEEF
+dma_rd 222225c0 BBBAFFF1
+dma_rd 222225c4 00B00F00
+dma_rd 222225c8 85013487
+dma_rd 222225cc 33332938
+dma_rd 222225d0 43441978
+dma_rd 222225d4 FFFA9999
+dma_rd 222225d8 BBBECEBA
+dma_rd 222225dc BBFABEBA
+dma_rd 222225e0 CEFAFECA
+dma_rd 222225e4 00F0FEEF
+dma_rd 222225e8 BBBAFFF1
+dma_rd 222225ec 00B00F00
+dma_rd 222225f0 85013487
+dma_rd 222225f4 33332938
+dma_rd 222225f8 43441978
+dma_rd 222225fc FFFA9999
+
+dma_rd 22222600 BBBECEBA
+dma_rd 22222604 BBFABEBA
+dma_rd 22222608 CEFAFECA
+dma_rd 2222260c 00F0FEEF
+dma_rd 22222610 BBBAFFF1
+dma_rd 22222614 00B00F00
+dma_rd 22222618 85013487
+dma_rd 2222261c 33332938
+dma_rd 22222620 43441978
+dma_rd 22222624 FFFA9999
+dma_rd 22222628 BBBECEBA
+dma_rd 2222262c BBFABEBA
+dma_rd 22222630 CEFAFECA
+dma_rd 22222634 00F0FEEF
+dma_rd 22222638 BBBAFFF1
+dma_rd 2222263c 00B00F00
+dma_rd 22222640 85013487
+dma_rd 22222644 33332938
+dma_rd 22222648 43441978
+dma_rd 2222264c FFFA9999
+dma_rd 22222650 BBBECEBA
+dma_rd 22222654 BBFABEBA
+dma_rd 22222658 CEFAFECA
+dma_rd 2222265c 00F0FEEF
+dma_rd 22222660 BBBAFFF1
+dma_rd 22222664 00B00F00
+dma_rd 22222668 85013487
+dma_rd 2222266c 33332938
+dma_rd 22222670 43441978
+dma_rd 22222674 FFFA9999
+dma_rd 22222678 BBBECEBA
+dma_rd 2222267c BBFABEBA
+
+dma_rd 22222680 CEFAFECA
+dma_rd 22222684 00F0FEEF
+dma_rd 22222688 BBBAFFF1
+dma_rd 2222268c 00B00F00
+dma_rd 22222690 85013487
+dma_rd 22222694 33332938
+dma_rd 22222698 43441978
+dma_rd 2222269c FFFA9999
+dma_rd 222226a0 BBBECEBA
+dma_rd 222226a4 BBFABEBA
+dma_rd 222226a8 CEFAFECA
+dma_rd 222226ac 00F0FEEF
+dma_rd 222226b0 BBBAFFF1
+dma_rd 222226b4 00B00F00
+dma_rd 222226b8 85013487
+dma_rd 222226bc 33332938
+dma_rd 222226c0 43441978
+dma_rd 222226c4 FFFA9999
+dma_rd 222226c8 BBBECEBA
+dma_rd 222226cc BBFABEBA
+dma_rd 222226d0 CEFAFECA
+dma_rd 222226d4 00F0FEEF
+dma_rd 222226d8 BBBAFFF1
+dma_rd 222226dc 00B00F00
+dma_rd 222226e0 85013487
+dma_rd 222226e4 33332938
+dma_rd 222226e8 43441978
+dma_rd 222226ec FFFA9999
+dma_rd 222226f0 BBBECEBA
+dma_rd 222226f4 BBFABEBA
+dma_rd 222226f8 CEFAFECA
+dma_rd 222226fc 00F0FEEF
+
+dma_rd 22222700 BBBAFFF1
+dma_rd 22222704 00B00F00
+dma_rd 22222708 85013487
+dma_rd 2222270c 33332938
+dma_rd 22222710 43441978
+dma_rd 22222714 FFFA9999
+dma_rd 22222718 BBBECEBA
+dma_rd 2222271c BBFABEBA
+dma_rd 22222720 CEFAFECA
+dma_rd 22222724 00F0FEEF
+dma_rd 22222728 BBBAFFF1
+dma_rd 2222272c 00B00F00
+dma_rd 22222730 85013487
+dma_rd 22222734 33332938
+dma_rd 22222738 43441978
+dma_rd 2222273c FFFA9999
+dma_rd 22222740 BBBECEBA
+dma_rd 22222744 BBFABEBA
+dma_rd 22222748 CEFAFECA
+dma_rd 2222274c 00F0FEEF
+dma_rd 22222750 BBBAFFF1
+dma_rd 22222754 00B00F00
+dma_rd 22222758 85013487
+dma_rd 2222275c 33332938
+dma_rd 22222760 43441978
+dma_rd 22222764 FFFA9999
+dma_rd 22222768 BBBECEBA
+dma_rd 2222276c BBFABEBA
+dma_rd 22222770 CEFAFECA
+dma_rd 22222774 00F0FEEF
+dma_rd 22222778 BBBAFFF1
+dma_rd 2222277c 00B00F00
+
+dma_rd 22222780 85013487
+dma_rd 22222784 33332938
+dma_rd 22222788 43441978
+dma_rd 2222278c FFFA9999
+dma_rd 22222790 BBBECEBA
+dma_rd 22222794 BBFABEBA
+dma_rd 22222798 CEFAFECA
+dma_rd 2222279c 00F0FEEF
+dma_rd 222227a0 BBBAFFF1
+dma_rd 222227a4 00B00F00
+dma_rd 222227a8 85013487
+dma_rd 222227ac 33332938
+dma_rd 222227b0 43441978
+dma_rd 222227b4 FFFA9999
+dma_rd 222227b8 BBBECEBA
+dma_rd 222227bc BBFABEBA
+dma_rd 222227c0 CEFAFECA
+dma_rd 222227c4 00F0FEEF
+dma_rd 222227c8 BBBAFFF1
+dma_rd 222227cc 00B00F00
+dma_rd 222227d0 85013487
+dma_rd 222227d4 33332938
+dma_rd 222227d8 43441978
+dma_rd 222227dc FFFA9999
+dma_rd 222227e0 BBBECEBA
+dma_rd 222227e4 BBFABEBA
+dma_rd 222227e8 CEFAFECA
+dma_rd 222227ec 00F0FEEF
+dma_rd 222227f0 BBBAFFF1
+dma_rd 222227f4 00B00F00
+dma_rd 222227f8 85013487
+dma_rd 222227fc 33332938
+
+dma_rd 22222800 43441978
+dma_rd 22222804 FFFA9999
+dma_rd 22222808 BBBECEBA
+dma_rd 2222280c BBFABEBA
+dma_rd 22222810 CEFAFECA
+dma_rd 22222814 00F0FEEF
+dma_rd 22222818 BBBAFFF1
+dma_rd 2222281c 00B00F00
+dma_rd 22222820 85013487
+dma_rd 22222824 33332938
+dma_rd 22222828 43441978
+dma_rd 2222282c FFFA9999
+dma_rd 22222830 BBBECEBA
+dma_rd 22222834 BBFABEBA
+dma_rd 22222838 CEFAFECA
+dma_rd 2222283c 00F0FEEF
+dma_rd 22222840 BBBAFFF1
+dma_rd 22222844 00B00F00
+dma_rd 22222848 85013487
+dma_rd 2222284c 33332938
+dma_rd 22222850 43441978
+dma_rd 22222854 FFFA9999
+dma_rd 22222858 BBBECEBA
+dma_rd 2222285c BBFABEBA
+dma_rd 22222860 CEFAFECA
+dma_rd 22222864 00F0FEEF
+dma_rd 22222868 BBBAFFF1
+dma_rd 2222286c 00B00F00
+dma_rd 22222870 85013487
+dma_rd 22222874 33332938
+dma_rd 22222878 43441978
+dma_rd 2222287c FFFA9999
+
+dma_rd 22222880 BBBECEBA
+dma_rd 22222884 BBFABEBA
+dma_rd 22222888 CEFAFECA
+dma_rd 2222288c 00F0FEEF
+dma_rd 22222890 BBBAFFF1
+dma_rd 22222894 00B00F00
+dma_rd 22222898 85013487
+dma_rd 2222289c 33332938
+dma_rd 222228a0 43441978
+dma_rd 222228a4 FFFA9999
+dma_rd 222228a8 BBBECEBA
+dma_rd 222228ac BBFABEBA
+dma_rd 222228b0 CEFAFECA
+dma_rd 222228b4 00F0FEEF
+dma_rd 222228b8 BBBAFFF1
+dma_rd 222228bc 00B00F00
+dma_rd 222228c0 85013487
+dma_rd 222228c4 33332938
+dma_rd 222228c8 43441978
+dma_rd 222228cc FFFA9999
+dma_rd 222228d0 BBBECEBA
+dma_rd 222228d4 BBFABEBA
+dma_rd 222228d8 CEFAFECA
+dma_rd 222228dc 00F0FEEF
+dma_rd 222228e0 BBBAFFF1
+dma_rd 222228e4 00B00F00
+dma_rd 222228e8 85013487
+dma_rd 222228ec 33332938
+dma_rd 222228f0 43441978
+dma_rd 222228f4 FFFA9999
+dma_rd 222228f8 BBBECEBA
+dma_rd 222228fc BBFABEBA
+
+dma_rd 22222900 CEFAFECA
+dma_rd 22222904 00F0FEEF
+dma_rd 22222908 BBBAFFF1
+dma_rd 2222290c 00B00F00
+dma_rd 22222910 85013487
+dma_rd 22222914 33332938
+dma_rd 22222918 43441978
+dma_rd 2222291c FFFA9999
+dma_rd 22222920 BBBECEBA
+dma_rd 22222924 BBFABEBA
+dma_rd 22222928 CEFAFECA
+dma_rd 2222292c 00F0FEEF
+dma_rd 22222930 BBBAFFF1
+dma_rd 22222934 00B00F00
+dma_rd 22222938 85013487
+dma_rd 2222293c 33332938
+dma_rd 22222940 43441978
+dma_rd 22222944 FFFA9999
+dma_rd 22222948 BBBECEBA
+dma_rd 2222294c BBFABEBA
+dma_rd 22222950 CEFAFECA
+dma_rd 22222954 00F0FEEF
+dma_rd 22222958 BBBAFFF1
+dma_rd 2222295c 00B00F00
+dma_rd 22222960 85013487
+dma_rd 22222964 33332938
+dma_rd 22222968 43441978
+dma_rd 2222296c FFFA9999
+dma_rd 22222970 BBBECEBA
+dma_rd 22222974 BBFABEBA
+dma_rd 22222978 CEFAFECA
+dma_rd 2222297c 00F0FEEF
+
+dma_rd 22222980 BBBAFFF1
+dma_rd 22222984 00B00F00
+dma_rd 22222988 85013487
+dma_rd 2222298c 33332938
+dma_rd 22222990 43441978
+dma_rd 22222994 FFFA9999
+dma_rd 22222998 BBBECEBA
+dma_rd 2222299c BBFABEBA
+dma_rd 222229a0 CEFAFECA
+dma_rd 222229a4 00F0FEEF
+dma_rd 222229a8 BBBAFFF1
+dma_rd 222229ac 00B00F00
+dma_rd 222229b0 85013487
+dma_rd 222229b4 33332938
+dma_rd 222229b8 43441978
+dma_rd 222229bc FFFA9999
+dma_rd 222229c0 BBBECEBA
+dma_rd 222229c4 BBFABEBA
+dma_rd 222229c8 CEFAFECA
+dma_rd 222229cc 00F0FEEF
+dma_rd 222229d0 BBBAFFF1
+dma_rd 222229d4 00B00F00
+dma_rd 222229d8 85013487
+dma_rd 222229dc 33332938
+dma_rd 222229e0 43441978
+dma_rd 222229e4 FFFA9999
+dma_rd 222229e8 BBBECEBA
+dma_rd 222229ec BBFABEBA
+dma_rd 222229f0 CEFAFECA
+dma_rd 222229f4 00F0FEEF
+dma_rd 222229f8 BBBAFFF1
+dma_rd 222229fc 00B00F00
+
+dma_rd 22222a00 85013487
+dma_rd 22222a04 33332938
+dma_rd 22222a08 43441978
+dma_rd 22222a0c FFFA9999
+dma_rd 22222a10 BBBECEBA
+dma_rd 22222a14 BBFABEBA
+dma_rd 22222a18 CEFAFECA
+dma_rd 22222a1c 00F0FEEF
+dma_rd 22222a20 BBBAFFF1
+dma_rd 22222a24 00B00F00
+dma_rd 22222a28 85013487
+dma_rd 22222a2c 33332938
+dma_rd 22222a30 43441978
+dma_rd 22222a34 FFFA9999
+dma_rd 22222a38 BBBECEBA
+dma_rd 22222a3c BBFABEBA
+dma_rd 22222a40 CEFAFECA
+dma_rd 22222a44 00F0FEEF
+dma_rd 22222a48 BBBAFFF1
+dma_rd 22222a4c 00B00F00
+dma_rd 22222a50 85013487
+dma_rd 22222a54 33332938
+dma_rd 22222a58 43441978
+dma_rd 22222a5c FFFA9999
+dma_rd 22222a60 BBBECEBA
+dma_rd 22222a64 BBFABEBA
+dma_rd 22222a68 CEFAFECA
+dma_rd 22222a6c 00F0FEEF
+dma_rd 22222a70 BBBAFFF1
+dma_rd 22222a74 00B00F00
+dma_rd 22222a78 85013487
+dma_rd 22222a7c 33332938
+
+dma_rd 22222a80 43441978
+dma_rd 22222a84 FFFA9999
+dma_rd 22222a88 BBBECEBA
+dma_rd 22222a8c BBFABEBA
+dma_rd 22222a90 CEFAFECA
+dma_rd 22222a94 00F0FEEF
+dma_rd 22222a98 BBBAFFF1
+dma_rd 22222a9c 00B00F00
+dma_rd 22222aa0 85013487
+dma_rd 22222aa4 33332938
+dma_rd 22222aa8 43441978
+dma_rd 22222aac FFFA9999
+dma_rd 22222ab0 BBBECEBA
+dma_rd 22222ab4 BBFABEBA
+dma_rd 22222ab8 CEFAFECA
+dma_rd 22222abc 00F0FEEF
+dma_rd 22222ac0 BBBAFFF1
+dma_rd 22222ac4 00B00F00
+dma_rd 22222ac8 85013487
+dma_rd 22222acc 33332938
+dma_rd 22222ad0 43441978
+dma_rd 22222ad4 FFFA9999
+dma_rd 22222ad8 BBBECEBA
+dma_rd 22222adc BBFABEBA
+dma_rd 22222ae0 CEFAFECA
+dma_rd 22222ae4 00F0FEEF
+dma_rd 22222ae8 0000FFF1
+
+txd        55555555555555d5-- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        05DC         -- total length
+txd        DFFA         -- ID
+txd        4000         -- flags & fragmentation
+txd        8006         -- time to live and protocol
+txd        933E         -- IP Header checksum
+txd        C0A80001     -- IP SA
+txd        C0A80091     -- IP DA
+txd        0015         -- TCP source port
+txd        048A         -- TCP destination port
+txd        3DBB5C60     -- Sequence number
+txd        EA224D76     -- Acknowledgement Number
+txd        50104428     -- Flags and window
+txd        9BF6         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE -- Data
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FF                         -- last data
+txd        cf5022e3                         -- FCS
+
+dma_wr 5555552c 800085ea -- write used bit, IP fragmentation
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 2.7
+--    Broadcast frame, Valid IP + TCP (no VLAN, with SNAP, type/length = 0x5DC)
+--    Long packet, consistent with type/length = 0x5DC.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and SNAP (bit 24 high).
+--******************************************************************************
+
+dma_rd 55555534 000085ea -- start of frame
+dma_rd 55555530 22222500 -- dma reads pointer of 22222500
+
+dma_rd 22222500 FFFFFFFF
+dma_rd 22222504 0008FFFF
+dma_rd 22222508 56341239
+dma_rd 2222250c AAAADC05
+dma_rd 22222510 00000003
+dma_rd 22222514 00450008
+dma_rd 22222518 FADFD405
+dma_rd 2222251c 06800040
+dma_rd 22222520 A8C0fedc
+dma_rd 22222524 A8C00100
+dma_rd 22222528 15009100
+dma_rd 2222252c BB3D8A04
+dma_rd 22222530 22EA605C
+dma_rd 22222534 1050764D
+dma_rd 22222538 98762844
+dma_rd 2222253c FFFA0000
+dma_rd 22222540 BBBECEBA
+dma_rd 22222544 BBFABEBA
+dma_rd 22222548 CEFAFECA
+dma_rd 2222254c 00F0FEEF
+dma_rd 22222550 BBBAFFF1
+dma_rd 22222554 00B00F00
+dma_rd 22222558 85013487
+dma_rd 2222255c 33332938
+dma_rd 22222560 43441978
+dma_rd 22222564 FFFA9999
+dma_rd 22222568 BBBECEBA
+dma_rd 2222256c BBFABEBA
+dma_rd 22222570 CEFAFECA
+dma_rd 22222574 00F0FEEF
+dma_rd 22222578 BBBAFFF1
+dma_rd 2222257c 00B00F00
+
+dma_rd 22222580 85013487
+dma_rd 22222584 33332938
+dma_rd 22222588 43441978
+dma_rd 2222258c FFFA9999
+dma_rd 22222590 BBBECEBA
+dma_rd 22222594 BBFABEBA
+dma_rd 22222598 CEFAFECA
+dma_rd 2222259c 00F0FEEF
+dma_rd 222225a0 BBBAFFF1
+dma_rd 222225a4 00B00F00
+dma_rd 222225a8 85013487
+dma_rd 222225ac 33332938
+dma_rd 222225b0 43441978
+dma_rd 222225b4 FFFA9999
+dma_rd 222225b8 BBBECEBA
+dma_rd 222225bc BBFABEBA
+dma_rd 222225c0 CEFAFECA
+dma_rd 222225c4 00F0FEEF
+dma_rd 222225c8 BBBAFFF1
+dma_rd 222225cc 00B00F00
+dma_rd 222225d0 85013487
+dma_rd 222225d4 33332938
+dma_rd 222225d8 43441978
+dma_rd 222225dc FFFA9999
+dma_rd 222225e0 BBBECEBA
+dma_rd 222225e4 BBFABEBA
+dma_rd 222225e8 CEFAFECA
+dma_rd 222225ec 00F0FEEF
+dma_rd 222225f0 BBBAFFF1
+dma_rd 222225f4 00B00F00
+dma_rd 222225f8 85013487
+dma_rd 222225fc 33332938
+
+dma_rd 22222600 43441978
+dma_rd 22222604 FFFA9999
+dma_rd 22222608 BBBECEBA
+dma_rd 2222260c BBFABEBA
+dma_rd 22222610 CEFAFECA
+dma_rd 22222614 00F0FEEF
+dma_rd 22222618 BBBAFFF1
+dma_rd 2222261c 00B00F00
+dma_rd 22222620 85013487
+dma_rd 22222624 33332938
+dma_rd 22222628 43441978
+dma_rd 2222262c FFFA9999
+dma_rd 22222630 BBBECEBA
+dma_rd 22222634 BBFABEBA
+dma_rd 22222638 CEFAFECA
+dma_rd 2222263c 00F0FEEF
+dma_rd 22222640 BBBAFFF1
+dma_rd 22222644 00B00F00
+dma_rd 22222648 85013487
+dma_rd 2222264c 33332938
+dma_rd 22222650 43441978
+dma_rd 22222654 FFFA9999
+dma_rd 22222658 BBBECEBA
+dma_rd 2222265c BBFABEBA
+dma_rd 22222660 CEFAFECA
+dma_rd 22222664 00F0FEEF
+dma_rd 22222668 BBBAFFF1
+dma_rd 2222266c 00B00F00
+dma_rd 22222670 85013487
+dma_rd 22222674 33332938
+dma_rd 22222678 43441978
+dma_rd 2222267c FFFA9999
+
+dma_rd 22222680 BBBECEBA
+dma_rd 22222684 BBFABEBA
+dma_rd 22222688 CEFAFECA
+dma_rd 2222268c 00F0FEEF
+dma_rd 22222690 BBBAFFF1
+dma_rd 22222694 00B00F00
+dma_rd 22222698 85013487
+dma_rd 2222269c 33332938
+dma_rd 222226a0 43441978
+dma_rd 222226a4 FFFA9999
+dma_rd 222226a8 BBBECEBA
+dma_rd 222226ac BBFABEBA
+dma_rd 222226b0 CEFAFECA
+dma_rd 222226b4 00F0FEEF
+dma_rd 222226b8 BBBAFFF1
+dma_rd 222226bc 00B00F00
+dma_rd 222226c0 85013487
+dma_rd 222226c4 33332938
+dma_rd 222226c8 43441978
+dma_rd 222226cc FFFA9999
+dma_rd 222226d0 BBBECEBA
+dma_rd 222226d4 BBFABEBA
+dma_rd 222226d8 CEFAFECA
+dma_rd 222226dc 00F0FEEF
+dma_rd 222226e0 BBBAFFF1
+dma_rd 222226e4 00B00F00
+dma_rd 222226e8 85013487
+dma_rd 222226ec 33332938
+dma_rd 222226f0 43441978
+dma_rd 222226f4 FFFA9999
+dma_rd 222226f8 BBBECEBA
+dma_rd 222226fc BBFABEBA
+
+dma_rd 22222700 CEFAFECA
+dma_rd 22222704 00F0FEEF
+dma_rd 22222708 BBBAFFF1
+dma_rd 2222270c 00B00F00
+dma_rd 22222710 85013487
+dma_rd 22222714 33332938
+dma_rd 22222718 43441978
+dma_rd 2222271c FFFA9999
+dma_rd 22222720 BBBECEBA
+dma_rd 22222724 BBFABEBA
+dma_rd 22222728 CEFAFECA
+dma_rd 2222272c 00F0FEEF
+dma_rd 22222730 BBBAFFF1
+dma_rd 22222734 00B00F00
+dma_rd 22222738 85013487
+dma_rd 2222273c 33332938
+dma_rd 22222740 43441978
+dma_rd 22222744 FFFA9999
+dma_rd 22222748 BBBECEBA
+dma_rd 2222274c BBFABEBA
+dma_rd 22222750 CEFAFECA
+dma_rd 22222754 00F0FEEF
+dma_rd 22222758 BBBAFFF1
+dma_rd 2222275c 00B00F00
+dma_rd 22222760 85013487
+dma_rd 22222764 33332938
+dma_rd 22222768 43441978
+dma_rd 2222276c FFFA9999
+dma_rd 22222770 BBBECEBA
+dma_rd 22222774 BBFABEBA
+dma_rd 22222778 CEFAFECA
+dma_rd 2222277c 00F0FEEF
+
+dma_rd 22222780 BBBAFFF1
+dma_rd 22222784 00B00F00
+dma_rd 22222788 85013487
+dma_rd 2222278c 33332938
+dma_rd 22222790 43441978
+dma_rd 22222794 FFFA9999
+dma_rd 22222798 BBBECEBA
+dma_rd 2222279c BBFABEBA
+dma_rd 222227a0 CEFAFECA
+dma_rd 222227a4 00F0FEEF
+dma_rd 222227a8 BBBAFFF1
+dma_rd 222227ac 00B00F00
+dma_rd 222227b0 85013487
+dma_rd 222227b4 33332938
+dma_rd 222227b8 43441978
+dma_rd 222227bc FFFA9999
+dma_rd 222227c0 BBBECEBA
+dma_rd 222227c4 BBFABEBA
+dma_rd 222227c8 CEFAFECA
+dma_rd 222227cc 00F0FEEF
+dma_rd 222227d0 BBBAFFF1
+dma_rd 222227d4 00B00F00
+dma_rd 222227d8 85013487
+dma_rd 222227dc 33332938
+dma_rd 222227e0 43441978
+dma_rd 222227e4 FFFA9999
+dma_rd 222227e8 BBBECEBA
+dma_rd 222227ec BBFABEBA
+dma_rd 222227f0 CEFAFECA
+dma_rd 222227f4 00F0FEEF
+dma_rd 222227f8 BBBAFFF1
+dma_rd 222227fc 00B00F00
+
+dma_rd 22222800 85013487
+dma_rd 22222804 33332938
+dma_rd 22222808 43441978
+dma_rd 2222280c FFFA9999
+dma_rd 22222810 BBBECEBA
+dma_rd 22222814 BBFABEBA
+dma_rd 22222818 CEFAFECA
+dma_rd 2222281c 00F0FEEF
+dma_rd 22222820 BBBAFFF1
+dma_rd 22222824 00B00F00
+dma_rd 22222828 85013487
+dma_rd 2222282c 33332938
+dma_rd 22222830 43441978
+dma_rd 22222834 FFFA9999
+dma_rd 22222838 BBBECEBA
+dma_rd 2222283c BBFABEBA
+dma_rd 22222840 CEFAFECA
+dma_rd 22222844 00F0FEEF
+dma_rd 22222848 BBBAFFF1
+dma_rd 2222284c 00B00F00
+dma_rd 22222850 85013487
+dma_rd 22222854 33332938
+dma_rd 22222858 43441978
+dma_rd 2222285c FFFA9999
+dma_rd 22222860 BBBECEBA
+dma_rd 22222864 BBFABEBA
+dma_rd 22222868 CEFAFECA
+dma_rd 2222286c 00F0FEEF
+dma_rd 22222870 BBBAFFF1
+dma_rd 22222874 00B00F00
+dma_rd 22222878 85013487
+dma_rd 2222287c 33332938
+
+dma_rd 22222880 43441978
+dma_rd 22222884 FFFA9999
+dma_rd 22222888 BBBECEBA
+dma_rd 2222288c BBFABEBA
+dma_rd 22222890 CEFAFECA
+dma_rd 22222894 00F0FEEF
+dma_rd 22222898 BBBAFFF1
+dma_rd 2222289c 00B00F00
+dma_rd 222228a0 85013487
+dma_rd 222228a4 33332938
+dma_rd 222228a8 43441978
+dma_rd 222228ac FFFA9999
+dma_rd 222228b0 BBBECEBA
+dma_rd 222228b4 BBFABEBA
+dma_rd 222228b8 CEFAFECA
+dma_rd 222228bc 00F0FEEF
+dma_rd 222228c0 BBBAFFF1
+dma_rd 222228c4 00B00F00
+dma_rd 222228c8 85013487
+dma_rd 222228cc 33332938
+dma_rd 222228d0 43441978
+dma_rd 222228d4 FFFA9999
+dma_rd 222228d8 BBBECEBA
+dma_rd 222228dc BBFABEBA
+dma_rd 222228e0 CEFAFECA
+dma_rd 222228e4 00F0FEEF
+dma_rd 222228e8 BBBAFFF1
+dma_rd 222228ec 00B00F00
+dma_rd 222228f0 85013487
+dma_rd 222228f4 33332938
+dma_rd 222228f8 43441978
+dma_rd 222228fc FFFA9999
+
+dma_rd 22222900 BBBECEBA
+dma_rd 22222904 BBFABEBA
+dma_rd 22222908 CEFAFECA
+dma_rd 2222290c 00F0FEEF
+dma_rd 22222910 BBBAFFF1
+dma_rd 22222914 00B00F00
+dma_rd 22222918 85013487
+dma_rd 2222291c 33332938
+dma_rd 22222920 43441978
+dma_rd 22222924 FFFA9999
+dma_rd 22222928 BBBECEBA
+dma_rd 2222292c BBFABEBA
+dma_rd 22222930 CEFAFECA
+dma_rd 22222934 00F0FEEF
+dma_rd 22222938 BBBAFFF1
+dma_rd 2222293c 00B00F00
+dma_rd 22222940 85013487
+dma_rd 22222944 33332938
+dma_rd 22222948 43441978
+dma_rd 2222294c FFFA9999
+dma_rd 22222950 BBBECEBA
+dma_rd 22222954 BBFABEBA
+dma_rd 22222958 CEFAFECA
+dma_rd 2222295c 00F0FEEF
+dma_rd 22222960 BBBAFFF1
+dma_rd 22222964 00B00F00
+dma_rd 22222968 85013487
+dma_rd 2222296c 33332938
+dma_rd 22222970 43441978
+dma_rd 22222974 FFFA9999
+dma_rd 22222978 BBBECEBA
+dma_rd 2222297c BBFABEBA
+
+dma_rd 22222980 CEFAFECA
+dma_rd 22222984 00F0FEEF
+dma_rd 22222988 BBBAFFF1
+dma_rd 2222298c 00B00F00
+dma_rd 22222990 85013487
+dma_rd 22222994 33332938
+dma_rd 22222998 43441978
+dma_rd 2222299c FFFA9999
+dma_rd 222229a0 BBBECEBA
+dma_rd 222229a4 BBFABEBA
+dma_rd 222229a8 CEFAFECA
+dma_rd 222229ac 00F0FEEF
+dma_rd 222229b0 BBBAFFF1
+dma_rd 222229b4 00B00F00
+dma_rd 222229b8 85013487
+dma_rd 222229bc 33332938
+dma_rd 222229c0 43441978
+dma_rd 222229c4 FFFA9999
+dma_rd 222229c8 BBBECEBA
+dma_rd 222229cc BBFABEBA
+dma_rd 222229d0 CEFAFECA
+dma_rd 222229d4 00F0FEEF
+dma_rd 222229d8 BBBAFFF1
+dma_rd 222229dc 00B00F00
+dma_rd 222229e0 85013487
+dma_rd 222229e4 33332938
+dma_rd 222229e8 43441978
+dma_rd 222229ec FFFA9999
+dma_rd 222229f0 BBBECEBA
+dma_rd 222229f4 BBFABEBA
+dma_rd 222229f8 CEFAFECA
+dma_rd 222229fc 00F0FEEF
+
+dma_rd 22222a00 BBBAFFF1
+dma_rd 22222a04 00B00F00
+dma_rd 22222a08 85013487
+dma_rd 22222a0c 33332938
+dma_rd 22222a10 43441978
+dma_rd 22222a14 FFFA9999
+dma_rd 22222a18 BBBECEBA
+dma_rd 22222a1c BBFABEBA
+dma_rd 22222a20 CEFAFECA
+dma_rd 22222a24 00F0FEEF
+dma_rd 22222a28 BBBAFFF1
+dma_rd 22222a2c 00B00F00
+dma_rd 22222a30 85013487
+dma_rd 22222a34 33332938
+dma_rd 22222a38 43441978
+dma_rd 22222a3c FFFA9999
+dma_rd 22222a40 BBBECEBA
+dma_rd 22222a44 BBFABEBA
+dma_rd 22222a48 CEFAFECA
+dma_rd 22222a4c 00F0FEEF
+dma_rd 22222a50 BBBAFFF1
+dma_rd 22222a54 00B00F00
+dma_rd 22222a58 85013487
+dma_rd 22222a5c 33332938
+dma_rd 22222a60 43441978
+dma_rd 22222a64 FFFA9999
+dma_rd 22222a68 BBBECEBA
+dma_rd 22222a6c BBFABEBA
+dma_rd 22222a70 CEFAFECA
+dma_rd 22222a74 00F0FEEF
+dma_rd 22222a78 BBBAFFF1
+dma_rd 22222a7c 00B00F00
+
+dma_rd 22222a80 85013487
+dma_rd 22222a84 33332938
+dma_rd 22222a88 43441978
+dma_rd 22222a8c FFFA9999
+dma_rd 22222a90 BBBECEBA
+dma_rd 22222a94 BBFABEBA
+dma_rd 22222a98 CEFAFECA
+dma_rd 22222a9c 00F0FEEF
+dma_rd 22222aa0 BBBAFFF1
+dma_rd 22222aa4 00B00F00
+dma_rd 22222aa8 85013487
+dma_rd 22222aac 33332938
+dma_rd 22222ab0 43441978
+dma_rd 22222ab4 FFFA9999
+dma_rd 22222ab8 BBBECEBA
+dma_rd 22222abc BBFABEBA
+dma_rd 22222ac0 CEFAFECA
+dma_rd 22222ac4 00F0FEEF
+dma_rd 22222ac8 BBBAFFF1
+dma_rd 22222acc 00B00F00
+dma_rd 22222ad0 85013487
+dma_rd 22222ad4 33332938
+dma_rd 22222ad8 43441978
+dma_rd 22222adc FFFA9999
+dma_rd 22222ae0 BBBECEBA
+dma_rd 22222ae4 BBFABEBA
+dma_rd 22222ae8 0000FECA
+
+txd        55555555555555d5-- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        05DC         -- Length/typeID
+txd        AAAA         -- DSAP and SSAP
+txd        0300         -- Control / Protocol ID[7:0]
+txd        0000         -- Protocol ID [23:8]
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        05D4         -- total length
+txd        DFFA         -- ID
+txd        4000         -- flags & fragmentation
+txd        8006         -- time to live and protocol
+txd        9346         -- IP Header checksum
+txd        C0A80001     -- IP SA
+txd        C0A80091     -- IP DA
+txd        0015         -- TCP source port
+txd        048A         -- TCP destination port
+txd        3DBB5C60     -- Sequence number
+txd        EA224D76     -- Acknowledgement Number
+txd        50104428     -- Flags and window
+txd        68CD         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE -- Data
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFEFACEEFFE
+txd        F000F1FFBABB000FB000873401853829
+txd        3333781944439999FAFFBACEBEBBBABE
+txd        FABBCAFEFACEEFFEF000F1FFBABB000F
+txd        B0008734018538293333781944439999
+txd        FAFFBACEBEBBBABEFABBCAFE         -- last data
+txd        55384412     -- FCS
+
+dma_wr 55555534 800085ea -- write used bit, IP fragmentation
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+--******************************************************************************
+-- Test 2.8
+--    Broadcast frame, UDP null checksum, VLAN, SNAP (checksum is not last data)
+--    The frame should be copied to memory, with status indicating IP & UDP
+--    checksums checked (bits [23:22] = 11) and SNAP (bit 24 high).
+--******************************************************************************
+
+dma_rd 5555553c 00008040 -- start of frame
+dma_rd 55555538 22222700 -- dma reads pointer of 22222700
+
+dma_rd 22222700 FFFFFFFF -- store frame to memory
+dma_rd 22222704 0008FFFF
+dma_rd 22222708 56341239
+dma_rd 2222270c 01000081
+dma_rd 22222710 AAAA2400
+dma_rd 22222714 00000003
+dma_rd 22222718 00450008
+dma_rd 2222271c 00002600
+dma_rd 22222720 110A0000
+dma_rd 22222724 BF86FFFF
+dma_rd 22222728 BF86520B
+dma_rd 2222272c 00002216
+dma_rd 22222730 08000000
+dma_rd 22222734 00000000
+dma_rd 22222738 00000000
+dma_rd 2222273c 00000000
+
+txd        55555555555555d5         -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        8100         -- Length/typeID
+txd        0001         -- VLAN tag
+txd        0024         -- Length/typeID
+txd        AAAA         -- DSAP and SSAP
+txd        0300         -- Control / Protocol ID[7:0]
+txd        0000         -- Protocol ID [23:8]
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        0026         -- total length
+txd        0000         -- ID
+txd        0000         -- flags & fragmentation
+txd        0A11         -- time to live and protocol
+txd        81D5         -- IP Header checksum
+txd        86BF0B52     -- IP SA
+txd        86BF1622     -- IP DA
+txd        0000         -- UDP source port
+txd        0000         -- UDP destination port
+txd        0008         -- UDP length
+txd        d0e1         -- UDP checksum
+txd        00000000     -- UDP data
+txd        00000000     -- UDP data
+txd        0000         -- UDP data
+txd        11d9f73e     -- Good FCS
+
+dma_wr 5555553c 80008040 -- write used bit, Not TCP or IP
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+
+
+
+--******************************************************************************
+-- Test 2.9
+--    Broadcast frame, UDP null checksum, VLAN, SNAP, zero UDP length.
+--    The frame should be copied to memory, with status indicating IP & UDP
+--    checksums checked (bits [23:22] = 11) and SNAP (bit 24 high).
+--******************************************************************************
+
+
+dma_rd 55555544 00008040 -- start of frame
+dma_rd 55555540 98766000 -- dma reads pointer of 22222700
+
+dma_rd 98766000 FFFFFFFF -- store frame to memory
+dma_rd 98766004 0008FFFF
+dma_rd 98766008 56341239
+dma_rd 9876600c 01000081
+dma_rd 98766010 AAAA2400
+dma_rd 98766014 00000003
+dma_rd 98766018 00450008
+dma_rd 9876601c 00002600
+dma_rd 98766020 110A0000
+dma_rd 98766024 BF861342
+dma_rd 98766028 BF86520B
+dma_rd 9876602c 00002216
+dma_rd 98766030 00000000
+dma_rd 98766034 00000000
+dma_rd 98766038 00000000
+dma_rd 9876603c 00000000
+
+txd        55555555555555d5 -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        8100         -- Length/typeID
+txd        0001         -- VLAN tag
+txd        0024         -- Length/typeID
+txd        AAAA         -- DSAP and SSAP
+txd        0300         -- Control / Protocol ID[7:0]
+txd        0000         -- Protocol ID [23:8]
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        0026         -- total length
+txd        0000         -- ID
+txd        0000         -- flags & fragmentation
+txd        0A11         -- time to live and protocol
+txd        81D5         -- IP Header checksum
+txd        86BF0B52     -- IP SA
+txd        86BF1622     -- IP DA
+txd        0000         -- UDP source port
+txd        0000         -- UDP destination port
+txd        0000         -- UDP length
+txd        d0e9         -- UDP checksum
+txd        00000000     -- pad
+txd        00000000     -- pad
+txd        0000         -- pad
+txd        39eb37de     -- Good FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555544 80008040 -- write used bit, goot TCP status
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- Clear it
+apbrd	      14 00000028  -- tx status - frame transmitted
+
+
+--******************************************************************************
+-- Test 2.10
+--    Broadcast frame, Valid TCP, even length, no IP options, no VLAN, no SNAP.
+--    TCP sequence number field is 32'h00000000, which corresponds to NULL
+--    UDP checksum value. Test ensures NULL UDP is ignored.
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+--******************************************************************************
+
+dma_rd 5555554c 0000803c -- start of frame
+dma_rd 55555548 98766000 -- dma reads pointer of 22222700
+
+dma_rd 98766000 FFFFFFFF -- store frame to memory
+dma_rd 98766004 0008FFFF
+dma_rd 98766008 56341239
+dma_rd 9876600c 00450008
+dma_rd 98766010 FADF2800
+dma_rd 98766014 06800040
+dma_rd 98766018 A8C00055
+dma_rd 9876601c A8C00100
+dma_rd 98766020 15009100
+dma_rd 98766024 00008A04
+dma_rd 98766028 22EA0000
+dma_rd 9876602c 1050764D
+dma_rd 98766030 abcd2844
+dma_rd 98766034 ACAC0000
+dma_rd 98766038 B0B0DBDB
+
+txd        55555555555555d5 -- preamble & SDF
+txd        FFFFFFFFFFFF -- MAC DA
+txd        080039123456 -- MAC SA
+txd        0800         -- Length/typeID
+txd        4500         -- Version, IHL, type of service
+txd        0028         -- total length
+txd        DFFA         -- ID
+txd        4000         -- flags & fragmentation
+txd        8006         -- time to live and protocol
+txd        98F2         -- IP Header checksum
+txd        C0A80001     -- IP SA
+txd        C0A80091     -- IP DA
+txd        0015         -- TCP source port
+txd        048A         -- TCP destination port
+txd        00000000     -- Sequence number
+txd        EA224D76     -- Acknowledgement Number
+txd        50104428     -- Flags and window
+txd        AD91         -- TCP checksum
+txd        0000         -- TCP urgent pointer
+txd        ACACDBDBB0B0 -- options or padding
+txd        544D2CEF     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555554c 8000803c -- write used bit, goot TCP status
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete
+apbwr       24 00000088  -- Clear it
+
+apbrd	      14 00000021  -- tx status - frame transmitted, used bit set
+
+dma_rd 55555554 80008062 -- used bit read
+dma_rd 55555550 98767000 -- 
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(30000)
+
+bus_grant_delay 0

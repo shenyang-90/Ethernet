@@ -1,0 +1,281 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : pause_basic
+--
+--   Authors        : Mike MacGillis (mikema@tality.com)/Adam Walker (awalker@tality.com/
+--		      Martin James
+--
+--   Date           : 16 January 2002
+--
+--------------------------------------------------------------------------------
+-- Test Description
+-- This test checks the mode to drop uinicast pause frames
+--
+--------------------------------------------------------------------------------
+
+bus_grant_delay 0
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 ffffff00  -- write address of receive buffer descriptor in memory
+apbrd      18 ffffff00  -- check receive queue pointerapbrd     
+apbrd      24 00000000  -- check interrupt status
+apbwr      00 0000000C  -- enable receive and transmit
+apbrd      00 0000000C  -- check receive and transmit
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      04 00082003  -- set enable pause time bit(13)
+apbrd      04 00082003  -- check network configuration register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      38 00000000  -- check the value of the pause time register
+
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+
+-- ************************************************************************** --
+-- Receive a pause frame where the destination address matches register 1,
+-- type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x0005.  
+-- (Frame should be copied to memory)
+-- ************************************************************************** --
+
+rxd(apb)     d578563412111111112222222288080001
+rxd            00004444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- supply the receive buffer location
+dma_rd ffffff00 22222006 -- dma reads pointer of 22222004
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 01000888
+dma_wr 22222014 44440000
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 zzzzzzzz
+
+
+dma_wr ffffff04 0800c040 -- checks for local address match, 64 bytes (start and end set)
+dma_wr ffffff00 22222007 -- dma writes ownership bit
+dma_rd ffffff00 22222006 -- reads locations of next rx buffer
+
+apbrd(int)   24 00002000 -- check interrupt status - zero pause frame received
+apbwr        24 00002000 -- Clear it
+apbrd(int)   24 00000002 -- check interrupt status - frame rx'ed
+apbwr        24 00000002 -- Clear it
+apbrd      158 00000001 -- check frames rxed OK (register 1 match)
+
+
+-- ************************************************************************** --
+-- Receive the same pause frame, this time with drop_pause bit 23 set in NCFGR
+-- frame will be droppeed 
+-- ************************************************************************** --
+
+apbwr       04 00882003 -- set NCFGR
+apbrdf      04 00882003 -- 
+
+rxd(apb)     d578563412111111112222222288080001
+rxd            00004444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+apbrd(int)   24 00002000 -- check interrupt status - zero pause frame received
+apbwr        24 00002000 -- check interrupt status - zero pause frame received
+apbrd       158 00000000 -- check frames rxed OK (register 1 match)
+
+-- ************************************************************************** --
+-- Receive the same pause frame, this time with drop_pause bit 23 clear 
+-- frame should be copied
+-- ************************************************************************** --
+
+apbwr       04 00082003 -- clear NCFGR
+apbrdf      04 00082003 -- 
+
+rxd(apb)     d578563412111111112222222288080001
+rxd            00004444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 01000888
+dma_wr 22222014 44440000
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 zzzzzzzz
+
+
+dma_wr ffffff04 0800c040 -- checks for local address match, 64 bytes (start and end set)
+dma_wr ffffff00 22222007 -- dma writes ownership bit
+dma_rd ffffff00 22222006 -- reads locations of next rx buffer
+
+apbrd(int)   24 00002000 -- check interrupt status - zero pause frame received
+apbwr        24 00002000 -- Clear it
+apbrd(int)   24 00000002 -- check interrupt status - frame rx'ed
+apbwr        24 00000002 -- Clear it
+apbrdf      158 00000001 -- check frames rxed OK (register 1 match)
+
+
+-- ************************************************************************** --
+-- Receive a pause frame with the broadcast destination address 
+-- type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x0005.  
+-- (Frame should be copied to memory) - not a real pause frame
+-- ************************************************************************** --
+
+rxd(apb)     d5ffffffffffff11112222222288080001
+rxd            00004444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 ffffffff -- store frame to memory
+dma_wr 22222008 1111ffff
+dma_wr 2222200c 22222222
+dma_wr 22222010 01000888
+dma_wr 22222014 44440000
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 zzzzzzzz
+
+
+dma_wr ffffff04 8000c040 -- checks for broadcast, 64 bytes (start and end set)
+dma_wr ffffff00 22222007 -- dma writes ownership bit
+dma_rd ffffff00 22222006 -- reads locations of next rx buffer
+
+apbrd(int)   24 00000002 -- check interrupt status - frame rx'ed
+apbwr        24 00000002 -- Clear it
+apbrd      158 00000001 -- check frames rxed OK (register 1 match)
+apbwr       04 00082013 -- clear NCFGR and set copy all frames
+apbrdf      04 00082013 -- 
+
+
+-- ************************************************************************** --
+-- Receive a pause frame with unknown destination address in promiscuous mode
+-- type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x0005.  
+-- (Frame should be copied to memory) - not a real pause frame
+-- ************************************************************************** --
+
+rxd(apb)     d5dadadadadada11112222222288080001
+rxd            00004444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 dadadada -- store frame to memory
+dma_wr 22222008 1111dada
+dma_wr 2222200c 22222222
+dma_wr 22222010 01000888
+dma_wr 22222014 44440000
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 zzzzzzzz
+
+
+dma_wr ffffff04 0000c040 -- checks for 64 bytes (start and end set)
+dma_wr ffffff00 22222007 -- dma writes ownership bit
+dma_rd ffffff00 22222006 -- reads locations of next rx buffer
+
+apbrd(int)   24 00000002 -- check interrupt status - frame rx'ed
+apbwr        24 00000002 -- Clear it
+apbrd      158 00000001 -- check frames rxed OK (register 1 match)
+
+apbwr       04 00882013 -- set NCFGR and set copy all frames
+apbrdf      04 00882013 -- 
+
+
+
+-- ************************************************************************** --
+-- Receive a pause frame with the broadcast destination address 
+-- type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x0005.  
+-- (Frame should NOT NOW be copied to memory) - not a real pause frame
+-- ************************************************************************** --
+
+rxd(apb)     d5ffffffffffff11112222222288080001
+rxd            00004444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+
+-- ************************************************************************** --
+-- Receive a pause frame with unknown destination address in promiscuous mode
+-- type field = 0x8808, pause op-code = 0x0001 and pause time to be set is 0x0005.  
+-- (Frame should be copied to memory) - not a real pause frame
+-- ************************************************************************** --
+
+rxd(gap)     d5dadadadadada11112222222288080001
+rxd            00004444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+
+apbrd(5000)       164 00000003 -- check four pause frames rxed
+apbrd       168 00000004 -- check 4 64 byte frames received
+apbrd       1B4 00000000 -- check no RX errors
+apbrd       1B0 00000000 -- check no RX errors
+apbrd       1AC 00000000 -- check no RX errors
+apbrd       1A8 00000000 -- check no RX errors
+apbrd       1A4 00000000 -- check no RX errors
+apbrd       1A0 00000000 -- check no RX errors
+apbrd       19C 00000000 -- check no RX errors
+apbrd       198 00000000 -- check no RX errors
+apbrd       194 00000000 -- check no RX errors
+apbrd       190 00000000 -- check no RX errors
+apbrd       18c 00000000 -- check no RX errors
+apbrd       188 00000000 -- check no RX errors
+apbrd       184 00000000 -- check no RX errors
+
+end(6000)
+

@@ -1,0 +1,239 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2016
+--                                       Cadence Design Systems, Inc.
+--                                       All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_frer_latent
+--
+--   Author         : Steven Ho
+--
+--   Date           : 25th Aug 2016
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Checks latent error statistics saturates at max value.
+--
+-- Functional Coverage
+----------------------
+-- · 
+-- 
+-- 
+--
+-- Detailed Test Description
+----------------------------
+-- Set to use Match recovery algorithm.
+-- Latent error is signalled when a new sequence number is received but the 
+-- previous one didn't receive a duplicate.
+-- Use the trans.pl automatic frame generation and have sequence number
+-- increment by 1 each time without sending in duplicates.
+-- After receiving 1023 frames, check the stats. The latent count should be 1022.
+-- This is because the most recent frame is still in history so it hasn't been 
+-- detected as an error yet...
+-- The count should reset on read.
+-- Receive 1023, this time stats should be max at 1023.
+-- Receive 1030, stats should have saturated at 1023.
+--
+--------------------------------------------------------------------------------
+
+wait_states 0
+
+-- Set AHB clock freq to 250MHz
+-- At 32bit, this means we have maximum bandwidth of 8Gbit/s shared between
+-- TX and RX. Randomize hready, keeping the maximum to 5 (averages around 2.5)
+-- to ensure no RX overflows occur, and max line rate is acheivable on TX
+sel_ahb_freq 3 
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      10 01a00710  -- DMA config
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 10000000  -- write receive queue pointer
+apbrd      18 10000000  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 0008040a  -- 64bit enable, gigabit mode, full duplex
+
+-- Set up the screener registers
+-- Match against Source MAC address: 11:11:22:22:22:22
+
+-- First compare register set to compare 0x22221111 with no masking. Offset 6.
+-- Second compare register set to compare 0x2222 with mask of 0xffff. Offset 10.
+apbwr     700 22221111  -- Compare registers
+apbwr     704 00000206
+apbwr     708 2222ffff
+apbwr     70c 0000000a
+
+-- Screener Type2 register 0.
+-- Enable Compare A=0, B=1
+-- 0 0 00000 1 00001 1 00000 0000 00000 0000
+apbwr     540 010c0000  -- Screener type 2 setup
+
+-- Repeat for the other 2 stream functions.
+-- Note that we are only using queue 0 in all cases.
+-- Stream 1 match MAC address: 22:22:33:33:33:33
+-- Stream 2 match MAC address: 33:33:44:44:44:44
+apbwr     710 33332222  -- Compare registers
+apbwr     714 00000206
+apbwr     718 3333ffff
+apbwr     71c 0000000a
+apbwr     720 44443333  -- Compare registers
+apbwr     724 00000206
+apbwr     728 4444ffff
+apbwr     72c 0000000a
+
+-- Screener Type2 register 1.
+-- Enable Compare A=2, B=3
+-- 0 0 00000 1 00011 1 00010 0000 00000 0000
+apbwr     544 011c4000  -- Screener type 2 setup
+
+-- Screener Type2 register 2.
+-- Enable Compare A=4, B=5
+-- 0 0 00000 1 00101 1 00100 0000 00000 0000
+apbwr     548 012c8000  -- Screener type 2 setup
+
+-- Program the FRER registers
+apbwr     8a0 0000ffff  -- FRER Timeout value. This is 65535x8ns. Not used.
+apbwr     8a4 c000dada  -- Strip redundancy tag and type set to 0xdada
+apbwr     8c0 90000000  -- Stream 0 setup A. Enable, Match, No Timeout, RTag.
+apbwr     8c4 00000800  -- Stream 0 setup B. Set to 8-bit sequence number.
+apbwr     8d0 90000011  -- Stream 1 setup A. Enable, Match, No Timeout, RTag.
+apbwr     8d4 00000800  -- Stream 1 setup B. Set to 8-bit sequence number.
+apbwr     8e0 90000022  -- Stream 2 setup A. Enable, Match, No Timeout, RTag.
+apbwr     8e4 00000800  -- Stream 2 setup B. Set to 8-bit sequence number.
+
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+-- Note that no frames are duplicated.
+-- First frame to stream 0 to set first sequence number
+rx_frame (apb)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  fffe        -- Set an initial value
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+-- Followed by remaining 1022 frames.
+rx_frame (gap)  1022
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_inc_val      1
+      frer_rtag_seqnum  inc
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+
+-- check receive statistics
+apbrd     158 000003ff  -- check frames received ok
+
+-- Check CB statistics
+apbrd     8c8 000003fe  -- Stats A for CB function 0. 0 Rogue, 1022 latent errors.
+apbrd     8cc 00000000  -- Stats B for CB function 0. 0 timeouts, 0 out of order frames.
+apbrd     8d8 00000000  -- Stats A for CB function 1. 
+apbrd     8dc 00000000  -- Stats B for CB function 1. 
+apbrd     8e8 00000000  -- Stats A for CB function 2. 
+apbrd     8ec 00000000  -- Stats B for CB function 2. 
+
+-- Check stats reset.
+apbrdf    8c8 00000000  -- Stats A for CB function 0. 0 Rogue, 0 latent errors.
+
+-- Next set of 1023...
+rx_frame (apb)  1023
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_inc_val      1
+      frer_rtag_seqnum  inc
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+      
+
+-- check receive statistics
+apbrd     158 000003ff  -- check frames received ok
+
+-- Check CB statistics
+apbrd     8c8 000003ff  -- Stats A for CB function 0. 0 Rogue, 1023 latent errors.
+apbrd     8cc 00000000  -- Stats B for CB function 0. 0 timeouts, 0 out of order frames.
+apbrd     8d8 00000000  -- Stats A for CB function 1. 
+apbrd     8dc 00000000  -- Stats B for CB function 1. 
+apbrd     8e8 00000000  -- Stats A for CB function 2. 
+apbrd     8ec 00000000  -- Stats B for CB function 2. 
+
+-- Check stats reset.
+apbrdf    8c8 00000000  -- Stats A for CB function 0. 0 Rogue, 0 latent errors.
+
+-- Next set of 1030...
+rx_frame (apb)  1030
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_inc_val      1
+      frer_rtag_seqnum  inc
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+      
+-- check receive statistics
+apbrd     158 00000406  -- check frames received ok
+
+-- Check CB statistics
+apbrd     8c8 000003ff  -- Stats A for CB function 0. 0 Rogue, Max latent errors.
+apbrd     8cc 00000000  -- Stats B for CB function 0. 0 timeouts, 0 out of order frames.
+apbrd     8d8 00000000  -- Stats A for CB function 1. 
+apbrd     8dc 00000000  -- Stats B for CB function 1. 
+apbrd     8e8 00000000  -- Stats A for CB function 2. 
+apbrd     8ec 00000000  -- Stats B for CB function 2. 
+
+-- Check stats reset.
+apbrd     8c8 00000000  -- Stats A for CB function 0. 0 Rogue, 0 latent errors.
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(250000)

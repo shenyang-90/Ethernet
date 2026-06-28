@@ -1,0 +1,146 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_pre_ver_rgmii_100m_invert_mcrc_0
+--
+--   Author         : Francesco Malaspina
+--
+--   Date           : 31 May 2017
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This is an 802.3br random test running with TBI interface
+-- Stimulating the DUT with a Verify packet which contains a rx_er = 1'b1, 
+-- stimulating some corners of the MMSL block.
+-- This test will be run with invert_mcrc = 0
+--------------------------------------------------------------------------------
+
+sel_ahb_freq 2 
+
+randomize_hready -read_max 4 -write_max 4
+--check_txlinerate
+bus_grant_delay 0 -- This sets hgrant to 1 always
+
+set_random_seed 45;
+--tog_cnt_en 1
+
+-- Disable txd checking for this test
+set_tx_data_check   0;
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100)  00 00000000  -- check reset value of network control register
+apbwr      04 0128001b  -- 64bit enable, 100M, full duplex, no PCS yet ...
+apbwr    1004 0128001b  
+apbwr     f00 00000008  -- enable pre-empt, invert_mcrc unset
+apbwr      10 01a00701
+apbwr    1010 01a00701
+apbwr    1018 f0020000  -- write receive queue pointer 2
+apbwr    101c 99000000  -- write transmit queue pointer 2
+apbrd    101c 99000000  -- check transmit queue pointer
+
+-- initialise the relevant pcs registers
+apbrd      200 00009140  -- check reset value
+apbwr      200 00000140  -- disable auto-negotiation prior to enabling PCS
+
+apbwr      28 00000200  -- enable PCS interrupt
+apbwr      1c 11111100  -- write address of transmit buffer q0 descriptor in memory
+apbwr     440 88000000  -- write transmit queue pointer 1
+apbwr     444 99000000  -- repeat transmit queue pointer 2, just need this for TB (pkt generator)
+apbwr      18 ffff0000  -- write receive queue pointer
+apbwr     480 f0010000  -- write receive queue pointer 1
+apbwr     484 f0020000  -- repeat receive queue pointer 2, just need this for TB (pkt generator)
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      1c 11111100  -- check transmit queue pointer
+
+apbwr     4a0 00000001  -- Buffer size Q1
+apbwr     4a4 000000a0  -- Buffer size Q2 -- just need this for TB (pkt generator)
+
+apbwr      540 00040000  -- Screener2 reg 0, comp reg = 0
+apbwr      544 00042011  -- Screener2 reg 1, comp reg = 1
+apbwr      548 00044022  -- Screener2 reg 2, comp reg = 2
+apbwr      54c 00046033  -- Screener2 reg 3, comp reg = 3
+
+apbwr      700 000000ff  -- Compare reg 0a
+apbwr      704 00000000  -- Compare reg 0b, offset is 0
+apbwr      708 000100ff  -- Compare reg 1a
+apbwr      70c 00000000  -- Compare reg 1b, offset is 0
+apbwr      710 000200ff  -- Compare reg 2a
+apbwr      714 00000000  -- Compare reg 2b, offset is 0
+apbwr      718 000300ff  -- Compare reg 3a
+apbwr      71c 00000000  -- Compare reg 3b, offset is 0
+
+apbwr      00 0000000c  -- enable tx, enable rx, no loopback
+apbwr    1000 0000000c  -- enable tx, enable rx, no loopback
+
+-- delay for enable rx to propagate though design
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd    284 6ef13fff  -- read design cfg reg to set axi test in trans.pl
+apbrdf    20 00000000  -- check contents of the receive status register 
+                       -- and trigger reception of frame
+
+apbwr      00 0000020c  -- write tx_go and enable tx, enable rx, 
+apbwr    1000 0000020c  -- write tx_go and enable tx, enable rx, 
+
+apbrd(200) f04 00000008 -- we should see verify_status == SEND_VERIFY
+apbrd      f04 00000008 -- this field is not read-to-clear so it's still there
+
+apbrd(500) f04 0000004c -- we should see verify_status == WAIT_FOR_RESPOND and
+                        -- rcv_v_error because of the first packet received
+
+-- Receiving a ERRORED verify packet first
+rxd(apb)      5555555555550700000000000000000000
+rxd           0000000000000000000000000000000000000000 
+rxd           0000000000000000000000000000000000000000 
+rxd           000000000000000000x0f7761204 
+
+-- Receiving a CORRECT verify packet first
+rxd(gap)      5555555555550700000000000000000000
+rxd           0000000000000000000000000000000000000000 
+rxd           0000000000000000000000000000000000000000 
+rxd           00000000000000000000f7761204 
+
+-- Receiving another WRONG verify packet
+rxd(gap)      5555555555550700000000000000000000
+rxd           0000000000000000000000000000000000000000 
+rxd           0000000000000000000000000000000000000000 
+rxd           00000000000000000000e7761204 
+
+
+apbrd(2000)    20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+
+-------------------------------------------------------------------
+----------- NO DMA ACTIVITY AS WE ARE TESTING HERE ERROR CONDITIONS
+-------------------------------------------------------------------
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(400000)

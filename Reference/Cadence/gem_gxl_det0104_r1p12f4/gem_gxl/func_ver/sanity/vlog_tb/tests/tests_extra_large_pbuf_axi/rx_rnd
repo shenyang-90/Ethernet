@@ -1,0 +1,80 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx
+--
+--   Author         : Scot McKelvie
+--
+--   Date           : 22nd July, 2013
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Simple rx test for the extra large pbuf configuration. The AMBA frequency is
+-- set low to allow the ethernet interface to burst as much data as possible into
+-- the packet buffer. The number of waits states has also been set high for the
+-- same reason.
+-- 
+-- 
+--------------------------------------------------------------------------------
+
+-- need fast bus response for 25MHz Hclk
+wait_states 0
+bus_grant_delay 0
+set_random_seed 1;
+sel_ahb_freq 1
+randomize_hready -read_max 100 -write_max 100
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd     284 7bb13fff  -- check design cfg reg 2 - this sets AXI test parameter in trans.pl
+apbwr      28 0000ffff  -- enable all interrupts
+apbwr      04 00280010  -- 64bit and copy all
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      18 f0000000  -- write receive queue pointer
+apbwr      10 09040710
+apbwr      00 00000004 -- enable rx
+-- delay for enable rx to propagate though design
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrdf    20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+-- The packet buffer is 128k and the following frame count equests to 180k
+
+rx_frame (apb)  1
+      preamble_size  1-14
+      auto_gen_int  0
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      data_size      16 
+      data           random
+      fcs            good
+
+rx_frame (gap)  150
+      preamble_size  1-14
+      auto_gen_int   0
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      data_size      1000-1048
+      data           random
+      fcs            good
+
+dma_rd rx_q_ptr ddddd000 
+

@@ -1,0 +1,299 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : defer_tbi
+--
+--   Author         : Mike MacGillis (mikema@tality.com)
+--
+--   Date           : 16 July, 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+-- 
+-- This test verifies that the deference functionality works properly 
+-- in the GEM in tbi mode.
+-- 
+-- Functional Coverage
+-- -------------------
+-- · Ensures that the GEM defers to carrier sense when the medium 
+--     is busy and the GEM has a frame waiting to be sent.
+--     
+-- Detailed Test Description
+-- -------------------------
+-- 
+-- 1) Initialise the GEM for TBI mode.
+-- 2) assert crs (This is done by receiving a frame.)
+-- 3) try and transmit a frame - nothing happens
+-- 4) Observe frame transmission once the GEM has finished receiving the frame. (CRS should be deasserted)
+-- 5) Check stats 
+--------------------------------------------------------------------------------
+
+
+wait_states 0
+bus_grant_delay 0
+
+
+--******************************************************************************
+-- 1) Initialise the GEM for TBI mode.
+--******************************************************************************
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      18 fffffff0  -- write receive queue pointer
+apbrd      18 fffffff0  -- check receive queue pointer
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbrd     200 00009040  -- check value of pcs control register
+apbwr     200 00000040  -- disable autonegotioation
+apbrd     200 00008040  -- check autoneg disabled
+apbwr      04 00080c00  -- Put MAC into gigabit mode with TBI
+apbrd      04 00080c00  -- Check value of network config register
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 03020100  -- specific address register 1 bottom
+apbwr      8C 00000504  -- specific address register 1 top
+apbrd     200 00000040  -- check autoneg disabled and reset clear
+
+
+
+--******************************************************************************
+-- 2) assert crs by receiving a frame
+--******************************************************************************
+apbrd(int) 24 00000200  -- check link status change interrupt
+apbrdf     20 00000000  -- check receive status register and trigger reception
+
+
+--******************************************************************************
+-- 3) try and transmit a frame - nothing happens
+--******************************************************************************
+apbrd(200)  14 00000000  -- check tx status to delay trigger
+apbwr       00 0000020c  -- enable tx
+apbwr       00 0000040c  -- write tx halt immediately keeping tx enabled
+                         -- this stops fetch of second frame
+
+dma_rd 55555504 0000803c -- start of frame, length 
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+
+
+
+-- drive the receive frame data with carrier extension into the MII interface
+pcs_rxd(apb_x)  555555d5000102030405060708090a0b0c0d0e0f
+pcs_rxd                 101112131415161718191a1b1c1d1e1f
+pcs_rxd                 202122232425262728292a2b2c2d2e2f
+pcs_rxd                 303132333435363738393a3b3c3d3e3f
+pcs_rxd                 404142434445464748494a4b4c4d4e4f
+pcs_rxd                 505152535455565758595a5b5c5d5e5f
+pcs_rxd                 606162636465666768696a6b6c6d6e6f
+pcs_rxd                 707172737475767778797a7b7c7d7e7f
+pcs_rxd                 808182838485868788898a8b8c8d8e8f
+pcs_rxd                 909192939495969798999a9b9c9d9e9f
+pcs_rxd                 a0a1a2a3a4a5a6a7a8a9aaabacadaeaf
+pcs_rxd                 b0b1b2b3b4b5b6b7b8b9babbbcbdbebf
+pcs_rxd                 c0c1c2c3c4c5c6c7c8c9cacbcccdcecf
+pcs_rxd                 d0d1d2d3d4d5d6d7d8d9dadbdcdddedf
+pcs_rxd                 e0e1e2e3e4e5e6e7e8e9eaebecedeeef
+pcs_rxd                 f0f1f2f3f4f5f6f7f8f9fafbfcfdfeffgggggggg
+
+-- supply the receive buffer location
+dma_rd fffffff0 22222000 -- dma reads pointer of 22222000
+
+-- check the receive data as it is written out
+dma_wr 22222000 03020100
+dma_wr 22222004 07060504
+dma_wr 22222008 0b0a0908
+dma_wr 2222200c 0f0e0d0c
+dma_wr 22222010 13121110
+dma_wr 22222014 17161514
+dma_wr 22222018 1b1a1918
+dma_wr 2222201c 1f1e1d1c
+dma_wr 22222020 23222120
+dma_wr 22222024 27262524
+dma_wr 22222028 2b2a2928
+dma_wr 2222202c 2f2e2d2c
+dma_wr 22222030 33323130
+dma_wr 22222034 37363534
+dma_wr 22222038 3b3a3938
+dma_wr 2222203c 3f3e3d3c
+dma_wr 22222040 43424140
+dma_wr 22222044 47464544
+dma_wr 22222048 4b4a4948
+dma_wr 2222204c 4f4e4d4c
+dma_wr 22222050 53525150
+dma_wr 22222054 57565554
+dma_wr 22222058 5b5a5958
+dma_wr 2222205c 5f5e5d5c
+dma_wr 22222060 63626160
+dma_wr 22222064 67666564
+dma_wr 22222068 6b6a6968
+dma_wr 2222206c 6f6e6d6c
+dma_wr 22222070 73727170
+dma_wr 22222074 77767574
+dma_wr 22222078 7b7a7978
+dma_wr 2222207c 7f7e7d7c
+
+
+dma_wr fffffff4 00004000 -- dma writes rx status
+dma_wr fffffff0 22222001 -- dma writes ownership bit
+
+dma_rd fffffff8 22222080 -- reads locations of next rx buffer
+
+
+dma_wr 22222080 83828180
+dma_wr 22222084 87868584
+dma_wr 22222088 8b8a8988
+dma_wr 2222208c 8f8e8d8c
+dma_wr 22222090 93929190
+dma_wr 22222094 97969594
+dma_wr 22222098 9b9a9998
+dma_wr 2222209c 9f9e9d9c
+dma_wr 222220a0 a3a2a1a0
+dma_wr 222220a4 a7a6a5a4
+dma_wr 222220a8 abaaa9a8
+dma_wr 222220ac afaeadac
+dma_wr 222220b0 b3b2b1b0
+dma_wr 222220b4 b7b6b5b4
+dma_wr 222220b8 bbbab9b8
+dma_wr 222220bc bfbebdbc
+dma_wr 222220c0 c3c2c1c0
+dma_wr 222220c4 c7c6c5c4
+dma_wr 222220c8 cbcac9c8
+dma_wr 222220cc cfcecdcc
+dma_wr 222220d0 d3d2d1d0
+dma_wr 222220d4 d7d6d5d4
+dma_wr 222220d8 dbdad9d8
+dma_wr 222220dc dfdedddc
+dma_wr 222220e0 e3e2e1e0
+dma_wr 222220e4 e7e6e5e4
+dma_wr 222220e8 ebeae9e8
+dma_wr 222220ec efeeedec
+dma_wr 222220f0 f3f2f1f0
+dma_wr 222220f4 f7f6f5f4
+dma_wr 222220f8 fbfaf9f8
+dma_wr 222220fc fffefdfc
+
+dma_wr fffffffc 00000000 -- dma writes rx status
+dma_wr fffffff8 22222081 -- dma writes ownership bit
+
+dma_rd 00000000 22222100 -- reads locations of next rx buffer
+
+dma_wr 22222100 29058c73
+
+dma_wr 00000004 08008104 -- dma writes rx status, local address match
+dma_wr 00000000 22222101 -- dma writes ownership bit
+
+dma_rd 00000008 33330000 -- reads locations of next rx buffer
+
+
+
+
+-- write transmit complete status
+dma_wr 55555504 8000803c -- write used bit
+
+
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+--******************************************************************************
+-- 4) Observe frame transmission once the GEM has finished receiving the frame.
+--    (CRS should be deasserted)
+--******************************************************************************
+
+-- check for correct preamble, SFD, data, pad and crc
+pcs_txd(s_x)  55555555555555d501005e00000200d0bcece704080045c0
+pcs_txd                       003000000000021158729e8ce0fce000
+pcs_txd                       000207c107c1001cb6e9000008030a64
+pcs_txd                       0200636973636f0000009e8cgggggggg
+
+apbrd(int) 24 00000080  -- check interrupt status - used bit set
+apbrd	   14 00000020  -- tx status - frame transmitted
+apbwr      14 00000028  -- clear it
+apbrd      14 00000000  -- check it again - frame transmitted
+
+--******************************************************************************
+-- 5) Check stats 
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000040  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000001  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000104  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000001  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000001  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+end(10000)

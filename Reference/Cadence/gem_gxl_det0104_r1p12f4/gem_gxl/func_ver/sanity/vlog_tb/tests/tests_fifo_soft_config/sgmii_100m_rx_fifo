@@ -1,0 +1,377 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2003
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : sgmii_100m_rx_fifo
+--
+--   Author         : Arthur Marris
+--
+--   Date           : 24 November 2003
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This shows the GEM receiving data at 100Mbps in SGMII mode
+--
+--
+-- 
+--
+-- Detailed Test Description
+----------------------------
+--
+-- The auto-negotiation function is disabled (using bit-7 of the PCS Control
+-- Register) prior to selecting PCS. The PCS is selected by setting PCS enable
+-- in the MAC network configuration register and the speed bit but not setting
+-- the gigabit bit.
+--
+-- Four frames are received. The input data needs to be repeated 10 times
+-- 
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+
+apbwr(60)  4c 00000001  -- enable soft config fifo port bit when available
+apbrd      4c 00000001  -- check enable soft config bit when available
+
+-- check the relevant pcs registers
+apbrd(100) 200 00009040  -- check reset value of pcs control register, bit-15
+                         -- indicates the pcs is in reset (until enabled)
+apbrd      204 00000109  -- check reset value of pcs status reg
+apbrd      210 00000020  -- check reset value of pcs a-n advertisement reg
+apbrd      214 00000000  -- check reset value of pcs a-n link ptnr ability reg
+apbrd      218 00000004  -- check reset value of pcs a-n expansion reg
+apbrd      21C 00000000  -- check reset value of pcs a-n next page reg
+apbrd      220 00000000  -- check reset value of pcs a-n link partner reg
+apbrd      23C 00008000  -- check reset value of pcs a-n extended status reg
+
+
+-- initialise the relevant pcs registers
+apbwr      200 00000040  -- disable auto-negotiation prior to enabling PCS
+
+
+-- check and initialise the relevant mac registers
+apbrd      000 00000000  -- check reset value of network control register
+apbwr      000 00000004  -- enable rx
+apbwr      028 ffffffff  -- enable all interrupts
+apbrd      004 00080000  -- check reset value of network config register
+apbrd      008 00000006  -- check reset value of network status register
+apbwr      004 08080813  -- set pcs and full duplex, 100M enabled - SGMII mode - copy all frames
+
+apbrd(int)  24 00000200  -- check link status change interrupt
+apbrd       14 00000000  -- check tx status
+apbrd       14 00000000  -- check tx status
+apbrd       14 00000000  -- check tx status
+apbrd       14 00000000  -- check tx status
+apbrd       14 00000000  -- check tx status
+apbrd       14 00000000  -- check tx status
+apbrd       14 00000000  -- check tx status
+apbrd       14 00000000  -- check tx status
+apbrdf      20 00000000  -- check receive status register and trigger reception
+
+-- supply correct preamble, SFD, data, pad and crc
+
+pcs_rxd(apb_x) 55555555555555555555555555555555555555555555555555555555555555555555555555555555
+pcs_rxd  555555555555555555555555555555555555555555555555555555555555d5d5d5d5d5d5d5d5d5d5
+pcs_rxd  00000000000000000000000000000000000000000000000000000000000000000000000000000000
+pcs_rxd  11111111111111111111111111111111111111111111111111111111111111111111111111111111
+pcs_rxd  22222222222222222222222222222222222222222222222222222222222222222222222222222222
+pcs_rxd  33333333333333333333333333333333333333333333333333333333333333333333333333333333
+pcs_rxd  10101010101010101010111111111111111111111212121212121212121213131313131313131313
+pcs_rxd  44444444444444444444444444444444444444444444444444444444444444444444444444444444
+pcs_rxd  55555555555555555555555555555555555555555555555555555555555555555555555555555555
+pcs_rxd  66666666666666666666666666666666666666666666666666666666666666666666666666666666
+pcs_rxd  11111111111111111111111111111111111111111111111111111111111111111111111111111111
+pcs_rxd  22222222222222222222222222222222222222222222222222222222222222222222222222222222
+pcs_rxd  33333333333333333333333333333333333333333333333333333333333333333333333333333333
+pcs_rxd  10101010101010101010111111111111111111111212121212121212121213131313131313131313
+pcs_rxd  44444444444444444444444444444444444444444444444444444444444444444444444444444444
+pcs_rxd  55555555555555555555555555555555555555555555555555555555555555555555555555555555
+pcs_rxd  66666666666666666666666666666666666666666666666666666666666666666666666666666666
+pcs_rxd  77777777777777777777777777777777777777777777777777777777777777777777777777777777
+pcs_rxd  40404040404040404040414141414141414141414242424242424242424243434343434343434343
+pcs_rxd  88888888888888888888888888888888888888888888888888888888888888888888888888888888
+pcs_rxd  99999999999999999999999999999999999999999999999999999999999999999999999999999999
+pcs_rxd  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+pcs_rxd  96969696969696969696d3d3d3d3d3d3d3d3d3d3dadadadadadadadadadaa4a4a4a4a4a4a4a4a4gg
+
+
+
+-- check the receive data as it is written out on the FIFO interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    11111111
+fifo_wr      1000     0   xxxxxxxxxx    22222222
+fifo_wr      1000     0   xxxxxxxxxx    33333333
+fifo_wr      1000     0   xxxxxxxxxx    13121110
+fifo_wr      1000     0   xxxxxxxxxx    44444444
+fifo_wr      1000     0   xxxxxxxxxx    55555555
+fifo_wr      1000     0   xxxxxxxxxx    66666666
+fifo_wr      1000     0   xxxxxxxxxx    11111111
+fifo_wr      1000     0   xxxxxxxxxx    22222222
+fifo_wr      1000     0   xxxxxxxxxx    33333333
+fifo_wr      1000     0   xxxxxxxxxx    13121110
+fifo_wr      1000     0   xxxxxxxxxx    44444444
+fifo_wr      1000     0   xxxxxxxxxx    55555555
+fifo_wr      1000     0   xxxxxxxxxx    66666666
+fifo_wr      1000     0   xxxxxxxxxx    77777777
+fifo_wr      1000     0   xxxxxxxxxx    43424140
+fifo_wr      1000     0   xxxxxxxxxx    88888888
+fifo_wr      1000     0   xxxxxxxxxx    99999999
+fifo_wr      1000     0   xxxxxxxxxx    aaaaaaaa
+fifo_wr      1001     0   0000000054    a4dad396
+
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbrd      150 00000054  -- check octets received bottom
+
+
+
+-- supply correct preamble, SFD, data, pad and crc
+
+pcs_rxd(gap) 55555555555555555555555555555555555555555555555555555555555555555555555555555555
+pcs_rxd  555555555555555555555555555555555555555555555555555555555555d5d5d5d5d5d5d5d5d5d5
+pcs_rxd  00000000000000000000000000000000000000000000000000000000000000000000000000000000
+pcs_rxd  11111111111111111111111111111111111111111111111111111111111111111111111111111111
+pcs_rxd  22222222222222222222222222222222222222222222222222222222222222222222222222222222
+pcs_rxd  33333333333333333333333333333333333333333333333333333333333333333333333333333333
+pcs_rxd  10101010101010101010111111111111111111111212121212121212121213131313131313131313
+pcs_rxd  44444444444444444444444444444444444444444444444444444444444444444444444444444444
+pcs_rxd  55555555555555555555555555555555555555555555555555555555555555555555555555555555
+pcs_rxd  66666666666666666666666666666666666666666666666666666666666666666666666666666666
+pcs_rxd  11111111111111111111111111111111111111111111111111111111111111111111111111111111
+pcs_rxd  22222222222222222222222222222222222222222222222222222222222222222222222222222222
+pcs_rxd  33333333333333333333333333333333333333333333333333333333333333333333333333333333
+pcs_rxd  10101010101010101010111111111111111111111212121212121212121213131313131313131313
+pcs_rxd  44444444444444444444444444444444444444444444444444444444444444444444444444444444
+pcs_rxd  55555555555555555555555555555555555555555555555555555555555555555555555555555555
+pcs_rxd  66666666666666666666666666666666666666666666666666666666666666666666666666666666
+pcs_rxd  77777777777777777777777777777777777777777777777777777777777777777777777777777777
+pcs_rxd  40404040404040404040414141414141414141414242424242424242424243434343434343434343
+pcs_rxd  88888888888888888888888888888888888888888888888888888888888888888888888888888888
+pcs_rxd  99999999999999999999999999999999999999999999999999999999999999999999999999999999
+pcs_rxd  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+pcs_rxd  eaeaeaeaeaeaeaeaeaea8b8b8b8b8b8b8b8b8b8b7d7d7d7d7d7d7d7d7d7d040404040404040404gg
+
+
+
+-- check the receive data as it is written out on the FIFO interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    11111111
+fifo_wr      1000     0   xxxxxxxxxx    22222222
+fifo_wr      1000     0   xxxxxxxxxx    33333333
+fifo_wr      1000     0   xxxxxxxxxx    13121110
+fifo_wr      1000     0   xxxxxxxxxx    44444444
+fifo_wr      1000     0   xxxxxxxxxx    55555555
+fifo_wr      1000     0   xxxxxxxxxx    66666666
+fifo_wr      1000     0   xxxxxxxxxx    11111111
+fifo_wr      1000     0   xxxxxxxxxx    22222222
+fifo_wr      1000     0   xxxxxxxxxx    33333333
+fifo_wr      1000     0   xxxxxxxxxx    13121110
+fifo_wr      1000     0   xxxxxxxxxx    44444444
+fifo_wr      1000     0   xxxxxxxxxx    55555555
+fifo_wr      1000     0   xxxxxxxxxx    66666666
+fifo_wr      1000     0   xxxxxxxxxx    77777777
+fifo_wr      1000     0   xxxxxxxxxx    43424140
+fifo_wr      1000     0   xxxxxxxxxx    88888888
+fifo_wr      1000     0   xxxxxxxxxx    99999999
+fifo_wr      1000     0   xxxxxxxxxx    eaaaaaaa
+fifo_wr      1001     3   0000000053    00047d8b
+
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbrd      150 00000053  -- check octets received bottom
+
+
+-- supply correct preamble, SFD, data, pad and crc
+
+pcs_rxd(gap) 555555555555555555555555555555555555555555555555555555555555
+pcs_rxd  555555555555555555555555555555555555555555555555555555555555d5d5d5d5d5d5d5d5d5d5
+pcs_rxd  00000000000000000000000000000000000000000000000000000000000000000000000000000000
+pcs_rxd  11111111111111111111111111111111111111111111111111111111111111111111111111111111
+pcs_rxd  22222222222222222222222222222222222222222222222222222222222222222222222222222222
+pcs_rxd  33333333333333333333333333333333333333333333333333333333333333333333333333333333
+pcs_rxd  10101010101010101010111111111111111111111212121212121212121213131313131313131313
+pcs_rxd  44444444444444444444444444444444444444444444444444444444444444444444444444444444
+pcs_rxd  55555555555555555555555555555555555555555555555555555555555555555555555555555555
+pcs_rxd  66666666666666666666666666666666666666666666666666666666666666666666666666666666
+pcs_rxd  11111111111111111111111111111111111111111111111111111111111111111111111111111111
+pcs_rxd  22222222222222222222222222222222222222222222222222222222222222222222222222222222
+pcs_rxd  33333333333333333333333333333333333333333333333333333333333333333333333333333333
+pcs_rxd  10101010101010101010111111111111111111111212121212121212121213131313131313131313
+pcs_rxd  44444444444444444444444444444444444444444444444444444444444444444444444444444444
+pcs_rxd  55555555555555555555555555555555555555555555555555555555555555555555555555555555
+pcs_rxd  66666666666666666666666666666666666666666666666666666666666666666666666666666666
+pcs_rxd  77777777777777777777777777777777777777777777777777777777777777777777777777777777
+pcs_rxd  40404040404040404040414141414141414141414242424242424242424243434343434343434343
+pcs_rxd  88888888888888888888888888888888888888888888888888888888888888888888888888888888
+pcs_rxd  99999999999999999999999999999999999999999999999999999999999999999999999999999999
+pcs_rxd  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+pcs_rxd  0a0a0a0a0a0a0a0a0a0a8f8f8f8f8f8f8f8f8f8fc7c7c7c7c7c7c7c7c7c7a9a9a9a9a9a9a9a9a9gg
+
+
+
+-- check the receive data as it is written out on the FIFO interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    11111111
+fifo_wr      1000     0   xxxxxxxxxx    22222222
+fifo_wr      1000     0   xxxxxxxxxx    33333333
+fifo_wr      1000     0   xxxxxxxxxx    13121110
+fifo_wr      1000     0   xxxxxxxxxx    44444444
+fifo_wr      1000     0   xxxxxxxxxx    55555555
+fifo_wr      1000     0   xxxxxxxxxx    66666666
+fifo_wr      1000     0   xxxxxxxxxx    11111111
+fifo_wr      1000     0   xxxxxxxxxx    22222222
+fifo_wr      1000     0   xxxxxxxxxx    33333333
+fifo_wr      1000     0   xxxxxxxxxx    13121110
+fifo_wr      1000     0   xxxxxxxxxx    44444444
+fifo_wr      1000     0   xxxxxxxxxx    55555555
+fifo_wr      1000     0   xxxxxxxxxx    66666666
+fifo_wr      1000     0   xxxxxxxxxx    77777777
+fifo_wr      1000     0   xxxxxxxxxx    43424140
+fifo_wr      1000     0   xxxxxxxxxx    88888888
+fifo_wr      1000     0   xxxxxxxxxx    99999999
+fifo_wr      1000     0   xxxxxxxxxx    8f0aaaaa
+fifo_wr      1001     2   0000000052    0000a9c7
+
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbrd      150 00000052  -- check octets received bottom
+
+
+
+-- supply correct preamble, SFD, data, pad and crc
+
+pcs_rxd(gap) 55555555555555555555555555555555555555555555555555555555555555555555555555555555
+pcs_rxd  555555555555555555555555555555555555555555555555555555555555d5d5d5d5d5d5d5d5d5d5
+pcs_rxd  00000000000000000000000000000000000000000000000000000000000000000000000000000000
+pcs_rxd  11111111111111111111111111111111111111111111111111111111111111111111111111111111
+pcs_rxd  22222222222222222222222222222222222222222222222222222222222222222222222222222222
+pcs_rxd  33333333333333333333333333333333333333333333333333333333333333333333333333333333
+pcs_rxd  10101010101010101010111111111111111111111212121212121212121213131313131313131313
+pcs_rxd  44444444444444444444444444444444444444444444444444444444444444444444444444444444
+pcs_rxd  55555555555555555555555555555555555555555555555555555555555555555555555555555555
+pcs_rxd  66666666666666666666666666666666666666666666666666666666666666666666666666666666
+pcs_rxd  11111111111111111111111111111111111111111111111111111111111111111111111111111111
+pcs_rxd  22222222222222222222222222222222222222222222222222222222222222222222222222222222
+pcs_rxd  33333333333333333333333333333333333333333333333333333333333333333333333333333333
+pcs_rxd  10101010101010101010111111111111111111111212121212121212121213131313131313131313
+pcs_rxd  44444444444444444444444444444444444444444444444444444444444444444444444444444444
+pcs_rxd  55555555555555555555555555555555555555555555555555555555555555555555555555555555
+pcs_rxd  66666666666666666666666666666666666666666666666666666666666666666666666666666666
+pcs_rxd  77777777777777777777777777777777777777777777777777777777777777777777777777777777
+pcs_rxd  40404040404040404040414141414141414141414242424242424242424243434343434343434343
+pcs_rxd  88888888888888888888888888888888888888888888888888888888888888888888888888888888
+pcs_rxd  99999999999999999999999999999999999999999999999999999999999999999999999999999999
+pcs_rxd  aaaaaaaaaaaaaaaaaaaa
+pcs_rxd  60606060606060606060292929292929292929294b4b4b4b4b4b4b4b4b4b747474747474747474gg
+
+
+
+-- check the receive data as it is written out on the FIFO interface
+--          CONTROL  MOD  STATUS[39:0]    DATA
+fifo_wr      1010     0   xxxxxxxxxx    00000000
+fifo_wr      1000     0   xxxxxxxxxx    11111111
+fifo_wr      1000     0   xxxxxxxxxx    22222222
+fifo_wr      1000     0   xxxxxxxxxx    33333333
+fifo_wr      1000     0   xxxxxxxxxx    13121110
+fifo_wr      1000     0   xxxxxxxxxx    44444444
+fifo_wr      1000     0   xxxxxxxxxx    55555555
+fifo_wr      1000     0   xxxxxxxxxx    66666666
+fifo_wr      1000     0   xxxxxxxxxx    11111111
+fifo_wr      1000     0   xxxxxxxxxx    22222222
+fifo_wr      1000     0   xxxxxxxxxx    33333333
+fifo_wr      1000     0   xxxxxxxxxx    13121110
+fifo_wr      1000     0   xxxxxxxxxx    44444444
+fifo_wr      1000     0   xxxxxxxxxx    55555555
+fifo_wr      1000     0   xxxxxxxxxx    66666666
+fifo_wr      1000     0   xxxxxxxxxx    77777777
+fifo_wr      1000     0   xxxxxxxxxx    43424140
+fifo_wr      1000     0   xxxxxxxxxx    88888888
+fifo_wr      1000     0   xxxxxxxxxx    99999999
+fifo_wr      1000     0   xxxxxxxxxx    4b2960aa
+fifo_wr      1001     1   0000000051    00000074
+
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+
+
+
+
+
+-- check pcs status
+apbrd      200 00000140  -- check pcs control register, full duplex, 1000 mbits/s
+apbrd      204 00000105  -- check pcs status reg, auto-neg not possible and link is up
+apbrd      210 00000001  -- check pcs a-n advertisement reg, SGMII mode
+apbrd      214 00000001  -- check pcs a-n link ptnr ability reg, SGMII mode
+apbrd      218 00000004  -- check pcs a-n expansion reg, next page supported
+apbrd      21C 00000000  -- check pcs a-n next page reg
+apbrd      220 00000000  -- check pcs a-n link partner reg
+apbrd      23C 00008000  -- check pcs a-n extended status reg, 1000base-x half duplex and
+                         -- full duplex supported
+
+-- check transmit statistics
+apbrd      100 00000000  -- check octets transmitted bottom
+apbrd      104 00000000  -- check octets transmitted top
+apbrd      108 00000000  -- check frames transmitted ok
+apbrd      10C 00000000  -- check broadcast frames transmitted
+apbrd      110 00000000  -- check multicast frames transmitted
+apbrd      114 00000000  -- check pause frames transmitted
+apbrd      118 00000000  -- check frames transmitted 64
+apbrd      11C 00000000  -- check frames transmitted 65-127
+apbrd      120 00000000  -- check frames transmitted 128-255
+apbrd      124 00000000  -- check frames transmitted 256-511
+apbrd      128 00000000  -- check frames transmitted 512-1023
+apbrd      12C 00000000  -- check frames transmitted 1024-1518
+apbrd      130 00000000  -- check frames transmitted 1519
+apbrd      134 00000000  -- check transmit underruns errors
+apbrd      138 00000000  -- check single collisions frames
+apbrd      13C 00000000  -- check multiple collisions frames
+apbrd      140 00000000  -- check excessive collisions frames
+apbrd      144 00000000  -- check late collisions frames
+apbrd      148 00000000  -- check deferred frames
+apbrd      14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd      150 00000051  -- check octets received bottom
+apbrd      154 00000000  -- check octets received top
+apbrd      158 00000004  -- check frames received ok
+apbrd      15C 00000000  -- check broadcast frames received
+apbrd      160 00000000  -- check multicast frames received
+apbrd      164 00000000  -- check pause frames received
+apbrd      168 00000000  -- check frames received 64
+apbrd      16C 00000004  -- check frames received 65-127
+apbrd      170 00000000  -- check frames received 128-255
+apbrd      174 00000000  -- check frames received 256-511
+apbrd      178 00000000  -- check frames received 512-1023
+apbrd      17C 00000000  -- check frames received 1024-1518
+apbrd      180 00000000  -- check frames received 1519
+apbrd      184 00000000  -- check undersize frame errors
+apbrd      188 00000000  -- check excessive receive length errors
+apbrd      18C 00000000  -- check receive jabbers errors
+apbrd      190 00000000  -- check FCS errors
+apbrd      194 00000000  -- check receive length errors
+apbrd      198 00000000  -- check receive symbol errors
+apbrd      19C 00000000  -- check alignment errors
+apbrd      1A0 00000000  -- check receive resource errors
+apbrd      1A4 00000000  -- check receive overrun errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(5000)
+

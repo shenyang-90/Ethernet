@@ -1,0 +1,671 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2006
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : ptp_frames_ipv4_unicast_1gm
+--
+--   Author         : Andreas Bode
+--
+--   Date           : 11 October 2006
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- See if a variety of PTP version 2 unicast frames encapsulated in IPv4 can be 
+-- detected, some have incorrect addresses
+--
+-- Receive frames:-
+-- RX Frame 1 : PTP sync frame
+-- RX Frame 2 : PTP delay request frame
+-- RX Frame 3 : PTP sync frame but DA address not unicast - not recognized
+-- RX Frame 4 : PTP pdelay_req frame
+-- RX Frame 5 : PTP pdelay_resp frame
+-- RX Frame 6 : PTP sync frame DA address not unicast - not recognized
+-- RX Frame 7 : PTP sync frame DA address not unicast - not recognized
+--
+-- Transmit frames:-
+-- TX Frame 1 : PTP sync frame
+-- TX Frame 2 : PTP delay request frame
+-- TX Frame 3 : PTP pdelay_req frame 
+-- TX Frame 4 : PTP pdelay_resp frame 
+-- TX Frame 5 : PTP sync frame event with incorrect address
+--
+--
+--------------------------------------------------------------------------------
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 0
+bus_grant_delay 0
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 32-bit DMA data bus.
+--******************************************************************************
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 00080413  -- copy all & full duplex
+apbrd      04 00080413  -- verify write to network config register.
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      18 fffff000  -- check receive queue pointer
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      d4 76543210  -- write unicast IP DA for RX PTP
+apbwr      d8 fedcba98  -- write unicast IP DA for TX PTP
+apbwr      00 00100004  -- enable receive and ptp unicast
+apbrd      24 00000000  -- delay - check interrupt status
+apbrd      24 00000000  -- delay - check interrupt status
+apbrd      24 00000000  -- delay - check interrupt status
+
+
+--******************************************************************************
+-- RX Frame 1 : PTP unicast sync frame
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 1 : PTP sync frame"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        00e0f7263fe9 -- MAC DA
+rxd        08002086354b -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002c         -- total length = 55
+rxd        08b8         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        ff12         -- time to live and not UDP protocol
+rxd        9997         -- IP Header checksum
+rxd        8b85d96e     -- IP SA
+rxd        76543210     -- IP DA
+rxd        9005         -- UDP source port
+rxd        013f         -- UDP destination port
+rxd        0012         -- UDP length
+rxd        7228         -- UDP checksum
+rxd        60           -- transport specific, messageType
+rxd        02           -- version PTP
+rxd        6c6c         -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        abababab     -- other stuff
+rxd        abababab     -- other stuff
+rxd        abababab     -- UUID, sequenceID
+rxd        00000000     -- control, subdomain
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        gggggggg     -- FCS
+
+
+-- supply the receive buffer location
+dma_rd fffff000 22222100 -- dma reads pointer of 22222100
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 26f7e000 -- store frame to memory
+dma_wr 22222104 0008e93f
+dma_wr 22222108 4b358620
+dma_wr 2222210c 00450008
+dma_wr 22222110 b8082c00
+dma_wr 22222114 12ff0040
+dma_wr 22222118 858b9799
+dma_wr 2222211c 54766ed9
+dma_wr 22222120 05901032
+dma_wr 22222124 12003f01
+dma_wr 22222128 02602872
+dma_wr 2222212c 686f6c6c
+dma_wr 22222130 686f6c65
+dma_wr 22222134 686f6c65
+dma_wr 22222138 686f6c65
+dma_wr 2222213c abab6c65
+dma_wr 22222140 abababab
+dma_wr 22222144 abababab
+dma_wr 22222148 0000abab
+dma_wr 2222214c 00000000
+dma_wr 22222150 00000000
+dma_wr 22222154 00000000
+dma_wr 22222158 00000000
+dma_wr 2222215c 00000000
+dma_wr 22222160 00000000
+dma_wr 22222164 00000000
+dma_wr 22222168 00000000
+dma_wr 2222216c 00000000
+dma_wr 22222170 00000000
+dma_wr 22222174 00000000
+dma_wr 22222178 zzzzzzzz
+dma_wr 2222217c zzzzzzzz
+
+
+dma_wr fffff004 0000c07e -- dma writes rx status,
+dma_wr fffff000 22222101 -- dma writes ownership bit
+
+
+-- supply the receive buffer location
+dma_rd fffff008 22222100 -- dma reads pointer of 22222100
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Frame 1 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+--******************************************************************************
+-- RX Frame 2 : PTP unicast delay request frame
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 2 : PTP delay request frame"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        00e0f7263fe9 -- MAC DA
+rxd        08002086354b -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002c         -- total length = 55
+rxd        08b8         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        ff12         -- time to live and not UDP protocol
+rxd        9997         -- IP Header checksum
+rxd        8b85d96e     -- IP SA
+rxd        76543210     -- IP DA
+rxd        9005         -- UDP source port
+rxd        013f         -- UDP destination port
+rxd        0012         -- UDP length
+rxd        7228         -- UDP checksum
+rxd        61           -- transport specific, messageType
+rxd        02           -- version PTP
+rxd        6c6c         -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        abababab     -- other stuff
+rxd        abababab     -- other stuff
+rxd        abababab     -- UUID, sequenceID
+rxd        00000000     -- control, subdomain
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        gggggggg     -- FCS
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 26f7e000 -- store frame to memory
+dma_wr 22222104 0008e93f
+dma_wr 22222108 4b358620
+dma_wr 2222210c 00450008
+dma_wr 22222110 b8082c00
+dma_wr 22222114 12ff0040
+dma_wr 22222118 858b9799
+dma_wr 2222211c 54766ed9
+dma_wr 22222120 05901032
+dma_wr 22222124 12003f01
+dma_wr 22222128 02612872
+dma_wr 2222212c 686f6c6c
+dma_wr 22222130 686f6c65
+dma_wr 22222134 686f6c65
+dma_wr 22222138 686f6c65
+dma_wr 2222213c abab6c65
+dma_wr 22222140 abababab
+dma_wr 22222144 abababab
+dma_wr 22222148 0000abab
+dma_wr 2222214c 00000000
+dma_wr 22222150 00000000
+dma_wr 22222154 00000000
+dma_wr 22222158 00000000
+dma_wr 2222215c 00000000
+dma_wr 22222160 00000000
+dma_wr 22222164 00000000
+dma_wr 22222168 00000000
+dma_wr 2222216c 00000000
+dma_wr 22222170 00000000
+dma_wr 22222174 00000000
+dma_wr 22222178 zzzzzzzz
+dma_wr 2222217c zzzzzzzz
+
+
+dma_wr fffff00c 0000c07e -- dma writes rx status,
+dma_wr fffff008 22222101 -- dma writes ownership bit
+
+-- supply the receive buffer location
+dma_rd fffff010 22222100 -- dma reads pointer of 22222100
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Frame 2 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+--******************************************************************************
+-- RX Frame 4 : PTP unicast pdelay_req frame
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 4 : PTP pdelay_req frame"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        00e0f7263fe9 -- MAC DA
+rxd        08002086354b -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002c         -- total length = 55
+rxd        08b8         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        ff12         -- time to live and not UDP protocol
+rxd        9997         -- IP Header checksum
+rxd        8b85d96e     -- IP SA
+rxd        76543210     -- IP DA
+rxd        9005         -- UDP source port
+rxd        013f         -- UDP destination port
+rxd        0012         -- UDP length
+rxd        7228         -- UDP checksum
+rxd        62           -- transport specific, messageType
+rxd        02           -- version PTP
+rxd        6c6c         -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        abababab     -- other stuff
+rxd        abababab     -- other stuff
+rxd        abababab     -- UUID, sequenceID
+rxd        00000000     -- control, subdomain
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        gggggggg     -- FCS
+
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 26f7e000 -- store frame to memory
+dma_wr 22222104 0008e93f
+dma_wr 22222108 4b358620
+dma_wr 2222210c 00450008
+dma_wr 22222110 b8082c00
+dma_wr 22222114 12ff0040
+dma_wr 22222118 858b9799
+dma_wr 2222211c 54766ed9
+dma_wr 22222120 05901032
+dma_wr 22222124 12003f01
+dma_wr 22222128 02622872
+dma_wr 2222212c 686f6c6c
+dma_wr 22222130 686f6c65
+dma_wr 22222134 686f6c65
+dma_wr 22222138 686f6c65
+dma_wr 2222213c abab6c65
+dma_wr 22222140 abababab
+dma_wr 22222144 abababab
+dma_wr 22222148 0000abab
+dma_wr 2222214c 00000000
+dma_wr 22222150 00000000
+dma_wr 22222154 00000000
+dma_wr 22222158 00000000
+dma_wr 2222215c 00000000
+dma_wr 22222160 00000000
+dma_wr 22222164 00000000
+dma_wr 22222168 00000000
+dma_wr 2222216c 00000000
+dma_wr 22222170 00000000
+dma_wr 22222174 00000000
+dma_wr 22222178 zzzzzzzz
+dma_wr 2222217c zzzzzzzz
+
+
+dma_wr fffff014 0000c07e -- dma writes rx status,
+dma_wr fffff010 22222101 -- dma writes ownership bit
+
+-- supply the receive buffer location
+dma_rd fffff018 22222100 -- dma reads pointer of 22222100
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Frame 4 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+--******************************************************************************
+-- RX Frame 5 : PTP unicast pdelay_resp frame
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 5 : PTP pdelay_resp frame"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        00e0f7263fe9 -- MAC DA
+rxd        08002086354b -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002c         -- total length = 55
+rxd        08b8         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        ff12         -- time to live and not UDP protocol
+rxd        9997         -- IP Header checksum
+rxd        8b85d96e     -- IP SA
+rxd        76543210     -- IP DA
+rxd        9005         -- UDP source port
+rxd        013f         -- UDP destination port
+rxd        0012         -- UDP length
+rxd        7228         -- UDP checksum
+rxd        63           -- transport specific, messageType
+rxd        02           -- version PTP
+rxd        6c6c         -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        abababab     -- other stuff
+rxd        abababab     -- other stuff
+rxd        abababab     -- UUID, sequenceID
+rxd        00000000     -- control, subdomain
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        gggggggg     -- FCS
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 26f7e000 -- store frame to memory
+dma_wr 22222104 0008e93f
+dma_wr 22222108 4b358620
+dma_wr 2222210c 00450008
+dma_wr 22222110 b8082c00
+dma_wr 22222114 12ff0040
+dma_wr 22222118 858b9799
+dma_wr 2222211c 54766ed9
+dma_wr 22222120 05901032
+dma_wr 22222124 12003f01
+dma_wr 22222128 02632872
+dma_wr 2222212c 686f6c6c
+dma_wr 22222130 686f6c65
+dma_wr 22222134 686f6c65
+dma_wr 22222138 686f6c65
+dma_wr 2222213c abab6c65
+dma_wr 22222140 abababab
+dma_wr 22222144 abababab
+dma_wr 22222148 0000abab
+dma_wr 2222214c 00000000
+dma_wr 22222150 00000000
+dma_wr 22222154 00000000
+dma_wr 22222158 00000000
+dma_wr 2222215c 00000000
+dma_wr 22222160 00000000
+dma_wr 22222164 00000000
+dma_wr 22222168 00000000
+dma_wr 2222216c 00000000
+dma_wr 22222170 00000000
+dma_wr 22222174 00000000
+dma_wr 22222178 zzzzzzzz
+dma_wr 2222217c zzzzzzzz
+
+
+dma_wr fffff01c 0000c07e -- dma writes rx status,
+dma_wr fffff018 22222101 -- dma writes ownership bit
+
+-- supply the receive buffer location
+dma_rd fffff020 22222100 -- dma reads pointer of 22222100
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Frame 5 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+--******************************************************************************
+-- RX Frame 5 : PTP unicast general frame
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 5 : PTP pdelay_resp frame"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        00e0f7263fe9 -- MAC DA
+rxd        08002086354b -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002c         -- total length = 55
+rxd        08b8         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        ff12         -- time to live and not UDP protocol
+rxd        9997         -- IP Header checksum
+rxd        8b85d96e     -- IP SA
+rxd        76543210     -- IP DA
+rxd        9005         -- UDP source port
+rxd        013f         -- UDP destination port
+rxd        0012         -- UDP length
+rxd        7228         -- UDP checksum
+rxd        6a           -- transport specific, messageType
+rxd        02           -- version PTP
+rxd        6c6c         -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        abababab     -- other stuff
+rxd        abababab     -- other stuff
+rxd        abababab     -- UUID, sequenceID
+rxd        00000000     -- control, subdomain
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        gggggggg     -- FCS
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 26f7e000 -- store frame to memory
+dma_wr 22222104 0008e93f
+dma_wr 22222108 4b358620
+dma_wr 2222210c 00450008
+dma_wr 22222110 b8082c00
+dma_wr 22222114 12ff0040
+dma_wr 22222118 858b9799
+dma_wr 2222211c 54766ed9
+dma_wr 22222120 05901032
+dma_wr 22222124 12003f01
+dma_wr 22222128 026a2872
+dma_wr 2222212c 686f6c6c
+dma_wr 22222130 686f6c65
+dma_wr 22222134 686f6c65
+dma_wr 22222138 686f6c65
+dma_wr 2222213c abab6c65
+dma_wr 22222140 abababab
+dma_wr 22222144 abababab
+dma_wr 22222148 0000abab
+dma_wr 2222214c 00000000
+dma_wr 22222150 00000000
+dma_wr 22222154 00000000
+dma_wr 22222158 00000000
+dma_wr 2222215c 00000000
+dma_wr 22222160 00000000
+dma_wr 22222164 00000000
+dma_wr 22222168 00000000
+dma_wr 2222216c 00000000
+dma_wr 22222170 00000000
+dma_wr 22222174 00000000
+dma_wr 22222178 zzzzzzzz
+dma_wr 2222217c zzzzzzzz
+
+
+dma_wr fffff024 0000c07e -- dma writes rx status,
+dma_wr fffff020 22222101 -- dma writes ownership bit
+
+-- supply the receive buffer location
+dma_rd fffff028 22222100 -- dma reads pointer of 22222100
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Frame 5 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+--******************************************************************************
+-- RX Frame 5 : PTP unicast (other) frame
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 5 : PTP pdelay_resp frame"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        00e0f7263fe9 -- MAC DA
+rxd        08002086354b -- MAC SA
+rxd        0800         -- Length/typeID
+rxd        4500         -- Version, IHL, type of service
+rxd        002c         -- total length = 55
+rxd        08b8         -- ID
+rxd        4000         -- flags & fragmentation
+rxd        ff12         -- time to live and not UDP protocol
+rxd        9997         -- IP Header checksum
+rxd        8b85d96e     -- IP SA
+rxd        76543210     -- IP DA
+rxd        9005         -- UDP source port
+rxd        013f         -- UDP destination port
+rxd        0012         -- UDP length
+rxd        7228         -- UDP checksum
+rxd        61           -- transport specific, messageType
+rxd        01           -- version PTP
+rxd        6c6c         -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        6f68656c     -- subdomain
+rxd        abababab     -- other stuff
+rxd        abababab     -- other stuff
+rxd        abababab     -- UUID, sequenceID
+rxd        00000000     -- control, subdomain
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        00000000     -- PAD
+rxd        gggggggg     -- FCS
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 26f7e000 -- store frame to memory
+dma_wr 22222104 0008e93f
+dma_wr 22222108 4b358620
+dma_wr 2222210c 00450008
+dma_wr 22222110 b8082c00
+dma_wr 22222114 12ff0040
+dma_wr 22222118 858b9799
+dma_wr 2222211c 54766ed9
+dma_wr 22222120 05901032
+dma_wr 22222124 12003f01
+dma_wr 22222128 01612872
+dma_wr 2222212c 686f6c6c
+dma_wr 22222130 686f6c65
+dma_wr 22222134 686f6c65
+dma_wr 22222138 686f6c65
+dma_wr 2222213c abab6c65
+dma_wr 22222140 abababab
+dma_wr 22222144 abababab
+dma_wr 22222148 0000abab
+dma_wr 2222214c 00000000
+dma_wr 22222150 00000000
+dma_wr 22222154 00000000
+dma_wr 22222158 00000000
+dma_wr 2222215c 00000000
+dma_wr 22222160 00000000
+dma_wr 22222164 00000000
+dma_wr 22222168 00000000
+dma_wr 2222216c 00000000
+dma_wr 22222170 00000000
+dma_wr 22222174 00000000
+dma_wr 22222178 zzzzzzzz
+dma_wr 2222217c zzzzzzzz
+
+
+dma_wr fffff02c 0000c07e -- dma writes rx status,
+dma_wr fffff028 22222101 -- dma writes ownership bit
+
+-- supply the receive buffer location
+dma_rd fffff030 22222100 -- dma reads pointer of 22222100
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Frame 5 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+end(4000)
+
+

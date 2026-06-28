@@ -1,0 +1,716 @@
+-------------------------------------------------------
+-- tx_buffer_both test scenario for the Ethernet MAC --
+-------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+-- Written by Adam Walker
+--
+-- 05Mar2002 awalker started it off
+--
+-- Case 1: Queue up two frames then signal a halt before any writeback occurs
+--         check that the writebacks for both frames occur in the correct order
+--         frm1 then frm2
+--
+--
+-- Case 2: Queue up two frames and signal a collision in the first frame.
+--         Check that frame one is recovered. Halt occurs because of 
+--         used bit read mid frame on second frame during first attempt.
+--
+--
+-- Case 3: Queue up two frames and signal a collision in the first frame.
+--         Check that frame one is recovered. This time halt occurs 
+--         because of write to control reg.
+--
+--
+-- Case 4: Queue up three frames and signal a collision in the second frame
+--         after frame one has written back and a used bit has been read 
+--         from frame three (second buffer). Check that frame two is retried 
+--         and then try frame three again (OK this time).
+--
+--
+-- Case 5: Queue up three frames allow the first one to writeback descriptor
+--         and then set the halt in frame three check that the writebacks occur
+--         in the correct order, frm2 then frm3
+--
+-- ************************************************************************** --
+
+
+wait_states 0
+bus_grant_delay 0
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      440 88000000  -- write transmit queue pointer 1
+apbwr      444 99000000  -- write transmit queue pointer 2
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+
+
+
+-------------------------------------------------------------------------
+-- Case 1: Queue up two frames then signal a halt before any writeback occurs
+--         check that the writebacks for both frames occur in the correct order
+--         frm1 then frm2
+-------------------------------------------------------------------------
+
+
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000408  "Case 1: Queue up two frames and check writeback"
+                        -- write tx_go and enable tx
+
+
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555504 00008008 -- end of frame, length 8 bytes
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 5555550c 0000801c -- end of frame, length 28 bytes
+dma_rd 55555508 fedcb000 -- dma reads pointer of fedcb000
+
+
+-- supply the transmit data to the AHB interface
+dma_rd fedcb000 005e0001
+dma_rd fedcb004 d0000200
+dma_rd fedcb008 04e7ecbc
+dma_rd fedcb00c c0450008
+dma_rd fedcb010 00003000
+dma_rd fedcb014 11020000
+dma_rd fedcb018 8c9e7258
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d00000000000000000
+txd		       00000000000000000000000000000000
+txd		       00000000000000000000000000000000
+txd		       00000000000000000000000059f64c90
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8c00000000
+txd		       00000000000000000000000000000000
+txd		       0000000000000000000000007b9b4a26
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 80008008 -- write used bit
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	    14 00000028  -- tx status - frame transmitted, go bit set
+
+-- write transmit complete status for frame 2
+dma_wr 5555550c 8000801c -- write used bit
+
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	    14 00000020  -- tx status - frame transmitted, halted
+apbwr	    14 00000020  -- clear tx status
+
+
+-- check transmit statistics
+apbrd     100 00000080  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000002  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000002  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000002  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+
+-------------------------------------------------------------------------
+-- Case 2: Queue up two frames and signal a collision in the first frame.
+--         Check that frame one is recovered. Halt occurs because of 
+--         used bit read mid frame on second frame during first attempt.
+-------------------------------------------------------------------------
+
+apbwr      1c 66666600  -- write address of transmit buffer descriptor in memory
+apbrd      1c 66666600  -- check transmit queue pointer
+apbwr      00 00000208  "Case 2: Queue up 2 frames and coll in the first frame"
+
+
+-- NOTE: Due to packet buffer frames are only read once and are retried from 
+--       the packet buffer without re-fetching DMA.
+
+-- descriptor reads for first frame, first attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 66666604 00008008 -- end of frame, length 8 bytes
+dma_rd 66666600 98765000 -- dma reads pointer of 98765000
+
+-- data reads for first frame, first attempt
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+
+
+
+-- descriptor reads for second frame, first attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 6666660c 0000001c -- multibuffer frame, length 28 bytes
+dma_rd 66666608 fedcb000 -- dma reads pointer of fedcb000
+
+-- data reads for second frame, first attempt
+dma_rd fedcb000 005e0001
+dma_rd fedcb004 d0000200
+dma_rd fedcb008 04e7ecbc
+dma_rd fedcb00c c0450008
+dma_rd fedcb010 00003000
+dma_rd fedcb014 11020000
+dma_rd fedcb018 8c9e7258
+
+dma_rd 66666614 8000001c -- used bit mid frame (causes halt)
+dma_rd 66666610 fedcb000 -- 
+
+
+-- First frame transmit data, first attempt (collision occurs)
+txd    55555555555555d501005e00000200d00000000000000000
+txd                 00000000000000000000000000000000
+txd                 00000000000000000000000000000000
+txd                 00000000000000000000x0000
+txd                    00000000 -- JAM
+
+
+-- First frame transmit data, second attempt (successfull)
+txd    55555555555555d501005e00000200d00000000000000000
+txd                 00000000000000000000000000000000
+txd                 00000000000000000000000000000000
+txd                 00000000000000000000000059f64c90
+
+
+-- No TX for frame 2 as used mid frame is read
+
+
+-- write transmit complete status for frame 1
+dma_wr 66666604 80008008 -- write used bit
+
+-- write transmit complete status for frame 2
+dma_wr 6666660c 8800001c -- write used bit, exhausted mid frame
+
+
+
+-- With the new packet buffer we get good status for the first successful frame
+
+-- interrupt for frame 1
+apbrd(int)  24 000000c8  -- check interrupt status - TX complete, used & mid frame
+apbwr       24 000000c8  -- clear interrupt status
+apbrd       14 00000033  -- tx status - TX complete, used, mid frame, collision detected, halted
+apbwr       14 00000033  -- clear tx status
+
+
+
+-- check transmit statistics
+apbrd     100 00000040  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000001  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000001  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+
+
+
+-------------------------------------------------------------------------
+-- Case 3: Queue up two frames and signal a collision in the first frame.
+--         Check that frame one is recovered. This time halt occurs 
+--         because of write to control reg.
+-------------------------------------------------------------------------
+
+apbwr      1c 66666600  -- write address of transmit buffer descriptor in memory
+apbrd      1c 66666600  -- check transmit queue pointer
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000408  "Case 3: Queue up 2 frames and coll in the first frame"
+
+
+-- NOTE: Due to packet buffer frames are only read once and are retried from 
+--       the packet buffer without re-fetching DMA.
+
+
+-- descriptor reads for first frame, first attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 66666604 00008008 -- end of frame, length 8 bytes
+dma_rd 66666600 98765000 -- dma reads pointer of 98765000
+
+-- data reads for first frame, first attempt
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+
+
+
+-- descriptor reads for second frame, first attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 6666660c 0000801c -- end of frame, length 28 bytes
+dma_rd 66666608 fedcb000 -- dma reads pointer of fedcb000
+
+-- data reads for second frame, first attempt
+dma_rd fedcb000 005e0001
+dma_rd fedcb004 d0000200
+dma_rd fedcb008 04e7ecbc
+dma_rd fedcb00c c0450008
+dma_rd fedcb010 00003000
+dma_rd fedcb014 11020000
+dma_rd fedcb018 8c9e7258
+
+
+
+-- First frame transmit data, first attempt (collision occurs)
+txd    55555555555555d501005e00000200d00000000000000000
+txd		       00000000000000000000000000000000
+txd		       00000000000000000000000000000000
+txd		       00000000000000000000x000011111111
+
+
+-- First frame transmit data, second attempt (successfull)
+txd    55555555555555d501005e00000200d00000000000000000
+txd		       00000000000000000000000000000000
+txd		       00000000000000000000000000000000
+txd		       00000000000000000000000059f64c90
+
+-- write transmit complete status for frame 1
+dma_wr 66666604 80008008 -- write used bit
+
+-- interrupt for frame 1
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	    14 0000002a  -- tx status - frame transmitted, collision detected
+apbwr	    14 0000002a  -- clear tx status
+
+
+-- NOTE: Due to packet buffer the second frame will always be transmitted
+--       as we are not having to re-fetch after a collision.
+
+-- First 2 frame transmit data, first attempt (successfull)
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd                    003000000000021158729e8c00000000
+txd		       00000000000000000000000000000000
+txd		       0000000000000000000000007b9b4a26
+
+-- write transmit complete status for frame 1
+dma_wr 6666660c 8000801c -- write used bit
+
+-- interrupt for frame 2
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	    14 00000020  -- tx status - frame transmitted, halted
+apbwr	    14 00000020  -- clear tx status
+
+
+
+
+-- check transmit statistics
+apbrd     100 00000080  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000002  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000002  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000002  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000001  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000001  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+
+
+
+-------------------------------------------------------------------------
+-- Case 4: Queue up three frames and signal a collision in the second frame
+--         after frame one has written back and a used bit has been read 
+--         from frame three (second buffer). Check that frame two is retried 
+--         and then try frame three again (OK this time).
+-------------------------------------------------------------------------
+
+apbwr      1c 77777700  -- write address of transmit buffer descriptor in memory
+apbrd      1c 77777700  -- check transmit queue pointer
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  "Case 4: Queue up three frames and col second"
+
+
+-- NOTE: Due to packet buffer frames are only read once and are retried from 
+--       the packet buffer without re-fetching DMA.
+
+
+-- descriptor reads for first frame, first attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 77777704 00008008 -- end of frame, length 8 bytes
+dma_rd 77777700 98765000 -- dma reads pointer of 98765000
+
+-- data reads for first frame, first attempt
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+
+
+
+
+-- descriptor reads for second frame, first attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 7777770c 0000801c -- end of frame, length 28 bytes
+dma_rd 77777708 fedcb000 -- dma reads pointer of fedcb000
+
+-- data reads for second frame, first attempt
+dma_rd fedcb000 005e0001
+dma_rd fedcb004 d0000200
+dma_rd fedcb008 04e7ecbc
+dma_rd fedcb00c c0450008
+dma_rd fedcb010 00003000
+dma_rd fedcb014 11020000
+dma_rd fedcb018 8c9e7258
+
+
+
+
+-- descriptor reads for third frame, first buffer, first attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 77777714 00000004 -- length 4 bytes
+dma_rd 77777710 abcdef00 -- dma reads pointer of fedcb000
+
+-- data reads for third frame, first buffer, first attempt
+dma_rd abcdef00 10101010
+
+-- descriptor reads for third frame, second buffer, first attempt (marked as USED)
+dma_rd 7777771c 80008004 -- end of frame, length 4 bytes -- USED
+dma_rd 77777718 abcdef00 -- dma reads pointer of fedcb000
+
+
+
+
+
+-- First frame transmit data, first attempt (successfull)
+txd    55555555555555d501005e00000200d00000000000000000
+txd		       00000000000000000000000000000000
+txd		       00000000000000000000000000000000
+txd		       00000000000000000000000059f64c90
+
+-- write transmit complete status for frame 1
+dma_wr 77777704 80008008 -- write used bit
+
+-- interrupt for frame 1
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	    14 00000028  -- tx status - frame transmitted, go bit set
+apbwr	    14 00000028  -- clear tx status
+
+
+
+
+
+-- Second frame transmit data, first attempt (collision)
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd                    003000000000021158729e8c00000000
+txd                    000000000000x000000000000 
+
+
+-- Second frame transmit data, second attempt (successfull)
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd                    003000000000021158729e8c00000000
+txd                    00000000000000000000000000000000
+txd                    0000000000000000000000007b9b4a26
+
+
+-- write transmit complete status for frame 2
+dma_wr 7777770c 8000801c -- write used bit
+
+
+-- write transmit complete status for frame 3 - exhausted mid-frame
+dma_wr 77777714 88000004 -- length 4 bytes
+
+
+-- interrupt for frame 2
+apbrd(int)  24 000000c8  -- check interrupt status - TX complete, used & mid frame
+apbwr       24 000000c8  -- clear interrupt status
+apbrd       14 00000033  -- tx status - TX complete, used, mid frame, collision detected, halted
+apbwr       14 00000033  -- clear tx status
+
+
+
+-- check transmit statistics - two frames are dropped
+apbrd     100 00000080  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000002  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000002  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000002  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000001  -- check single collisions frames -- 2nd frame not successful
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+
+
+-------------------------------------------------------------------------
+-- Case 5: Queue up three frames allow the first one to writeback descriptor
+--         and then set the halt in frame three check that the writebacks occur
+--         in the correct order, frm2 then frm3
+-------------------------------------------------------------------------
+
+-- cause halt to be seen in the second buffer
+apbwr      1c 77777710  -- write address of transmit buffer descriptor in memory
+apbrd      1c 77777710  -- check transmit queue pointer
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr      00 00000408  "Case 5: Queue up three frames and all tx OK then halt"
+
+
+-- descriptor reads for first frame, first attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 77777714 00008008 -- end of frame, length 8 bytes
+dma_rd 77777710 98765000 -- dma reads pointer of 98765000
+
+-- data reads for first frame, first attempt
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+
+
+
+-- descriptor reads for second frame, first attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 7777771c 0000801c -- end of frame, length 28 bytes
+dma_rd 77777718 fedcb000 -- dma reads pointer of fedcb000
+
+-- data reads for second frame, first attempt
+dma_rd fedcb000 005e0001
+dma_rd fedcb004 d0000200
+dma_rd fedcb008 04e7ecbc
+dma_rd fedcb00c c0450008
+dma_rd fedcb010 00003000
+dma_rd fedcb014 11020000
+dma_rd fedcb018 8c9e7258
+
+
+
+-- descriptor reads for third frame, first attempt
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 77777724 00018020 -- end of frame, length 32 bytes
+dma_rd 77777720 abcde000 -- dma reads pointer of fedcb000
+
+-- data reads for third frame, first attempt
+dma_rd abcde000 10101010
+dma_rd abcde004 01010101
+dma_rd abcde008 20202020
+dma_rd abcde00c 02020202
+dma_rd abcde010 30303030
+dma_rd abcde014 03030303
+dma_rd abcde018 40404040
+dma_rd abcde01c 04040404
+
+
+
+-- First frame transmit data, first attempt (successfull)
+txd    55555555555555d501005e00000200d00000000000000000
+txd		       00000000000000000000000000000000
+txd		       00000000000000000000000000000000
+txd		       00000000000000000000000059f64c90
+
+
+-- Second frame transmit data, first attempt (successfull)
+txd    55555555555555d501005e00000200d0bcece704080045c0
+txd		       003000000000021158729e8c00000000
+txd		       00000000000000000000000000000000
+txd		       0000000000000000000000007b9b4a26
+
+
+-- Third frame transmit data, first attempt (successfull)
+txd    55555555555555d510101010010101012020202002020202
+txd		       30303030030303034040404004040404
+
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 77777714 80008008 -- write used bit
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	    14 00000028  -- tx status - frame transmitted, go bit set
+
+
+-- write transmit complete status for the oldest frame 2
+dma_wr 7777771c 8000801c -- write used bit
+
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	    14 00000028  -- tx status - frame transmitted, 
+
+
+-- write transmit complete status for the oldest frame 3
+dma_wr 77777724 80018020 -- write used bit
+
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- clear interrupt status
+apbrd	    14 00000020  -- tx status - frame transmitted, halted
+
+
+-- check transmit statistics, one frame short, not recorded
+apbrd     100 000000a0  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000003  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000002  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000002  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+
+
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(10000)
+

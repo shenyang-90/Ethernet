@@ -1,0 +1,133 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_an_orderedset_tbi
+--
+--   Author         : Mike MacGillis (mikema@tality.com)
+--
+--   Date           : May 13 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--   This tests ensures that the Conf_Reg is properly encoded into the Configuration Ordered
+--   Sets and that the ordered sets are properly transmitted.
+-- 
+-- Functional Coverage
+----------------------
+--  * Ensures the GEM will transmit proper /C/ code groups.
+
+-- Detailed Test Description
+----------------------------
+-- 1. Initialise the GEM for Gigabit Operation with PCS enabled. Furthermore, Auto-Negotiation is 
+--    enabled.
+-- 2. Provide a link of /C/ codes with the Config_Reg all zero.
+-- 3. The GEM should respond with alternating /C/ codes with the Config_Reg field all zeros.
+-- 4. After the link timer in the GEM finishes counting, the GEM should then transmit alternating /C/
+--    codes with the Conf_Reg field incdicating the same values that are in the PCS auto-negotiation 
+--    advertisement register.
+-- 5. Provide a link of /C/ codes corresponding to the abilities of the link partner (Bits 6(HD) and 5(FD) set
+--    high.) 
+-- 6. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--     same values that are in the PCS auto-negotiation advertisement register plus bit 14 should be set high.
+-- 7. Check the PCS registers.
+--
+--   Note: To cause the tb_pcs_rx test-bench to be triggered from tb_pcs_tx test-bench
+--      the following commands should be used.
+--   
+--    i.e.
+--    pcs_an_tx(trx)        c10000c20000c10000c20000    
+--    pcs_an_rx(trx)        c16000c26000c16000c26000  
+--
+--      The trigger field in the pcs_an_tx command should have pcs in it. 
+--      This will cause the tb_pcs_tx test-bench to generate a pulse to trigger the 
+--      start of the pcs_an_rx command. Then, the trigger field in the pcs_an_rx
+--      command should have pcs in it.  This will cause the tb_pcs_rx test-bench
+--      to trigger off the pulse generated in tb_pcs_tx test-bench.
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- ********************************************************************************************* --
+-- 1. Initialise the GEM for Gigabit Operation with PCS enabled. Furthermore, Auto-Negotiation is 
+--    enabled.
+-- ********************************************************************************************* --
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd     200 00009040  -- check value of pcs control register
+apbwr      04 00081c00  -- Put MAC into gigabit mode with TBI. Retry test enabled
+apbrd      04 00081c00  -- Check value of network config register
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 03020100  -- specific address register 1 bottom
+apbwr      8C 00000504  -- specific address register 1 top
+apbrd     200 00001040  -- check value of pcs control register
+apbrd     204 00000109  -- check pcs status register
+apbwr     210 00000060  -- pcs auto-nego. HD and FD
+apbrdf     20 00000000  -- check receive status register and trigger reception
+
+
+-- ********************************************************************************************* --
+-- 2. Provide a link of /C/ codes with the Config_Reg all zero.
+-- ********************************************************************************************* --
+
+pcs_an_rx(300)        c10000c20000c10000c20000  8r
+
+-- ********************************************************************************************* --
+-- 3. The GEM should respond with alternating /C/ codes with the Config_Reg field all zeros.
+-- ********************************************************************************************* --
+
+pcs_an_tx             0000
+
+
+-- ********************************************************************************************* --
+-- 4. After the link timer in the GEM finishes counting, the GEM should then transmit alternating /C/
+--    codes with the Conf_Reg field incdicating the same values that are in the PCS auto-negotiation 
+--    advertisement register.
+-- ********************************************************************************************* --
+
+pcs_an_tx(trx)             6000
+
+-- ********************************************************************************************* --
+-- 5. Provide a link of /C/ codes corresponding to the abilities of the link partner (Bits 6(HD) and 5(FD) set
+--    high in the Conf_Reg.) 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c16000c26000c16000c26000  8r
+pcs_an_rx             c16000c26000c16000c26000  8r
+
+-- ********************************************************************************************* --
+-- 6. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--     same values that are in the PCS auto-negotiation advertisement register plus bit 14 should be set high.
+-- ********************************************************************************************* --
+
+pcs_an_tx             6040
+
+
+-- ********************************************************************************************* --
+-- 7. Check the PCS registers.
+-- ********************************************************************************************* --
+
+apbrd(2000)    204 00000109     -- check pcs status register
+apbrd          200 00001040  -- check pcs control register 
+apbrd          200 00001040  -- check pcs control register 
+apbrd          200 00001040  -- check pcs control register 
+apbrd          210 00000060  -- check pcs auto-neg. advertisment register
+apbrd          214 00000060  -- check pcs auto-neg. link partner advertisment register
+apbrd          218 00000004  -- check pcs auto-neg. expansion register 
+apbrd          21c 00000000  -- check pcs auto-neg. next page register
+apbrd          220 00000000  -- check pcs auto-neg. link partner next page register
+apbrd          23C 00008000  -- check pcs auto-neg. extended status register
+dma_rd 00000000 12345678 -- DMA will read a single descriptor after RX is enabled
+end(2500)

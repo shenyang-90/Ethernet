@@ -1,0 +1,195 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2017
+--                                       Cadence Design Systems, Inc.
+--                                       All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : asf_amba_trans_to
+--
+--   Author         : Steven Ho
+--
+--   Date           : 22nd May 2017
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Simple random TX test using the DMA and enabling the host bus interface 
+-- lockup detection.
+--
+-- 
+--------------------------------------------------------------------------------
+
+-- define config compatibility (names are the verilog defines in the defs file without the IP prefix)
+requires ext_fifo_interface 0
+requires rx_pkt_buffer 1
+requires tx_pkt_buffer 1
+requires asf_enable 1
+
+
+-- Set AMBA clock freq to 250MHz
+-- At 32bit, this means we have maximum bandwidth of 8Gbit/s shared between
+-- TX and RX. Randomize hready, keeping the maximum to 5 (averages around 2.5)
+-- to ensure no RX overflows occur, and max line rate is acheivable on TX
+sel_ahb_freq 3 
+randomize_hready -descr_max 5 -data_max 5 -read_max 5 -write_max 5
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- APB writes to instruct testbench to release the lockup detect forces as we
+-- want to control them directly in this test.
+apbwr(60)  40 80000000  -- Enable TX cutthru
+apbwr      44 80000000  -- Enable RX cutthru
+apbwr      40 00000000  -- Disable TX cutthru
+apbwr      44 00000000  -- Disable RX cutthru
+apbwr     e30 80003000  -- Enable host transaction timeout
+apbwr     e30 00003000  -- Disable host transaction timeout
+
+# Initialize the transmit and receive DMA queue pointers (random values but can add specifics if required)
+# use arg -rx_ptr_q<Q> and tx_ptr_q<Q> to set specific ptr values rather than the default random
+init_q_ptr  -num_tx_queues take_from_cfg   -num_rx_queues take_from_cfg
+
+# Initialize the screener type 1 registers (random values)
+# Note this will automatically force the transactor later on to
+# randomly create frames that match on these screeners, thus routing
+# frames to receive queues ..
+init_screener_type1 -num_type1_screeners take_from_cfg   -num_rx_queues take_from_cfg 
+
+# initialize the DMA specific options for random data xfers
+#   - RX DMA data buffer size
+#     If left without an argument, it will be completely random
+#     Set high to force single buffer descriptor testing eg 16320
+#     use -max_buf_size for max (multiple 64 bytes only)
+#     use -min_buf_size for min (multiple 64 bytes only)
+#
+#   - Burst Length (random by default)
+#     use -burst <num>, where num can be 1,2,4,8,16, random
+#        
+#   - address bus (random by default, or off if config doesnt allow)
+#     use -addr_bus <32|64|random|take_from_cfg>     
+#        
+#   - extended buffer descriptors (random by default, or off if config doesnt allow)
+#     use -ext_bd <1|0|random>     
+#        
+#   - force max burst mode (forces AXI to send max length bursts)
+#     use -force_max_burst_<tx|rx> <1|0|random>    default is 0 
+init_dma -ext_bd random -addr_bus random  -burst random -min_buf_size 16320
+
+# Initialize the network configuration register
+# Args are
+#   -eam      <1|0|random>, default = 0. This is external address matching
+#   -duplex   <full|half|random>, default = random
+#   -speed    <1g|100m|10m|random>, default = random
+#   -jumbo    <1|0|random>, default = random. This wont affect the RX transactor below, but will automatically cause jumbos to be dropped.
+#   -copy_all <1|0|random>, default = 0. If 0, ensure you initialize the dest_addr in the rx transactor to something that will match
+#   -databus  <32|64|128|take_from_cfg|random>, default = random, bus <= config.  The max value is the value set in dma_bus_width in gem_defs.v
+init_ncr -duplex full -speed 1g -jumbo random -databus take_from_cfg
+
+# Enable the interrupts
+# This is per queue, 
+# Valid args are ..
+#    -num_queues <1-16|take_from_cfg>
+#    -vector <the actual interrupt vector as per userguide>
+enable_ints -num_queues take_from_cfg -vector 00000008
+
+-- check and initialise the relevant registers
+apbwr      10 01a00710  -- DMA configuration
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      90 abababab  -- specific address register 2 bottom (multicast)
+apbwr      94 0000abab  -- specific address register 2 top
+apbwr      98 abcdef10  -- specific address register 3 bottom (unicast)
+apbwr      9C 0000a5a5  -- specific address register 3 top
+apbwr      a0 cccccccc  -- specific address register 3 bottom (unicast)
+apbwr      a4 00005a5a  -- specific address register 3 top
+
+apbwr     e34 00000000  -- Unmask all transaction timeout fault sources for ASF
+
+-- First start with testing the ASF interrupt
+apbwr     e08 00000000  -- Unmask ASF interrupts
+apbrd     e00 00000000  -- No interrupts set yet.
+apbwr     e30 00000000  -- Set timer value to 0, this will cause timeout once enabled.
+apbwr     e30 80000000  -- Enable host timeout check
+
+apbrd(asf_fint) e00 00000010 -- Transaction timeout
+apbrd     e04 00000010  -- Raw interrupt
+apbrd     e38 00000010  -- Host interface timeout status
+apbwr     e10 ffffffef  -- Downgrade to non-fatal
+apbrd(asf_int)  e00 00000010  -- Still set
+
+apbwr     e30 00000000  -- Disable host timeout check
+apbrd     e30 00000000  -- Some delay for propagation
+apbrd     e30 00000000  -- Some delay for propagation
+apbrd     e30 00000000  -- Some delay for propagation
+apbrd     e30 00000000  -- Some delay for propagation
+apbrd     e30 00000000  -- Some delay for propagation
+apbrd     e30 00000000  -- Some delay for propagation
+
+apbwr     e00 00000010  -- Clear interrupt status
+apbrd     e00 00000000  -- Check cleared
+apbrd     e38 00000010  -- Status still set
+apbwr     e38 00000010  -- Clear it
+apbrd     e38 00000000  -- Check cleared
+
+-- Set up to non-zero time value but still small enough to ensure a timeout can occur.
+apbwr     e30 00000003  -- 3 host clock cycles
+apbwr     e30 80000003  -- Enable it
+apbrd     e04 00000000  -- Check not set
+apbrd     e04 00000000  -- Check not set
+apbrd     e04 00000000  -- Check not set
+apbrd     e04 00000000  -- Check not set
+apbrd     e04 00000000  -- Check not set
+apbrd     e04 00000000  -- Check not set
+apbrd     e04 00000000  -- Check not set
+apbrd     e04 00000000  -- Check not set
+apbrd     e04 00000000  -- Check not set
+apbrd     e04 00000000  -- Check not set
+
+apbwr      00 00000208  -- Enable TX
+
+tx_frame  10
+      number_of_bufs 2
+      num_dma_queues take_from_cfg
+      auto_gen_int   0
+      buffer_size    100-take_from_cfg
+      data           random
+      fcs            YES
+
+-- The interrupt should've fired at some point...
+apbrd(asf_int) e00 00000010 -- Transaction timeout
+apbrd     e04 00000010  -- Raw interrupt
+apbrd     e38 00000010  -- Host interface timeout status
+
+-- Now set to a higher value and expect no interrupt
+-- Note here that we didn't disable the monitor first to prevent the
+-- count from getting out of sync. This is an issue with using the above
+-- tx_frame generator as we have little control over the timing of this in
+-- relation to the design actually fetching data.
+-- In a real system, the values would not be changed on the fly like this and any CDC violations
+-- in the test environment due to this is not real and can be ignored.
+apbwr     e30 80000080  -- 128 Clock cycles
+apbrd     e30 80000080  -- Delay to allow propagation
+apbrd     e30 80000080  -- Delay to allow propagation
+apbrd     e30 80000080  -- Delay to allow propagation
+apbrd     e30 80000080  -- Delay to allow propagation
+apbrd     e30 80000080  -- Delay to allow propagation
+
+-- Clear existing interrupt
+apbwr     e00 00000010  -- Clear interrupt status
+apbrd     e00 00000000  -- Check cleared
+apbrd     e38 00000010  -- Status still set
+apbwr     e38 00000010  -- Clear it
+apbrd     e38 00000000  -- Check cleared
+
+
+-- Check after some time
+apbrd(8000) e04 00000000  -- No interrupts
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(3000000)
+

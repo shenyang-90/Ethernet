@@ -1,0 +1,1722 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : wol_arp
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 6 March 2003
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- This test verifies the operation of ARP detection for Wake-on-LAN.
+-- 
+-- Functional Coverage
+-- * Checks that the ARP type field is correctly recognised.
+-- * Checks that the ARP target protocol field is correctly recognised when
+--   it matches the wol_ip_addr[15:0] register value.
+-- * Checks the operation of the WoL enable mask.
+-- * Checks that when the wol_ip_addr[15:0] register value is 0x0000 a wakeup
+--   event is not generated.
+-- * Checks the operation of the "wol" output.
+-- * Checks that the ARP frame is recognised for both good and bad frames.
+-- * Checks that the ARP frame is recognised for both VLAN and non-VLAN frames.
+-- * Checks that the ARP frame is only recognised for a broadcast address.
+-- * Checks that the ARP frame is only recognised when broadcasts are enabled.
+--
+-- 
+-- Detailed Test Description
+--  1. Initialise suitable wait states for the test.
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 32-bit DMA data bus.
+--  3. Send the DUT various frames to test ARP request detection for WoL:
+--
+-- Test 1: Good ARP that generates WoL
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a good receive ARP request frame with correct type and operation 
+--     fields and a target address that matches the value programmed.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame is successfully received.
+--
+-- Test 2: Good ARP, but mask disabled
+--     Disable the ARP wake up event enable bit in the WoL register, enable all
+--     other wake up event and program the WoL target address match register.
+--     Send a good receive ARP request frame with correct type and operation 
+--     fields and a target address that matches the value programmed.
+--     Verify that the wol output is not asserted but that the frame is 
+--     successfully received.
+--
+-- Test 3: Good ARP type, bad operation, good IP address match
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a good receive ARP request frame with correct type field and a 
+--     target address that matches the value programmed, but the operation
+--     does not indicate an ARP request.
+--     Verify that the wol output is not asserted but that the frame is 
+--     successfully received.
+--
+-- Test 4: Good ARP type, good operation, bad IP address match (MSB)
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a good receive ARP request frame with correct type and operation 
+--     fields, but the target address does not matches the MSB value programmed.
+--     Verify that the wol output is not asserted but that the frame is 
+--     successfully received.
+--
+-- Test 5: Good ARP type, good operation, good zero IP address match
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register with 0x0000.
+--     Send a good receive ARP request frame with correct type and operation 
+--     fields and a target address that matches the value programmed (0x0000).
+--     Verify that the wol output is not asserted but that the frame is 
+--     successfully received.
+--
+-- Test 6: Bad CRC ARP that generates WoL
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a receive ARP request frame with bad CRC, but correct type and 
+--     operation fields and a target address that matches the value programmed.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame dropped with a CRC error.
+--
+-- Test 7: Too short ARP that generates WoL
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a short (60 bytes) receive ARP request frame, but correct type and 
+--     operation fields and a target address that matches the value programmed.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame dropped with a undersize error.
+--
+-- Test 8: Non-broadcast ARP that does not generates WoL
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a receive ARP request frame to a non-broadcast address that matches
+--     specific address 1, but correct type and operation fields and a target 
+--     address that matches the value programmed.
+--     Verify that the wol output is not asserted and that the frame is 
+--     successfully recognised.
+--
+-- Test 9: Good VLAN ARP that generates WoL
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a good receive VLAN tagged ARP request frame with correct type and
+--     operation fields and a target address that matches the value programmed.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame is successfully received.
+--
+-- Test 10: Broadcast ARP, but broadcasts are disabled
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Disable reception of broadcasts.
+--     Send a receive ARP request frame to the broadcast address with correct 
+--     type and operation fields and a target address that matches the value 
+--     programmed.
+--     Verify that the wol output is not asserted and that the frame is 
+--     not recognised.
+--     Receive a frame to trigger an interrupt and return the system back to
+--     normal operating conditions.
+--
+-- Test 11: Bad ARP type ID MSB
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a receive ARP request frame to the broadcast address with incorrect 
+--     typeID MSB.
+--     Verify that the wol output is not asserted, but that the frame is 
+--     successfully received.
+--
+-- Test 12: Bad ARP type ID LSB
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a receive ARP request frame to the broadcast address with incorrect 
+--     typeID LSB.
+--     Verify that the wol output is not asserted, but that the frame is 
+--     successfully received.
+--
+-- Test 13: VLAN tagged, bad ARP type ID MSB
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a VLAN tagged receive ARP request frame to the broadcast address
+--     with incorrect typeID MSB.
+--     Verify that the wol output is not asserted, but that the frame is 
+--     successfully received.
+--
+-- Test 14: VLAN tagged, bad ARP type ID LSB
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a VLAN tagged receive ARP request frame to the broadcast address
+--     with incorrect typeID LSB.
+--     Verify that the wol output is not asserted, but that the frame is 
+--     successfully received.
+--
+-- Test 15: Bad VLAN tag, but good ARP
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a VLAN tagged receive ARP request frame to the broadcast address
+--     with correct ARP typeID. Ensure that the VLAN type ID field is incorrect.
+--     Verify that the wol output is not asserted, but that the frame is 
+--     successfully received.
+--
+-- Test 16: Repeated ARP typeID
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a receive ARP request frame to the broadcast address with correct
+--     ARP typeID. Repeat the ARP typeID as if a VLAN tag had been inserted.
+--     Verify that the wol output is still asserted, and that the frame is 
+--     successfully received.
+--     Note, because the protocol type is not checked by this implementation 
+--     the frame is still seen as an ARP request.
+--
+-- Test 17: Good ARP type, good operation, bad IP address match (LSB)
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a good receive ARP request frame with correct type and operation 
+--     fields, but the target address does not matches the LSB value programmed.
+--     Verify that the wol output is not asserted but that the frame is 
+--     successfully received.
+--
+--  4. Check statistics for correct values from above tests.
+--
+--------------------------------------------------------------------------------
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 3
+bus_grant_delay 3
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 32-bit DMA data bus.
+--******************************************************************************
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 00080001  -- Setup speed bit.
+apbrd      04 00080001  -- verify write to network config register.
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      18 fffff000  -- check receive queue pointer
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      00 00000004  -- enable receive
+
+
+
+--******************************************************************************
+--  3. Send the DUT various frames to test ARP request detection for WoL:
+--******************************************************************************
+
+--  check reset state of Wake-on-LAN output
+pinsc(50) wol 0
+
+
+
+--******************************************************************************
+-- Test 1: Good ARP that generates WoL
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a good receive ARP request frame with correct type and operation 
+--     fields and a target address that matches the value programmed.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame is successfully received.
+--******************************************************************************
+
+apbwr      B8 00021213  -- enable WoL ARP and write expected target protocol address
+apbrdf     20 00000000  "Test 1 : Good ARP that generates WoL"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        0806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        d27d43b9     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 type 0806
+
+
+-- supply the receive buffer location
+dma_rd fffff000 22222100 -- dma reads pointer of 22222100
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 FFFFFFFF -- store frame to memory
+dma_wr 22222104 3412FFFF
+dma_wr 22222108 bc9a7856
+dma_wr 2222210c 01000608
+dma_wr 22222110 04060008
+dma_wr 22222114 01000100
+dma_wr 22222118 05040302
+dma_wr 2222211c 09080706
+
+pinsc(int) wol 1  -- check wol pin is high
+apbrd(int) 24 10000000  -- check interrupt status - WOL interrupt
+
+dma_wr 22222120 0d0c0b0a
+dma_wr 22222124 11100f0e
+dma_wr 22222128 00001312
+dma_wr 2222212c 00000000
+dma_wr 22222130 00000000
+dma_wr 22222134 00000000
+dma_wr 22222138 00000000
+dma_wr 2222213c b9437dd2
+
+dma_wr fffff004 8000c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- No VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff000 22222101 -- dma writes ownership bit
+
+
+pinsc(int) wol 1  -- check wol pin is high
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 1 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Test 2: Good ARP, but mask disabled
+--     Disable the ARP wake up event enable bit in the WoL register, enable all
+--     other wake up event and program the WoL target address match register.
+--     Send a good receive ARP request frame with correct type and operation 
+--     fields and a target address that matches the value programmed.
+--     Verify that the wol output is not asserted but that the frame is 
+--     successfully received.
+--******************************************************************************
+
+apbwr      B8 000d1213  -- disable WoL ARP and write expected target protocol address
+apbrdf     20 00000000  "Test 2 : Good ARP, but mask disabled"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        0806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        d27d43b9     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 type 0806
+
+
+-- supply the receive buffer location
+dma_rd fffff008 22222200 -- dma reads pointer of 22222200
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222200 FFFFFFFF -- store frame to memory
+dma_wr 22222204 3412FFFF
+dma_wr 22222208 bc9a7856
+dma_wr 2222220c 01000608
+dma_wr 22222210 04060008
+dma_wr 22222214 01000100
+dma_wr 22222218 05040302
+dma_wr 2222221c 09080706
+dma_wr 22222220 0d0c0b0a
+dma_wr 22222224 11100f0e
+dma_wr 22222228 00001312
+dma_wr 2222222c 00000000
+dma_wr 22222230 00000000
+dma_wr 22222234 00000000
+dma_wr 22222238 00000000
+dma_wr 2222223c b9437dd2
+
+dma_wr fffff00c 8000c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- No VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff008 22222201 -- dma writes ownership bit
+
+
+pinsc(int) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 2 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+--******************************************************************************
+-- Test 3: Good ARP type, bad operation, good IP address match
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a good receive ARP request frame with correct type field and a 
+--     target address that matches the value programmed, but the operation
+--     does not indicate an ARP request.
+--     Verify that the wol output is not asserted but that the frame is 
+--     successfully received.
+--******************************************************************************
+
+apbwr      B8 00021213  -- enable WoL ARP and write expected target protocol address
+apbrdf     20 00000000  "Test 3 : Good ARP type, bad op, good IP address match"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        0806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        aaaa         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        06b26255     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 type 0806
+
+
+-- supply the receive buffer location
+dma_rd fffff010 22222300 -- dma reads pointer of 22222300
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222300 FFFFFFFF -- store frame to memory
+dma_wr 22222304 3412FFFF
+dma_wr 22222308 bc9a7856
+dma_wr 2222230c 01000608
+dma_wr 22222310 04060008
+dma_wr 22222314 0100aaaa
+dma_wr 22222318 05040302
+dma_wr 2222231c 09080706
+dma_wr 22222320 0d0c0b0a
+dma_wr 22222324 11100f0e
+dma_wr 22222328 00001312
+dma_wr 2222232c 00000000
+dma_wr 22222330 00000000
+dma_wr 22222334 00000000
+dma_wr 22222338 00000000
+dma_wr 2222233c 5562b206
+
+dma_wr fffff014 8000c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- No VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff010 22222301 -- dma writes ownership bit
+
+
+pinsc(int) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 3 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+
+--******************************************************************************
+-- Test 4: Good ARP type, good operation, bad IP address match (MSB)
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a good receive ARP request frame with correct type and operation 
+--     fields, but the target address does not matches the MSB value programmed.
+--     Verify that the wol output is not asserted but that the frame is 
+--     successfully received.
+--******************************************************************************
+
+
+apbwr      B8 00021213  -- enable WoL ARP and write expected target protocol address
+apbrdf     20 00000000  "Test 4 : Good ARP type, good op, bad MSB address match"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        0806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111113     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        1830ea16     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 type 0806
+
+
+-- supply the receive buffer location
+dma_rd fffff018 22222400 -- dma reads pointer of 22222400
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222400 FFFFFFFF -- store frame to memory
+dma_wr 22222404 3412FFFF
+dma_wr 22222408 bc9a7856
+dma_wr 2222240c 01000608
+dma_wr 22222410 04060008
+dma_wr 22222414 01000100
+dma_wr 22222418 05040302
+dma_wr 2222241c 09080706
+dma_wr 22222420 0d0c0b0a
+dma_wr 22222424 11100f0e
+dma_wr 22222428 00001311
+dma_wr 2222242c 00000000
+dma_wr 22222430 00000000
+dma_wr 22222434 00000000
+dma_wr 22222438 00000000
+dma_wr 2222243c 16ea3018
+
+dma_wr fffff01c 8000c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- No VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff018 22222401 -- dma writes ownership bit
+
+
+pinsc(int) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 4 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+
+--******************************************************************************
+-- Test 5: Good ARP type, good operation, good zero IP address match
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register with 0x0000.
+--     Send a good receive ARP request frame with correct type and operation 
+--     fields and a target address that matches the value programmed (0x0000).
+--     Verify that the wol output is not asserted but that the frame is 
+--     successfully received.
+--******************************************************************************
+
+
+apbwr      B8 00020000  -- enable WoL ARP and write ZERO expected target protocol address
+apbrdf     20 00000000  "Test 5 : Good ARP type, good op, good 0 IP addr match"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        0806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10110000     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        d81d5f23     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 type 0806
+
+
+-- supply the receive buffer location
+dma_rd fffff020 22222500 -- dma reads pointer of 22222500
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222500 FFFFFFFF -- store frame to memory
+dma_wr 22222504 3412FFFF
+dma_wr 22222508 bc9a7856
+dma_wr 2222250c 01000608
+dma_wr 22222510 04060008
+dma_wr 22222514 01000100
+dma_wr 22222518 05040302
+dma_wr 2222251c 09080706
+dma_wr 22222520 0d0c0b0a
+dma_wr 22222524 11100f0e
+dma_wr 22222528 00000000
+dma_wr 2222252c 00000000
+dma_wr 22222530 00000000
+dma_wr 22222534 00000000
+dma_wr 22222538 00000000
+dma_wr 2222253c 235f1dd8
+
+dma_wr fffff024 8000c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- No VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff020 22222501 -- dma writes ownership bit
+
+
+pinsc(int) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 5 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Test 6: Bad CRC ARP that generates WoL
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a receive ARP request frame with bad CRC, but correct type and 
+--     operation fields and a target address that matches the value programmed.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame dropped with a CRC error.
+--******************************************************************************
+
+
+apbwr      B8 00021213  -- enable WoL ARP and write expected target protocol address
+apbwr      88 FFFFFFFF  -- specific address register 1 bottom for test 8
+apbwr      8C 0000F0FF  -- specific address register 1 top for test 8
+apbrdf     20 00000000  "Test 6 : Bad CRC ARP that generates WoL"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        0806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        deaddead     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 type 0806
+
+
+-- supply the receive buffer location
+dma_rd fffff028 22222600 -- dma reads pointer of 22222600
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222600 FFFFFFFF -- store frame to memory
+dma_wr 22222604 3412FFFF
+dma_wr 22222608 bc9a7856
+dma_wr 2222260c 01000608
+dma_wr 22222610 04060008
+dma_wr 22222614 01000100
+dma_wr 22222618 05040302
+dma_wr 2222261c 09080706
+dma_wr 22222620 0d0c0b0a
+
+pinsc(int) wol 1  -- check wol pin is high
+apbrd(int) 24 10000000  -- check interrupt status - WOL interrupt
+
+dma_wr 22222624 11100f0e
+dma_wr 22222628 00001312
+dma_wr 2222262c 00000000
+dma_wr 22222630 00000000
+dma_wr 22222634 00000000
+dma_wr 22222638 00000000
+-- CRC bad so stop writing here
+-- dma_wr 2222263c addeadde
+
+
+pinsc(2680) wol 1  -- check wol pin is high
+
+
+
+
+--******************************************************************************
+-- Test 7: Too short ARP that generates WoL
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a short (60 bytes) receive ARP request frame, but correct type and 
+--     operation fields and a target address that matches the value programmed.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame dropped with a undersize error.
+--******************************************************************************
+
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        0806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00           -- Data
+rxd        gggggggg     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 type 0806
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222600 FFFFFFFF -- store frame to memory
+dma_wr 22222604 3412FFFF
+dma_wr 22222608 bc9a7856
+dma_wr 2222260c 01000608
+dma_wr 22222610 04060008
+dma_wr 22222614 01000100
+dma_wr 22222618 05040302
+dma_wr 2222261c 09080706
+dma_wr 22222620 0d0c0b0a
+
+pinsc(int) wol 1  -- check wol pin is high
+apbrd(int) 24 10000000  -- check interrupt status - WOL interrupt
+
+dma_wr 22222624 11100f0e
+dma_wr 22222628 00001312
+dma_wr 2222262c 00000000
+dma_wr 22222630 00000000
+dma_wr 22222634 00000000
+dma_wr 22222638 50000000
+-- too short so stop writing here
+-- dma_wr 2222263c cccccccc
+
+
+pinsc(3000) wol 1  -- check wol pin is high
+
+
+
+--******************************************************************************
+-- Test 8: Non-broadcast ARP that does not generates WoL
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a receive ARP request frame to a non-broadcast address that matches
+--     specific address 1, but correct type and operation fields and a target 
+--     address that matches the value programmed.
+--     Verify that the wol output is not asserted and that the frame is 
+--     successfully recognised.
+--******************************************************************************
+
+
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFF0 -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        0806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        63fa259c     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da F0FFFFFFFFFF sa bc9a78563412 type 0806
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222600 FFFFFFFF -- store frame to memory
+dma_wr 22222604 3412F0FF
+dma_wr 22222608 bc9a7856
+dma_wr 2222260c 01000608
+dma_wr 22222610 04060008
+dma_wr 22222614 01000100
+dma_wr 22222618 05040302
+dma_wr 2222261c 09080706
+dma_wr 22222620 0d0c0b0a
+dma_wr 22222624 11100f0e
+dma_wr 22222628 00001312
+dma_wr 2222262c 00000000
+dma_wr 22222630 00000000
+dma_wr 22222634 00000000
+dma_wr 22222638 00000000
+dma_wr 2222263c 9c25fa63
+
+dma_wr fffff02c 0800c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- local match 1
+                         -- 64 bytes received
+dma_wr fffff028 22222601 -- dma writes ownership bit
+
+
+pinsc(int) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Tests 6 to 8 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+--******************************************************************************
+-- Test 9: Good VLAN ARP that generates WoL
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a good receive VLAN tagged ARP request frame with correct type and
+--     operation fields and a target address that matches the value programmed.
+--     Verify that the wol output is asserted for 64 clock cycles and that the
+--     frame is successfully received.
+--******************************************************************************
+
+apbwr      B8 00021213  -- enable WoL ARP and write expected target protocol address
+apbrdf     20 00000000  "Test 9 : Good VLAN ARP that generates WoL"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        060beaad     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 vid 0001 type 0806
+
+
+-- supply the receive buffer location
+dma_rd fffff030 22222900 -- dma reads pointer of 22222900
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222900 FFFFFFFF -- store frame to memory
+dma_wr 22222904 3412FFFF
+dma_wr 22222908 bc9a7856
+dma_wr 2222290c 01000081
+dma_wr 22222910 01000608
+dma_wr 22222914 04060008
+dma_wr 22222918 01000100
+dma_wr 2222291c 05040302
+dma_wr 22222920 09080706
+
+pinsc(int) wol 1  -- check wol pin is high
+apbrd(int) 24 10000000  -- check interrupt status - WOL interrupt
+
+dma_wr 22222924 0d0c0b0a
+dma_wr 22222928 11100f0e
+dma_wr 2222292c 00001312
+dma_wr 22222930 00000000
+dma_wr 22222934 00000000
+dma_wr 22222938 00000000
+dma_wr 2222293c adea0b06
+
+dma_wr fffff034 8020c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- VLAN tag detected, no priority or CFI
+                         -- 64 bytes received
+dma_wr fffff030 22222901 -- dma writes ownership bit
+
+
+pinsc(int) wol 1  -- check wol pin is high
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 9 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+--******************************************************************************
+-- Test 10: Broadcast ARP, but broadcasts are disabled
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Disable reception of broadcasts.
+--     Send a receive ARP request frame to the broadcast address with correct 
+--     type and operation fields and a target address that matches the value 
+--     programmed.
+--     Verify that the wol output is not asserted and that the frame is 
+--     not recognised.
+--     Receive a frame to trigger an interrupt and return the system back to
+--     normal operating conditions.
+--******************************************************************************
+
+apbwr      B8 00021213  -- enable WoL ARP and write expected target protocol address
+apbwr      04 00080021  -- disable broadcasts.
+apbrdf     20 00000000  "Test 10 : Broadcast ARP, but broadcasts are disabled"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        0806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        gggggggg     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 type 0806
+
+
+-- No DMA as no match
+
+pinsc(4200) wol 0  -- check wol pin is low
+
+
+
+-- send an address matched frame to generate an interrupt
+rxd(gap)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFF0 -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        0806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        63fa259c     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da F0FFFFFFFFFF sa bc9a78563412 type 0806
+
+
+-- supply the receive buffer location
+dma_rd fffff038 22222a00 -- dma reads pointer of 22222a00
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222a00 FFFFFFFF -- store frame to memory
+dma_wr 22222a04 3412F0FF
+dma_wr 22222a08 bc9a7856
+dma_wr 22222a0c 01000608
+dma_wr 22222a10 04060008
+dma_wr 22222a14 01000100
+dma_wr 22222a18 05040302
+dma_wr 22222a1c 09080706
+dma_wr 22222a20 0d0c0b0a
+dma_wr 22222a24 11100f0e
+dma_wr 22222a28 00001312
+dma_wr 22222a2c 00000000
+dma_wr 22222a30 00000000
+dma_wr 22222a34 00000000
+dma_wr 22222a38 00000000
+dma_wr 22222a3c 9c25fa63
+
+dma_wr fffff03c 0800c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- local match 1
+                         -- 64 bytes received
+dma_wr fffff038 22222a01 -- dma writes ownership bit
+
+
+pinsc(int) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 10 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+apbwr      04 00080001  -- re-enable broadcasts.
+
+
+
+
+--******************************************************************************
+-- Test 11: Bad ARP type ID MSB
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a receive ARP request frame to the broadcast address with incorrect 
+--     typeID MSB.
+--     Verify that the wol output is not asserted, but that the frame is 
+--     successfully received.
+--******************************************************************************
+
+apbwr      B8 00021213  -- enable WoL ARP and write expected target protocol address
+apbrdf     20 00000000  "Test 11 : Bad ARP type ID MSB"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        8806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        407b4760     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 type 8806
+
+
+-- supply the receive buffer location
+dma_rd fffff040 22222b00 -- dma reads pointer of 22222b00
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222b00 FFFFFFFF -- store frame to memory
+dma_wr 22222b04 3412FFFF
+dma_wr 22222b08 bc9a7856
+dma_wr 22222b0c 01000688
+dma_wr 22222b10 04060008
+dma_wr 22222b14 01000100
+dma_wr 22222b18 05040302
+dma_wr 22222b1c 09080706
+dma_wr 22222b20 0d0c0b0a
+dma_wr 22222b24 11100f0e
+dma_wr 22222b28 00001312
+dma_wr 22222b2c 00000000
+dma_wr 22222b30 00000000
+dma_wr 22222b34 00000000
+dma_wr 22222b38 00000000
+dma_wr 22222b3c 60477b40
+
+dma_wr fffff044 8000c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no VLAN tag
+                         -- 64 bytes received
+dma_wr fffff040 22222b01 -- dma writes ownership bit
+
+
+pinsc(int) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 11 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+--******************************************************************************
+-- Test 12: Bad ARP type ID LSB
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a receive ARP request frame to the broadcast address with incorrect 
+--     typeID LSB.
+--     Verify that the wol output is not asserted, but that the frame is 
+--     successfully received.
+--******************************************************************************
+
+apbwr      B8 00021213  -- enable WoL ARP and write expected target protocol address
+apbrdf     20 00000000  "Test 12 : Bad ARP type ID LSB"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        0805         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        7d60c802     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 type 0805
+
+
+-- supply the receive buffer location
+dma_rd fffff048 22222c00 -- dma reads pointer of 22222c00
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222c00 FFFFFFFF -- store frame to memory
+dma_wr 22222c04 3412FFFF
+dma_wr 22222c08 bc9a7856
+dma_wr 22222c0c 01000508
+dma_wr 22222c10 04060008
+dma_wr 22222c14 01000100
+dma_wr 22222c18 05040302
+dma_wr 22222c1c 09080706
+dma_wr 22222c20 0d0c0b0a
+dma_wr 22222c24 11100f0e
+dma_wr 22222c28 00001312
+dma_wr 22222c2c 00000000
+dma_wr 22222c30 00000000
+dma_wr 22222c34 00000000
+dma_wr 22222c38 00000000
+dma_wr 22222c3c 02c8607d
+
+dma_wr fffff04c 8000c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no VLAN tag
+                         -- 64 bytes received
+dma_wr fffff048 22222c01 -- dma writes ownership bit
+
+
+pinsc(int) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 12 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+--******************************************************************************
+-- Test 13: VLAN tagged, bad ARP type ID MSB
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a VLAN tagged receive ARP request frame to the broadcast address
+--     with incorrect typeID MSB.
+--     Verify that the wol output is not asserted, but that the frame is 
+--     successfully received.
+--******************************************************************************
+
+apbwr      B8 00021213  -- enable WoL ARP and write expected target protocol address
+apbrdf     20 00000000  "Test 13 : VLAN tagged, bad ARP type ID MSB"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0106         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        35f6f20d     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 vid 0001 type 0106
+
+
+-- supply the receive buffer location
+dma_rd fffff050 22222d00 -- dma reads pointer of 22222d00
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222d00 FFFFFFFF -- store frame to memory
+dma_wr 22222d04 3412FFFF
+dma_wr 22222d08 bc9a7856
+dma_wr 22222d0c 01000081
+dma_wr 22222d10 01000601
+dma_wr 22222d14 04060008
+dma_wr 22222d18 01000100
+dma_wr 22222d1c 05040302
+dma_wr 22222d20 09080706
+dma_wr 22222d24 0d0c0b0a
+dma_wr 22222d28 11100f0e
+dma_wr 22222d2c 00001312
+dma_wr 22222d30 00000000
+dma_wr 22222d34 00000000
+dma_wr 22222d38 00000000
+dma_wr 22222d3c 0df2f635
+
+dma_wr fffff054 8020c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- VLAN tag detected, no priority or CFI
+                         -- 64 bytes received
+dma_wr fffff050 22222d01 -- dma writes ownership bit
+
+
+pinsc(int) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 13 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+--******************************************************************************
+-- Test 14: VLAN tagged, bad ARP type ID LSB
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a VLAN tagged receive ARP request frame to the broadcast address
+--     with incorrect typeID LSB.
+--     Verify that the wol output is not asserted, but that the frame is 
+--     successfully received.
+--******************************************************************************
+
+apbwr      B8 00021213  -- enable WoL ARP and write expected target protocol address
+apbrdf     20 00000000  "Test 14 : VLAN tagged, bad ARP type ID LSB"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        8100         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0866         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        301b5fe7     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 vid 0001 type 0866
+
+
+-- supply the receive buffer location
+dma_rd fffff058 22222e00 -- dma reads pointer of 22222e00
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222e00 FFFFFFFF -- store frame to memory
+dma_wr 22222e04 3412FFFF
+dma_wr 22222e08 bc9a7856
+dma_wr 22222e0c 01000081
+dma_wr 22222e10 01006608
+dma_wr 22222e14 04060008
+dma_wr 22222e18 01000100
+dma_wr 22222e1c 05040302
+dma_wr 22222e20 09080706
+dma_wr 22222e24 0d0c0b0a
+dma_wr 22222e28 11100f0e
+dma_wr 22222e2c 00001312
+dma_wr 22222e30 00000000
+dma_wr 22222e34 00000000
+dma_wr 22222e38 00000000
+dma_wr 22222e3c e75f1b30
+
+dma_wr fffff05c 8020c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- VLAN tag detected, no priority or CFI
+                         -- 64 bytes received
+dma_wr fffff058 22222e01 -- dma writes ownership bit
+
+
+pinsc(int) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 14 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+--******************************************************************************
+-- Test 15: Bad VLAN tag, but good ARP
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a VLAN tagged receive ARP request frame to the broadcast address
+--     with correct ARP typeID. Ensure that the VLAN type ID field is incorrect.
+--     Verify that the wol output is not asserted, but that the frame is 
+--     successfully received.
+--******************************************************************************
+
+apbwr      B8 00021213  -- enable WoL ARP and write expected target protocol address
+apbrdf     20 00000000  "Test 15 : Bad VLAN tag, but good ARP"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        8101         -- Length/typeID
+rxd        0001         -- VLAN tag
+rxd        0806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        630093c4     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 type 8101
+
+
+-- supply the receive buffer location
+dma_rd fffff060 22222f00 -- dma reads pointer of 22222f00
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222f00 FFFFFFFF -- store frame to memory
+dma_wr 22222f04 3412FFFF
+dma_wr 22222f08 bc9a7856
+dma_wr 22222f0c 01000181
+dma_wr 22222f10 01000608
+dma_wr 22222f14 04060008
+dma_wr 22222f18 01000100
+dma_wr 22222f1c 05040302
+dma_wr 22222f20 09080706
+dma_wr 22222f24 0d0c0b0a
+dma_wr 22222f28 11100f0e
+dma_wr 22222f2c 00001312
+dma_wr 22222f30 00000000
+dma_wr 22222f34 00000000
+dma_wr 22222f38 00000000
+dma_wr 22222f3c c4930063
+
+dma_wr fffff064 8000c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no VLAN tag
+                         -- 64 bytes received
+dma_wr fffff060 22222f01 -- dma writes ownership bit
+
+
+pinsc(int) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 15 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Test 16: Repeated ARP typeID
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a receive ARP request frame to the broadcast address with correct
+--     ARP typeID. Repeat the ARP typeID as if a VLAN tag had been inserted.
+--     Verify that the wol output is still asserted, and that the frame is 
+--     successfully received.
+--     Note, because the protocol type is not checked by this implementation 
+--     the frame is still seen as an ARP request.
+--******************************************************************************
+
+apbwr      B8 00021213  -- enable WoL ARP and write expected target protocol address
+apbrdf     20 00000000  "Test 16: Repeated ARP typeID"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        0806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0806         -- Protocol type (repeated ARP type)
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111213     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        894d5af0     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 type 0806
+
+
+-- supply the receive buffer location
+dma_rd fffff068 22223000 -- dma reads pointer of 22223000
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22223000 FFFFFFFF -- store frame to memory
+dma_wr 22223004 3412FFFF
+dma_wr 22223008 bc9a7856
+dma_wr 2222300c 01000608
+dma_wr 22223010 04060608
+dma_wr 22223014 01000100
+dma_wr 22223018 05040302
+dma_wr 2222301c 09080706
+dma_wr 22223020 0d0c0b0a
+
+pinsc(int) wol 1  -- check wol pin is high
+apbrd(int) 24 10000000  -- check interrupt status - WOL interrupt
+
+dma_wr 22223024 11100f0e
+dma_wr 22223028 00001312
+dma_wr 2222302c 00000000
+dma_wr 22223030 00000000
+dma_wr 22223034 00000000
+dma_wr 22223038 00000000
+dma_wr 2222303c f05a4d89
+
+dma_wr fffff06c 8000c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- no VLAN tag
+                         -- 64 bytes received
+dma_wr fffff068 22223001 -- dma writes ownership bit
+
+
+pinsc(int) wol 1  -- check wol pin is high
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 16 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+--******************************************************************************
+-- Test 17: Good ARP type, good operation, bad IP address match (LSB)
+--     Enable the ARP wake up event enable bit in the WoL register and program
+--     the WoL target address match register.
+--     Send a good receive ARP request frame with correct type and operation 
+--     fields, but the target address does not matches the LSB value programmed.
+--     Verify that the wol output is not asserted but that the frame is 
+--     successfully received.
+--******************************************************************************
+
+
+apbwr      C4 00021213  -- enable WoL ARP and write expected target protocol address
+apbrdf     20 00000000  "Test 17 : Good ARP type, good op, bad LSB address match"
+                        -- trigger reception of frame
+
+
+rxd(apb)   55d5         -- preamble & SDF
+rxd        FFFFFFFFFFFF -- MAC DA
+rxd        123456789abc -- MAC SA
+rxd        0806         -- Length/typeID
+rxd        0001         -- Hardware type
+rxd        0800         -- Protocol type
+rxd        06           -- Hardware address length
+rxd        04           -- Protocol address length
+rxd        0001         -- Operation (opcode)
+rxd        000102030405 -- Sender hardware address
+rxd        06070809     -- Sender protocol address
+rxd        0a0b0c0d0e0f -- Target hardware address
+rxd        10111211     -- Target protocol address
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        00000000     -- Data
+rxd        0000         -- Data
+rxd        237bf7cd     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da FFFFFFFFFFFF sa bc9a78563412 type 0806
+
+
+-- supply the receive buffer location
+dma_rd fffff070 22223100 -- dma reads pointer of 22223100
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22223100 FFFFFFFF -- store frame to memory
+dma_wr 22223104 3412FFFF
+dma_wr 22223108 bc9a7856
+dma_wr 2222310c 01000608
+dma_wr 22223110 04060008
+dma_wr 22223114 01000100
+dma_wr 22223118 05040302
+dma_wr 2222311c 09080706
+dma_wr 22223120 0d0c0b0a
+dma_wr 22223124 11100f0e
+dma_wr 22223128 00001112
+dma_wr 2222312c 00000000
+dma_wr 22223130 00000000
+dma_wr 22223134 00000000
+dma_wr 22223138 00000000
+dma_wr 2222313c cdf77b23
+
+dma_wr fffff074 8000c040 -- dma writes rx status,
+                         -- start & end of frame
+                         -- broadcast match
+                         -- No VLAN tag detected
+                         -- 64 bytes received
+dma_wr fffff070 22223101 -- dma writes ownership bit
+
+
+pinsc(int) wol 0  -- check wol pin is low
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Test 17 complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+
+
+
+
+
+
+
+-- supply the receive buffer location
+dma_rd fffff078 00000000 -- dma reads pointer of 00000000
+
+
+
+
+
+--******************************************************************************
+--  4. Check statistics for correct values from above tests.
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 000003c0  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 0000000f  -- check frames received ok
+apbrd     15C 0000000d  -- check broadcast frames received
+apbrd     160 00000002  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 0000000f  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000001  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000001  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+apbrd     1A8 00000000  -- check receive IP checksum errors
+apbrd     1AC 00000000  -- check receive TCP checksum errors
+apbrd     1B0 00000000  -- check receive UDP checksum errors
+
+end(8000)
+
+

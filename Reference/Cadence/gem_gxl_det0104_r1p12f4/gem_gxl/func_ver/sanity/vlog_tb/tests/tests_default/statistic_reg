@@ -1,0 +1,1921 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : pause_tx_stop
+--
+--   Authors        : Luca Rastello /Mike MacGillis (mikema@tality.com)
+--
+--   Date           : 14 Febuary 2002
+--
+--------------------------------------------------------------------------------
+-- Test Description
+-- The purpose of this test is to ensure the proper functionality of the statistics 
+-- registers.
+--
+-- Functional coverage																													        																																																								tion.
+-- · Checks read & write functionality works for all statistic registers
+-- · Checks counters increment to 0xff but do not roll over.
+--
+-- Detailed Test Description
+-- 1. Initialise the GEM for 100-mode operation.
+-- 2. Initiate reset.
+-- 3. Check network control register and statistic registers for their proper start up value.
+-- 4. Enable the statistic registers for writes (for test purposes).
+-- 5. Write 0xaa, 0x55 and 0xff to all the statistic registers. Read all the status registers 
+--    each time to ensure that the proper values are read back.
+-- 6. Reset the statistic registers.  (Set bit 5 in the network status register)
+-- 7. Read all of statistic registers to ensure they have the proper value.
+-- 8. Write 0xfffd to the statistic registers. Then, increment all the statistic registers 
+--    by one (Set bit 6 in the network control register to increment statistic registers).  
+--    Read all the statistic registers to ensure that each register was incremented by one.
+-- 9. Write 0xfff0 to the statistic registers.
+-- 10. Write bit 6 in the network control register 18 times.  Therefore, the statistic 
+--     registers should only increment up 0xffff or 15 times  (The registers should not roll over). 
+--     Now, read all the statistic registers to ensure that they incremented properly.
+-- 11. Read the statistic registers to ensure that all have been reset after the last 
+--     register read. (After a read a statistic register should reset to zero)
+-- 12  Test that snapshot registers are working properly.
+-- 13. Set the Write Enable for Stastics Register bit in the Network Control Register. Then,
+--     write 0xfffffffd to the octets transmitted lower register. Then, transmit a
+--     frame. (This should cause the octets transmitted lower register to
+--     roll over)
+-- 14. Then, write 0xffff to the octets transmitted upper register and 0xfffffffd to the octets transmitted
+--     lower register. Then, transmit a frame. (This should cause the octets transmitted upper register to 
+--     hit 0x0000ffff  and octets transmitted lower register to hit 0xffffffff)
+-- 15. Write 0xfffffffd to the octets received lower register. Then, receive a
+--     frame. (This should cause the octets received lower register to
+--     roll over)
+-- 16. Then, write 0xffff to the octets received upper register and 0xfffffffd to the octets received
+--     lower register. Then, receive a frame. (This should cause the octets received upper register to 
+--     hit 0x0000ffff  and octets received lower register to hit 0xffffffff)
+-- 17. Transmit a frame. Once the frame is totally transmitted, read the octets transmitted lower
+--     register exactly when the register is going to be incremented and then read the octets
+--     transmitted upper register.  Both registers should not be incremented. 
+--     Ensures that the status registers can cope with being read at the same 
+--     time as being incremented.
+-- 18. Transmit a frame. While the frame is being transmitted, enable the take snap shot bit
+--     in the network control register.  Then, set the read snapshot bit in the network control 
+--     register once the frame is completely transmitted. Now, read the snap shot of the octets
+--     transmitted lower register. Next, disable the the read snap shot bit in the network 
+--     control register and read the octets transmitted lower register. (The count of octets 
+--     transmitted lower register should have been incremented since the snap shot of the 
+--     statistic registers was taken.)  Ensures that the stats registers can cope with being
+--     read and reset at the  moment they are being incremented.  
+-- 19. Receive a frame. Once the frame is totally received, read the octets received lower
+--     register exactly when the register is going to be incremented and then read the octets
+--     received upper register.  Both registers should not be incremented. 
+--     Ensures that the status registers can cope with being read at the same 
+--     time as being incremented.
+-- 20. Receive a frame. While the frame is being received, enable the take snap shot bit
+--     in the network control register.  Then, set the read snapshot bit in the network control 
+--     register once the frame is completely received. Now, read the snap shot of the octets
+--     received lower register. Next, disable the the read snap shot bit in the network 
+--     control register and read the octets received lower register. (The count of octets 
+--     received lower register should have been incremented since the snap shot of the 
+--     statistic registers was taken.)  Ensures that the stats registers can cope with being
+--     read and reset at the  moment they are being incremented.  
+-- 21. Ensure that all bits of snapshot are toggled for codecoverage by writing all one's
+--     to the incrementing statistics registers and then taking a snapshot.
+--
+--------------------------------------------------------------------------------
+
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+
+------------------------------------
+-- check reset value in registers --
+------------------------------------
+apbrd(100) 00 00000000  -- check reset value of network control register
+
+--*************************
+-- 1. Set 100M Operation Mode
+--
+
+apbwr      04 00080001  -- indicate 100M operation, will check pin l8r.
+apbrd      04 00080001  -- verify write to speed register.
+
+--*************************
+
+
+--*************************
+-- 2. Initiate Reset
+--
+
+-- Happens automatically on startup
+
+--*************************
+
+
+--*************************
+-- 3. Check statistics registers for proper startup value
+--
+
+-- check reset values of statistics registers
+apbrd      100 00000000  -- check reset value of octets_txed_bottom
+apbrd      104 00000000  -- check reset value of octets_txed_top
+apbrd      108 00000000  -- check reset value of frames_txed_ok
+apbrd      10c 00000000  -- check reset value of broadcast_txed
+apbrd      110 00000000  -- check reset value of multicast_txed
+apbrd      114 00000000  -- check reset value of pause_frames_txed
+apbrd      118 00000000  -- check reset value of frames_txed_64
+apbrd      11c 00000000  -- check reset value of frames_txed_65
+apbrd      120 00000000  -- check reset value of frames_txed_128
+apbrd      124 00000000  -- check reset value of frames_txed_256
+apbrd      128 00000000  -- check reset value of frames_txed_512
+apbrd      12c 00000000  -- check reset value of frames_txed_1024
+apbrd      130 00000000  -- check reset value of frames_txed_1519
+apbrd      134 00000000  -- check reset value of tx_underruns
+apbrd      138 00000000  -- check reset value of single_collisions
+apbrd      13c 00000000  -- check reset value of multiple_collisions
+apbrd      140 00000000  -- check reset value of excessive_collisions
+apbrd      144 00000000  -- check reset value of late_collisions
+apbrd      148 00000000  -- check reset value of deferred_frames
+apbrd      14c 00000000  -- check reset value of crs_errors
+apbrd      150 00000000  -- check reset value of octets_rxed_bottom
+apbrd      154 00000000  -- check reset value of octets_rxed_top
+apbrd      158 00000000  -- check reset value of frames_rxed_ok
+apbrd      15c 00000000  -- check reset value of broadcast_rxed
+apbrd      160 00000000  -- check reset value of multicast_rxed
+apbrd      164 00000000  -- check reset value of pause_frames_rxed
+apbrd      168 00000000  -- check reset value of frames_rxed_64
+apbrd      16c 00000000  -- check reset value of frames_rxed_65
+apbrd      170 00000000  -- check reset value of frames_rxed_128
+apbrd      174 00000000  -- check reset value of frames_rxed_256
+apbrd      178 00000000  -- check reset value of frames_rxed_512
+apbrd      17c 00000000  -- check reset value of frames_rxed_1024
+apbrd      180 00000000  -- check reset value of frames_rxed_1519
+apbrd      184 00000000  -- check reset value of undersize_frames
+apbrd      188 00000000  -- check reset value of excessive_rx_length
+apbrd      18c 00000000  -- check reset value of rx_jabbers
+apbrd      190 00000000  -- check reset value of fcs_errors
+apbrd      194 00000000  -- check reset value of rx_length_errors
+apbrd      198 00000000  -- check reset value of rx_symbol_errors
+apbrd      19c 00000000  -- check reset value of alignment_errors
+apbrd      1a0 00000000  -- check reset value of rx_resource_errors
+apbrd      1a4 00000000  -- check reset value of rx_overruns
+apbrd      1a8 00000000  -- check reset value of IP checksum errors
+apbrd      1ac 00000000  -- check reset value of TCP checksum errors
+apbrd      1b0 00000000  -- check reset value of UDP checksum errors
+
+--*************************
+
+
+--*************************
+-- 4. Enable write to statistics registers
+--
+
+apbwr      00 00000080  -- enables write to statistics regs.
+
+--*************************
+
+
+--*************************
+-- 5. Write 0xaa, 0x55, 0xff to statistics registers and read back each time
+--
+
+-- write 0xaa to statistics registers and then read back
+apbwr      100 aaaaaaaa  -- write 0xaa to octets_txed_bottom
+apbwr      104 aaaaaaaa  -- write 0xaa to octets_txed_top
+apbwr      108 aaaaaaaa  -- write 0xaa to frames_txed_ok
+apbwr      10c aaaaaaaa  -- write 0xaa to broadcast_txed
+apbwr      110 aaaaaaaa  -- write 0xaa to multicast_txed
+apbwr      114 aaaaaaaa  -- write 0xaa to pause_frames_txed
+apbwr      118 aaaaaaaa  -- write 0xaa to frames_txed_64
+apbwr      11c aaaaaaaa  -- write 0xaa to frames_txed_65
+apbwr      120 aaaaaaaa  -- write 0xaa to frames_txed_128
+apbwr      124 aaaaaaaa  -- write 0xaa to frames_txed_256
+apbwr      128 aaaaaaaa  -- write 0xaa toframes_txed_512
+apbwr      12c aaaaaaaa  -- write 0xaa to frames_txed_1024
+apbwr      130 aaaaaaaa  -- write 0xaa to frames_txed_1519
+apbwr      134 aaaaaaaa  -- write 0xaa totx_underruns
+apbwr      138 aaaaaaaa  -- write 0xaa to single_collisions
+apbwr      13c aaaaaaaa  -- write 0xaa to multiple_collisions
+apbwr      140 aaaaaaaa  -- write 0xaa to excessive_collisions
+apbwr      144 aaaaaaaa  -- write 0xaa to late_collisions
+apbwr      148 aaaaaaaa  -- write 0xaa to deferred_frames
+apbwr      14c aaaaaaaa  -- write 0xaa to crs_errors
+apbwr      150 aaaaaaaa  -- write 0xaa to octets_rxed_bottom
+apbwr      154 aaaaaaaa  -- write 0xaa tooctets_rxed_top
+apbwr      158 aaaaaaaa  -- write 0xaa to frames_rxed_ok
+apbwr      15c aaaaaaaa  -- write 0xaa tobroadcast_rxed
+apbwr      160 aaaaaaaa  -- write 0xaa to multicast_rxed
+apbwr      164 aaaaaaaa  -- write 0xaa to pause_frames_rxed
+apbwr      168 aaaaaaaa  -- write 0xaa to frames_rxed_64
+apbwr      16c aaaaaaaa  -- write 0xaa toframes_rxed_65
+apbwr      170 aaaaaaaa  -- write 0xaa to frames_rxed_128
+apbwr      174 aaaaaaaa  -- write 0xaa to frames_rxed_256
+apbwr      178 aaaaaaaa  -- write 0xaa to frames_rxed_512
+apbwr      17c aaaaaaaa  -- write 0xaa to frames_rxed_1024
+apbwr      180 aaaaaaaa  -- write 0xaa to frames_rxed_1519
+apbwr      184 aaaaaaaa  -- write 0xaa to undersize_frames
+apbwr      188 aaaaaaaa  -- write 0xaa to excessive_rx_length
+apbwr      18c aaaaaaaa  -- write 0xaa to rx_jabbers
+apbwr      190 aaaaaaaa  -- write 0xaa to fcs_errors
+apbwr      194 aaaaaaaa  -- write 0xaa to rx_length_errors
+apbwr      198 aaaaaaaa  -- write 0xaa to rx_symbol_errors
+apbwr      19c aaaaaaaa  -- write 0xaa to alignment_errors
+apbwr      1a0 aaaaaaaa  -- write 0xaa to rx_resource_errors
+apbwr      1a4 aaaaaaaa  -- write 0xaa to rx_overruns
+apbwr      1a8 aaaaaaaa  -- write 0xaa to IP checksum errors
+apbwr      1ac aaaaaaaa  -- write 0xaa to TCP checksum errors
+apbwr      1b0 aaaaaaaa  -- write 0xaa to UDP checksum errors
+
+-- read back values from statistics registers
+apbrd      100 aaaaaaaa  -- read back from octets_txed_bottom
+apbrd      104 0000aaaa  -- read back from octets_txed_top
+apbrd      108 aaaaaaaa  -- read back from frames_txed_ok
+apbrd      10c aaaaaaaa  -- read back from broadcast_txed
+apbrd      110 aaaaaaaa  -- read back from multicast_txed
+apbrd      114 0000aaaa  -- read back from pause_frames_txed
+apbrd      118 aaaaaaaa  -- read back from frames_txed_64
+apbrd      11c aaaaaaaa  -- read back from frames_txed_65
+apbrd      120 aaaaaaaa  -- read back from frames_txed_128
+apbrd      124 aaaaaaaa  -- read back from frames_txed_256
+apbrd      128 aaaaaaaa  -- read back from frames_txed_512
+apbrd      12c aaaaaaaa  -- read back from frames_txed_1024
+apbrd      130 aaaaaaaa  -- read back from frames_txed_1519
+apbrd      134 000002aa  -- read back from tx_underruns
+apbrd      138 0002aaaa  -- read back from single_collisions
+apbrd      13c 0002aaaa  -- read back from multiple_collisions
+apbrd      140 000002aa  -- read back from excessive_collisions
+apbrd      144 000002aa  -- read back from late_collisions
+apbrd      148 0002aaaa  -- read back from deferred_frames
+apbrd      14c 000002aa  -- read back from crs_errors
+apbrd      150 aaaaaaaa  -- read back from octets_rxed_bottom
+apbrd      154 0000aaaa  -- read back from octets_rxed_top
+apbrd      158 aaaaaaaa  -- read back from frames_rxed_ok
+apbrd      15c aaaaaaaa  -- read back from broadcast_rxed
+apbrd      160 aaaaaaaa  -- read back from multicast_rxed
+apbrd      164 0000aaaa  -- read back from pause_frames_rxed
+apbrd      168 aaaaaaaa  -- read back from frames_rxed_64
+apbrd      16c aaaaaaaa  -- read back from frames_rxed_65
+apbrd      170 aaaaaaaa  -- read back from frames_rxed_128
+apbrd      174 aaaaaaaa  -- read back from frames_rxed_256
+apbrd      178 aaaaaaaa  -- read back from frames_rxed_512
+apbrd      17c aaaaaaaa  -- read back from frames_rxed_1024
+apbrd      180 aaaaaaaa  -- read back from frames_rxed_1519
+apbrd      184 000002aa  -- read back from undersize_frames
+apbrd      188 000002aa  -- read back from excessive_rx_length
+apbrd      18c 000002aa  -- read back from rx_jabbers
+apbrd      190 000002aa  -- read back from fcs_errors
+apbrd      194 000002aa  -- read back from rx_length_errors
+apbrd      198 000002aa  -- read back from rx_symbol_errors
+apbrd      19c 000002aa  -- read back from alignment_errors
+apbrd      1a0 0002aaaa  -- read back from rx_resource_errors
+apbrd      1a4 000002aa  -- read back from rx_overruns
+apbrd      1a8 000000aa  -- read back from IP checksum errors
+apbrd      1ac 000000aa  -- read back from TCP checksum errors
+apbrd      1b0 000000aa  -- read back from UDP checksum errors
+
+
+-- write 0x55 to statistics registers and then read back
+apbwr      100 55555555  -- write 0x55 to octets_txed_bottom
+apbwr      104 55555555  -- write 0x55 to octets_txed_top
+apbwr      108 55555555  -- write 0x55 to frames_txed_ok
+apbwr      10c 55555555  -- write 0x55 to broadcast_txed
+apbwr      110 55555555  -- write 0x55 to multicast_txed
+apbwr      114 55555555  -- write 0x55 to pause_frames_txed
+apbwr      118 55555555  -- write 0x55 to frames_txed_64
+apbwr      11c 55555555  -- write 0x55 to frames_txed_65
+apbwr      120 55555555  -- write 0x55 to frames_txed_128
+apbwr      124 55555555  -- write 0x55 to frames_txed_256
+apbwr      128 55555555  -- write 0x55 toframes_txed_512
+apbwr      12c 55555555  -- write 0x55 to frames_txed_1024
+apbwr      130 55555555  -- write 0x55 to frames_txed_1519
+apbwr      134 55555555  -- write 0x55 totx_underruns
+apbwr      138 55555555  -- write 0x55 to single_collisions
+apbwr      13c 55555555  -- write 0x55 to multiple_collisions
+apbwr      140 55555555  -- write 0x55 to excessive_collisions
+apbwr      144 55555555  -- write 0x55 to late_collisions
+apbwr      148 55555555  -- write 0x55 to deferred_frames
+apbwr      14c 55555555  -- write 0x55 to crs_errors
+apbwr      150 55555555  -- write 0x55 to octets_rxed_bottom
+apbwr      154 55555555  -- write 0x55 tooctets_rxed_top
+apbwr      158 55555555  -- write 0x55 to frames_rxed_ok
+apbwr      15c 55555555  -- write 0x55 tobroadcast_rxed
+apbwr      160 55555555  -- write 0x55 to multicast_rxed
+apbwr      164 55555555  -- write 0x55 to pause_frames_rxed
+apbwr      168 55555555  -- write 0x55 to frames_rxed_64
+apbwr      16c 55555555  -- write 0x55 toframes_rxed_65
+apbwr      170 55555555  -- write 0x55 to frames_rxed_128
+apbwr      174 55555555  -- write 0x55 to frames_rxed_256
+apbwr      178 55555555  -- write 0x55 to frames_rxed_512
+apbwr      17c 55555555  -- write 0x55 to frames_rxed_1024
+apbwr      180 55555555  -- write 0x55 to frames_rxed_1519
+apbwr      184 55555555  -- write 0x55 to undersize_frames
+apbwr      188 55555555  -- write 0x55 to excessive_rx_length
+apbwr      18c 55555555  -- write 0x55 to rx_jabbers
+apbwr      190 55555555  -- write 0x55 to fcs_errors
+apbwr      194 55555555  -- write 0x55 to rx_length_errors
+apbwr      198 55555555  -- write 0x55 to rx_symbol_errors
+apbwr      19c 55555555  -- write 0x55 to alignment_errors
+apbwr      1a0 55555555  -- write 0x55 to rx_resource_errors
+apbwr      1a4 55555555  -- write 0x55 to rx_overruns
+apbwr      1a8 55555555  -- write 0x55 to IP checksum errors
+apbwr      1ac 55555555  -- write 0x55 to TCP checksum errors
+apbwr      1b0 55555555  -- write 0x55 to UDP checksum errors
+
+-- read back values from statistics registers
+apbrd      100 55555555  -- read back from octets_txed_bottom
+apbrd      104 00005555  -- read back from octets_txed_top
+apbrd      108 55555555  -- read back from frames_txed_ok
+apbrd      10c 55555555  -- read back from broadcast_txed
+apbrd      110 55555555  -- read back from multicast_txed
+apbrd      114 00005555  -- read back from pause_frames_txed
+apbrd      118 55555555  -- read back from frames_txed_64
+apbrd      11c 55555555  -- read back from frames_txed_65
+apbrd      120 55555555  -- read back from frames_txed_128
+apbrd      124 55555555  -- read back from frames_txed_256
+apbrd      128 55555555  -- read back from frames_txed_512
+apbrd      12c 55555555  -- read back from frames_txed_1024
+apbrd      130 55555555  -- read back from frames_txed_1519
+apbrd      134 00000155  -- read back from tx_underruns
+apbrd      138 00015555  -- read back from single_collisions
+apbrd      13c 00015555  -- read back from multiple_collisions
+apbrd      140 00000155  -- read back from excessive_collisions
+apbrd      144 00000155  -- read back from late_collisions
+apbrd      148 00015555  -- read back from deferred_frames
+apbrd      14c 00000155  -- read back from crs_errors
+apbrd      150 55555555  -- read back from octets_rxed_bottom
+apbrd      154 00005555  -- read back from octets_rxed_top
+apbrd      158 55555555  -- read back from frames_rxed_ok
+apbrd      15c 55555555  -- read back from broadcast_rxed
+apbrd      160 55555555  -- read back from multicast_rxed
+apbrd      164 00005555  -- read back from pause_frames_rxed
+apbrd      168 55555555  -- read back from frames_rxed_64
+apbrd      16c 55555555  -- read back from frames_rxed_65
+apbrd      170 55555555  -- read back from frames_rxed_128
+apbrd      174 55555555  -- read back from frames_rxed_256
+apbrd      178 55555555  -- read back from frames_rxed_512
+apbrd      17c 55555555  -- read back from frames_rxed_1024
+apbrd      180 55555555  -- read back from frames_rxed_1519
+apbrd      184 00000155  -- read back from undersize_frames
+apbrd      188 00000155  -- read back from excessive_rx_length
+apbrd      18c 00000155  -- read back from rx_jabbers
+apbrd      190 00000155  -- read back from fcs_errors
+apbrd      194 00000155  -- read back from rx_length_errors
+apbrd      198 00000155  -- read back from rx_symbol_errors
+apbrd      19c 00000155  -- read back from alignment_errors
+apbrd      1a0 00015555  -- read back from rx_resource_errors
+apbrd      1a4 00000155  -- read back from rx_overruns
+apbrd      1a8 00000055  -- read back from IP checksum errors
+apbrd      1ac 00000055  -- read back from TCP checksum errors
+apbrd      1b0 00000055  -- read back from UDP checksum errors
+
+
+-- write 0xff to statistics registers and then read back
+apbwr      100 ffffffff  -- write 0xff to octets_txed_bottom
+apbwr      104 ffffffff  -- write 0xff to octets_txed_top
+apbwr      108 ffffffff  -- write 0xff to frames_txed_ok
+apbwr      10c ffffffff  -- write 0xff to broadcast_txed
+apbwr      110 ffffffff  -- write 0xff to multicast_txed
+apbwr      114 ffffffff  -- write 0xff to pause_frames_txed
+apbwr      118 ffffffff  -- write 0xff to frames_txed_64
+apbwr      11c ffffffff  -- write 0xff to frames_txed_65
+apbwr      120 ffffffff  -- write 0xff to frames_txed_128
+apbwr      124 ffffffff  -- write 0xff to frames_txed_256
+apbwr      128 ffffffff  -- write 0xff toframes_txed_512
+apbwr      12c ffffffff  -- write 0xff to frames_txed_1024
+apbwr      130 ffffffff  -- write 0xff to frames_txed_1519
+apbwr      134 ffffffff  -- write 0xff totx_underruns
+apbwr      138 ffffffff  -- write 0xff to single_collisions
+apbwr      13c ffffffff  -- write 0xff to multiple_collisions
+apbwr      140 ffffffff  -- write 0xff to excessive_collisions
+apbwr      144 ffffffff  -- write 0xff to late_collisions
+apbwr      148 ffffffff  -- write 0xff to deferred_frames
+apbwr      14c ffffffff  -- write 0xff to crs_errors
+apbwr      150 ffffffff  -- write 0xff to octets_rxed_bottom
+apbwr      154 ffffffff  -- write 0xff tooctets_rxed_top
+apbwr      158 ffffffff  -- write 0xff to frames_rxed_ok
+apbwr      15c ffffffff  -- write 0xff tobroadcast_rxed
+apbwr      160 ffffffff  -- write 0xff to multicast_rxed
+apbwr      164 ffffffff  -- write 0xff to pause_frames_rxed
+apbwr      168 ffffffff  -- write 0xff to frames_rxed_64
+apbwr      16c ffffffff  -- write 0xff toframes_rxed_65
+apbwr      170 ffffffff  -- write 0xff to frames_rxed_128
+apbwr      174 ffffffff  -- write 0xff to frames_rxed_256
+apbwr      178 ffffffff  -- write 0xff to frames_rxed_512
+apbwr      17c ffffffff  -- write 0xff to frames_rxed_1024
+apbwr      180 ffffffff  -- write 0xff to frames_rxed_1519
+apbwr      184 ffffffff  -- write 0xff to undersize_frames
+apbwr      188 ffffffff  -- write 0xff to excessive_rx_length
+apbwr      18c ffffffff  -- write 0xff to rx_jabbers
+apbwr      190 ffffffff  -- write 0xff to fcs_errors
+apbwr      194 ffffffff  -- write 0xff to rx_length_errors
+apbwr      198 ffffffff  -- write 0xff to rx_symbol_errors
+apbwr      19c ffffffff  -- write 0xff to alignment_errors
+apbwr      1a0 ffffffff  -- write 0xff to rx_resource_errors
+apbwr      1a4 ffffffff  -- write 0xff to rx_overruns
+apbwr      1a8 ffffffff  -- write 0xff to IP checksum errors
+apbwr      1ac ffffffff  -- write 0xff to TCP checksum errors
+apbwr      1b0 ffffffff  -- write 0xff to UDP checksum errors
+
+-- read back values from statistics registers
+apbrd      100 ffffffff  -- read back from octets_txed_bottom
+apbrd      104 0000ffff  -- read back from octets_txed_top
+apbrd      108 ffffffff  -- read back from frames_txed_ok
+apbrd      10c ffffffff  -- read back from broadcast_txed
+apbrd      110 ffffffff  -- read back from multicast_txed
+apbrd      114 0000ffff  -- read back from pause_frames_txed
+apbrd      118 ffffffff  -- read back from frames_txed_64
+apbrd      11c ffffffff  -- read back from frames_txed_65
+apbrd      120 ffffffff  -- read back from frames_txed_128
+apbrd      124 ffffffff  -- read back from frames_txed_256
+apbrd      128 ffffffff  -- read back from frames_txed_512
+apbrd      12c ffffffff  -- read back from frames_txed_1024
+apbrd      130 ffffffff  -- read back from frames_txed_1519
+apbrd      134 000003ff  -- read back from tx_underruns
+apbrd      138 0003ffff  -- read back from single_collisions
+apbrd      13c 0003ffff  -- read back from multiple_collisions
+apbrd      140 000003ff  -- read back from excessive_collisions
+apbrd      144 000003ff  -- read back from late_collisions
+apbrd      148 0003ffff  -- read back from deferred_frames
+apbrd      14c 000003ff  -- read back from crs_errors
+apbrd      150 ffffffff  -- read back from octets_rxed_bottom
+apbrd      154 0000ffff  -- read back from octets_rxed_top
+apbrd      158 ffffffff  -- read back from frames_rxed_ok
+apbrd      15c ffffffff  -- read back from broadcast_rxed
+apbrd      160 ffffffff  -- read back from multicast_rxed
+apbrd      164 0000ffff  -- read back from pause_frames_rxed
+apbrd      168 ffffffff  -- read back from frames_rxed_64
+apbrd      16c ffffffff  -- read back from frames_rxed_65
+apbrd      170 ffffffff  -- read back from frames_rxed_128
+apbrd      174 ffffffff  -- read back from frames_rxed_256
+apbrd      178 ffffffff  -- read back from frames_rxed_512
+apbrd      17c ffffffff  -- read back from frames_rxed_1024
+apbrd      180 ffffffff  -- read back from frames_rxed_1519
+apbrd      184 000003ff  -- read back from undersize_frames
+apbrd      188 000003ff  -- read back from excessive_rx_length
+apbrd      18c 000003ff  -- read back from rx_jabbers
+apbrd      190 000003ff  -- read back from fcs_errors
+apbrd      194 000003ff  -- read back from rx_length_errors
+apbrd      198 000003ff  -- read back from rx_symbol_errors
+apbrd      19c 000003ff  -- read back from alignment_errors
+apbrd      1a0 0003ffff  -- read back from rx_resource_errors
+apbrd      1a4 000003ff  -- read back from rx_overruns
+apbrd      1a8 000000ff  -- read back from IP checksum errors
+apbrd      1ac 000000ff  -- read back from TCP checksum errors
+apbrd      1b0 000000ff  -- read back from UDP checksum errors
+
+
+--*************************
+
+
+
+--*************************
+-- 6. Reset statistics registers by writing setting bit 5 in the network control register
+--
+
+-- write to network control register to clear statistic registers.
+apbwr      00 00000020  -- clear statistics regs.
+
+--*************************
+
+
+--*************************
+-- 7. Read statistics registers to ensure they have been properly reset
+--
+
+-- check reset values of statistics registers
+apbrd      100 00000000  -- check reset value of octets_txed_bottom
+apbrd      104 00000000  -- check reset value of octets_txed_top
+apbrd      108 00000000  -- check reset value of frames_txed_ok
+apbrd      10c 00000000  -- check reset value of broadcast_txed
+apbrd      110 00000000  -- check reset value of multicast_txed
+apbrd      114 00000000  -- check reset value of pause_frames_txed
+apbrd      118 00000000  -- check reset value of frames_txed_64
+apbrd      11c 00000000  -- check reset value of frames_txed_65
+apbrd      120 00000000  -- check reset value of frames_txed_128
+apbrd      124 00000000  -- check reset value of frames_txed_256
+apbrd      128 00000000  -- check reset value of frames_txed_512
+apbrd      12c 00000000  -- check reset value of frames_txed_1024
+apbrd      130 00000000  -- check reset value of frames_txed_1519
+apbrd      134 00000000  -- check reset value of tx_underruns
+apbrd      138 00000000  -- check reset value of single_collisions
+apbrd      13c 00000000  -- check reset value of multiple_collisions
+apbrd      140 00000000  -- check reset value of excessive_collisions
+apbrd      144 00000000  -- check reset value of late_collisions
+apbrd      148 00000000  -- check reset value of deferred_frames
+apbrd      14c 00000000  -- check reset value of crs_errors
+apbrd      150 00000000  -- check reset value of octets_rxed_bottom
+apbrd      154 00000000  -- check reset value of octets_rxed_top
+apbrd      158 00000000  -- check reset value of frames_rxed_ok
+apbrd      15c 00000000  -- check reset value of broadcast_rxed
+apbrd      160 00000000  -- check reset value of multicast_rxed
+apbrd      164 00000000  -- check reset value of pause_frames_rxed
+apbrd      168 00000000  -- check reset value of frames_rxed_64
+apbrd      16c 00000000  -- check reset value of frames_rxed_65
+apbrd      170 00000000  -- check reset value of frames_rxed_128
+apbrd      174 00000000  -- check reset value of frames_rxed_256
+apbrd      178 00000000  -- check reset value of frames_rxed_512
+apbrd      17c 00000000  -- check reset value of frames_rxed_1024
+apbrd      180 00000000  -- check reset value of frames_rxed_1519
+apbrd      184 00000000  -- check reset value of undersize_frames
+apbrd      188 00000000  -- check reset value of excessive_rx_length
+apbrd      18c 00000000  -- check reset value of rx_jabbers
+apbrd      190 00000000  -- check reset value of fcs_errors
+apbrd      194 00000000  -- check reset value of rx_length_errors
+apbrd      198 00000000  -- check reset value of rx_symbol_errors
+apbrd      19c 00000000  -- check reset value of alignment_errors
+apbrd      1a0 00000000  -- check reset value of rx_resource_errors
+apbrd      1a4 00000000  -- check reset value of rx_overruns
+apbrd      1a8 00000000  -- check reset value of IP checksum errors
+apbrd      1ac 00000000  -- check reset value of TCP checksum errors
+apbrd      1b0 00000000  -- check reset value of UDP checksum errors
+
+--*************************
+
+
+
+--*************************
+-- 8. Write 0xfffd to statistics registers, and then increment by 1 by
+--    setting bit 6 in the network control register.
+--    Read statistics registers back to make sure they were properly incremented.
+--
+
+-- write 0xfffd to statistic registers
+apbwr      00 00000080  -- enable writing to statistics registers.
+
+apbwr      100 fffffffd  -- write 0xfffd to octets_txed_bottom
+apbwr      104 fffffffd  -- write 0xfffd to octets_txed_top
+apbwr      108 fffffffd  -- write 0xfffd to frames_txed_ok
+apbwr      10c fffffffd  -- write 0xfffd to broadcast_txed
+apbwr      110 fffffffd  -- write 0xfffd to multicast_txed
+apbwr      114 fffffffd  -- write 0xfffd to pause_frames_txed
+apbwr      118 fffffffd  -- write 0xfffd to frames_txed_64
+apbwr      11c fffffffd  -- write 0xfffd to frames_txed_65
+apbwr      120 fffffffd  -- write 0xfffd to frames_txed_128
+apbwr      124 fffffffd  -- write 0xfffd to frames_txed_256
+apbwr      128 fffffffd  -- write 0xfffd toframes_txed_512
+apbwr      12c fffffffd  -- write 0xfffd to frames_txed_1024
+apbwr      130 fffffffd  -- write 0xfffd to frames_txed_1519
+apbwr      134 fffffffd  -- write 0xfffd totx_underruns
+apbwr      138 fffffffd  -- write 0xfffd to single_collisions
+apbwr      13c fffffffd  -- write 0xfffd to multiple_collisions
+apbwr      140 fffffffd  -- write 0xfffd to excessive_collisions
+apbwr      144 fffffffd  -- write 0xfffd to late_collisions
+apbwr      148 fffffffd  -- write 0xfffd to deferred_frames
+apbwr      14c fffffffd  -- write 0xfffd to crs_errors
+apbwr      150 fffffffd  -- write 0xfffd to octets_rxed_bottom
+apbwr      154 fffffffd  -- write 0xfffd tooctets_rxed_top
+apbwr      158 fffffffd  -- write 0xfffd to frames_rxed_ok
+apbwr      15c fffffffd  -- write 0xfffd tobroadcast_rxed
+apbwr      160 fffffffd  -- write 0xfffd to multicast_rxed
+apbwr      164 fffffffd  -- write 0xfffd to pause_frames_rxed
+apbwr      168 fffffffd  -- write 0xfffd to frames_rxed_64
+apbwr      16c fffffffd  -- write 0xfffd toframes_rxed_65
+apbwr      170 fffffffd  -- write 0xfffd to frames_rxed_128
+apbwr      174 fffffffd  -- write 0xfffd to frames_rxed_256
+apbwr      178 fffffffd  -- write 0xfffd to frames_rxed_512
+apbwr      17c fffffffd  -- write 0xfffd to frames_rxed_1024
+apbwr      180 fffffffd  -- write 0xfffd to frames_rxed_1519
+apbwr      184 fffffffd  -- write 0xfffd to undersize_frames
+apbwr      188 fffffffd  -- write 0xfffd to excessive_rx_length
+apbwr      18c fffffffd  -- write 0xfffd to rx_jabbers
+apbwr      190 fffffffd  -- write 0xfffd to fcs_errors
+apbwr      194 fffffffd  -- write 0xfffd to rx_length_errors
+apbwr      198 fffffffd  -- write 0xfffd to rx_symbol_errors
+apbwr      19c fffffffd  -- write 0xfffd to alignment_errors
+apbwr      1a0 fffffffd  -- write 0xfffd to rx_resource_errors
+apbwr      1a4 fffffffd  -- write 0xfffd to rx_overruns
+apbwr      1a8 fffffffd  -- write 0xfffd to IP checksum errors
+apbwr      1ac fffffffd  -- write 0xfffd to TCP checksum errors
+apbwr      1b0 fffffffd  -- write 0xfffd to UDP checksum errors
+
+
+-- Increment statistics registers
+apbwr      00 00000040  -- increment statistics registers by setting bit 6 of network control register.
+
+-- check statistics register increments
+
+apbrd      100 fffffffe  -- read back from octets_txed_bottom
+apbrd      104 0000fffe  -- read back from octets_txed_top
+apbrd      108 fffffffe  -- read back from frames_txed_ok
+apbrd      10c fffffffe  -- read back from broadcast_txed
+apbrd      110 fffffffe  -- read back from multicast_txed
+apbrd      114 0000fffe  -- read back from pause_frames_txed
+apbrd      118 fffffffe  -- read back from frames_txed_64
+apbrd      11c fffffffe  -- read back from frames_txed_65
+apbrd      120 fffffffe  -- read back from frames_txed_128
+apbrd      124 fffffffe  -- read back from frames_txed_256
+apbrd      128 fffffffe  -- read back from frames_txed_512
+apbrd      12c fffffffe  -- read back from frames_txed_1024
+apbrd      130 fffffffe  -- read back from frames_txed_1519
+apbrd      134 000003fe  -- read back from tx_underruns
+apbrd      138 0003fffe  -- read back from single_collisions
+apbrd      13c 0003fffe  -- read back from multiple_collisions
+apbrd      140 000003fe  -- read back from excessive_collisions
+apbrd      144 000003fe  -- read back from late_collisions
+apbrd      148 0003fffe  -- read back from deferred_frames
+apbrd      14c 000003fe  -- read back from crs_errors
+apbrd      150 fffffffe  -- read back from octets_rxed_bottom
+apbrd      154 0000fffe  -- read back from octets_rxed_top
+apbrd      158 fffffffe  -- read back from frames_rxed_ok
+apbrd      15c fffffffe  -- read back from broadcast_rxed
+apbrd      160 fffffffe  -- read back from multicast_rxed
+apbrd      164 0000fffe  -- read back from pause_frames_rxed
+apbrd      168 fffffffe  -- read back from frames_rxed_64
+apbrd      16c fffffffe  -- read back from frames_rxed_65
+apbrd      170 fffffffe  -- read back from frames_rxed_128
+apbrd      174 fffffffe  -- read back from frames_rxed_256
+apbrd      178 fffffffe  -- read back from frames_rxed_512
+apbrd      17c fffffffe  -- read back from frames_rxed_1024
+apbrd      180 fffffffe  -- read back from frames_rxed_1519
+apbrd      184 000003fe  -- read back from undersize_frames
+apbrd      188 000003fe  -- read back from excessive_rx_length
+apbrd      18c 000003fe  -- read back from rx_jabbers
+apbrd      190 000003fe  -- read back from fcs_errors
+apbrd      194 000003fe  -- read back from rx_length_errors
+apbrd      198 000003fe  -- read back from rx_symbol_errors
+apbrd      19c 000003fe  -- read back from alignment_errors
+apbrd      1a0 0003fffe  -- read back from rx_resource_errors
+apbrd      1a4 000003fe  -- read back from rx_overruns
+apbrd      1a8 000000fe  -- read back from IP checksum errors
+apbrd      1ac 000000fe  -- read back from TCP checksum errors
+apbrd      1b0 000000fe  -- read back from UDP checksum errors
+
+--*************************
+
+
+--*************************
+-- 9. Write 0xfff0 to statistics registers.
+--
+
+apbwr      00 00000080  -- enable writing to statistics registers.
+
+apbwr      100 fffffff0  -- write 0xfff0 to octets_txed_bottom
+apbwr      104 fffffff0  -- write 0xfff0 to octets_txed_top
+apbwr      108 fffffff0  -- write 0xfff0 to frames_txed_ok
+apbwr      10c fffffff0  -- write 0xfff0 to broadcast_txed
+apbwr      110 fffffff0  -- write 0xfff0 to multicast_txed
+apbwr      114 fffffff0  -- write 0xfff0 to pause_frames_txed
+apbwr      118 fffffff0  -- write 0xfff0 to frames_txed_64
+apbwr      11c fffffff0  -- write 0xfff0 to frames_txed_65
+apbwr      120 fffffff0  -- write 0xfff0 to frames_txed_128
+apbwr      124 fffffff0  -- write 0xfff0 to frames_txed_256
+apbwr      128 fffffff0  -- write 0xfff0 toframes_txed_512
+apbwr      12c fffffff0  -- write 0xfff0 to frames_txed_1024
+apbwr      130 fffffff0  -- write 0xfff0 to frames_txed_1519
+apbwr      134 fffffff0  -- write 0xfff0 totx_underruns
+apbwr      138 fffffff0  -- write 0xfff0 to single_collisions
+apbwr      13c fffffff0  -- write 0xfff0 to multiple_collisions
+apbwr      140 fffffff0  -- write 0xfff0 to excessive_collisions
+apbwr      144 fffffff0  -- write 0xfff0 to late_collisions
+apbwr      148 fffffff0  -- write 0xfff0 to deferred_frames
+apbwr      14c fffffff0  -- write 0xfff0 to crs_errors
+apbwr      150 fffffff0  -- write 0xfff0 to octets_rxed_bottom
+apbwr      154 fffffff0  -- write 0xfff0 tooctets_rxed_top
+apbwr      158 fffffff0  -- write 0xfff0 to frames_rxed_ok
+apbwr      15c fffffff0  -- write 0xfff0 tobroadcast_rxed
+apbwr      160 fffffff0  -- write 0xfff0 to multicast_rxed
+apbwr      164 fffffff0  -- write 0xfff0 to pause_frames_rxed
+apbwr      168 fffffff0  -- write 0xfff0 to frames_rxed_64
+apbwr      16c fffffff0  -- write 0xfff0 toframes_rxed_65
+apbwr      170 fffffff0  -- write 0xfff0 to frames_rxed_128
+apbwr      174 fffffff0  -- write 0xfff0 to frames_rxed_256
+apbwr      178 fffffff0  -- write 0xfff0 to frames_rxed_512
+apbwr      17c fffffff0  -- write 0xfff0 to frames_rxed_1024
+apbwr      180 fffffff0  -- write 0xfff0 to frames_rxed_1519
+apbwr      184 fffffff0  -- write 0xfff0 to undersize_frames
+apbwr      188 fffffff0  -- write 0xfff0 to excessive_rx_length
+apbwr      18c fffffff0  -- write 0xfff0 to rx_jabbers
+apbwr      190 fffffff0  -- write 0xfff0 to fcs_errors
+apbwr      194 fffffff0  -- write 0xfff0 to rx_length_errors
+apbwr      198 fffffff0  -- write 0xfff0 to rx_symbol_errors
+apbwr      19c fffffff0  -- write 0xfff0 to alignment_errors
+apbwr      1a0 fffffff0  -- write 0xfff0 to rx_resource_errors
+apbwr      1a4 fffffff0  -- write 0xfff0 to rx_overruns
+apbwr      1a8 fffffff0  -- write 0xfff0 to IP checksum errors
+apbwr      1ac fffffff0  -- write 0xfff0 to TCP checksum errors
+apbwr      1b0 fffffff0  -- write 0xfff0 to UDP checksum errors
+
+--*************************
+
+
+--*************************
+-- 10. Set bit 6 in network control register for 18 times.
+--     Statistics registers should increment up to 0xffff (15 times) but
+--     not roll over.
+--     Read back statistics registers to make sure they have been properly incremented.
+--
+
+-- Increment statistics registers
+apbwr      00 00000040  -- -01- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -02- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -03- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -04- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -05- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -06- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -07- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -08- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -09- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -10- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -11- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -12- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -13- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -14- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -15- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -16- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -17- increment statistics registers by setting bit 6 of network control register.
+apbwr      00 00000040  -- -18- increment statistics registers by setting bit 6 of network control register.
+
+-- check statistics register increments
+
+apbrd      100 ffffffff  -- read back from octets_txed_bottom
+apbrd      104 0000ffff  -- read back from octets_txed_top
+apbrd      108 ffffffff  -- read back from frames_txed_ok
+apbrd      10c ffffffff  -- read back from broadcast_txed
+apbrd      110 ffffffff  -- read back from multicast_txed
+apbrd      114 0000ffff  -- read back from pause_frames_txed
+apbrd      118 ffffffff  -- read back from frames_txed_64
+apbrd      11c ffffffff  -- read back from frames_txed_65
+apbrd      120 ffffffff  -- read back from frames_txed_128
+apbrd      124 ffffffff  -- read back from frames_txed_256
+apbrd      128 ffffffff  -- read back from frames_txed_512
+apbrd      12c ffffffff  -- read back from frames_txed_1024
+apbrd      130 ffffffff  -- read back from frames_txed_1519
+apbrd      134 000003ff  -- read back from tx_underruns
+apbrd      138 0003ffff  -- read back from single_collisions
+apbrd      13c 0003ffff  -- read back from multiple_collisions
+apbrd      140 000003ff  -- read back from excessive_collisions
+apbrd      144 000003ff  -- read back from late_collisions
+apbrd      148 0003ffff  -- read back from deferred_frames
+apbrd      14c 000003ff  -- read back from crs_errors
+apbrd      150 ffffffff  -- read back from octets_rxed_bottom
+apbrd      154 0000ffff  -- read back from octets_rxed_top
+apbrd      158 ffffffff  -- read back from frames_rxed_ok
+apbrd      15c ffffffff  -- read back from broadcast_rxed
+apbrd      160 ffffffff  -- read back from multicast_rxed
+apbrd      164 0000ffff  -- read back from pause_frames_rxed
+apbrd      168 ffffffff  -- read back from frames_rxed_64
+apbrd      16c ffffffff  -- read back from frames_rxed_65
+apbrd      170 ffffffff  -- read back from frames_rxed_128
+apbrd      174 ffffffff  -- read back from frames_rxed_256
+apbrd      178 ffffffff  -- read back from frames_rxed_512
+apbrd      17c ffffffff  -- read back from frames_rxed_1024
+apbrd      180 ffffffff  -- read back from frames_rxed_1519
+apbrd      184 000003ff  -- read back from undersize_frames
+apbrd      188 000003ff  -- read back from excessive_rx_length
+apbrd      18c 000003ff  -- read back from rx_jabbers
+apbrd      190 000003ff  -- read back from fcs_errors
+apbrd      194 000003ff  -- read back from rx_length_errors
+apbrd      198 000003ff  -- read back from rx_symbol_errors
+apbrd      19c 000003ff  -- read back from alignment_errors
+apbrd      1a0 0003ffff  -- read back from rx_resource_errors
+apbrd      1a4 000003ff  -- read back from rx_overruns
+apbrd      1a8 000000ff  -- read back from IP checksum errors
+apbrd      1ac 000000ff  -- read back from TCP checksum errors
+apbrd      1b0 000000ff  -- read back from UDP checksum errors
+
+--*************************
+
+
+
+
+
+
+--*************************
+-- 7. Read statistics registers to ensure they have been properly reset by last read
+--
+
+-- check reset values of statistics registers
+apbrd      100 00000000  -- check reset value of octets_txed_bottom
+apbrd      104 00000000  -- check reset value of octets_txed_top
+apbrd      108 00000000  -- check reset value of frames_txed_ok
+apbrd      10c 00000000  -- check reset value of broadcast_txed
+apbrd      110 00000000  -- check reset value of multicast_txed
+apbrd      114 00000000  -- check reset value of pause_frames_txed
+apbrd      118 00000000  -- check reset value of frames_txed_64
+apbrd      11c 00000000  -- check reset value of frames_txed_65
+apbrd      120 00000000  -- check reset value of frames_txed_128
+apbrd      124 00000000  -- check reset value of frames_txed_256
+apbrd      128 00000000  -- check reset value of frames_txed_512
+apbrd      12c 00000000  -- check reset value of frames_txed_1024
+apbrd      130 00000000  -- check reset value of frames_txed_1519
+apbrd      134 00000000  -- check reset value of tx_underruns
+apbrd      138 00000000  -- check reset value of single_collisions
+apbrd      13c 00000000  -- check reset value of multiple_collisions
+apbrd      140 00000000  -- check reset value of excessive_collisions
+apbrd      144 00000000  -- check reset value of late_collisions
+apbrd      148 00000000  -- check reset value of deferred_frames
+apbrd      14c 00000000  -- check reset value of crs_errors
+apbrd      150 00000000  -- check reset value of octets_rxed_bottom
+apbrd      154 00000000  -- check reset value of octets_rxed_top
+apbrd      158 00000000  -- check reset value of frames_rxed_ok
+apbrd      15c 00000000  -- check reset value of broadcast_rxed
+apbrd      160 00000000  -- check reset value of multicast_rxed
+apbrd      164 00000000  -- check reset value of pause_frames_rxed
+apbrd      168 00000000  -- check reset value of frames_rxed_64
+apbrd      16c 00000000  -- check reset value of frames_rxed_65
+apbrd      170 00000000  -- check reset value of frames_rxed_128
+apbrd      174 00000000  -- check reset value of frames_rxed_256
+apbrd      178 00000000  -- check reset value of frames_rxed_512
+apbrd      17c 00000000  -- check reset value of frames_rxed_1024
+apbrd      180 00000000  -- check reset value of frames_rxed_1519
+apbrd      184 00000000  -- check reset value of undersize_frames
+apbrd      188 00000000  -- check reset value of excessive_rx_length
+apbrd      18c 00000000  -- check reset value of rx_jabbers
+apbrd      190 00000000  -- check reset value of fcs_errors
+apbrd      194 00000000  -- check reset value of rx_length_errors
+apbrd      198 00000000  -- check reset value of rx_symbol_errors
+apbrd      19c 00000000  -- check reset value of alignment_errors
+apbrd      1a0 00000000  -- check reset value of rx_resource_errors
+apbrd      1a4 00000000  -- check reset value of rx_overruns
+apbrd      1a8 00000000  -- check reset value of IP checksum errors
+apbrd      1ac 00000000  -- check reset value of TCP checksum errors
+apbrd      1b0 00000000  -- check reset value of UDP checksum errors
+
+--*************************
+-- 12  Test that snapshot registers are working properly.
+
+--#############################################--
+--# Copied snapshot tests from reg_rd_wr test #--
+--#############################################--
+
+-- check values of snapshot at beginning of snapshot test
+--apbwr      00 00004000  -- set read snapshot bit[14] in control register
+--apbrd     100 00000000  -- check value of Octects transmitted [31:0]
+--apbrd     104 00000000  -- check value of Octects transmitted [47:32]
+--apbrd     108 00000000  -- check value of Frames transmitted
+--apbrd     10c 00000000  -- check value of Broadcast frames transmitted
+--apbrd     110 00000000  -- check value of Multicast frames transmitted
+--apbrd     114 00000000  -- check value of Transmitted pause frames
+--apbrd     118 00000000  -- check value of 64 byte frames transmitted
+--apbrd     11c 00000000  -- check value of 65 - 127 byte frames transmitted
+--apbrd     120 00000000  -- check value of 128 - 255 byte frames transmitted
+--apbrd     124 00000000  -- check value of 256 - 511 byte frames transmitted
+--apbrd     128 00000000  -- check value of 512 - 1023 byte frames transmitted
+--apbrd     12c 00000000  -- check value of 1024 - 1518 byte frames transmitted
+--apbrd     130 00000000  -- check value of >1518 byte frames transmitted
+--apbrd     134 00000000  -- check value of Transmit underrun errors
+--apbrd     138 00000000  -- check value of Single collision frames
+--apbrd     13c 00000000  -- check value of Multiple collision frames
+--apbrd     140 00000000  -- check value of Excessive collisions
+--apbrd     144 00000000  -- check value of Late collisions
+--apbrd     148 00000000  -- check value of Deferred transmission frames
+--apbrd     14c 00000000  -- check value of Carries sense errors
+--apbrd     150 00000000  -- check value of Octets received [31:0]
+--apbrd     154 00000000  -- check value of Octets received [47:32]
+--apbrd     158 00000000  -- check value of Frames received
+--apbrd     15c 00000000  -- check value of Broadcast frames received
+--apbrd     160 00000000  -- check value of Multicast frames received
+--apbrd     164 00000000  -- check value of Pause frames received
+--apbrd     168 00000000  -- check value of 64 byte frames received
+--apbrd     16c 00000000  -- check value of 65 - 127 byte frames received
+--apbrd     170 00000000  -- check value of 128 - 255 byte frames received
+--apbrd     174 00000000  -- check value of 256 - 511 byte frames received
+--apbrd     178 00000000  -- check value of 512 - 1023 byte frames received
+--apbrd     17c 00000000  -- check value of 1024 - 1518 byte frames received
+--apbrd     180 00000000  -- check value of >1518 byte frames received
+--apbrd     184 00000000  -- check value of Undersize frames received
+--apbrd     188 00000000  -- check value of Oversize frames received
+--apbrd     18c 00000000  -- check value of Jabbers received
+--apbrd     190 00000000  -- check value of Frame check sequence errors
+--apbrd     194 00000000  -- check value of Length field frame errors
+--apbrd     198 00000000  -- check value of Receive symbol errors
+--apbrd     19c 00000000  -- check value of Alignment errors
+--apbrd     1a0 00000000  -- check value of Receive resource errors
+--apbrd     1a4 00000000  -- check value of Receive overrun errors
+--apbrd     1a8 00000000  -- check value of IP checksum errors
+--apbrd     1ac 00000000  -- check value of TCP checksum errors
+--apbrd     1b0 00000000  -- check value of UDP checksum errors
+
+-- write (max value - 2) to statistics registers
+--apbwr      00 00000080  -- set stats write enable bit[7] in control register
+                        -- now reading real stats
+--apbwr     100 ffffffff  -- set value of Octects transmitted [31:0]
+--apbwr     104 0000fffd  -- set value of Octects transmitted [47:32]
+--apbwr     108 fffffffd  -- set value of Frames transmitted
+--apbwr     10c fffffffd  -- set value of Broadcast frames transmitted
+--apbwr     110 fffffffd  -- set value of Multicast frames transmitted
+--apbwr     114 0000fffd  -- set value of Transmitted pause frames
+--apbwr     118 fffffffd  -- set value of 64 byte frames transmitted
+--apbwr     11c fffffffd  -- set value of 65 - 127 byte frames transmitted
+--apbwr     120 fffffffd  -- set value of 128 - 255 byte frames transmitted
+--apbwr     124 fffffffd  -- set value of 256 - 511 byte frames transmitted
+--apbwr     128 fffffffd  -- set value of 512 - 1023 byte frames transmitted
+--apbwr     12c fffffffd  -- set value of 1024 - 1518 byte frames transmitted
+--apbwr     130 fffffffd  -- set value of >1518 byte frames transmitted
+--apbwr     134 000003fd  -- set value of Transmit underrun errors
+--apbwr     138 0003fffd  -- set value of Single collision frames
+--apbwr     13c 0003fffd  -- set value of Multiple collision frames
+--apbwr     140 000003fd  -- set value of Excessive collisions
+--apbwr     144 000003fd  -- set value of Late collisions
+--apbwr     148 0003fffd  -- set value of Deferred transmission frames
+--apbwr     14c 000003fd  -- set value of Carries sense errors
+--apbwr     150 ffffffff  -- set value of Octets received [31:0]
+--apbwr     154 0000fffd  -- set value of Octets received [47:32]
+--apbwr     158 fffffffd  -- set value of Frames received
+--apbwr     15c fffffffd  -- set value of Broadcast frames received
+--apbwr     160 fffffffd  -- set value of Multicast frames received
+--apbwr     164 0000fffd  -- set value of Pause frames received
+--apbwr     168 fffffffd  -- set value of 64 byte frames received
+--apbwr     16c fffffffd  -- set value of 65 - 127 byte frames received
+--apbwr     170 fffffffd  -- set value of 128 - 255 byte frames received
+--apbwr     174 fffffffd  -- set value of 256 - 511 byte frames received
+--apbwr     178 fffffffd  -- set value of 512 - 1023 byte frames received
+--apbwr     17c fffffffd  -- set value of 1024 - 1518 byte frames received
+--apbwr     180 fffffffd  -- set value of >1518 byte frames received
+--apbwr     184 000003fd  -- set value of Undersize frames received
+--apbwr     188 000003fd  -- set value of Oversize frames received
+--apbwr     18c 000003fd  -- set value of Jabbers received
+--apbwr     190 000003fd  -- set value of Frame check sequence errors
+--apbwr     194 000003fd  -- set value of Length field frame errors
+--apbwr     198 000003fd  -- set value of Receive symbol errors
+--apbwr     19c 000003fd  -- set value of Alignment errors
+--apbwr     1a0 0003fffd  -- set value of Receive resource errors
+--apbwr     1a4 000003fd  -- set value of Receive overrun errors
+--apbwr     1a8 000000fd  -- set value of IP checksum errors
+--apbwr     1ac 000000fd  -- set value of TCP checksum errors
+--apbwr     1b0 000000fd  -- set value of UDP checksum errors
+
+-- now increment statistics registers and then take a snapshot
+--apbwr      00 00000040  -- increment stats bit[6] in control register
+--apbwr      00 00006000  -- take snapshot of current stats values (max - 1)
+                        -- and switch back to reading snapshot
+
+-- taking snapshot will have cleared real stats
+-- (reading the snapshot will not clear real stats or snapshot stats)
+--apbwr      00 00004040  -- increment real stats so they become 1
+
+
+-- read new values in snapshot, now (max - 1)
+-- reading snapshot will NOT clear real stats
+--apbrd     100 00000000  -- check value of Octects transmitted [31:0]
+--apbrd     104 0000fffe  -- check value of Octects transmitted [47:32]
+--apbrd     108 fffffffe  -- check value of Frames transmitted
+--apbrd     10c fffffffe  -- check value of Broadcast frames transmitted
+--apbrd     110 fffffffe  -- check value of Multicast frames transmitted
+--apbrd     114 0000fffe  -- check value of Transmitted pause frames
+--apbrd     118 fffffffe  -- check value of 64 byte frames transmitted
+--apbrd     11c fffffffe  -- check value of 65 - 127 byte frames transmitted
+--apbrd     120 fffffffe  -- check value of 128 - 255 byte frames transmitted
+--apbrd     124 fffffffe  -- check value of 256 - 511 byte frames transmitted
+--apbrd     128 fffffffe  -- check value of 512 - 1023 byte frames transmitted
+--apbrd     12c fffffffe  -- check value of 1024 - 1518 byte frames transmitted
+--apbrd     130 fffffffe  -- check value of >1518 byte frames transmitted
+--apbrd     134 000003fe  -- check value of Transmit underrun errors
+--apbrd     138 0003fffe  -- check value of Single collision frames
+--apbrd     13c 0003fffe  -- check value of Multiple collision frames
+--apbrd     140 000003fe  -- check value of Excessive collisions
+--apbrd     144 000003fe  -- check value of Late collisions
+--apbrd     148 0003fffe  -- check value of Deferred transmission frames
+--apbrd     14c 000003fe  -- check value of Carries sense errors
+--apbrd     150 00000000  -- check value of Octets received [31:0]
+--apbrd     154 0000fffe  -- check value of Octets received [47:32]
+--apbrd     158 fffffffe  -- check value of Frames received
+--apbrd     15c fffffffe  -- check value of Broadcast frames received
+--apbrd     160 fffffffe  -- check value of Multicast frames received
+--apbrd     164 0000fffe  -- check value of Pause frames received
+--apbrd     168 fffffffe  -- check value of 64 byte frames received
+--apbrd     16c fffffffe  -- check value of 65 - 127 byte frames received
+--apbrd     170 fffffffe  -- check value of 128 - 255 byte frames received
+--apbrd     174 fffffffe  -- check value of 256 - 511 byte frames received
+--apbrd     178 fffffffe  -- check value of 512 - 1023 byte frames received
+--apbrd     17c fffffffe  -- check value of 1024 - 1518 byte frames received
+--apbrd     180 fffffffe  -- check value of >1518 byte frames received
+--apbrd     184 000003fe  -- check value of Undersize frames received
+--apbrd     188 000003fe  -- check value of Oversize frames received
+--apbrd     18c 000003fe  -- check value of Jabbers received
+--apbrd     190 000003fe  -- check value of Frame check sequence errors
+--apbrd     194 000003fe  -- check value of Length field frame errors
+--apbrd     198 000003fe  -- check value of Receive symbol errors
+--apbrd     19c 000003fe  -- check value of Alignment errors
+--apbrd     1a0 0003fffe  -- check value of Receive resource errors
+--apbrd     1a4 000003fe  -- check value of Receive overrun errors
+--apbrd     1a8 000000fe  -- check value of IP checksum errors
+--apbrd     1ac 000000fe  -- check value of TCP checksum errors
+--apbrd     1b0 000000fe  -- check value of UDP checksum errors
+
+-- now increment statistics registers again and read real stats
+--apbwr      00 00000040  -- increment stats bit[6] in control register
+                        -- and switch back to reading real stats
+                        -- will now all read 2
+--apbrd     100 00000002  -- check value of Octects transmitted [31:0]
+--apbrd     104 00000002  -- check value of Octects transmitted [47:32]
+--apbrd     108 00000002  -- check value of Frames transmitted
+--apbrd     10c 00000002  -- check value of Broadcast frames transmitted
+--apbrd     110 00000002  -- check value of Multicast frames transmitted
+--apbrd     114 00000002  -- check value of Transmitted pause frames
+--apbrd     118 00000002  -- check value of 64 byte frames transmitted
+--apbrd     11c 00000002  -- check value of 65 - 127 byte frames transmitted
+--apbrd     120 00000002  -- check value of 128 - 255 byte frames transmitted
+--apbrd     124 00000002  -- check value of 256 - 511 byte frames transmitted
+--apbrd     128 00000002  -- check value of 512 - 1023 byte frames transmitted
+--apbrd     12c 00000002  -- check value of 1024 - 1518 byte frames transmitted
+--apbrd     130 00000002  -- check value of >1518 byte frames transmitted
+--apbrd     134 00000002  -- check value of Transmit underrun errors
+--apbrd     138 00000002  -- check value of Single collision frames
+--apbrd     13c 00000002  -- check value of Multiple collision frames
+--apbrd     140 00000002  -- check value of Excessive collisions
+--apbrd     144 00000002  -- check value of Late collisions
+--apbrd     148 00000002  -- check value of Deferred transmission frames
+--apbrd     14c 00000002  -- check value of Carries sense errors
+--apbrd     150 00000002  -- check value of Octets received [31:0]
+--apbrd     154 00000002  -- check value of Octets received [47:32]
+--apbrd     158 00000002  -- check value of Frames received
+--apbrd     15c 00000002  -- check value of Broadcast frames received
+--apbrd     160 00000002  -- check value of Multicast frames received
+--apbrd     164 00000002  -- check value of Pause frames received
+--apbrd     168 00000002  -- check value of 64 byte frames received
+--apbrd     16c 00000002  -- check value of 65 - 127 byte frames received
+--apbrd     170 00000002  -- check value of 128 - 255 byte frames received
+--apbrd     174 00000002  -- check value of 256 - 511 byte frames received
+--apbrd     178 00000002  -- check value of 512 - 1023 byte frames received
+--apbrd     17c 00000002  -- check value of 1024 - 1518 byte frames received
+--apbrd     180 00000002  -- check value of >1518 byte frames received
+--apbrd     184 00000002  -- check value of Undersize frames received
+--apbrd     188 00000002  -- check value of Oversize frames received
+--apbrd     18c 00000002  -- check value of Jabbers received
+--apbrd     190 00000002  -- check value of Frame check sequence errors
+--apbrd     194 00000002  -- check value of Length field frame errors
+--apbrd     198 00000002  -- check value of Receive symbol errors
+--apbrd     19c 00000002  -- check value of Alignment errors
+--apbrd     1a0 00000002  -- check value of Receive resource errors
+--apbrd     1a4 00000002  -- check value of Receive overrun errors
+--apbrd     1a8 00000002  -- check value of IP checksum errors
+--apbrd     1ac 00000002  -- check value of TCP checksum errors
+--apbrd     1b0 00000002  -- check value of UDP checksum errors
+
+-- reading real stats registers should have cleared them this time
+--apbrd     100 00000000  -- check value of Octects transmitted [31:0]
+--apbrd     104 00000000  -- check value of Octects transmitted [47:32]
+--apbrd     108 00000000  -- check value of Frames transmitted
+--apbrd     10c 00000000  -- check value of Broadcast frames transmitted
+--apbrd     110 00000000  -- check value of Multicast frames transmitted
+--apbrd     114 00000000  -- check value of Transmitted pause frames
+--apbrd     118 00000000  -- check value of 64 byte frames transmitted
+--apbrd     11c 00000000  -- check value of 65 - 127 byte frames transmitted
+--apbrd     120 00000000  -- check value of 128 - 255 byte frames transmitted
+--apbrd     124 00000000  -- check value of 256 - 511 byte frames transmitted
+--apbrd     128 00000000  -- check value of 512 - 1023 byte frames transmitted
+--apbrd     12c 00000000  -- check value of 1024 - 1518 byte frames transmitted
+--apbrd     130 00000000  -- check value of >1518 byte frames transmitted
+--apbrd     134 00000000  -- check value of Transmit underrun errors
+--apbrd     138 00000000  -- check value of Single collision frames
+--apbrd     13c 00000000  -- check value of Multiple collision frames
+--apbrd     140 00000000  -- check value of Excessive collisions
+--apbrd     144 00000000  -- check value of Late collisions
+--apbrd     148 00000000  -- check value of Deferred transmission frames
+--apbrd     14c 00000000  -- check value of Carries sense errors
+--apbrd     150 00000000  -- check value of Octets received [31:0]
+--apbrd     154 00000000  -- check value of Octets received [47:32]
+--apbrd     158 00000000  -- check value of Frames received
+--apbrd     15c 00000000  -- check value of Broadcast frames received
+--apbrd     160 00000000  -- check value of Multicast frames received
+--apbrd     164 00000000  -- check value of Pause frames received
+--apbrd     168 00000000  -- check value of 64 byte frames received
+--apbrd     16c 00000000  -- check value of 65 - 127 byte frames received
+--apbrd     170 00000000  -- check value of 128 - 255 byte frames received
+--apbrd     174 00000000  -- check value of 256 - 511 byte frames received
+--apbrd     178 00000000  -- check value of 512 - 1023 byte frames received
+--apbrd     17c 00000000  -- check value of 1024 - 1518 byte frames received
+--apbrd     180 00000000  -- check value of >1518 byte frames received
+--apbrd     184 00000000  -- check value of Undersize frames received
+--apbrd     188 00000000  -- check value of Oversize frames received
+--apbrd     18c 00000000  -- check value of Jabbers received
+--apbrd     190 00000000  -- check value of Frame check sequence errors
+--apbrd     194 00000000  -- check value of Length field frame errors
+--apbrd     198 00000000  -- check value of Receive symbol errors
+--apbrd     19c 00000000  -- check value of Alignment errors
+--apbrd     1a0 00000000  -- check value of Receive resource errors
+--apbrd     1a4 00000000  -- check value of Receive overrun errors
+--apbrd     1a8 00000000  -- check value of IP checksum errors
+--apbrd     1ac 00000000  -- check value of TCP checksum errors
+--apbrd     1b0 00000000  -- check value of UDP checksum errors
+
+-- Check that this didn't affect snapshot
+--apbwr      00 00004000  -- switch back to reading snapshot
+--apbrd     100 00000000  -- check value of Octects transmitted [31:0]
+--apbrd     104 0000fffe  -- check value of Octects transmitted [47:32]
+--apbrd     108 fffffffe  -- check value of Frames transmitted
+--apbrd     10c fffffffe  -- check value of Broadcast frames transmitted
+--apbrd     110 fffffffe  -- check value of Multicast frames transmitted
+--apbrd     114 0000fffe  -- check value of Transmitted pause frames
+--apbrd     118 fffffffe  -- check value of 64 byte frames transmitted
+--apbrd     11c fffffffe  -- check value of 65 - 127 byte frames transmitted
+--apbrd     120 fffffffe  -- check value of 128 - 255 byte frames transmitted
+--apbrd     124 fffffffe  -- check value of 256 - 511 byte frames transmitted
+--apbrd     128 fffffffe  -- check value of 512 - 1023 byte frames transmitted
+--apbrd     12c fffffffe  -- check value of 1024 - 1518 byte frames transmitted
+--apbrd     130 fffffffe  -- check value of >1518 byte frames transmitted
+--apbrd     134 000003fe  -- check value of Transmit underrun errors
+--apbrd     138 0003fffe  -- check value of Single collision frames
+--apbrd     13c 0003fffe  -- check value of Multiple collision frames
+--apbrd     140 000003fe  -- check value of Excessive collisions
+--apbrd     144 000003fe  -- check value of Late collisions
+--apbrd     148 0003fffe  -- check value of Deferred transmission frames
+--apbrd     14c 000003fe  -- check value of Carries sense errors
+--apbrd     150 00000000  -- check value of Octets received [31:0]
+--apbrd     154 0000fffe  -- check value of Octets received [47:32]
+--apbrd     158 fffffffe  -- check value of Frames received
+--apbrd     15c fffffffe  -- check value of Broadcast frames received
+--apbrd     160 fffffffe  -- check value of Multicast frames received
+--apbrd     164 0000fffe  -- check value of Pause frames received
+--apbrd     168 fffffffe  -- check value of 64 byte frames received
+--apbrd     16c fffffffe  -- check value of 65 - 127 byte frames received
+--apbrd     170 fffffffe  -- check value of 128 - 255 byte frames received
+--apbrd     174 fffffffe  -- check value of 256 - 511 byte frames received
+--apbrd     178 fffffffe  -- check value of 512 - 1023 byte frames received
+--apbrd     17c fffffffe  -- check value of 1024 - 1518 byte frames received
+--apbrd     180 fffffffe  -- check value of >1518 byte frames received
+--apbrd     184 000003fe  -- check value of Undersize frames received
+--apbrd     188 000003fe  -- check value of Oversize frames received
+--apbrd     18c 000003fe  -- check value of Jabbers received
+--apbrd     190 000003fe  -- check value of Frame check sequence errors
+--apbrd     194 000003fe  -- check value of Length field frame errors
+--apbrd     198 000003fe  -- check value of Receive symbol errors
+--apbrd     19c 000003fe  -- check value of Alignment errors
+--apbrd     1a0 0003fffe  -- check value of Receive resource errors
+--apbrd     1a4 000003fe  -- check value of Receive overrun errors
+--apbrd     1a8 000000fe  -- check value of IP checksum errors
+--apbrd     1ac 000000fe  -- check value of TCP checksum errors
+--apbrd     1b0 000000fe  -- check value of UDP checksum errors
+
+-- finally take another snapshot and check snapshot registers updated again
+--apbwr      00 00006000  -- take snapshot of current stats values (max - 1)
+                        -- and switch back to reading snapshot
+--apbrd     100 00000000  -- check value of Octects transmitted [31:0]
+--apbrd     104 00000000  -- check value of Octects transmitted [47:32]
+--apbrd     108 00000000  -- check value of Frames transmitted
+--apbrd     10c 00000000  -- check value of Broadcast frames transmitted
+--apbrd     110 00000000  -- check value of Multicast frames transmitted
+--apbrd     114 00000000  -- check value of Transmitted pause frames
+--apbrd     118 00000000  -- check value of 64 byte frames transmitted
+--apbrd     11c 00000000  -- check value of 65 - 127 byte frames transmitted
+--apbrd     120 00000000  -- check value of 128 - 255 byte frames transmitted
+--apbrd     124 00000000  -- check value of 256 - 511 byte frames transmitted
+--apbrd     128 00000000  -- check value of 512 - 1023 byte frames transmitted
+--apbrd     12c 00000000  -- check value of 1024 - 1518 byte frames transmitted
+--apbrd     130 00000000  -- check value of >1518 byte frames transmitted
+--apbrd     134 00000000  -- check value of Transmit underrun errors
+--apbrd     138 00000000  -- check value of Single collision frames
+--apbrd     13c 00000000  -- check value of Multiple collision frames
+--apbrd     140 00000000  -- check value of Excessive collisions
+--apbrd     144 00000000  -- check value of Late collisions
+--apbrd     148 00000000  -- check value of Deferred transmission frames
+--apbrd     14c 00000000  -- check value of Carries sense errors
+--apbrd     150 00000000  -- check value of Octets received [31:0]
+--apbrd     154 00000000  -- check value of Octets received [47:32]
+--apbrd     158 00000000  -- check value of Frames received
+--apbrd     15c 00000000  -- check value of Broadcast frames received
+--apbrd     160 00000000  -- check value of Multicast frames received
+--apbrd     164 00000000  -- check value of Pause frames received
+--apbrd     168 00000000  -- check value of 64 byte frames received
+--apbrd     16c 00000000  -- check value of 65 - 127 byte frames received
+--apbrd     170 00000000  -- check value of 128 - 255 byte frames received
+--apbrd     174 00000000  -- check value of 256 - 511 byte frames received
+--apbrd     178 00000000  -- check value of 512 - 1023 byte frames received
+--apbrd     17c 00000000  -- check value of 1024 - 1518 byte frames received
+--apbrd     180 00000000  -- check value of >1518 byte frames received
+--apbrd     184 00000000  -- check value of Undersize frames received
+--apbrd     188 00000000  -- check value of Oversize frames received
+--apbrd     18c 00000000  -- check value of Jabbers received
+--apbrd     190 00000000  -- check value of Frame check sequence errors
+--apbrd     194 00000000  -- check value of Length field frame errors
+--apbrd     198 00000000  -- check value of Receive symbol errors
+--apbrd     19c 00000000  -- check value of Alignment errors
+--apbrd     1a0 00000000  -- check value of Receive resource errors
+--apbrd     1a4 00000000  -- check value of Receive overrun errors
+--apbrd     1a8 00000000  -- check value of IP checksum errors
+--apbrd     1ac 00000000  -- check value of TCP checksum errors
+--apbrd     1b0 00000000  -- check value of UDP checksum errors
+
+-- ************************************************************************************* --
+-- 13. Set the Write Enable for Stastics Register bit in the Network Control Register. Then,
+--     write 0xfffffffd to the octets transmitted lower register. Then, transmit a 
+--     frame. (This should cause the octets transmitted lower register to 
+--     roll over)
+-- ************************************************************************************* --
+
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           28  ffffffff    -- enable all interrupts
+apbrd           24  00000000    -- check interrupt status
+apbwr           00  00000080    -- set the write enable for statistics  register bit
+apbwr          100  fffffffd    -- set the octets transmitted lower register
+apbrd          100  fffffffd    -- check the octets transmitted lower register
+apbrd          100  00000000    -- check the octets transmitted lower register
+apbwr          100  fffffffd    -- set the octets transmitted lower register
+apbwr          104  00000000    -- set the octets transmitted upper register
+apbrd          104  00000000    -- set the octets transmitted upper register
+apbwr           1c  4313fc6c    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+apbwr           00  00000408    -- write tx halt immediately keeping tx enabled
+                                -- this stops fetch of second frame
+
+-- read the first transmit queue descriptor
+dma_rd          4313fc70    0000803c
+dma_rd          4313fc6c    28ddac1c
+
+-- read the transmit buffer
+dma_rd          28ddac1c    2db833d4
+dma_rd          28ddac20    f4312725
+dma_rd          28ddac24    f832136a
+dma_rd          28ddac28    77fb2e00
+dma_rd          28ddac2c    56284e71
+dma_rd          28ddac30    93df396e
+dma_rd          28ddac34    de5f1bbb
+dma_rd          28ddac38    daa7b434
+dma_rd          28ddac3c    b61aaefc
+dma_rd          28ddac40    46794e31
+dma_rd          28ddac44    7b299b37
+dma_rd          28ddac48    181ce947
+dma_rd          28ddac4c    17fba425
+dma_rd          28ddac50    663e11d1
+dma_rd          28ddac54    6ab6918c
+
+-- write back the first queue descriptors status
+dma_wr          4313fc70    8000803c
+
+
+
+txd         55555555555555d5d433b82d252731f46a1332f8002efb77
+txd                         714e28566e39df93bb1b5fde34b4a7da
+txd                         fcae1ab6314e7946379b297b47e91c18
+txd                         25a4fb17d1113e668c91b66a17f16381
+
+
+apbrd(int)    24 00000080  -- check frame tx complete
+apbrd        100 0000003D  -- check octets txed lower register
+apbrd        104 00000001  -- check octets txed upper register
+
+-- ************************************************************************************* --
+-- 14. Then, write 0xffff to the octets transmitted upper register and 0xfffffffd to the octets transmitted
+--     lower register. Then, transmit a frame. (This should cause the octets transmitted upper register to 
+--     hit 0x0000ffff  and octets transmitted lower register to hit 0xffffffff)
+-- ************************************************************************************* --
+
+-- setup the dma interface
+apbwr           28  0001ffff    -- enable all interrupts
+apbrd           24  00000000    -- check interrupt status
+apbwr           00  00000080    -- set the write enable for statistics  register bit
+apbwr          100  fffffffd    -- set the octets transmitted lower register
+apbrd          100  fffffffd    -- check the octets transmitted lower register
+apbrd          100  00000000    -- check the octets transmitted lower register
+apbwr          100  fffffffd    -- set the octets transmitted lower register
+apbwr          104  0000ffff    -- set the octets transmitted upper register
+apbrd          104  0000ffff    -- set the octets transmitted upper register
+apbwr          104  0000ffff    -- set the octets transmitted upper register
+apbwr           1c  c9e3ea44    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+apbwr           00  00000408    -- write tx halt immediately keeping tx enabled
+                                -- this stops fetch of second frame
+
+-- read the first transmit queue descriptor
+dma_rd          c9e3ea48    0000803c
+dma_rd          c9e3ea44    a2c45994
+
+-- read the transmit buffer
+dma_rd          a2c45994    447e9dbe
+dma_rd          a2c45998    7dbbca9d
+dma_rd          a2c4599c    2448e1b8
+dma_rd          a2c459a0    995a2e00
+dma_rd          a2c459a4    1bd83494
+dma_rd          a2c459a8    4f9e26ea
+dma_rd          a2c459ac    c253d8e3
+dma_rd          a2c459b0    de6aabe7
+dma_rd          a2c459b4    c69b478c
+dma_rd          a2c459b8    cdf361ff
+dma_rd          a2c459bc    9f3cd8ce
+dma_rd          a2c459c0    93fbc8bd
+dma_rd          a2c459c4    9b3a48bd
+dma_rd          a2c459c8    239f58a2
+dma_rd          a2c459cc    b8ea7d67
+
+-- write back the first queue descriptors status
+dma_wr          c9e3ea48    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xca9d447e9dbe' unicast
+-- srcaddr:  '0x2448e1b87dbb' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xe5df8cb3'
+
+txd         55555555555555d5be9d7e449dcabb7db8e14824002e5a99
+txd                         9434d81bea269e4fe3d853c2e7ab6ade
+txd                         8c479bc6ff61f3cdced83c9fbdc8fb93
+txd                         bd483a9ba2589f23677deab83bc8fd5e
+
+apbrd(int)    24 00000080  -- check frame tx complete
+apbrd        100 ffffffff  -- check octets txed lower register
+apbrd        104 0000ffff  -- check octets txed upper register
+
+-- ************************************************************************************* --
+-- 15. Write 0xfffffffd to the octets received lower register. Then, receive a
+--     frame. (This should cause the octets received lower register to
+--     roll over)
+-- ************************************************************************************* --
+
+-- setup the dma interface
+apbwr      00 00000080    -- set the write enable for statistics  register bit
+apbwr     150 fffffffd  -- set the octets received lower register
+apbrd     150 fffffffd  -- check the octets received lower register
+apbrd     150 00000000  -- check the octets received lower register
+apbwr     150 fffffffd  -- set the octets received lower register
+apbwr     154 00000000  -- set the octets received upper register
+apbrd     154 00000000  -- set the octets received upper register
+apbwr      18 c7ce8b38  -- set address of the receive queue descriptor
+apbrd      18 c7ce8b38  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive 
+apbrd      00 00000004  -- check network control register 
+apbwr      04 00080001  -- set network configuration register
+apbrd      04 00080001  -- check network configuration register
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 0001ffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwrf     8C 00001111  -- specific address register 1 top
+
+
+rxd(apb)         5555d5785634121111596772dec7878aea736e
+rxd               a76bc386f31dde767cbf6eea99f4b68e
+rxd               6b1c913e2ec1989a4dca8e81b3f4789f
+rxd               b626116b11fc4dc82e8baf3egggggggg
+
+-- read the first receive queue descriptor
+dma_rd          c7ce8b38    dfd2df2c
+
+-- check writes to the receive buffer
+dma_wr          dfd2df2c    12345678
+dma_wr          dfd2df30    67591111
+dma_wr          dfd2df34    87c7de72
+dma_wr          dfd2df38    6e73ea8a
+dma_wr          dfd2df3c    86c36ba7
+dma_wr          dfd2df40    76de1df3
+dma_wr          dfd2df44    ea6ebf7c
+dma_wr          dfd2df48    8eb6f499
+dma_wr          dfd2df4c    3e911c6b
+dma_wr          dfd2df50    9a98c12e
+dma_wr          dfd2df54    818eca4d
+dma_wr          dfd2df58    9f78f4b3
+dma_wr          dfd2df5c    6b1126b6
+dma_wr          dfd2df60    c84dfc11
+dma_wr          dfd2df64    3eaf8b2e
+dma_wr          dfd2df68    490b2f1d
+
+-- write back the final queue descriptor's status
+dma_wr          c7ce8b3c    0800c040 -- dma writes the final buffer's status
+dma_wr          c7ce8b38    dfd2df2d -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          c7ce8b40    dfd2df6c
+
+
+apbrd(int)    24 00000002  -- check frame rx complete
+apbrd        150 0000003D  -- check octets rxed lower register
+apbrd        154 00000001  -- check octets rxed upper register
+
+-- ************************************************************************************* --
+-- 16. Then, write 0xffff to the octets received upper register and 0xfffffffd to the octets received
+--     lower register. Then, receive a frame. (This should cause the octets received upper register to 
+--     hit 0x0000ffff  and octets received lower register to hit 0xffffffff)
+-- ************************************************************************************* --
+
+-- setup the dma interface
+apbwr      00 00000080  -- set the write enable for statistics  register bit
+apbwr     150 fffffffd  -- set the octets received lower register
+apbrd     150 fffffffd  -- check the octets received lower register
+apbrd     150 00000000  -- check the octets received lower register
+apbwr     150 fffffffd  -- set the octets received lower register
+apbwr     154 0000ffff  -- set the octets received upper register
+apbrd     154 0000ffff  -- check the octets received upper register
+apbwr     154 0000ffff  -- set the octets received upper register
+apbwr      18 c7ce8b38  -- set address of the receive queue descriptor
+apbrd      18 c7ce8b38  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive 
+apbrd      00 00000004  -- check network control register 
+apbwr      04 00080001  -- set network configuration register
+apbrd      04 00080001  -- check network configuration register
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 0001ffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwrf     8C 00001111  -- specific address register 1 top
+
+
+rxd(apb)         5555d5785634121111596772dec7878aea736e
+rxd               a76bc386f31dde767cbf6eea99f4b68e
+rxd               6b1c913e2ec1989a4dca8e81b3f4789f
+rxd               b626116b11fc4dc82e8baf3egggggggg
+
+-- read the first receive queue descriptor
+dma_rd          c7ce8b38    dfd2df2c
+
+-- check writes to the receive buffer
+dma_wr          dfd2df2c    12345678
+dma_wr          dfd2df30    67591111
+dma_wr          dfd2df34    87c7de72
+dma_wr          dfd2df38    6e73ea8a
+dma_wr          dfd2df3c    86c36ba7
+dma_wr          dfd2df40    76de1df3
+dma_wr          dfd2df44    ea6ebf7c
+dma_wr          dfd2df48    8eb6f499
+dma_wr          dfd2df4c    3e911c6b
+dma_wr          dfd2df50    9a98c12e
+dma_wr          dfd2df54    818eca4d
+dma_wr          dfd2df58    9f78f4b3
+dma_wr          dfd2df5c    6b1126b6
+dma_wr          dfd2df60    c84dfc11
+dma_wr          dfd2df64    3eaf8b2e
+dma_wr          dfd2df68    490b2f1d
+
+-- write back the final queue descriptor's status
+dma_wr          c7ce8b3c    0800c040 -- dma writes the final buffer's status
+dma_wr          c7ce8b38    dfd2df2d -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          c7ce8b40    dfd2df6c
+
+
+apbrd(int)    24 00000002  -- check frame rx complete
+apbrd        150 ffffffff  -- check octets rxed lower register
+apbrd        154 0000ffff  -- check octets rxed upper register
+
+-- ************************************************************************************* --
+-- 17. Transmit a frame. Once the frame is totally transmitted, read the octets transmitted lower
+--     register exactly when the register is going to be incremented and then read the octets
+--     transmitted upper register.  Both registers should not be incremented. 
+--     Ensures that the status registers can cope with being read at the same 
+--     time as being incremented.
+-- ************************************************************************************* --
+
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           00  00000080    -- set the write enable for statistics register bit
+apbwr          100  fffffffd    -- set the octets transmitted lower register
+apbwr          104  00000002    -- set the octets transmitted upper register
+apbwr           28  0001ffff    -- enable all interrupts
+apbrd           24  00000000    -- check interrupt status
+apbwr           1c  4313fc6c    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+apbwr           00  00000408    -- write tx halt immediately keeping tx enabled
+                                -- this stops fetch of second frame
+--apbrd(6589)    100  fffffffd    -- check octets txed lower register
+--apbrd          104  00000002    -- check octets txed upper register
+
+-- read the first transmit queue descriptor
+dma_rd          4313fc70    0000803c
+dma_rd          4313fc6c    28ddac1c
+
+-- read the transmit buffer
+dma_rd          28ddac1c    2db833d4
+dma_rd          28ddac20    f4312725
+dma_rd          28ddac24    f832136a
+dma_rd          28ddac28    77fb2e00
+dma_rd          28ddac2c    56284e71
+dma_rd          28ddac30    93df396e
+dma_rd          28ddac34    de5f1bbb
+dma_rd          28ddac38    daa7b434
+dma_rd          28ddac3c    b61aaefc
+dma_rd          28ddac40    46794e31
+dma_rd          28ddac44    7b299b37
+dma_rd          28ddac48    181ce947
+dma_rd          28ddac4c    17fba425
+dma_rd          28ddac50    663e11d1
+dma_rd          28ddac54    6ab6918c
+
+-- write back the first queue descriptors status
+dma_wr          4313fc70    8000803c
+
+
+
+txd         55555555555555d5d433b82d252731f46a1332f8002efb77
+txd                         714e28566e39df93bb1b5fde34b4a7da
+txd                         fcae1ab6314e7946379b297b47e91c18
+txd                         25a4fb17d1113e668c91b66a17f16381
+
+
+apbrd(int)    24 00000080  -- check frame tx complete
+--apbrd        100 00000040  -- check octets txed lower register
+--apbrd        104 00000000  -- check octets txed upper register
+apbrd        100 0000003d  -- check octets txed lower register
+apbrd        104 00000003  -- check octets txed upper register
+
+-- ************************************************************************************* --
+-- 18. Transmit a frame. While the frame is being transmitted, enable the take snap shot bit
+--     in the network control register.  Then, set the read snapshot bit in the network control 
+--     register once the frame is completely transmitted. Now, read the snap shot of the octets
+--     transmitted lower register. Next, disable the the read snap shot bit in the network 
+--     control register and read the octets transmitted lower register. (The count of octets 
+--     transmitted lower register should have been incremented since the snap shot of the 
+--     statistic registers was taken.)  Ensures that the stats registers can cope with being
+--     read and reset at the  moment they are being incremented.  
+-- ************************************************************************************* --
+
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           00  00000080    -- set the write enable for statistics register bit
+apbwr          100  abababab    -- set the octets transmitted lower register
+apbwr          104  abababab    -- set the octets transmitted upper register
+apbwr           28  0001ffff    -- enable all interrupts
+apbrd           24  00000000    -- check interrupt status
+apbwr           1c  4313fc6c    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+apbwr           00  00000408    -- write tx halt immediately keeping tx enabled
+                                -- this stops fetch of second frame
+--apbwr(7151)     00  00006008    -- take snapshot of current stats values 
+
+-- read the first transmit queue descriptor
+dma_rd          4313fc70    0000803c
+dma_rd          4313fc6c    28ddac1c
+
+-- read the transmit buffer
+dma_rd          28ddac1c    2db833d4
+dma_rd          28ddac20    f4312725
+dma_rd          28ddac24    f832136a
+dma_rd          28ddac28    77fb2e00
+dma_rd          28ddac2c    56284e71
+dma_rd          28ddac30    93df396e
+dma_rd          28ddac34    de5f1bbb
+dma_rd          28ddac38    daa7b434
+dma_rd          28ddac3c    b61aaefc
+dma_rd          28ddac40    46794e31
+dma_rd          28ddac44    7b299b37
+dma_rd          28ddac48    181ce947
+dma_rd          28ddac4c    17fba425
+dma_rd          28ddac50    663e11d1
+dma_rd          28ddac54    6ab6918c
+
+-- write back the first queue descriptors status
+dma_wr          4313fc70    8000803c
+
+txd         55555555555555d5d433b82d252731f46a1332f8002efb77
+txd                         714e28566e39df93bb1b5fde34b4a7da
+txd                         fcae1ab6314e7946379b297b47e91c18
+txd                         25a4fb17d1113e668c91b66a17f16381
+
+apbrd(int)    24 00000080  -- check frame tx complete
+apbwr         00 00004000  -- set read snapshot bit[14] in control register
+apbrd        100 abababeb  -- check octets txed lower register
+apbrd        104 0000abab  -- check the octets transmitted upper register
+apbwr         00 00000000  -- disable read snapshot bit[14] in control register
+--apbrd        100 00000040  -- check octets txed lower register
+apbrd        100 00000000  -- check octets txed lower register
+apbrd        104 00000000  -- check the octets transmitted upper register
+
+-- ************************************************************************************* --
+-- 19. Receive a frame. Once the frame is totally received, read the octets received lower
+--     register exactly when the register is going to be incremented and then read the octets
+--     received upper register.  Both registers should not be incremented. 
+--     Ensures that the status registers can cope with being read at the same 
+--     time as being incremented.
+-- ************************************************************************************* --
+
+-- setup the dma interface
+apbwr           00  00000080    -- set the write enable for statistics register bit
+apbwr          150  fffffffd    -- set the octets received lower register
+apbwr          154  00000002    -- set the octets received upper register
+apbwr           28  0001ffff    -- enable all interrupts
+apbrd           24  00000000    -- check interrupt status
+apbwr           18  8e6b758c    -- set address of the receive queue descriptor
+apbwr           00  00000004    -- enable rx
+
+-- add the destination address to a local address match register
+apbwr           88  12345678    -- specific address register 1 bottom
+apbwrf          8c  00001111    -- specific address register 1 top
+
+--apbrd(7683)    150  fffffffd	-- check octets rxed lower register
+--apbrd	       154  00000002	-- check octets rxed upper register
+
+
+
+rxd(apb)         55555555555555d5785634121111fcb745df272d002e134d
+rxd                         b6613f6a713759efca72c6a992ad4316
+rxd                         88dae11def39c7a6697c8e4c3ec6fbeb
+rxd                         e6bcf879ad43dca6c9e77c8cgggggggg
+
+-- read the first receive queue descriptor
+dma_rd          8e6b758c    9deab230
+
+-- check writes to the receive buffer
+dma_wr          9deab230    12345678
+dma_wr          9deab234    b7fc1111
+dma_wr          9deab238    2d27df45
+dma_wr          9deab23c    4d132e00
+dma_wr          9deab240    6a3f61b6
+dma_wr          9deab244    ef593771
+dma_wr          9deab248    a9c672ca
+dma_wr          9deab24c    1643ad92
+dma_wr          9deab250    1de1da88
+dma_wr          9deab254    a6c739ef
+dma_wr          9deab258    4c8e7c69
+dma_wr          9deab25c    ebfbc63e
+dma_wr          9deab260    79f8bce6
+dma_wr          9deab264    a6dc43ad
+dma_wr          9deab268    8c7ce7c9
+dma_wr          9deab26c    5ce7b80c
+
+-- write back the final queue descriptor's status
+dma_wr          8e6b7590    0800c040 -- dma writes the final buffer's status
+dma_wr          8e6b758c    9deab231 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          8e6b7594    9deab270
+
+apbrd(int)    24 00000002  -- check frame rx complete
+--apbrd        150 00000040  -- check octets txed lower register
+--apbrd        154 00000000  -- check octets txed upper register
+apbrd        150 0000003D  -- check octets rxed lower register
+apbrd        154 00000003  -- check octets rxed upper register
+apbwr         00 00000000  -- disable receive
+
+-- ************************************************************************************* --
+-- 20. Receive a frame. While the frame is being received, enable the take snap shot bit
+--     in the network control register.  Then, set the read snapshot bit in the network control 
+--     register once the frame is completely received. Now, read the snap shot of the octets
+--     received lower register. Next, disable the the read snap shot bit in the network 
+--     control register and read the octets received lower register. (The count of octets 
+--     received lower register should have been incremented since the snap shot of the 
+--     statistic registers was taken.)  Ensures that the stats registers can cope with being
+--     read and reset at the  moment they are being incremented.  
+-- ************************************************************************************* --
+
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           00  00000080    -- set the write enable for statistics register bit
+apbwr          150  abababab    -- set the octets received lower register
+apbwr           28  0001ffff    -- enable all interrupts
+apbrd           24  00000000    -- check interrupt status
+apbwr          154  abababab    -- set the octets received upper register
+apbwr           18  5fc8c870    -- set address of the receive queue descriptor
+apbwr           00  00000004    -- write enable rx
+
+-- add the destination address to a local address match register
+apbwr           98  12345678    -- specific address register 3 bottom
+apbwrf          9c  00001111    -- specific address register 3 top
+
+--apbwr(8181)     00  00006008    -- take snapshot of current stats values 
+
+
+rxd(apb)    55d57856341211113e5c913c57d8002ed14a
+rxd             d4ea6ead8d1ad72995f2d6e15cb33dd1
+rxd             9725e6347194659fe176fe659c2b6584
+rxd             5f8cafcb1afaa48e8f7c6496gggggggg
+
+-- read the first receive queue descriptor
+dma_rd          5fc8c870    2dc9b224
+
+-- check writes to the receive buffer
+dma_wr          2dc9b224    12345678
+dma_wr          2dc9b228    5c3e1111
+dma_wr          2dc9b22c    d8573c91
+dma_wr          2dc9b230    4ad12e00
+dma_wr          2dc9b234    ad6eead4
+dma_wr          2dc9b238    29d71a8d
+dma_wr          2dc9b23c    e1d6f295
+dma_wr          2dc9b240    d13db35c
+dma_wr          2dc9b244    34e62597
+dma_wr          2dc9b248    9f659471
+dma_wr          2dc9b24c    65fe76e1
+dma_wr          2dc9b250    84652b9c
+dma_wr          2dc9b254    cbaf8c5f
+dma_wr          2dc9b258    8ea4fa1a
+dma_wr          2dc9b25c    96647c8f
+dma_wr          2dc9b260    9bc4e839
+
+-- write back the final queue descriptor's status
+dma_wr          5fc8c874    0c00c040 -- dma writes the final buffer's status
+dma_wr          5fc8c870    2dc9b225 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd          5fc8c878    2dc9b264
+
+
+apbrd(int)    24 00000002  -- check frame rx complete
+apbwr         00 00004000  -- set read snapshot bit[14] in control register
+--apbrd        150 abababab  -- check octets rxed lower register
+apbrd        150 abababeb  -- check octets rxed lower register
+apbrd        154 0000abab    -- set the octets received upper register
+apbwr         00 00000000  -- disable read snapshot bit[14] in control register
+--apbrd        150 00000040  -- check octets rxed lower register
+apbrd        150 00000000  -- check octets rxed lower register
+apbrd        154 00000000    -- set the octets received upper register
+
+
+
+-- ************************************************************************************* --
+-- 21. Ensure that all bits of snapshot are toggled for codecoverage by writing all one's
+--     to the incrementing statistics registers and then taking a snapshot.
+-- ************************************************************************************* --
+
+-- clear real stats and copy into snapshot
+apbwr      00 000000a0  -- clear incrementing statistics and enable write
+apbwr      00 00006080  -- take snapshot and enable write and change to reading snapshot
+
+-- check that snapshot is clear
+apbrd     100 00000000  -- check value of Octects transmitted [31:0]
+apbrd     104 00000000  -- check value of Octects transmitted [47:32]
+apbrd     108 00000000  -- check value of Frames transmitted
+apbrd     10c 00000000  -- check value of Broadcast frames transmitted
+apbrd     110 00000000  -- check value of Multicast frames transmitted
+apbrd     114 00000000  -- check value of Transmitted pause frames
+apbrd     118 00000000  -- check value of 64 byte frames transmitted
+apbrd     11c 00000000  -- check value of 65 - 127 byte frames transmitted
+apbrd     120 00000000  -- check value of 128 - 255 byte frames transmitted
+apbrd     124 00000000  -- check value of 256 - 511 byte frames transmitted
+apbrd     128 00000000  -- check value of 512 - 1023 byte frames transmitted
+apbrd     12c 00000000  -- check value of 1024 - 1518 byte frames transmitted
+apbrd     130 00000000  -- check value of >1518 byte frames transmitted
+apbrd     134 00000000  -- check value of Transmit underrun errors
+apbrd     138 00000000  -- check value of Single collision frames
+apbrd     13c 00000000  -- check value of Multiple collision frames
+apbrd     140 00000000  -- check value of Excessive collisions
+apbrd     144 00000000  -- check value of Late collisions
+apbrd     148 00000000  -- check value of Deferred transmission frames
+apbrd     14c 00000000  -- check value of Carries sense errors
+apbrd     150 00000000  -- check value of Octets received [31:0]
+apbrd     154 00000000  -- check value of Octets received [47:32]
+apbrd     158 00000000  -- check value of Frames received
+apbrd     15c 00000000  -- check value of Broadcast frames received
+apbrd     160 00000000  -- check value of Multicast frames received
+apbrd     164 00000000  -- check value of Pause frames received
+apbrd     168 00000000  -- check value of 64 byte frames received
+apbrd     16c 00000000  -- check value of 65 - 127 byte frames received
+apbrd     170 00000000  -- check value of 128 - 255 byte frames received
+apbrd     174 00000000  -- check value of 256 - 511 byte frames received
+apbrd     178 00000000  -- check value of 512 - 1023 byte frames received
+apbrd     17c 00000000  -- check value of 1024 - 1518 byte frames received
+apbrd     180 00000000  -- check value of >1518 byte frames received
+apbrd     184 00000000  -- check value of Undersize frames received
+apbrd     188 00000000  -- check value of Oversize frames received
+apbrd     18c 00000000  -- check value of Jabbers received
+apbrd     190 00000000  -- check value of Frame check sequence errors
+apbrd     194 00000000  -- check value of Length field frame errors
+apbrd     198 00000000  -- check value of Receive symbol errors
+apbrd     19c 00000000  -- check value of Alignment errors
+apbrd     1a0 00000000  -- check value of Receive resource errors
+apbrd     1a4 00000000  -- check value of Receive overrun errors
+apbrd     1a8 00000000  -- check value of IP checksum errors
+apbrd     1ac 00000000  -- check value of TCP checksum errors
+apbrd     1b0 00000000  -- check value of UDP checksum errors
+
+
+-- write all ones to incrementing statistics
+apbwr      00 00004080  -- enable write
+
+-- write all one's to stats
+apbwr     100 ffffffff  -- set value of Octects transmitted [31:0]
+apbwr     104 ffffffff  -- set value of Octects transmitted [47:32]
+apbwr     108 ffffffff  -- set value of Frames transmitted
+apbwr     10c ffffffff  -- set value of Broadcast frames transmitted
+apbwr     110 ffffffff  -- set value of Multicast frames transmitted
+apbwr     114 ffffffff  -- set value of Transmitted pause frames
+apbwr     118 ffffffff  -- set value of 64 byte frames transmitted
+apbwr     11c ffffffff  -- set value of 65 - 127 byte frames transmitted
+apbwr     120 ffffffff  -- set value of 128 - 255 byte frames transmitted
+apbwr     124 ffffffff  -- set value of 256 - 511 byte frames transmitted
+apbwr     128 ffffffff  -- set value of 512 - 1023 byte frames transmitted
+apbwr     12c ffffffff  -- set value of 1024 - 1518 byte frames transmitted
+apbwr     130 ffffffff  -- set value of >1518 byte frames transmitted
+apbwr     134 ffffffff  -- set value of Transmit underrun errors
+apbwr     138 ffffffff  -- set value of Single collision frames
+apbwr     13c ffffffff  -- set value of Multiple collision frames
+apbwr     140 ffffffff  -- set value of Excessive collisions
+apbwr     144 ffffffff  -- set value of Late collisions
+apbwr     148 ffffffff  -- set value of Deferred transmission frames
+apbwr     14c ffffffff  -- set value of Carries sense errors
+apbwr     150 ffffffff  -- set value of Octets received [31:0]
+apbwr     154 ffffffff  -- set value of Octets received [47:32]
+apbwr     158 ffffffff  -- set value of Frames received
+apbwr     15c ffffffff  -- set value of Broadcast frames received
+apbwr     160 ffffffff  -- set value of Multicast frames received
+apbwr     164 ffffffff  -- set value of Pause frames received
+apbwr     168 ffffffff  -- set value of 64 byte frames received
+apbwr     16c ffffffff  -- set value of 65 - 127 byte frames received
+apbwr     170 ffffffff  -- set value of 128 - 255 byte frames received
+apbwr     174 ffffffff  -- set value of 256 - 511 byte frames received
+apbwr     178 ffffffff  -- set value of 512 - 1023 byte frames received
+apbwr     17c ffffffff  -- set value of 1024 - 1518 byte frames received
+apbwr     180 ffffffff  -- set value of >1518 byte frames received
+apbwr     184 ffffffff  -- set value of Undersize frames received
+apbwr     188 ffffffff  -- set value of Oversize frames received
+apbwr     18c ffffffff  -- set value of Jabbers received
+apbwr     190 ffffffff  -- set value of Frame check sequence errors
+apbwr     194 ffffffff  -- set value of Length field frame errors
+apbwr     198 ffffffff  -- set value of Receive symbol errors
+apbwr     19c ffffffff  -- set value of Alignment errors
+apbwr     1a0 ffffffff  -- set value of Receive resource errors
+apbwr     1a4 ffffffff  -- set value of Receive overrun errors
+apbwr     1a8 ffffffff  -- set value of IP checksum errors
+apbwr     1ac ffffffff  -- set value of TCP checksum errors
+apbwr     1b0 ffffffff  -- set value of UDP checksum errors
+
+apbwr      00 000000c0  -- incrementing statistics to make sure doesn't roll over
+--apbwr      00 00006080  -- take snapshot (this will clear incrementing stats)
+
+-- Check that snapshot is now all one's
+apbrd      100 ffffffff  -- read back from octets_txed_bottom
+apbrd      104 0000ffff  -- read back from octets_txed_top
+apbrd      108 ffffffff  -- read back from frames_txed_ok
+apbrd      10c ffffffff  -- read back from broadcast_txed
+apbrd      110 ffffffff  -- read back from multicast_txed
+apbrd      114 0000ffff  -- read back from pause_frames_txed
+apbrd      118 ffffffff  -- read back from frames_txed_64
+apbrd      11c ffffffff  -- read back from frames_txed_65
+apbrd      120 ffffffff  -- read back from frames_txed_128
+apbrd      124 ffffffff  -- read back from frames_txed_256
+apbrd      128 ffffffff  -- read back from frames_txed_512
+apbrd      12c ffffffff  -- read back from frames_txed_1024
+apbrd      130 ffffffff  -- read back from frames_txed_1519
+apbrd      134 000003ff  -- read back from tx_underruns
+apbrd      138 0003ffff  -- read back from single_collisions
+apbrd      13c 0003ffff  -- read back from multiple_collisions
+apbrd      140 000003ff  -- read back from excessive_collisions
+apbrd      144 000003ff  -- read back from late_collisions
+apbrd      148 0003ffff  -- read back from deferred_frames
+apbrd      14c 000003ff  -- read back from crs_errors
+apbrd      150 ffffffff  -- read back from octets_rxed_bottom
+apbrd      154 0000ffff  -- read back from octets_rxed_top
+apbrd      158 ffffffff  -- read back from frames_rxed_ok
+apbrd      15c ffffffff  -- read back from broadcast_rxed
+apbrd      160 ffffffff  -- read back from multicast_rxed
+apbrd      164 0000ffff  -- read back from pause_frames_rxed
+apbrd      168 ffffffff  -- read back from frames_rxed_64
+apbrd      16c ffffffff  -- read back from frames_rxed_65
+apbrd      170 ffffffff  -- read back from frames_rxed_128
+apbrd      174 ffffffff  -- read back from frames_rxed_256
+apbrd      178 ffffffff  -- read back from frames_rxed_512
+apbrd      17c ffffffff  -- read back from frames_rxed_1024
+apbrd      180 ffffffff  -- read back from frames_rxed_1519
+apbrd      184 000003ff  -- read back from undersize_frames
+apbrd      188 000003ff  -- read back from excessive_rx_length
+apbrd      18c 000003ff  -- read back from rx_jabbers
+apbrd      190 000003ff  -- read back from fcs_errors
+apbrd      194 000003ff  -- read back from rx_length_errors
+apbrd      198 000003ff  -- read back from rx_symbol_errors
+apbrd      19c 000003ff  -- read back from alignment_errors
+apbrd      1a0 0003ffff  -- read back from rx_resource_errors
+apbrd      1a4 000003ff  -- read back from rx_overruns
+apbrd      1a8 000000ff  -- read back from IP checksum errors
+apbrd      1ac 000000ff  -- read back from TCP checksum errors
+apbrd      1b0 000000ff  -- read back from UDP checksum errors
+
+--apbwr      00 00006080  -- take another snapshot
+
+-- Check that snapshot is now all zero's
+apbrd     100 00000000  -- check value of Octects transmitted [31:0]
+apbrd     104 00000000  -- check value of Octects transmitted [47:32]
+apbrd     108 00000000  -- check value of Frames transmitted
+apbrd     10c 00000000  -- check value of Broadcast frames transmitted
+apbrd     110 00000000  -- check value of Multicast frames transmitted
+apbrd     114 00000000  -- check value of Transmitted pause frames
+apbrd     118 00000000  -- check value of 64 byte frames transmitted
+apbrd     11c 00000000  -- check value of 65 - 127 byte frames transmitted
+apbrd     120 00000000  -- check value of 128 - 255 byte frames transmitted
+apbrd     124 00000000  -- check value of 256 - 511 byte frames transmitted
+apbrd     128 00000000  -- check value of 512 - 1023 byte frames transmitted
+apbrd     12c 00000000  -- check value of 1024 - 1518 byte frames transmitted
+apbrd     130 00000000  -- check value of >1518 byte frames transmitted
+apbrd     134 00000000  -- check value of Transmit underrun errors
+apbrd     138 00000000  -- check value of Single collision frames
+apbrd     13c 00000000  -- check value of Multiple collision frames
+apbrd     140 00000000  -- check value of Excessive collisions
+apbrd     144 00000000  -- check value of Late collisions
+apbrd     148 00000000  -- check value of Deferred transmission frames
+apbrd     14c 00000000  -- check value of Carries sense errors
+apbrd     150 00000000  -- check value of Octets received [31:0]
+apbrd     154 00000000  -- check value of Octets received [47:32]
+apbrd     158 00000000  -- check value of Frames received
+apbrd     15c 00000000  -- check value of Broadcast frames received
+apbrd     160 00000000  -- check value of Multicast frames received
+apbrd     164 00000000  -- check value of Pause frames received
+apbrd     168 00000000  -- check value of 64 byte frames received
+apbrd     16c 00000000  -- check value of 65 - 127 byte frames received
+apbrd     170 00000000  -- check value of 128 - 255 byte frames received
+apbrd     174 00000000  -- check value of 256 - 511 byte frames received
+apbrd     178 00000000  -- check value of 512 - 1023 byte frames received
+apbrd     17c 00000000  -- check value of 1024 - 1518 byte frames received
+apbrd     180 00000000  -- check value of >1518 byte frames received
+apbrd     184 00000000  -- check value of Undersize frames received
+apbrd     188 00000000  -- check value of Oversize frames received
+apbrd     18c 00000000  -- check value of Jabbers received
+apbrd     190 00000000  -- check value of Frame check sequence errors
+apbrd     194 00000000  -- check value of Length field frame errors
+apbrd     198 00000000  -- check value of Receive symbol errors
+apbrd     19c 00000000  -- check value of Alignment errors
+apbrd     1a0 00000000  -- check value of Receive resource errors
+apbrd     1a4 00000000  -- check value of Receive overrun errors
+apbrd     1a8 00000000  -- check value of IP checksum errors
+apbrd     1ac 00000000  -- check value of TCP checksum errors
+apbrd     1b0 00000000  -- check value of UDP checksum errors
+
+
+end(15000)
+
+

@@ -1,0 +1,623 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2015
+--            DESIGN                     Cadence Design Systems, Inc.
+--            SYSTEMS                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_an_linkok_lpi_cfg_tbi
+--
+--   Author         : Steven Ho
+--
+--   Date           : 15th Oct 2015
+--
+--------------------------------------------------------------------------------
+--
+--Purpose: To verify that the DUT restarts auto-negotiation upon receipt of /C/ 
+--         codes causing ability_match=TRUE while xmit=DATA.
+--
+--Note: This is an overall description of the test below.
+--Procedure:
+--
+--    1.Initialize by restarting auto-negotiation by any means.
+--    2.Provide a link of /C/ codes such that the GEM enters the COMPLETE_ACKNOWLEDGE state.
+--    3.Provide a stream of /I/ codes to the GEM.
+--    4.Verify that a link is established by observing frame transmission from the GEM.
+--    5.In the idle transmitted to the GEM, embed three validly encoded /C/ code after link fail
+--    6.Observe transmissions from the GEM.
+--
+--Observable Results:
+--
+--    a.The GEM should restart auto-negotiation as observed by the
+--       transmission of /C/ codes from the GEM.
+--
+--
+--------------------------------------------------------------------------------
+
+
+wait_states 0
+bus_grant_delay 0
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+
+-- ********************************************************************************************* --
+-- 1. Initialise the GEM for Gigabit Operation with PCS enabled. Furthermore, Auto-Negotiation is 
+--    enabled.
+-- ********************************************************************************************* --
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd     200 00009040  -- check value of pcs control register
+apbrd     210 00000020  -- check reset value of pcs auto-nego. adv. register
+apbwr     210 00000060  -- pcs auto-nego. adv. register - disable next page bit 
+apbrd     210 00000060  -- check pcs auto-nego. adv. register
+apbrd     21c 00000000  -- check reset value of pcs auto-nego. next page register
+apbwr      18 fffffff0  -- write receive queue pointer
+apbrd      18 fffffff0  -- check receive queue pointer
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+
+apbwr      04 00081c00  -- Put MAC into gigabit mode with TBI. Retry test enabled
+apbrd      04 00081c00  -- Check value of network config register
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 03020100  -- specific address register 1 bottom
+apbwr      8C 00000504  -- specific address register 1 top
+apbrd     200 00001040  -- check value of pcs control register
+apbrd     204 00000109  -- check pcs status register
+apbrd      20 00000000  -- check receive status register and trigger reception
+
+
+-- supply the receive buffer location
+dma_rd fffffff0 22222000 -- dma reads pointer of 22222000
+
+-- ********************************************************************************************* --
+-- 2. Once the GEM enters AN_ENABLE state, it should start transmitting alternating /C/ codes with the Config_Reg field all zeros.
+-- ********************************************************************************************* --
+
+pcs_an_tx          0000  
+
+-- ********************************************************************************************* --
+-- 3. After the link timer in the GEM finishes counting, the GEM should then transmit alternating /C/
+--    codes with the Conf_Reg field incdicating the same values that are in the PCS auto-negotiation 
+--    advertisement register.  (Enter into ABILITY_DETECT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      0        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_tx(trx)        6000
+
+-- ********************************************************************************************* --
+-- 4. Provide a link of /C/ codes corresponding to the abilities of the link partner (Bits 6(HD) and 5(FD) set
+--    high in the Conf_Reg. and bit 15 (NP)).  
+--    Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        0       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c16080c26080c16080c26080  8r
+
+-- ********************************************************************************************* --
+-- 5. The GEM should then transmit alternating /C/ codes with the Conf_Reg field incdicating the 
+--    same values that are in the PCS auto-negotiation advertisement register plus bit 14 should be set high.
+--    This bit tells the link partner that the GEM has successfully received the link partner's base
+--    page information. (Enter into ACKNOWLEDGE_DETECT state)
+--    Contents of TX_CONFIG Register = PCS Auto. Neg Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- TX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      0        1       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+
+pcs_an_tx(trx)        6040  
+
+
+-- ********************************************************************************************* --
+-- 6.  Provide a link of /C/ codes which correspond to the link partner sending the contents of
+--     its Auto-Neg. Advertisment register.  Furthermore, bit 14 will be set to indicate that
+--     the link partner has successfully received the GEM's acknowledge. (Enter into COMPLETE_ACK.
+--     state) 
+--     Contents of RX_CONFIG Register = PCS Auto. Neg Link Partner Advertisment Register 
+--              7------6------5------4------3------2------1------0   15------14------13------12------11------10------9------8    
+-- RX_CONFIG   PS1     HD     FD   rsvd   rsvd   rsvd   rsvd  rsvd    NP      ACK     RF2     RF1    rsvd     rsvd   rsvd   PS2
+--              0      1      1      0     0      0      0     0      1        1       0      0       0        0      0      0 
+-- ********************************************************************************************* --
+
+pcs_an_rx(trx)        c160c0c260c0c160c0c260c0 8r  
+pcs_an_rx             c160c0c260c0c160c0c260c0 8r  
+pcs_an_rx             c160c0c260c0c160c0c260c0 8r  
+pcs_an_rx             c160c0c260c0c160c0c260c0 8r
+  
+-- ********************************************************************************************* --
+-- 7.  Provide a stream of valid idle codes. 
+-- ********************************************************************************************* --
+
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50 
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50   
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50   
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50 
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50   
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50  
+pcs_an_err_rx                sbc    o50    sbc    o50   
+
+-- ********************************************************************************************* --
+-- 8.  The GEM should enter the COMPLETE_ACKNOWLEGE state, IDLE_DETECT state and finally LINK_OK
+--      state.
+-- ********************************************************************************************* --
+apbrd(int)     200 00001040  -- check pcs control register
+apbrd           08 00000006  -- check value of network status register, no link yet
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          204 00000109  -- check pcs status register
+apbrd          210 00000060  -- check pcs auto-neg. advertisment register
+apbrd          214 00008060  -- check pcs auto-neg. link partner advertisment register
+apbrd          218 00000006  -- check pcs auto-neg. expansion register
+apbrd          21c 00000000  -- check pcs auto-nego. next page register
+apbrd          220 00000000  -- check pcs auto-neg. link partner next page register
+apbrd          23C 00008000  -- check pcs auto-neg. extended status register
+apbrd           24 00020000  -- check interrupt status register -- PCS next page request interrupt
+apbrd(int)      24 00010200  -- check interrupt status register -- Link change and Auto Negotiation Complete
+apbwr      00 0000020c  -- write tx_go and enable tx
+apbwr      00 0000040c  -- write tx halt immediately keeping tx enabled
+                        -- this stops fetch of second frame
+
+
+dma_rd 55555504 00008100 -- start of frame, 
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+
+
+-- supply the transmit data to the AHB interface
+
+dma_rd 98765000 03020100
+dma_rd 98765004 07060504
+dma_rd 98765008 0b0a0908
+dma_rd 9876500c 0f0e0d0c
+dma_rd 98765010 13121110
+dma_rd 98765014 17161514
+dma_rd 98765018 1b1a1918
+dma_rd 9876501c 1f1e1d1c
+dma_rd 98765020 23222120
+dma_rd 98765024 27262524
+dma_rd 98765028 2b2a2928
+dma_rd 9876502c 2f2e2d2c
+dma_rd 98765030 33323130
+dma_rd 98765034 37363534
+dma_rd 98765038 3b3a3938
+dma_rd 9876503c 3f3e3d3c
+dma_rd 98765040 43424140
+dma_rd 98765044 47464544
+dma_rd 98765048 4b4a4948
+dma_rd 9876504c 4f4e4d4c
+dma_rd 98765050 53525150
+dma_rd 98765054 57565554
+dma_rd 98765058 5b5a5958
+dma_rd 9876505c 5f5e5d5c
+dma_rd 98765060 63626160
+dma_rd 98765064 67666564
+dma_rd 98765068 6b6a6968
+dma_rd 9876506c 6f6e6d6c
+dma_rd 98765070 73727170
+dma_rd 98765074 77767574
+dma_rd 98765078 7b7a7978
+dma_rd 9876507c 7f7e7d7c
+dma_rd 98765080 83828180
+dma_rd 98765084 87868584
+dma_rd 98765088 8b8a8988
+dma_rd 9876508c 8f8e8d8c
+dma_rd 98765090 93929190
+dma_rd 98765094 97969594
+dma_rd 98765098 9b9a9998
+dma_rd 9876509c 9f9e9d9c
+dma_rd 987650a0 a3a2a1a0
+dma_rd 987650a4 a7a6a5a4
+dma_rd 987650a8 abaaa9a8
+dma_rd 987650ac afaeadac
+dma_rd 987650b0 b3b2b1b0
+dma_rd 987650b4 b7b6b5b4
+dma_rd 987650b8 bbbab9b8
+dma_rd 987650bc bfbebdbc
+dma_rd 987650c0 c3c2c1c0
+dma_rd 987650c4 c7c6c5c4
+dma_rd 987650c8 cbcac9c8
+dma_rd 987650cc cfcecdcc
+dma_rd 987650d0 d3d2d1d0
+dma_rd 987650d4 d7d6d5d4
+dma_rd 987650d8 dbdad9d8
+dma_rd 987650dc dfdedddc
+dma_rd 987650e0 e3e2e1e0
+dma_rd 987650e4 e7e6e5e4
+dma_rd 987650e8 ebeae9e8
+dma_rd 987650ec efeeedec
+dma_rd 987650f0 f3f2f1f0
+dma_rd 987650f4 f7f6f5f4
+dma_rd 987650f8 fbfaf9f8
+dma_rd 987650fc fffefdfc
+
+-- check for correct preamble, SFD, data, pad and crc
+pcs_txd(s)    55555555555555d5000102030405060708090a0b0c0d0e0f
+pcs_txd                       101112131415161718191a1b1c1d1e1f
+pcs_txd                       202122232425262728292a2b2c2d2e2f
+pcs_txd                       303132333435363738393a3b3c3d3e3f
+pcs_txd                       404142434445464748494a4b4c4d4e4f
+pcs_txd                       505152535455565758595a5b5c5d5e5f
+pcs_txd                       606162636465666768696a6b6c6d6e6f
+pcs_txd                       707172737475767778797a7b7c7d7e7f
+pcs_txd                       808182838485868788898a8b8c8d8e8f
+pcs_txd                       909192939495969798999a9b9c9d9e9f
+pcs_txd                       a0a1a2a3a4a5a6a7a8a9aaabacadaeaf
+pcs_txd                       b0b1b2b3b4b5b6b7b8b9babbbcbdbebf
+pcs_txd                       c0c1c2c3c4c5c6c7c8c9cacbcccdcecf
+pcs_txd                       d0d1d2d3d4d5d6d7d8d9dadbdcdddedf
+pcs_txd                       e0e1e2e3e4e5e6e7e8e9eaebecedeeef
+pcs_txd                       f0f1f2f3f4f5f6f7f8f9fafbfcfdfeffgggggggg
+
+
+dma_wr 55555504 80008100 -- start of frame, 
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24  00000080  "TRANSMITTED FRAME with all data code groups"
+                         -- check interrupt status - transmit complete
+
+-- check pcs status
+apbrd       08 0000000f  -- check value of network status register, full duplex negotiated
+apbrd      200 00001040  -- check pcs control register, 1000 mbits/s and auto negotiation enabled
+apbrd      204 0000012d  -- check pcs status reg, auto-neg possible, link is up, auto negotiation complete
+apbrd      210 00000060  -- check pcs a-n advertisement reg, half and full duplex supported
+apbrd      214 00008060  -- check pcs a-n link ptnr ability reg
+apbrd      218 00000004  -- check pcs a-n expansion reg, next page supported
+apbrd      21C 00000000  -- check pcs a-n next page reg
+apbrd      220 00000000  -- check pcs a-n link partner reg
+apbrd      23C 00008000  -- check pcs a-n extended status reg, 1000base-x half duplex and
+                         -- full duplex supported
+
+-- check transmit statistics
+apbrd      100 00000104  -- check octets transmitted bottom
+apbrd      104 00000000  -- check octets transmitted top
+apbrd      108 00000001  -- check frames transmitted ok
+apbrd      10C 00000000  -- check broadcast frames transmitted
+apbrd      110 00000000  -- check multicast frames transmitted
+apbrd      114 00000000  -- check pause frames transmitted
+apbrd      118 00000000  -- check frames transmitted 64
+apbrd      11C 00000000  -- check frames transmitted 65-127
+apbrd      120 00000000  -- check frames transmitted 128-255
+apbrd      124 00000001  -- check frames transmitted 256-511
+apbrd      128 00000000  -- check frames transmitted 512-1023
+apbrd      12C 00000000  -- check frames transmitted 1024-1518
+apbrd      130 00000000  -- check frames transmitted 1519
+apbrd      134 00000000  -- check transmit underruns errors
+apbrd      138 00000000  -- check single collisions frames
+apbrd      13C 00000000  -- check multiple collisions frames
+apbrd      140 00000000  -- check excessive collisions frames
+apbrd      144 00000000  -- check late collisions frames
+apbrd      148 00000000  -- check deferred frames
+apbrd      14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd      150 00000000  -- check octets received bottom
+apbrd      154 00000000  -- check octets received top
+apbrd      158 00000000  -- check frames received ok
+apbrd      15C 00000000  -- check broadcast frames received
+apbrd      160 00000000  -- check multicast frames received
+apbrd      164 00000000  -- check pause frames received
+apbrd      168 00000000  -- check frames received 64
+apbrd      16C 00000000  -- check frames received 65-127
+apbrd      170 00000000  -- check frames received 128-255
+apbrd      174 00000000  -- check frames received 256-511
+apbrd      178 00000000  -- check frames received 512-1023
+apbrd      17C 00000000  -- check frames received 1024-1518
+apbrd      180 00000000  -- check frames received 1519
+apbrd      184 00000000  -- check undersize frame errors
+apbrd      188 00000000  -- check excessive receive length errors
+apbrd      18C 00000000  -- check receive jabbers errors
+apbrd      190 00000000  -- check FCS errors
+apbrd      194 00000000  -- check receive length errors
+apbrd      198 00000000  -- check receive symbol errors
+apbrd      19C 00000000  -- check alignment errors
+apbrd      1A0 00000000  -- check receive resource errors
+apbrd      1A4 00000000  -- check receive overrun errors
+
+-- ********************************************************************************************* --
+-- 10.  The GEM receives three code groups.  (Should cause the GEM to restart auto negotiation.)
+-- ********************************************************************************************* --
+
+-- Enough invalids to enter link failed state
+pcs_synch_rx      s1f i1f
+pcs_synch_rx      s1f i1f
+pcs_synch_rx      s1f i1f
+pcs_synch_rx      s1f i1f
+pcs_synch_rx      s1f i1f
+
+-- 5. Link failed to config state
+pcs_synch_rx      sbc o50
+pcs_synch_rx      sbc o50
+pcs_synch_rx      sbc o50
+pcs_synch_rx      sbc ob5 o00 o00
+pcs_synch_rx      sbc o42 o00 o00
+pcs_synch_rx      sbc ob5 o00 o00
+pcs_synch_rx      sbc o42 o00 o00
+pcs_synch_rx      sbc ob5 o00 o00
+pcs_synch_rx      sbc o42 o00 o00
+pcs_synch_rx      sbc ob5 o00 o00
+pcs_synch_rx      sbc o42 o00 o00
+
+-- ********************************************************************************************* --
+-- 11. Once the GEM enters AN_ENABLE state, it should start transmitting alternating /C/ codes with the Config_Reg field all zeros.
+-- ********************************************************************************************* --
+
+pcs_an_tx          0000  
+
+apbrd(int)      24 00000200  -- check interrupt status - link is down
+
+end(7000)
+

@@ -1,0 +1,262 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2006
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : ptp_frames_tx_ts_mode_4_64_ext_bd 
+--
+--   Author         : Brian Torley
+--
+--   Date           : June 2013
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- receive ptp frame and capture enhanced TS if ts_mode is set for frame type
+--
+-- Transmit frames:-
+-- TX Frame : PTP sync frame and ts_mode set for ptp event frames
+-- check extension bit is set in WORD bit[2] 
+--
+--------------------------------------------------------------------------------
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 0
+bus_grant_delay 0
+
+
+--******************************************************************************
+--  check reset state of PTP output flags
+--******************************************************************************
+pinsc(50) sof_tx         0
+pinsc     sync_frame_tx  0
+pinsc     delay_req_tx   0
+pinsc     sof_rx         0
+pinsc     sync_frame_rx  0
+pinsc     delay_req_rx   0
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 32-bit DMA data bus.
+--******************************************************************************
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 00280013  -- copy all & full duplex
+apbrd      04 00280013  -- verify write to network config register.
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      18 fffff000  -- check receive queue pointer
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      00 00000000  -- enable receive
+apbrd      24 00000000  -- delay - check interrupt status
+apbrd      24 00000000  -- delay - check interrupt status
+apbrd      24 00000000  -- delay - check interrupt status
+
+-- setup extended BD mode
+apbrd      10 000207c4  -- check dma config reg initial value
+apbwr      10 300207c4  -- enable ext BD (tx: set bit[29] = 1, rx: set bit[28] = 1)
+
+apbwr     4cc 00000014  -- tx_bd_control_reg  where last 6 bits are: ts_mode[1;0], bd_size_words
+apbwr     4d0 00000004  -- rx_bd_control_reg  where last 6 bits are: ts_mode[1:0], bd_size_words
+                        -- ts_mode
+                        -- 00 = disabled,
+                        -- 01 = ptp event frames only,
+                        -- 10 = all ptp frames,
+                        -- 11 = all frames
+
+
+apbwr     1d0 0000003f  -- Timer seconds register  (6 bits of seconds xfered in enhanced ts)
+apbwr     1d4 12345678  -- Timer nanoseconds register
+--apbwr     1dc 00000002  -- Timer increment register
+
+
+
+--******************************************************************************
+-- Transmit Frames
+--******************************************************************************
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      00 0000020c  "Starting transmit frames"
+                        -- write tx_go and enable tx
+
+
+
+--******************************************************************************
+-- TX Frame : PTP sync frame
+--******************************************************************************
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd 55555504 0000807a -- end of frame,
+
+dma_rd 98765000 00191b01
+dma_rd 98765004 e0000000
+dma_rd 98765008 e93f26f7
+dma_rd 9876500c 6560f788  -- 0 = sync, B = Announce general msg
+dma_rd 98765010 686f6c6c
+dma_rd 98765014 686f6c65
+dma_rd 98765018 686f6c65
+dma_rd 9876501c 686f6c65
+dma_rd 98765020 abab6c65
+dma_rd 98765024 abababab
+dma_rd 98765028 abababab
+dma_rd 9876502c 0000abab
+dma_rd 98765030 00000000
+dma_rd 98765034 00000000
+dma_rd 98765038 00000000
+dma_rd 9876503c 00000000
+dma_rd 98765040 00000000
+dma_rd 98765044 00000000
+dma_rd 98765048 00000000
+dma_rd 9876504c 00000000
+dma_rd 98765050 00000000
+dma_rd 98765054 00000000
+dma_rd 98765058 00000000
+dma_rd 9876505c 00000000
+dma_rd 98765060 00000000
+dma_rd 98765064 00000000
+dma_rd 98765068 00000000
+dma_rd 9876506c 00000000
+dma_rd 98765070 00000000
+dma_rd 98765074 00000000
+dma_rd 98765078 00000000
+dma_rd 9876507c 00000000  -- dummy read as 64b accesses
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d5
+txd     011b19000000 -- MAC DA
+txd     00e0f7263fe9 -- MAC SA
+txd     88f7         -- Length/typeID
+txd     60           -- transport specific, messageType
+txd     656c6c       -- subdomain
+txd     6f68656c     -- subdomain
+txd     6f68656c     -- subdomain
+txd     6f68656c     -- subdomain
+txd     6f68656c     -- subdomain
+txd     abababab     -- other stuff
+txd     abababab     -- other stuff
+txd     abababab     -- UUID, sequenceID
+txd     00000000     -- sync frame control field, flags, reserved
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     00000000     -- PAD
+txd     22ee9dea     -- CRC
+
+
+--  check state of PTP output flags
+pinsc(490)sof_tx        1
+pinsc      sync_frame_tx 1
+pinsc      delay_req_tx  0
+pinsc      sof_rx        0
+pinsc      sync_frame_rx 0
+pinsc      delay_req_rx  0
+
+dma_rd 55555510 98765000 -- dma reads pointer of 98765000  
+dma_rd 55555514 8000807a -- end of frame,  used bit set
+
+
+
+--  check state of PTP output flags
+pinsc(500)sof_tx        1
+pinsc      sync_frame_tx 1
+pinsc      delay_req_tx  0
+pinsc      sof_rx        0
+pinsc      sync_frame_rx 0
+pinsc      delay_req_rx  0
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555550c 0000000f -- TS msw seconds[5:2]
+dma_wr 55555508 d2345678 -- TS lsw  (bits[31:30] are lower 2 bits of seconds [1:0])
+dma_wr 55555504 8080807a -- dma writes rx status,
+
+
+-- check status on detection of transmit sync frame
+apbrd(int) 24 00200000  "Frame 1 detected"
+                        -- check interrupt status - transmit sync frame
+apbwr      24 00200000  -- clear interrupt status register
+apbrd      14 00000008  -- check TX status register
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000088  "Frame 1 complete"
+                        -- check interrupt status - transmit complete
+apbwr      24 00000088  -- clear interrupt status register
+apbrd      14 00000021  -- check TX status register - transmit complete
+apbwr      14 00000020  -- clear TX status register
+
+apbrd(2000)     100 0000007e  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000001  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+apbrd     1A8 00000000  -- check receive IP checksum errors
+apbrd     1AC 00000000  -- check receive TCP checksum errors
+apbrd     1B0 00000000  -- check receive UDP checksum errors
+
+end(3000)
+
+

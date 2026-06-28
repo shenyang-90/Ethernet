@@ -1,0 +1,215 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2009
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_pfc_pause_1gm_fifo
+--
+--   Author         : Brian Torley (briant@cadence.com)
+--
+--   Date           : 10 November 2009
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This checks transmissionion of PFC pause frames controled by pins
+-- and registers in gigabit mode.
+--
+--
+-- Functional Coverage
+----------------------
+-- 
+--
+-- Detailed Test Description
+----------------------------
+----
+-- ************************************************************************** --
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+pinsd(60) tx_pfc_sel        1         -- PFC pause frame
+pinsd(61) tx_pfc_pause      11111111  -- priority_enable
+pinsd(62) tx_pfc_pause_zero 11111111  -- all timers zero
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      04 00080403  -- full duplex and gigabit mode
+
+apbwr      00 00020008  -- send PFC frame
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+
+
+apbrdf     24 00000000  -- check interrupt status
+
+pinsd(apb) tx_pause 0   -- drive tx_pause low 
+
+-- ************************************************************************** --
+-- ************************************************************************** --
+-- #1
+-- PFC pause request from register coincident with request
+-- from fifo. Pause frame should be sent first.
+-- ************************************************************************** --
+-- ************************************************************************** --
+
+
+-- Supply the transmit data to the FIFO interface - preamble ins disabled
+-- DA[0] = 1 therefore frames are multicast
+
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd(apb)    00001010   0   00000000      67452301
+fifo_rd         00000000   0   00000000      1111ab89
+fifo_rd         00000000   0   00000000      22222222
+fifo_rd         00000000   0   00000000      33333333
+fifo_rd         00000000   0   00000000      44444444
+fifo_rd         00000000   0   00000000      55555555
+fifo_rd         00000000   0   00000000      66666666
+fifo_rd         00000000   0   00000000      77777777
+fifo_rd         00000000   0   00000000      88888888
+fifo_rd         00000000   0   00000000      99999999
+fifo_rd         00000000   0   00000000      aaaaaaaa
+fifo_rd         00000000   0   00000000      bbbbbbbb
+fifo_rd         00001001   0   00000000      cccccccc
+
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         00001010   0   00000000      67452301
+fifo_rd         00000000   0   00000000      1111ab89
+fifo_rd         00000000   0   00000000      22222222
+fifo_rd         00000000   0   00000000      33333333
+fifo_rd         00000000   0   00000000      44444444
+fifo_rd         00000000   0   00000000      55555555
+fifo_rd         00000000   0   00000000      66666666
+fifo_rd         00000000   0   00000000      77777777
+fifo_rd         00000000   0   00000000      88888888
+fifo_rd         00000000   0   00000000      99999999
+fifo_rd         00000000   0   00000000      aaaaaaaa
+fifo_rd         00000000   0   00000000      bbbbbbbb
+fifo_rd         00000000   0   00000000      cccccccc
+fifo_rd         00000000   0   00000000      dddddddd 
+fifo_rd         00000001   0   00000000      eeeeeeee
+
+
+
+apbrd      24 00000000   -- extra register access added so that 
+                         -- when we request Pause frame the
+                         -- timing is such that it should
+                         -- arrive during the 1st pkt transfer
+                         -- This will then allow the Pause pkt
+                         -- to be inserted before the 2nd pkt 
+                         -- from the fifo.
+
+
+-- Verify the Pause frame data on the MII interface
+txd            55555555555555d5
+txd            0180c200000100000000000088080101
+txd            0000ffffffffffffffffffffffffffff
+txd            ffff0000000000000000000000000000
+txd            00000000000000000000000062118448
+
+
+
+-- Verify the 1st transmit frame data on the MII interface
+txd            55555555555555d5
+txd            0123456789ab11112222222233333333
+txd            44444444555555556666666677777777
+txd            8888888899999999aaaaaaaabbbbbbbb
+txd            cccccccc0000000000000000a3e2b1ad
+
+
+-- Verify the 2nd transmit frame data on the MII interface
+txd            55555555555555d5
+txd            0123456789ab11112222222233333333
+txd            44444444555555556666666677777777
+txd            8888888899999999aaaaaaaabbbbbbbb
+txd            ccccccccddddddddeeeeeeee4e8deb37
+
+-- Check Stats
+apbrd(int) 24 00004000  -- check interrupt status - pause transmit complete
+apbwr      24 00004000  -- clear it
+-- interrupt not set for fifo frames
+--apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+--apbwr      24 00000080  -- clear it
+
+-- Check Stats
+-- interrupt not set for fifo frames
+--apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+--apbwr      24 00000080  -- clear it
+apbrd(1000) 150 00000000  -- read number of octets received
+apbrd     154 00000000 
+apbrd     100 00000080  -- read number of octets transmitted
+apbrd     104 00000000 
+apbrd     158 00000000  -- check no frames have been received
+apbrd     108 00000002  -- check frame has been transmitted
+apbrd     10C 00000000  -- no broadcast
+apbrd     110 00000002  -- no multicast
+apbrd     114 00000001  -- no pause
+apbrd     118 00000002  -- tx_64
+apbrd     11c 00000000  -- tx_65_to_127
+apbrd     120 00000000  -- tx_128_to_255
+apbrd     124 00000000  -- tx_256_to_511
+apbrd     128 00000000  -- tx_512_to_1023
+apbrd     12c 00000000  -- tx_1024_to_1518
+apbrd     130 00000000  -- tx_1519_to_max
+apbrd     134 00000000  -- transmitted error frames
+apbrd     108 00000000  -- check stats have been reset on read
+
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+apbwr      88 aaaaaaaa  -- specific address register 1 bottom
+apbwr      8C 0000aaaa  -- specific address register 1 top
+apbwrf     3c 0000aaaa  -- write pause quantum register
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(2000)
+
+
+
+
+
+
+
+

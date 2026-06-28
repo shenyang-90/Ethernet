@@ -1,0 +1,585 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_type1_scrn_drop_on_match
+--
+--   Author         : fmalaspi@cadence.com
+--
+--   Date           : 06 April 2017
+--
+--------------------------------------------------------------------------------------
+--   Test Description                                                               --
+--   This test is composed in different phases:                                     --
+----------------------------- First Phase --------------------------------------------
+--   This is a simple test which shows that when a screener is programmed           --
+--   To drop a frame when matches it, then the frame is actually dropped.           --
+--   16 frames are received, one for each type1 screener and every screener is      --
+--   programmed to drop the frame in case of match, therefore all the frames will   --
+--   be dropped.                                                                    --
+---------------------------- Second Phase --------------------------------------------
+--   Here we want to make sure that, when a frame is matched by more than one       --
+--   screener, then if the screeners have a different setting on drop_on_match      --
+--   the frame must be dropped anyway since it is matched by at least one scrn      --
+--   with drop_on_match bit set. Reg0,2,4,6,8,10,12,14 will be tested as they       --
+--   will have drop_on_match set wheread Reg1,3,5,7,9,11,13,15 will have it unset   --
+---------------------------- Third Phase ---------------------------------------------
+--   Here we want to make sure that, when a frame is matched by more than one       --
+--   screener, then if the screeners have a different setting on drop_on_match      --
+--   the frame must be dropped anyway since it is matched by at least one scrn      --
+--   with drop_on_match bit set. Reg1,3,5,7,9,11,13,15 will be tested as they       --
+--   will have drop_on_match set wheread Reg0,2,4,6,8,10,12,14 will have it unset   --
+--------------------------------------------------------------------------------------
+
+wait_states 0
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 f0000000  -- write receive queue pointer
+apbrd      18 f0000000  -- check receive queue pointer
+apbwr     480 f0010000  -- write receive queue pointer
+apbwr     484 f0020000  -- write receive queue pointer
+apbwr     488 f0030000  -- write receive queue pointer
+apbwr     48c f0040000  -- write receive queue pointer
+apbwr     490 f0050000  -- write receive queue pointer
+apbwr     494 f0060000  -- write receive queue pointer
+apbwr     498 f0070000  -- write receive queue pointer
+apbwr      10  000107c4  -- set buffer size to 64
+apbwr      4a0 00000001  -- Buffer size Q1
+apbwr      4a4 00000001  -- Buffer size Q2
+
+-- Programming the type1 screeners 
+
+apbwr      500 50000bb0 -- Type1 screener 1  programmed to drop on a match, and match DS/TC to 0xbb and route to queue0
+apbwr      504 50000aa1 -- Type1 screener 2  programmed to drop on a match, and match DS/TC to 0xaa and route to queue1
+apbwr      508 50000cc0 -- Type1 screener 3  programmed to drop on a match, and match DS/TC to 0xcc and route to queue0
+apbwr      50c 50000dd1 -- Type1 screener 4  programmed to drop on a match, and match DS/TC to 0xdd and route to queue1
+apbwr      510 50000ee0 -- Type1 screener 5  programmed to drop on a match, and match DS/TC to 0xee and route to queue0
+apbwr      514 50000ff1 -- Type1 screener 6  programmed to drop on a match, and match DS/TC to 0xff and route to queue1
+apbwr      518 50000110 -- Type1 screener 7  programmed to drop on a match, and match DS/TC to 0x11 and route to queue0
+apbwr      51c 50000221 -- Type1 screener 8  programmed to drop on a match, and match DS/TC to 0x22 and route to queue1
+apbwr      520 50000330 -- Type1 screener 9  programmed to drop on a match, and match DS/TC to 0x33 and route to queue0
+apbwr      524 50000441 -- Type1 screener 10 programmed to drop on a match, and match DS/TC to 0x44 and route to queue1
+apbwr      528 50000550 -- Type1 screener 11 programmed to drop on a match, and match DS/TC to 0x55 and route to queue0
+apbwr      52c 50000661 -- Type1 screener 12 programmed to drop on a match, and match DS/TC to 0x66 and route to queue1
+apbwr      530 50000770 -- Type1 screener 13 programmed to drop on a match, and match DS/TC to 0x77 and route to queue0
+apbwr      534 50000881 -- Type1 screener 14 programmed to drop on a match, and match DS/TC to 0x88 and route to queue1
+apbwr      538 50000990 -- Type1 screener 15 programmed to drop on a match, and match DS/TC to 0x99 and route to queue0
+apbwr      53c 500001a2 -- Type1 screener 16 programmed to drop on a match, and match DS/TC to 0x1a and route to queue2
+
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      600 ffffffff -- enable q1 interrupts
+apbwr      604 ffffffff -- enable q2 interrupts
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      90 abababab  -- specific address register 2 bottom (multicast)
+apbwr      94 0000abab  -- specific address register 2 top
+apbwr      98 abcdef10  -- specific address register 3 bottom (unicast)
+apbwr      9C 0000a5a5  -- specific address register 3 top
+apbwr      a0 cccccccc  -- specific address register 3 bottom (unicast)
+apbwr      a4 00005a5a  -- specific address register 3 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 010a0001  -- indicate 100M operation, will check pin l8r.
+apbrd      04 010a0001  -- verify write to speed register..
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+
+-- All the frames will be dropped as drop_on_match is set on all the screeners
+
+-- *****************************************************************************
+-- Frame to reg0 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame (ethertype = 0x0800 means ipv4) with version=4 IHL=0xd DS=0xbb 
+-- It will be matched by screener reg0 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(apb) 555555d5ffffffffffff11112222222281002000
+rxd              08004dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg1 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0xaa 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004daa111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg2 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0xcc 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004dcc111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg3 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0xdd 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004ddd111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg4 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0xee 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004dee111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg5 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0xff 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004dff111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg6 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x11 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d11111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg7 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x22 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d22111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg8 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x33 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d33111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg9 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x44
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d44111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg10 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x55 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d55111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg11 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x66 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d66111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg12 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x77 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d77111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg13 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x88 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d88111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg14 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x99 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d99111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg15 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x1a 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d1a111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+      
+
+apbwr(6000) 00 00000000  -- writing enable_receive to 0 and reprogram the screeners
+
+-- Starting Second phase
+
+-- Programming the type1 screeners 
+
+apbwr      500 50000bb0 -- Type1 screener 1  programmed to drop on a match, and match DS/TC to 0xbb and route to queue0
+apbwr      504 10000bb1 -- Type1 screener 2  programmed to                      match DS/TC to 0xbb and route to queue1
+apbwr      508 50000cc0 -- Type1 screener 3  programmed to drop on a match, and match DS/TC to 0xcc and route to queue0
+apbwr      50c 10000cc1 -- Type1 screener 4  programmed to                      match DS/TC to 0xcc and route to queue1
+apbwr      510 50000ee0 -- Type1 screener 5  programmed to drop on a match, and match DS/TC to 0xee and route to queue0
+apbwr      514 10000ee1 -- Type1 screener 6  programmed to                      match DS/TC to 0xee and route to queue1
+apbwr      518 50000110 -- Type1 screener 7  programmed to drop on a match, and match DS/TC to 0x11 and route to queue0
+apbwr      51c 10000111 -- Type1 screener 8  programmed to                      match DS/TC to 0x11 and route to queue1
+apbwr      520 50000330 -- Type1 screener 9  programmed to drop on a match, and match DS/TC to 0x33 and route to queue0
+apbwr      524 10000331 -- Type1 screener 10 programmed to                      match DS/TC to 0x33 and route to queue1
+apbwr      528 50000550 -- Type1 screener 11 programmed to drop on a match, and match DS/TC to 0x55 and route to queue0
+apbwr      52c 10000551 -- Type1 screener 12 programmed to                      match DS/TC to 0x55 and route to queue1
+apbwr      530 50000770 -- Type1 screener 13 programmed to drop on a match, and match DS/TC to 0x77 and route to queue0
+apbwr      534 10000771 -- Type1 screener 14 programmed to                      match DS/TC to 0x77 and route to queue1
+apbwr      538 50000990 -- Type1 screener 15 programmed to drop on a match, and match DS/TC to 0x99 and route to queue0
+apbwr      53c 10000992 -- Type1 screener 16 programmed to                      match DS/TC to 0x99 and route to queue2
+ 
+apbwr      00 00000004  -- enable receive now
+apbrd      00 00000004  -- giving the time for enable receive to propagate
+apbrd      00 00000004  -- giving the time for enable receive to propagate
+apbrd      00 00000004  -- giving the time for enable receive to propagate
+apbrd      00 00000004  -- giving the time for enable receive to propagate
+apbrd      00 00000004  -- giving the time for enable receive to propagate
+apbrd      00 00000004  -- giving the time for enable receive to propagate
+apbrdf     00 00000004  -- giving the time for enable receive to propagate
+
+-- *****************************************************************************
+-- Frame to reg0 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame (ethertype = 0x0800 means ipv4) with version=4 IHL=0xd DS=0xbb 
+-- It will be matched by screener reg0 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(apb) 555555d5ffffffffffff11112222222281002000
+rxd              08004dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg2 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0xcc 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004dcc111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg4 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0xee 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004dee111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg6 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x11 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d11111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg8 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x33 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d33111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg10 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x55 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d55111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg12 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x77 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d77111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg14 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x99 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d99111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame not mached by any screener
+-- *****************************************************************************
+-- This will pass through then
+
+rxd(gap) 555555d5FFFFFFFFFFFF1111222222228100ffffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333gggggggg
+
+dma_rd f0000000 88888004
+
+dma_wr 88888004 FFFFFFFF -- store frame to memory
+dma_wr 88888008 1111FFFF
+dma_wr 8888800c 22222222
+dma_wr 88888010 ffff0081
+dma_wr 88888014 4444ffff
+dma_wr 88888018 55554444
+dma_wr 8888801c 66665555
+dma_wr 88888020 77776666
+dma_wr 88888024 88887777
+dma_wr 88888028 99998888
+dma_wr 8888802c aaaa9999
+dma_wr 88888030 bbbbaaaa
+dma_wr 88888034 ccccbbbb
+dma_wr 88888038 11111111
+dma_wr 8888803c 22222222
+dma_wr 88888040 33333333
+
+dma_wr f0000004 802fc040
+dma_wr f0000000 88888005
+
+apbwr(10000) 00 00000000  -- writing enable_receive to 0 and reprogram the screeners
+
+-- Third Phase
+-- Programming the type1 screeners for the last phase 
+
+apbwr      500 10000bb0 -- Type1 screener 0  programmed to                      match DS/TC to 0xbb and route to queue0
+apbwr      504 50000bb1 -- Type1 screener 1  programmed to drop on a match, and match DS/TC to 0xbb and route to queue1
+apbwr      508 10000cc0 -- Type1 screener 2  programmed to                      match DS/TC to 0xcc and route to queue0
+apbwr      50c 50000cc1 -- Type1 screener 3  programmed to drop on a match, and match DS/TC to 0xcc and route to queue1
+apbwr      510 10000ee0 -- Type1 screener 4  programmed to                      match DS/TC to 0xee and route to queue0
+apbwr      514 50000ee1 -- Type1 screener 5  programmed to drop on a match, and match DS/TC to 0xee and route to queue1
+apbwr      518 10000110 -- Type1 screener 6  programmed to                      match DS/TC to 0x11 and route to queue0
+apbwr      51c 50000111 -- Type1 screener 7  programmed to drop on a match, and match DS/TC to 0x11 and route to queue1
+apbwr      520 10000330 -- Type1 screener 8  programmed to                      match DS/TC to 0x33 and route to queue0
+apbwr      524 50000331 -- Type1 screener 9  programmed to drop on a match, and match DS/TC to 0x33 and route to queue1
+apbwr      528 10000550 -- Type1 screener 10 programmed to                      match DS/TC to 0x55 and route to queue0
+apbwr      52c 50000551 -- Type1 screener 11 programmed to drop on a match, and match DS/TC to 0x55 and route to queue1
+apbwr      530 10000770 -- Type1 screener 12 programmed to                      match DS/TC to 0x77 and route to queue0
+apbwr      534 50000771 -- Type1 screener 13 programmed to drop on a match, and match DS/TC to 0x77 and route to queue1
+apbwr      538 10000990 -- Type1 screener 14 programmed to                      match DS/TC to 0x99 and route to queue0
+apbwr      53c 50000992 -- Type1 screener 15 programmed to drop on a match, and match DS/TC to 0x99 and route to queue2
+ 
+apbwr      00 00000004  -- enable receive now
+apbrd      00 00000004  -- giving the time for enable receive to propagate
+apbrd      00 00000004  -- giving the time for enable receive to propagate
+apbrd      00 00000004  -- giving the time for enable receive to propagate
+apbrd      00 00000004  -- giving the time for enable receive to propagate
+apbrd      00 00000004  -- giving the time for enable receive to propagate
+apbrd      00 00000004  -- giving the time for enable receive to propagate
+apbrdf     00 00000004  -- giving the time for enable receive to propagate
+
+-- *****************************************************************************
+-- Frame to reg0 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame (ethertype = 0x0800 means ipv4) with version=4 IHL=0xd DS=0xbb 
+-- It will be matched by screener reg0 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(apb) 555555d5ffffffffffff11112222222281002000
+rxd              08004dbb111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg2 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0xcc 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004dcc111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg4 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0xee 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004dee111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg6 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x11 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d11111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg8 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x33 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d33111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg10 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x55 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d55111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg12 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x77 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d77111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame to reg14 screener type1
+-- *****************************************************************************
+-- This will be an ipv4 frame with version=4 IHL=0xd DS=0x99 
+-- It will be matched by screener reg1 which is programmed to drop
+-- the frame in case of match, hence this frame will be dropped.
+rxd(gap) 555555d5ffffffffffff11112222222281002000
+rxd              08004d99111122223333444455556666
+rxd              777788889999aaaabbbbccccddddeeee
+rxd              ffff1111222233334444555566667777gggggggg
+
+-- *****************************************************************************
+-- Frame not mached by any screener
+-- *****************************************************************************
+-- This will pass through then
+
+rxd(gap) 555555d5FFFFFFFFFFFF1111222222228100ffffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333gggggggg
+
+dma_rd f0000008 88888004
+
+dma_wr 88888004 FFFFFFFF -- store frame to memory
+dma_wr 88888008 1111FFFF
+dma_wr 8888800c 22222222
+dma_wr 88888010 ffff0081
+dma_wr 88888014 4444ffff
+dma_wr 88888018 55554444
+dma_wr 8888801c 66665555
+dma_wr 88888020 77776666
+dma_wr 88888024 88887777
+dma_wr 88888028 99998888
+dma_wr 8888802c aaaa9999
+dma_wr 88888030 bbbbaaaa
+dma_wr 88888034 ccccbbbb
+dma_wr 88888038 11111111
+dma_wr 8888803c 22222222
+dma_wr 88888040 33333333
+
+dma_wr f000000c 802fc040
+dma_wr f0000008 88888005
+
+apbrd(15000) 00 00000004  -- giving the time for the dpram to get empty
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(50000)

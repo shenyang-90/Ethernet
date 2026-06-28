@@ -1,0 +1,131 @@
+-------------------------------------------------
+-- rx_random test scenario for the Ethernet MAC --
+-------------------------------------------------
+--
+-- Written by Alastair Boomer/Arthur Marris
+--
+-- Cadence Design Systems Ltd
+-- Livingston Design Centre,
+-- West Lothian.
+--
+-- 21Mar2003     Arthur finished it off
+--
+-- This shows the ability of the trans.pl to generate random
+-- receive frames.
+--
+-- 17 frames of varying lengths are generated, 14 of which
+-- are address recognized
+--
+-- trans.pl picks destination addresses from the values written
+-- to the specific address registers.
+--
+-- trans.pl reads the value written to the receive queue pointer
+-- and checks reads and writes to the rx buffer queue. trans.pl
+-- generates random values for the rx buffer locations and sets
+-- the wrap bit from time to time.
+--
+-- 
+-- ************************************************************************** --
+
+wait_states 0
+set_random_seed 0;
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr     480 f0010000  -- write receive queue pointer 1
+apbwr     484 f0020000  -- write receive queue pointer 2
+apbwr      18 f0000000  -- write receive queue pointer
+apbrd      18 f0000000  -- check receive queue pointer
+apbwr      10 000107c4  -- set buffer size to 64
+apbwr      4a0 00000001 -- Buffer size Q1
+apbwr      4a4 00000001 -- Buffer size Q1
+apbwr      500 31234aa0 -- Screener 1
+apbwr      504 32345bb1 -- Screener 2 
+apbwr      508 33456cc1 -- Screener 3
+apbwr      50c 35678dd1 -- Screener 4
+apbwr      510 36789ee1 -- Screener 5
+apbwr      514 3789aff1 -- Screener 6
+apbwr      518 389ab112 -- Screener 7
+apbwr      51c 39abc222 -- Screener 8
+apbwr      520 3abcd332 -- Screener 9
+apbwr      524 3bcde442 -- Screener 10
+apbwr      528 3cdef552 -- Screener 11
+apbwr      52c 3def0662 -- Screener 12
+apbwr      530 3ef01772 -- Screener 13
+apbwr      534 3f012880 -- Screener 14
+apbwr      538 3f5f5991 -- Screener 15
+apbwr      53c 33d3daf2 -- Screener 16
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      600 ffffffff -- enable q1 interrupts
+apbwr      604 ffffffff -- enable q2 interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      90 abababab  -- specific address register 2 bottom (multicast)
+apbwr      94 0000abab  -- specific address register 2 top
+apbwr      98 abcdef10  -- specific address register 3 bottom (unicast)
+apbwr      9C 0000a5a5  -- specific address register 3 top
+apbwr      a0 cccccccc  -- specific address register 3 bottom (unicast)
+apbwr      a4 00005a5a  -- specific address register 3 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 01080001  -- indicate 100M operation, will check pin l8r.
+apbrd      04 01080001  -- verify write to speed register..
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+
+---------------------------------------
+-- TEST 1: FRAME SIZE 64 BYTES (PADDED)
+---------------------------------------
+
+rx_frame (apb)  300
+
+      #------------------------------
+      # Ethernet Header
+      preamble_size       1-14
+      dest_addr           broadcast
+      src_addr            111122222222
+      type_len_field      random
+
+      #------------------------------
+      # Level 3 Stuff
+      ipv4_en             1
+        num_ipv4_options  random
+        ipv4_tos          ee
+        ipv4_tos          ff
+        ipv4_tos          11
+        ipv4_tos          22
+      ipv6_en             1
+ 
+      #------------------------------
+      # Level 4 Stuff
+      udp_en              1
+        udp_sport         1234
+        udp_dport         6789
+        udp_dport         789a
+        udp_dport         89ab
+        udp_dport         9abc
+        
+      tcp_en              0
+      
+      #------------------------------
+      # Payload
+      data_size           16-32
+      data                random
+
+      #------------------------------
+      debug_print_frame   0
+      num_dma_queues      3
+      auto_gen_int        1
+      fcs                 good
+
+
+-- force end of test in case it doesn't stop of its own accord
+--end(100000)
+

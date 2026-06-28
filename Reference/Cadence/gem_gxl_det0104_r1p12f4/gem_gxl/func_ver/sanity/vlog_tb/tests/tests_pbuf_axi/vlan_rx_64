@@ -1,0 +1,511 @@
+-------------------------------------------------
+-- vlan_rx_64 test scenario for the GEM MAC --
+-------------------------------------------------
+--
+--           CADENCE                    Copyright (c) 2002
+--           DESIGN                     Cadence Design Foundry, Inc.
+--           FOUNDRY                    All rights reserved.
+--
+-- Written by Adam Walker
+--
+-- 18Apr2001     Adam started it off
+--
+-- This tests that a VLAN tagged frame can be received according
+-- to 802.1Q and the priority is extracted from the tagged frame correctly
+-- 
+-- Enable receive and interrupts, write specific address, and
+-- receive buffer descriptor location.
+--
+-- Drive data into the MII receive interface and provide
+-- receive buffer pointer to the AHB interface.
+--
+-- Check the priority bits are set and that it flags a vlan/priority tagged
+-- frame on receiving the complete frame.
+-- 
+-- ************************************************************************** --
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      04 00280000  -- check reset value of network config register
+apbrd      04 00280000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 ffffff00  -- write address of receive buffer descriptor in memory
+apbrd      18 ffffff00  -- check receive queue pointer
+apbrd      A8 00000000  -- check reset value of type ID checking register
+apbwr      A8 80004444  -- set to type field after VLAN for match
+apbwr      00 00000004  -- enable receive
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+-- drive the receive frame data into the MII interface, VLAN tag set TPID 0x8100,
+-- TCI set to 0x1FFF setting all priority bits to '0' and VID to all '1'
+
+rxd(apb)     d578563412111111112222222281001fff
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(gap)     d57856341211111111222222228100e001
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(gap)     d578563412111111112222222281003492
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(gap)     d578563412111111112222222281005555
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- Priority tagged frame tests
+
+rxd(gap)     d578563412111111112222222281000000
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(gap)     d57856341211111111222222228100f000
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(gap)     d578563412111111112222222281008000
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+rxd(gap)     d578563412111111112222222281005000
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+
+-- bad type ID fields
+
+-- bad vlan tag MSB
+rxd(gap)     d578563412111111112222222218000000
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- bad vlan tag LSB
+rxd(gap)     d5785634121111111122222222810f0000
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+
+-- supply the receive buffer location
+dma_rd ffffff00 22222000 -- dma reads pointer of 22222000
+
+
+-- check the correct destination, source addresses type and vlan identifier are
+-- present on the filter interface
+filterc da 111112345678 sa 222222221111 type 4444 vid 1fff
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c ff1f0081
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 00000000
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c cf8fd739
+
+
+-- Instead of writing read the receive buffer descriptor entry and check for the 
+-- bits as set by the VLAN tag
+dma_wr ffffff00 22222001 -- dma writes ownership bit
+dma_wr ffffff04 0921c040 -- spec addr1 match, type id match, VLAN tag, priority 000, CFI, length 64
+dma_rd ffffff08 22222040 -- reads locations of next rx buffer
+apbrd(int)  24  00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+-- check the correct destination, source addresses type and vlan identifier are
+-- present on the filter interface
+filterc da 111112345678 sa 222222221111 type 4444 vid e001
+
+dma_wr 22222040 12345678 -- store frame to memory
+dma_wr 22222044 11111111
+dma_wr 22222048 22222222
+dma_wr 2222204c 01e00081
+dma_wr 22222050 44444444
+dma_wr 22222054 55555555
+dma_wr 22222058 66666666
+dma_wr 2222205c 77777777
+dma_wr 22222060 88888888
+dma_wr 22222064 99999999
+dma_wr 22222068 aaaaaaaa
+dma_wr 2222206c bbbbbbbb
+dma_wr 22222070 00000000
+dma_wr 22222074 00000000
+dma_wr 22222078 00000000
+dma_wr 2222207c e99663e5
+
+-- Instead of writing read the receive buffer descriptor entry and check for the 
+-- bits as set by the VLAN tag
+apbrd      A8 80004444  -- check reset value of type ID checking register
+apbwr      A8 00000000  -- clear type id register
+
+dma_wr ffffff08 22222041 -- dma writes ownership bit
+dma_wr ffffff0c 092ec040 -- checks for vlan tag, priority 000, length 64 and local address match
+dma_rd ffffff10 22222080 -- reads locations of next rx buffer
+apbrd(int) 24  00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+-- check the correct destination, source addresses type and vlan identifier are
+-- present on the filter interface
+filterc da 111112345678 sa 222222221111 type 4444 vid 3492
+
+dma_wr 22222080 12345678 -- store frame to memory
+dma_wr 22222084 11111111
+dma_wr 22222088 22222222
+dma_wr 2222208c 92340081
+dma_wr 22222090 44444444
+dma_wr 22222094 55555555
+dma_wr 22222098 66666666
+dma_wr 2222209c 77777777
+dma_wr 222220a0 88888888
+dma_wr 222220a4 99999999
+dma_wr 222220a8 aaaaaaaa
+dma_wr 222220ac bbbbbbbb
+dma_wr 222220b0 00000000
+dma_wr 222220b4 00000000
+dma_wr 222220b8 00000000
+dma_wr 222220bc 36a1f403
+
+-- Instead of writing read the receive buffer descriptor entry and check for the 
+-- bits as set by the VLAN tag
+dma_wr ffffff10 22222081 -- dma writes ownership bit
+dma_wr ffffff14 0823c040 -- checks for vlan tag, priority 000, length 64 and local address match
+dma_rd ffffff18 222220c0 -- reads locations of next rx buffer
+apbrd(int) 24  00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+-- check the correct destination, source addresses type and vlan identifier are
+-- present on the filter interface
+filterc da 111112345678 sa 222222221111 type 4444 vid 5555
+
+dma_wr 222220c0 12345678 -- store frame to memory
+dma_wr 222220c4 11111111
+dma_wr 222220c8 22222222
+dma_wr 222220cc 55550081
+dma_wr 222220d0 44444444
+dma_wr 222220d4 55555555
+dma_wr 222220d8 66666666
+dma_wr 222220dc 77777777
+dma_wr 222220e0 88888888
+dma_wr 222220e4 99999999
+dma_wr 222220e8 aaaaaaaa
+dma_wr 222220ec bbbbbbbb
+dma_wr 222220f0 00000000
+dma_wr 222220f4 00000000
+dma_wr 222220f8 00000000
+dma_wr 222220fc b661e7c5
+
+
+-- Instead of writing read the receive buffer descriptor entry and check for the 
+-- bits as set by the VLAN tag
+
+apbrd      A8 00000000  -- check reset value of type ID checking register
+apbwr      A8 80004444  -- set to type field after VLAN for match
+dma_wr ffffff18 222220c1 -- dma writes ownership bit
+dma_wr ffffff1c 0825c040 -- checks for vlan tag, priority 000, length 64 and local address match
+dma_rd ffffff20 22222100 -- reads locations of next rx buffer
+apbrd(int) 24  00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+
+
+--*****************************************************************************
+--************************ Priority tagged tests ******************************
+--*****************************************************************************
+
+
+
+
+-- check the correct destination, source addresses type and vlan identifier are
+-- present on the filter interface
+filterc da 111112345678 sa 222222221111 type 4444 vid 0000
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 12345678 -- store frame to memory
+dma_wr 22222104 11111111
+dma_wr 22222108 22222222
+dma_wr 2222210c 00000081
+dma_wr 22222110 44444444
+dma_wr 22222114 55555555
+dma_wr 22222118 66666666
+dma_wr 2222211c 77777777
+dma_wr 22222120 88888888
+dma_wr 22222124 99999999
+dma_wr 22222128 aaaaaaaa
+dma_wr 2222212c bbbbbbbb
+dma_wr 22222130 00000000
+dma_wr 22222134 00000000
+dma_wr 22222138 00000000
+dma_wr 2222213c cae493b5
+
+
+-- Instead of writing read the receive buffer descriptor entry and check for the 
+-- bits as set by the VLAN tag
+
+dma_wr ffffff20 22222101 -- dma writes ownership bit
+dma_wr ffffff24 0930c040 -- checks for vlan tag, priority 000, length 64 and local address match
+dma_rd ffffff28 22222140 -- reads locations of next rx buffer
+apbrd(int) 24  00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+-- check the correct destination, source addresses type and vlan identifier are
+-- present on the filter interface
+filterc da 111112345678 sa 222222221111 type 4444 vid f000
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222140 12345678 -- store frame to memory
+dma_wr 22222144 11111111
+dma_wr 22222148 22222222
+dma_wr 2222214c 00f00081
+dma_wr 22222150 44444444
+dma_wr 22222154 55555555
+dma_wr 22222158 66666666
+dma_wr 2222215c 77777777
+dma_wr 22222160 88888888
+dma_wr 22222164 99999999
+dma_wr 22222168 aaaaaaaa
+dma_wr 2222216c bbbbbbbb
+dma_wr 22222170 00000000
+dma_wr 22222174 00000000
+dma_wr 22222178 00000000
+dma_wr 2222217c db5deb9d
+
+
+-- Instead of writing read the receive buffer descriptor entry and check for the 
+-- bits as set by the VLAN tag
+apbrd      A8 80004444  -- check reset value of type ID checking register
+apbwr      A8 00000000  -- set to vlan type to force detection
+
+dma_wr ffffff28 22222141 -- dma writes ownership bit
+dma_wr ffffff2c 093fc040 -- checks for vlan tag, priority 000, length 64 and local address match
+dma_rd ffffff30 22222180 -- reads locations of next rx buffer
+apbrd(int) 24  00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+-- check the correct destination, source addresses type and vlan identifier are
+-- present on the filter interface
+filterc da 111112345678 sa 222222221111 type 4444 vid 8000
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222180 12345678 -- store frame to memory
+dma_wr 22222184 11111111
+dma_wr 22222188 22222222
+dma_wr 2222218c 00800081
+dma_wr 22222190 44444444
+dma_wr 22222194 55555555
+dma_wr 22222198 66666666
+dma_wr 2222219c 77777777
+dma_wr 222221a0 88888888
+dma_wr 222221a4 99999999
+dma_wr 222221a8 aaaaaaaa
+dma_wr 222221ac bbbbbbbb
+dma_wr 222221b0 00000000
+dma_wr 222221b4 00000000
+dma_wr 222221b8 00000000
+dma_wr 222221bc 9b2f8793
+
+
+-- Instead of writing read the receive buffer descriptor entry and check for the 
+-- bits as set by the VLAN tag
+
+dma_wr ffffff30 22222181 -- dma writes ownership bit
+dma_wr ffffff34 0838c040 -- checks for vlan tag, priority 000, length 64 and local address match
+dma_rd ffffff38 222221c0 -- reads locations of next rx buffer
+apbrd(int) 24  00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+-- check the correct destination, source addresses type and vlan identifier are
+-- present on the filter interface
+filterc da 111112345678 sa 222222221111 type 4444 vid 5000
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 222221c0 12345678 -- store frame to memory
+dma_wr 222221c4 11111111
+dma_wr 222221c8 22222222
+dma_wr 222221cc 00500081
+dma_wr 222221d0 44444444
+dma_wr 222221d4 55555555
+dma_wr 222221d8 66666666
+dma_wr 222221dc 77777777
+dma_wr 222221e0 88888888
+dma_wr 222221e4 99999999
+dma_wr 222221e8 aaaaaaaa
+dma_wr 222221ec bbbbbbbb
+dma_wr 222221f0 00000000
+dma_wr 222221f4 00000000
+dma_wr 222221f8 00000000
+dma_wr 222221fc 735cb992
+
+
+-- Instead of writing read the receive buffer descriptor entry and check for the 
+-- bits as set by the VLAN tag
+
+dma_wr ffffff38 222221c1 -- dma writes ownership bit
+dma_wr ffffff3c 0835c040 -- checks for vlan tag, priority 000, length 64 and local address match
+dma_rd ffffff40 222221c0 -- reads locations of next rx buffer
+apbrd(int) 24  00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+
+
+
+--*****************************************************************************
+-- Bad VLAN type ID fields
+--*****************************************************************************
+
+
+-- check the correct destination, source addresses type and vlan identifier are
+-- present on the filter interface
+filterc da 111112345678 sa 222222221111 type 1800
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 222221c0 12345678 -- store frame to memory
+dma_wr 222221c4 11111111
+dma_wr 222221c8 22222222
+dma_wr 222221cc 00000018
+dma_wr 222221d0 44444444
+dma_wr 222221d4 55555555
+dma_wr 222221d8 66666666
+dma_wr 222221dc 77777777
+dma_wr 222221e0 88888888
+dma_wr 222221e4 99999999
+dma_wr 222221e8 aaaaaaaa
+dma_wr 222221ec bbbbbbbb
+dma_wr 222221f0 00000000
+dma_wr 222221f4 00000000
+dma_wr 222221f8 00000000
+dma_wr 222221fc 7553d818
+
+
+dma_wr ffffff40 222221c1 -- dma writes ownership bit
+dma_wr ffffff44 0800c040 -- no VLAN tag
+dma_rd ffffff48 222221c0 -- reads locations of next rx buffer
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+
+-- check the correct destination, source addresses type and vlan identifier are
+-- present on the filter interface
+filterc da 111112345678 sa 222222221111 type 810f
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 222221c0 12345678 -- store frame to memory
+dma_wr 222221c4 11111111
+dma_wr 222221c8 22222222
+dma_wr 222221cc 00000f81
+dma_wr 222221d0 44444444
+dma_wr 222221d4 55555555
+dma_wr 222221d8 66666666
+dma_wr 222221dc 77777777
+dma_wr 222221e0 88888888
+dma_wr 222221e4 99999999
+dma_wr 222221e8 aaaaaaaa
+dma_wr 222221ec bbbbbbbb
+dma_wr 222221f0 00000000
+dma_wr 222221f4 00000000
+dma_wr 222221f8 00000000
+dma_wr 222221fc f2d0f265
+
+
+dma_wr ffffff48 222221c1 -- dma writes ownership bit
+dma_wr ffffff4c 0800c040 -- no VLAN tag
+dma_rd ffffff50 22222200 -- reads locations of next rx buffer
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+
+
+
+-- check status at end of test
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      18 ffffff50  -- check receive queue pointer
+apbrd      38 00000000  -- check rx pause time
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000280  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 0000000a  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 0000000a  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- force end of test in case it doesn't stop of its own accord
+dma_rd rx_descr ffffff58 12345678 -- Supply final descriptor - this is not used for any data buffers, but the EDMA tries to keep its buffer full so it reads it
+end(10000)
+
+bus_grant_delay 0

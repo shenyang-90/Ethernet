@@ -1,0 +1,101 @@
+--------------------------------------------------------------------------------
+--                                     
+--            CADENCE                    Copyright (c) 2015
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : basic_100M_enst
+--
+--
+--------------------------------------------------------------------------------
+--
+--  Summary
+--
+--  Need to setup system such that the TSU is running
+--  Setup the Start-time, On-time, Off-time and addfragsize_count for queues
+--  Check that all queues only transmit when active.
+--  The design is set to 10Mbs mode and both frames can transmit within a single
+--  gatestate pulse of Q0.
+--
+--------------------------------------------------------------------------------
+
+--pinsc(10) loopback 0 half_duplex 1  extint 0 --  check reset state
+set_random_seed 94;
+
+-- check and initialise the relevant registers
+apbrd(50) 00 00000000  -- check reset value of network control register
+apbwr     440 88000000  -- write transmit queue pointer 1
+apbwr     444 99000000  -- write transmit queue pointer 2
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00080003  -- set to full duplex mode and 100M
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      f8 00000001  -- check Q0 DPRAM fill levl
+apbrd      f8 00000001  -- check Q0 DPRAM fill levl
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbrd     284 6ef13fff  -- read design cfg reg to set axi test in trans.pl
+
+--------------------------------------
+----  TSU registers                 --
+--------------------------------------
+apbwr     1d0 00000000  -- TSU timer seconds
+apbwr     1d4 00000000  -- TSU timer nanoseconds
+apbrd     1d0 00000000  
+apbrd     1d4 00000000  
+apbwr     1dc 00000064  -- TSU timer increment
+
+
+--------------------------------------
+---- EnST registers                 --
+---- Setup as follows               --
+--      ___
+--Q0  _|   |_________|
+--          ___
+--Q1  _____|   |____
+--              ___
+--Q2  _________|   |
+--
+---------------------------------------
+apbrd     800 00000000  -- Q0 Start time
+apbrd     820 0001ffff  -- Q0 On time 
+apbrd     840 00000000  -- Q0 Off time
+apbwr     800 00005570  -- Q0 Start time
+apbwr     820 00000100  -- Q0 On time 
+apbwr     840 00000200  -- Q0 Off time
+apbrd     804 00000000  -- Q1 Start time
+apbrd     824 0001ffff  -- Q1 On time 
+apbrd     844 00000000  -- Q1 Off time
+apbwr     804 0000A570  -- Q1 Start time
+apbwr     824 00000100  -- Q1 On time 
+apbwr     844 00000200  -- Q1 Off time
+apbrd     808 00000000  -- Q2 Start time
+apbrd     828 0001ffff  -- Q2 On time 
+apbrd     848 00000000  -- Q2 Off time
+apbwr     808 0000F570  -- Q2 Start time
+apbwr     828 00000100  -- Q2 On time 
+apbwr     848 00000200  -- Q2 Off time
+
+apbwr 880 00000007  -- EnST Enable
+
+apbwr 00 00000208  -- write tx_go and enable tx
+
+apbwr(5000) 880 00070000  -- EnST disable
+apbwr(5200) 880 00000007  -- EnST Enable
+apbwr(5208) 880 00070000  -- EnST disable    
+
+                
+tx_frame  50
+      number_of_bufs 1
+      num_dma_queues 3
+      auto_gen_int   0
+      buffer_size    100-120
+      data           random
+      fcs            YES
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(60000)
+
+bus_grant_delay 0

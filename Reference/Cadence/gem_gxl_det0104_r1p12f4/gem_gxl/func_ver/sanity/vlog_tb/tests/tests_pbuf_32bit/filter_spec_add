@@ -1,0 +1,1250 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : filter
+--
+--   Author         : Arthur Marris (arthurm@tality.com)/ Mike MacGillis
+--                    (mikema@tality.com)
+--
+--   Date           : 21 January 2001
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- This test checks the generic specific address filter implementation 
+-- for src/dest address filtering with masks.
+--
+-- This complements the other filter tests which check dest address
+-- fitlering without masks
+--
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+bus_grant_delay 0 -- This sets hgrant to 1 always
+
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      18 01234000  -- write receive queue pointer
+
+apbwr      00 0000000c  -- enable transmit and receive
+
+apbwr      88 78563412  -- specific address register 1
+apbwr      8C 0000bc9a  -- specific address register 1
+apbwr      90 9a785634  -- specific address register 2
+apbwr      94 0000debc  -- specific address register 2
+apbwr      98 bc9a7856  -- specific address register 3
+apbwr      9C 0000f0de  -- specific address register 3
+apbwr      a0 debc9a78  -- specific address register 4
+apbwr      a4 000012f0  -- specific address register 4
+apbwr      300 f0debc9a -- specific address register 5
+apbwr      304 00003412 -- specific address register 5
+apbrd      300 f0debc9a -- specific address register 5
+apbrd      304 00003412 -- specific address register 5
+apbwr      308 f0debc9a -- specific address register 6
+apbwr      30c 00003412 -- specific address register 6
+apbwr      310 f0debc9a -- specific address register 7
+apbwr      314 00003412 -- specific address register 7
+apbwr      318 f0debc9a -- specific address register 8
+apbwr      31c 00003412 -- specific address register 8
+apbwr      3f0 12f0debc -- specific address register 35
+apbwr      3f4 00005634 -- specific address register 35
+apbrd      3f0 12f0debc -- specific address register 35
+apbrd      3f4 00005634 -- specific address register 35
+apbwr      3f8 f0debc9a -- specific address register 36
+apbwr      3fc 00003412 -- specific address register 36
+apbrd      3f8 00000000 perr -- specific address register 36
+apbrd      3fc 00000000 perr -- specific address register 36
+apbrdf     88 78563412  -- specific address register 1
+
+-- 1. Check reg1 - filter on dest address
+-- drive the receive frame data into the MII interface
+rxd(apb)     d5123456789abc00000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+dma_rd 01234000 22222000 -- dma reads pointer of 22222000
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222000 78563412 -- store frame to memory
+dma_wr 22222004 0000bc9a
+dma_wr 22222008 00000000
+dma_wr 2222200c 33332222
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 00000000
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234004 1000c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234000 22222001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234008 22223000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it 
+
+-- 2. Check reg1 - disable the filter by writing to lower add.
+
+apbwr      88 78563412  -- specific address register 1
+apbrdf     88 78563412  -- specific address register 1
+
+rxd(apb)     d5123456789abc00000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- 3. Check reg1 - reenable the filter by writing to upper add
+--                 filter on src address
+
+apbwr(5000) 8C 0001bc9a  -- specific address register 1
+apbrdf      88 78563412  
+
+rxd(apb)     d5000000000000123456789abc22223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22223000 00000000 -- store frame to memory
+dma_wr 22223004 34120000
+dma_wr 22223008 bc9a7856
+dma_wr 2222300c 33332222
+dma_wr 22223010 44444444
+dma_wr 22223014 55555555
+dma_wr 22223018 66666666
+dma_wr 2222301c 77777777
+dma_wr 22223020 88888888
+dma_wr 22223024 99999999
+dma_wr 22223028 aaaaaaaa
+dma_wr 2222302c bbbbbbbb
+dma_wr 22223030 00000000
+dma_wr 22223034 00000000
+dma_wr 22223038 00000000
+dma_wr 2222303c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123400c 1000c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234008 22223001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234010 22224000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+
+-- 4. Check reg1 - Dest add check. Set mask to all ones. 
+--                 mask bits are ignored for filter 0, so this will not match
+
+apbwr       8C 3f00bc9a  -- specific address register 1
+apbrdf      88 78563412  
+
+rxd(apb)     d5000000000000123456789abc22223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- 5. Check reg1 - same again, but use bit mask in 0x0c8
+
+apbwr(6000) c8 ffffffff  
+apbwr       cc 0000ffff  
+apbrdf      88 78563412  
+
+rxd(apb)     d5000000000000123456789abc22223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22224000 00000000 -- store frame to memory
+dma_wr 22224004 34120000
+dma_wr 22224008 bc9a7856
+dma_wr 2222400c 33332222
+dma_wr 22224010 44444444
+dma_wr 22224014 55555555
+dma_wr 22224018 66666666
+dma_wr 2222401c 77777777
+dma_wr 22224020 88888888
+dma_wr 22224024 99999999
+dma_wr 22224028 aaaaaaaa
+dma_wr 2222402c bbbbbbbb
+dma_wr 22224030 00000000
+dma_wr 22224034 00000000
+dma_wr 22224038 00000000
+dma_wr 2222403c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234014 1000c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234010 22224001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234018 22225002 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+-- 6. Check reg1 - same again, but do a src address chk
+
+apbwr       8C 5501bc9a  -- specific address register 1
+apbrdf      88 78563412  
+
+rxd(apb)     d5123456789abc00000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22225000 78563412 -- store frame to memory
+dma_wr 22225004 0000bc9a
+dma_wr 22225008 00000000
+dma_wr 2222500c 33332222
+dma_wr 22225010 44444444
+dma_wr 22225014 55555555
+dma_wr 22225018 66666666
+dma_wr 2222501c 77777777
+dma_wr 22225020 88888888
+dma_wr 22225024 99999999
+dma_wr 22225028 aaaaaaaa
+dma_wr 2222502c bbbbbbbb
+dma_wr 22225030 00000000
+dma_wr 22225034 00000000
+dma_wr 22225038 00000000
+dma_wr 2222503c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123401c 1000c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234018 22225003 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234000 22222000 -- dma reads pointer of 22222000
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it 
+
+
+
+----------------------------------------------------------------------
+-- Now test a filter other than 0. all other filters should have 
+-- byte mask capabilities
+-- 1. Check reg1 - filter on dest address
+-- drive the receive frame data into the MII interface
+
+-- First disable filter 1.
+apbwr      88 78563412  -- specific address register 1
+apbrdf     20 00000000  
+
+-- Enable filter 4.
+
+
+rxd(apb)     d5789abcdef01200000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222000 debc9a78 -- store frame to memory
+dma_wr 22222004 000012f0
+dma_wr 22222008 00000000
+dma_wr 2222200c 33332222
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 00000000
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234004 1600c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234000 22222001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234008 22223000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it 
+
+-- 2. Check reg1 - disable the filter by writing to lower add.
+
+apbwr      a0 debc9a78  -- specific address register 1
+apbrdf     a0 debc9a78  -- specific address register 1
+
+rxd(apb)     d5789abcdef01200000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- 3. Check reg1 - reenable the filter by writing to upper add
+--                 filter on src address
+
+apbwr(10000) a4 000112f0  -- specific address register 1
+apbrdf       a0 debc9a78  
+
+rxd(apb)     d5000000000000789abcdef01222223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22223000 00000000 -- store frame to memory
+dma_wr 22223004 9a780000
+dma_wr 22223008 12f0debc
+dma_wr 2222300c 33332222
+dma_wr 22223010 44444444
+dma_wr 22223014 55555555
+dma_wr 22223018 66666666
+dma_wr 2222301c 77777777
+dma_wr 22223020 88888888
+dma_wr 22223024 99999999
+dma_wr 22223028 aaaaaaaa
+dma_wr 2222302c bbbbbbbb
+dma_wr 22223030 00000000
+dma_wr 22223034 00000000
+dma_wr 22223038 00000000
+dma_wr 2222303c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123400c 1600c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234008 22223001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234010 22224000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+
+-- 4. Check reg1 - Dest add check. Set mask to all ones. 
+--                 mask bits are not ignored for filter 4, so this will match
+
+apbwr       a4 3f0012f0  -- specific address register 1
+apbrdf      a0 debc9a78  
+
+rxd(apb)     d5000000000000789abcdef01222223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22224000 00000000 -- store frame to memory
+dma_wr 22224004 9a780000
+dma_wr 22224008 12f0debc
+dma_wr 2222400c 33332222
+dma_wr 22224010 44444444
+dma_wr 22224014 55555555
+dma_wr 22224018 66666666
+dma_wr 2222401c 77777777
+dma_wr 22224020 88888888
+dma_wr 22224024 99999999
+dma_wr 22224028 aaaaaaaa
+dma_wr 2222402c bbbbbbbb
+dma_wr 22224030 00000000
+dma_wr 22224034 00000000
+dma_wr 22224038 00000000
+dma_wr 2222403c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234014 1600c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234010 22224001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234018 22225000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+-- 5. Check reg1 - same again, but do a src address chk
+
+apbwr       a4 3f0112f0  -- specific address register 1
+apbrdf      a0 debc9a78  
+
+rxd(apb)     d5789abcdef01200000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22225000 debc9a78 -- store frame to memory
+dma_wr 22225004 000012f0
+dma_wr 22225008 00000000
+dma_wr 2222500c 33332222
+dma_wr 22225010 44444444
+dma_wr 22225014 55555555
+dma_wr 22225018 66666666
+dma_wr 2222501c 77777777
+dma_wr 22225020 88888888
+dma_wr 22225024 99999999
+dma_wr 22225028 aaaaaaaa
+dma_wr 2222502c bbbbbbbb
+dma_wr 22225030 00000000
+dma_wr 22225034 00000000
+dma_wr 22225038 00000000
+dma_wr 2222503c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123401c 1600c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234018 22225001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234020 22226000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+
+-- 6. check mask byte 0
+
+apbwr       a4 010112f0  -- specific address register 4
+apbrdf      a0 debc9a78  
+
+rxd(apb)     d500000000000000000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbwr(13000) a4 010112f0  -- specific address register 4
+apbrdf       a0 debc9a78  
+
+rxd(apb)     d5000000000000009abcdef01222223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22226000 00000000 -- store frame to memory
+dma_wr 22226004 9a000000
+dma_wr 22226008 12f0debc
+dma_wr 2222600c 33332222
+dma_wr 22226010 44444444
+dma_wr 22226014 55555555
+dma_wr 22226018 66666666
+dma_wr 2222601c 77777777
+dma_wr 22226020 88888888
+dma_wr 22226024 99999999
+dma_wr 22226028 aaaaaaaa
+dma_wr 2222602c bbbbbbbb
+dma_wr 22226030 00000000
+dma_wr 22226034 00000000
+dma_wr 22226038 00000000
+dma_wr 2222603c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234024 1600c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234020 22226001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234028 22227000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+
+-- 7. check mask byte 2
+
+apbwr       a4 020112f0  -- specific address register 4
+apbrdf      a0 debc9a78  
+
+rxd(apb)     d500000000000000000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbwr(14000) a4 020112f0  -- specific address register 4
+apbrdf       a0 debc9a78  
+
+rxd(apb)     d50000000000007800bcdef01222223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22227000 00000000 -- store frame to memory
+dma_wr 22227004 00780000
+dma_wr 22227008 12f0debc
+dma_wr 2222700c 33332222
+dma_wr 22227010 44444444
+dma_wr 22227014 55555555
+dma_wr 22227018 66666666
+dma_wr 2222701c 77777777
+dma_wr 22227020 88888888
+dma_wr 22227024 99999999
+dma_wr 22227028 aaaaaaaa
+dma_wr 2222702c bbbbbbbb
+dma_wr 22227030 00000000
+dma_wr 22227034 00000000
+dma_wr 22227038 00000000
+dma_wr 2222703c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123402c 1600c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234028 22227001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234030 22228000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+
+
+-- 7. check mask byte 3
+
+apbwr       a4 040112f0  -- specific address register 4
+apbrdf      a0 debc9a78  
+
+rxd(apb)     d500000000000000000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbwr(15000) a4 040112f0  -- specific address register 4
+apbrdf       a0 debc9a78  
+
+rxd(apb)     d5000000000000789a00def01222223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22228000 00000000 -- store frame to memory
+dma_wr 22228004 9a780000
+dma_wr 22228008 12f0de00
+dma_wr 2222800c 33332222
+dma_wr 22228010 44444444
+dma_wr 22228014 55555555
+dma_wr 22228018 66666666
+dma_wr 2222801c 77777777
+dma_wr 22228020 88888888
+dma_wr 22228024 99999999
+dma_wr 22228028 aaaaaaaa
+dma_wr 2222802c bbbbbbbb
+dma_wr 22228030 00000000
+dma_wr 22228034 00000000
+dma_wr 22228038 00000000
+dma_wr 2222803c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234034 1600c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234030 22228001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234038 22229000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+
+
+-- 7. check mask byte 3
+
+apbwr       a4 080112f0  -- specific address register 4
+apbrdf      a0 debc9a78  
+
+rxd(apb)     d500000000000000000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbwr(16000) a4 080112f0  -- specific address register 4
+apbrdf       a0 debc9a78  
+
+rxd(apb)     d5000000000000789abc00f01222223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22229000 00000000 -- store frame to memory
+dma_wr 22229004 9a780000
+dma_wr 22229008 12f000bc
+dma_wr 2222900c 33332222
+dma_wr 22229010 44444444
+dma_wr 22229014 55555555
+dma_wr 22229018 66666666
+dma_wr 2222901c 77777777
+dma_wr 22229020 88888888
+dma_wr 22229024 99999999
+dma_wr 22229028 aaaaaaaa
+dma_wr 2222902c bbbbbbbb
+dma_wr 22229030 00000000
+dma_wr 22229034 00000000
+dma_wr 22229038 00000000
+dma_wr 2222903c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123403c 1600c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234038 22229001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234040 2222a000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+
+
+-- 8. check mask byte 4
+
+apbwr       a4 100112f0  -- specific address register 4
+apbrdf      a0 debc9a78  
+
+rxd(apb)     d500000000000000000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbwr(17000) a4 100112f0  -- specific address register 4
+apbrdf       a0 debc9a78  
+
+rxd(apb)     d5000000000000789abcde001222223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 2222a000 00000000 -- store frame to memory
+dma_wr 2222a004 9a780000
+dma_wr 2222a008 1200debc
+dma_wr 2222a00c 33332222
+dma_wr 2222a010 44444444
+dma_wr 2222a014 55555555
+dma_wr 2222a018 66666666
+dma_wr 2222a01c 77777777
+dma_wr 2222a020 88888888
+dma_wr 2222a024 99999999
+dma_wr 2222a028 aaaaaaaa
+dma_wr 2222a02c bbbbbbbb
+dma_wr 2222a030 00000000
+dma_wr 2222a034 00000000
+dma_wr 2222a038 00000000
+dma_wr 2222a03c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234044 1600c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234040 2222a001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234048 2222b002 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+
+
+-- 8. check mask byte 4
+
+apbwr       a4 200112f0  -- specific address register 4
+apbrdf      a0 debc9a78  
+
+rxd(apb)     d500000000000000000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+apbwr(18000) a4 200112f0  -- specific address register 4
+apbrdf       a0 debc9a78  
+
+rxd(apb)     d5000000000000789abcdef00022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 2222b000 00000000 -- store frame to memory
+dma_wr 2222b004 9a780000
+dma_wr 2222b008 00f0debc
+dma_wr 2222b00c 33332222
+dma_wr 2222b010 44444444
+dma_wr 2222b014 55555555
+dma_wr 2222b018 66666666
+dma_wr 2222b01c 77777777
+dma_wr 2222b020 88888888
+dma_wr 2222b024 99999999
+dma_wr 2222b028 aaaaaaaa
+dma_wr 2222b02c bbbbbbbb
+dma_wr 2222b030 00000000
+dma_wr 2222b034 00000000
+dma_wr 2222b038 00000000
+dma_wr 2222b03c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123404c 1600c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234048 2222b003 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234000 22222000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+
+
+----------------------------------------------------------------------
+-- Now test q5 filter . 
+-- 1. Check reg1 - filter on dest address
+-- drive the receive frame data into the MII interface
+
+-- First disable filter 4.
+apbwr      a0 78563412  -- specific address register 1
+apbrdf     20 00000000  
+
+
+rxd(apb)     d59abcdef0123400000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222000 f0debc9a -- store frame to memory
+dma_wr 22222004 00003412
+dma_wr 22222008 00000000
+dma_wr 2222200c 33332222
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 00000000
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234004 1e00c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234000 22222001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234008 22223000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it 
+
+-- 2. Check reg1 - disable the filter by writing to lower add.
+
+apbwr      300 f0debc9a  -- specific address register 5
+apbwr      308 f0debc9a  -- specific address register 6
+apbwr      310 f0debc9a  -- specific address register 7
+apbwr      318 f0debc9a  -- specific address register 8
+apbrdf     300 f0debc9a  -- specific address register 5
+
+rxd(apb)     d59abcdef0123400000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- 3. Check reg1 - reenable the filter by writing to upper add
+--                 filter on src address
+
+apbwr(20000) 304 00013412  -- specific address register 5
+apbrdf       300 f0debc9a  
+
+rxd(apb)     d50000000000009abcdef0123422223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22223000 00000000 -- store frame to memory
+dma_wr 22223004 bc9a0000
+dma_wr 22223008 3412f0de
+dma_wr 2222300c 33332222
+dma_wr 22223010 44444444
+dma_wr 22223014 55555555
+dma_wr 22223018 66666666
+dma_wr 2222301c 77777777
+dma_wr 22223020 88888888
+dma_wr 22223024 99999999
+dma_wr 22223028 aaaaaaaa
+dma_wr 2222302c bbbbbbbb
+dma_wr 22223030 00000000
+dma_wr 22223034 00000000
+dma_wr 22223038 00000000
+dma_wr 2222303c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123400c 1800c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234008 22223001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234010 22224000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+
+-- 4. Check reg1 - Dest add check. Set mask to all ones. 
+--                 mask bits are not ignored for filter 4, so this will match
+
+apbwr       304 3f003412  -- specific address register 1
+apbrdf      300 f0debc9a  
+
+rxd(apb)     d50000000000009abcdef0123422223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22224000 00000000 -- store frame to memory
+dma_wr 22224004 bc9a0000
+dma_wr 22224008 3412f0de
+dma_wr 2222400c 33332222
+dma_wr 22224010 44444444
+dma_wr 22224014 55555555
+dma_wr 22224018 66666666
+dma_wr 2222401c 77777777
+dma_wr 22224020 88888888
+dma_wr 22224024 99999999
+dma_wr 22224028 aaaaaaaa
+dma_wr 2222402c bbbbbbbb
+dma_wr 22224030 00000000
+dma_wr 22224034 00000000
+dma_wr 22224038 00000000
+dma_wr 2222403c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234014 1800c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234010 22224001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234018 22225002 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+-- 5. Check reg1 - same again, but do a src address chk
+
+apbwr       304 3f013412  -- specific address register 1
+apbrdf      300 f0debc9a  
+
+rxd(apb)     d59abcdef0123400000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22225000 f0debc9a -- store frame to memory
+dma_wr 22225004 00003412
+dma_wr 22225008 00000000
+dma_wr 2222500c 33332222
+dma_wr 22225010 44444444
+dma_wr 22225014 55555555
+dma_wr 22225018 66666666
+dma_wr 2222501c 77777777
+dma_wr 22225020 88888888
+dma_wr 22225024 99999999
+dma_wr 22225028 aaaaaaaa
+dma_wr 2222502c bbbbbbbb
+dma_wr 22225030 00000000
+dma_wr 22225034 00000000
+dma_wr 22225038 00000000
+dma_wr 2222503c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123401c 1800c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234018 22225003 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234000 22222000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+
+
+----------------------------------------------------------------------
+-- Now test q35 filter . 
+-- 1. Check reg1 - filter on dest address
+-- drive the receive frame data into the MII interface
+
+-- First disable filter 5.
+apbwr      300 78563412  -- specific address register 5
+apbrdf     20 00000000  
+
+
+rxd(apb)     d5bcdef012345600000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222000 12f0debc -- store frame to memory
+dma_wr 22222004 00005634
+dma_wr 22222008 00000000
+dma_wr 2222200c 33332222
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 00000000
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234004 0000c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234000 22222001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234008 22223000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it 
+
+-- 2. Check reg1 - disable the filter by writing to lower add.
+
+apbwr      3f0 12f0debc  -- specific address register 35
+apbrdf     3f0 12f0debc  -- specific address register 35
+
+rxd(apb)     d5bcdef012345600000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- 3. Check reg1 - reenable the filter by writing to upper add
+--                 filter on src address
+
+apbwr(23000) 3f4 00015634  -- specific address register 5
+apbrdf       3f0 12f0debc  
+
+rxd(apb)     d5000000000000bcdef012345622223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22223000 00000000 -- store frame to memory
+dma_wr 22223004 debc0000
+dma_wr 22223008 563412f0
+dma_wr 2222300c 33332222
+dma_wr 22223010 44444444
+dma_wr 22223014 55555555
+dma_wr 22223018 66666666
+dma_wr 2222301c 77777777
+dma_wr 22223020 88888888
+dma_wr 22223024 99999999
+dma_wr 22223028 aaaaaaaa
+dma_wr 2222302c bbbbbbbb
+dma_wr 22223030 00000000
+dma_wr 22223034 00000000
+dma_wr 22223038 00000000
+dma_wr 2222303c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123400c 0000c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234008 22223001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234010 22224000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+
+-- 4. Check reg1 - Dest add check. Set mask to all ones. 
+--                 mask bits are not ignored for filter 4, so this will match
+
+apbwr       3f4 3f005634  -- specific address register 1
+apbrdf      3f0 12f0debc  
+
+rxd(apb)     d5000000000000bcdef012345622223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22224000 00000000 -- store frame to memory
+dma_wr 22224004 debc0000
+dma_wr 22224008 563412f0
+dma_wr 2222400c 33332222
+dma_wr 22224010 44444444
+dma_wr 22224014 55555555
+dma_wr 22224018 66666666
+dma_wr 2222401c 77777777
+dma_wr 22224020 88888888
+dma_wr 22224024 99999999
+dma_wr 22224028 aaaaaaaa
+dma_wr 2222402c bbbbbbbb
+dma_wr 22224030 00000000
+dma_wr 22224034 00000000
+dma_wr 22224038 00000000
+dma_wr 2222403c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 01234014 0000c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234010 22224001 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234018 22225002 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+-- 5. Check reg1 - same again, but do a src address chk
+
+apbwr       3f4 3f015634  -- specific address register 1
+apbrdf      3f0 12f0debc  
+
+rxd(apb)     d5bcdef012345600000000000022223333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000gggggggg
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22225000 12f0debc -- store frame to memory
+dma_wr 22225004 00005634
+dma_wr 22225008 00000000
+dma_wr 2222500c 33332222
+dma_wr 22225010 44444444
+dma_wr 22225014 55555555
+dma_wr 22225018 66666666
+dma_wr 2222501c 77777777
+dma_wr 22225020 88888888
+dma_wr 22225024 99999999
+dma_wr 22225028 aaaaaaaa
+dma_wr 2222502c bbbbbbbb
+dma_wr 22225030 00000000
+dma_wr 22225034 00000000
+dma_wr 22225038 00000000
+dma_wr 2222503c zzzzzzzz
+
+-- check updates to the receive buffer descriptor list
+dma_wr 0123401c 0000c040 -- dma writes rx status:
+                         -- end of frame set, start of frame set,
+                         -- 64 bytes received
+dma_wr 01234018 22225003 -- dma writes ownership bit
+
+-- check that location of next rx buffer is read
+dma_rd 01234000 22222000 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 3: Complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrdf     20 00000000  -- check it 
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(35000)

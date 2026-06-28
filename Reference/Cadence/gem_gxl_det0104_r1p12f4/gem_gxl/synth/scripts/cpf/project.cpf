@@ -1,0 +1,93 @@
+set_cpf_version 1.1
+
+
+# Read project.tcl from current directory if it exists, otherwise look for it in $DUT_PATH
+  if [file exists "./project.tcl"] {
+     puts "Sourcing ./project.tcl ..."
+     source ./project.tcl
+  } else {
+     puts "ERROR: Can't find project.tcl in current working directory."
+     exit
+  }
+
+
+#######################################
+# Define library 
+#######################################
+include ./tech.cpf 
+
+##############################################################################
+# Design portion of the CPF
+##############################################################################
+set_design $DESIGN
+
+set_hierarchy_separator "/"
+
+#######################################
+# Create power domains
+#######################################
+create_power_domain -name PD_vdd -default
+
+#create_power_domain -name PDavdd2 -instances {inst_A inst_B} -shutoff_condition {pse_enable[0]} -base_domains PD_vdd
+#####################################
+# Create nominal conditions
+#####################################
+create_nominal_condition -name power_on  -voltage $VDD_values -state on
+
+create_nominal_condition -name power_off -voltage 0.0 -state off
+
+
+#######################################
+# Create power modes
+#######################################
+### Functional ###
+set default_domain_conditions { PD_vdd@power_on}
+create_power_mode -name PM_ALL_on -domain_conditions $default_domain_conditions -default
+#create_power_mode -name PM2 -domain_conditions {PD_vdd@power_on PDavdd2@power_off}  
+#create_power_mode -name PM_all_off  -domain_conditions { PD_vdd@power_off }  
+
+#######################################
+# Declare power and ground nets
+#######################################
+create_power_nets  -nets vdd     	-voltage [lindex $VDD_values 0]
+create_ground_nets -nets gnd
+
+#######################################
+# Create global connections
+#######################################
+#connect to all pins on the analog macro if not already there in rtl
+create_global_connection -domain PD_vdd  -net vdd  -pins VDD
+create_global_connection -domain PD_vdd  -net gnd  -pins vss
+create_global_connection -domain PD_vdd  -net gnd  -pins VSS
+
+#######################################
+#   create rules
+#######################################
+#Input_supply to switch:     net defined by -external_power_net
+#Output supply net     :     The primary_power_net of the Domain specified by -domain :  ( if grounds switchable use -external_ground_net instead of -external_power_net).
+#create_power_switch_rule -name SWITCH_RULE -domain PDswitched -external_power_net vdd 
+
+#create_isolation_rule -name LOW_ISO -from PD1   -exclude $iso_high_pins
+#create_isolation_rule -name HIHG_ISO -from PD1 -pins $iso_high_pins
+#create_isolation_rule -name PDavddOff_iso_high  -isolation_condition { } -pins { } -from { PDavdd } -to { PDvaux } -isolation_target from -isolation_output high 
+
+#create_level_shifter_rule -name lsr1 -from PD1 -to PD2
+#update_level_shifter_rules -names lsr1 -location to -prefix ls1_from_PD1
+
+#2 pin SR Reg rule
+#create_state_retention_rule \
+#        -name SD_retn_rule \
+#        -restore_level !u_power_ctrl/restore_n \
+#        -save_level     u_power_ctrl/save 
+#1 pin SR Reg rule
+#create_state_retention_rule \
+#        -name SD_retn_rule \
+#        -restore_level !u_power_ctrl/restore_n 
+
+
+#######################################
+# Add implementation info for power domains
+#######################################
+update_power_domain -name PD_vdd 	-primary_power_net vdd  -primary_ground_net gnd
+
+end_design

@@ -1,0 +1,2603 @@
+-------------------------------------------------
+-- rx_nocrc_check test scenario for the Ethernet MAC --
+-------------------------------------------------
+--
+-- Written by Arthur Marris
+--
+-- Cadence Design Systems Ltd
+-- Livingston Design Centre,
+-- West Lothian.
+--
+-- 05Jun2002     Arthur started it off
+--
+-- This tests the rx_no_crc_check bit in the network configuration
+-- register. When set frames can be received with bad crc.
+--
+-- Receive two frames. The first with bad crc and the second with
+-- good. Show that they are both received OK.
+--
+-- Receive a jumbo frame (6144 bytes) with bad crc. 
+-- Check that the length is reported correctly and that the bad FCS status 
+-- is not set as it is now used for the length field.
+--
+-- ************************************************************************** --
+
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      10 00020304  -- Allow rx packets of up to 8k
+apbwr      18 aaaaaaa0  -- write receive queue pointer
+apbwr      00 0000000c  -- enable tx and rx
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 04080001  -- set rx_no_crc_check bit and 100M mode
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwrf     8C 00001111  -- specific address register 1 top
+
+
+
+-- drive the receive frame data into the MII interface
+rxd(apb)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            000000000000000000000000badbadcc   -- bad crc
+
+
+-- supply the receive buffer location
+dma_rd rx_descr aaaaaaa0 22222004 -- dma reads pointer of 22222004
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 ccaddbba
+
+dma_wr rx_descr aaaaaaa4 0800e040 -- dma writes rx status, BAD FCS bit set (bit[13]), local address match and 64 bytes received
+dma_wr rx_descr aaaaaaa0 22222005 -- dma writes ownership bit
+
+dma_rd rx_descr aaaaaaa8 44440004 -- reads locations of next rx buffer
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+-- drive the receive frame data into the MII interface
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b  -- good crc
+
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 44440004 12345678 -- store frame to memory
+dma_wr 44440008 11111111
+dma_wr 4444000c 22222222
+dma_wr 44440010 33333333
+dma_wr 44440014 44444444
+dma_wr 44440018 55555555
+dma_wr 4444001c 66666666
+dma_wr 44440020 77777777
+dma_wr 44440024 88888888
+dma_wr 44440028 99999999
+dma_wr 4444002c aaaaaaaa
+dma_wr 44440030 bbbbbbbb
+dma_wr 44440034 00000000
+dma_wr 44440038 00000000
+dma_wr 4444003c 00000000
+dma_wr 44440040 9b303826
+
+dma_wr rx_descr aaaaaaac 0800c040 -- dma writes rx status, local address match and 64 bytes received
+dma_wr rx_descr aaaaaaa8 44440005 -- dma writes ownership bit
+
+dma_rd rx_descr aaaaaab0 44440008 -- reads locations of next rx buffer
+dma_rd rx_descr aaaaaab8 44440008 -- reads locations of next rx buffer
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- Clear it
+
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000080  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000002  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000002  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000001  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+
+
+--******************************************************************************
+-- Receive a jumbo frame (6144 bytes) with bad crc. 
+-- Check that the length is reported correctly and that the bad FCS status 
+-- is not set as it is now used for the length field.
+--******************************************************************************
+
+-- setup the dma interface to receive this frame
+apbwr           00  00000000    -- disable receive to setup queue pointer
+apbwr           04  04080009    -- set rx_no_crc_check bit and jumbo frames
+apbwr           18  69583230    -- set address of the receive queue descriptor
+apbwr           00  00000004    -- enable receive
+apbwr           88  7d512168    -- specific address register 1 bottom
+apbwrf          8c  00004618    -- specific address register 1 top
+
+
+-- receive a 6144 (0x1800) byte frame:
+rxd(apb)    55555555555555d56821517d1846a7796a5b151518008832
+rxd                         ded99af721e177965523283b3775111a
+rxd                         2f72d42c2c5abb17493a6f81e28bcb32
+rxd                         343ec983a783771be7ce1f4b432ec7f5
+rxd                         a6ef7327b3c9bb5186513e889a177791
+rxd                         569179a48723ba52599bded2c78f61f6
+rxd                         4b75f4f6ffeb8319a586f8eae19e6e1b
+rxd                         b6575aa6ae71579e1579e1f3df5169c1
+rxd                         fff8b999919841ac4e7dbb39274f4d3e
+rxd                         9dd91d269529b2b91f855b93994671f3
+rxd                         b56dd15ef1c1587f3b967f3e3f579f6c
+rxd                         9439d4ff612ac55fb26a3dedc29f18f6
+rxd                         d4ac3c7566576849c97695bab67473dc
+rxd                         a23af558a8136e8f25aeb665e751c832
+rxd                         295ed837eb167ffcfab42d3c6b89dada
+rxd                         7a29ffe3cce7e2e5ceca17fd6ca3553f
+rxd                         79836815a65d2f8af89881bbc41ae86b
+rxd                         39e7a2ec45f6df7d18d2872776f347b1
+rxd                         a7ef3bc9ca41717182296447bdf6dae8
+rxd                         88198f51ae5378d77fff5f2f613fdf76
+rxd                         b2e22ffde8be92c76bacc143a2aacb48
+rxd                         cc2eeb3a51c66467c5c851d72c821415
+rxd                         c37947a296a7266b774985684698b41f
+rxd                         7c667e39d73baa58bd3da6a5199ccbc1
+rxd                         2587ee6b66db187aeabcf772795b786b
+rxd                         b11b99caacdc8e977d27d947345b93fd
+rxd                         97884216aa4934195ac6c6a986cfb142
+rxd                         b2d7f56b593ba795c8325e745465615f
+rxd                         2e4d9ef772322d5c8e18597b8c46bce4
+rxd                         644f2b35ddcdd94284cd48886b7ca461
+rxd                         9dd86f1855b5f7a4864a9c991a86a6ff
+rxd                         374895b4f39f6c75bc258e56bc658dbe
+rxd                         b22187d737f88f178d8c72fbfe4eca1e
+rxd                         9325d4277b5d848aa514ed1bc5a589f9
+rxd                         d4f525e36ebcdbfc61f83825f7e89683
+rxd                         8a2f1747d44d6c59de681637796d5b33
+rxd                         eaaab32ffe4d515f46dbc47f6d263996
+rxd                         abe9c596972aa8fb345b8c8bb4f5c6d7
+rxd                         df36c868954f996f67ec3e3a6e383593
+rxd                         f385a2a5325927939741b88372c86d38
+rxd                         3331ddb2dc67efe987ef2a59dca92a51
+rxd                         6e31e669a651f1ae96b73a33526a95fb
+rxd                         d32ee61234ec2d2fe325f3df2f786429
+rxd                         bc36c64547bfd9ee8dcc3e854c83d95d
+rxd                         53461c53493f13524cf6fe56f13ce9d5
+rxd                         e2df263d9eaf5581d9346211ebf188e8
+rxd                         a6ae227d7411f7b676b675acff4bbefc
+rxd                         62c16ab7b674c5796e79e74377f153ab
+rxd                         969429d54d38deecd73f99e768edc16c
+rxd                         f4fe2cefa2e54fd951cdf5949b8cacb1
+rxd                         c6ca5a6b8261fd1d89d867dc838443e2
+rxd                         a914eeeb2214d7334a3a9732f556c348
+rxd                         77accedf8cd1d938fb62c438e9cf3bbf
+rxd                         ec629e1fb5fd3d322312417ba4fea9d3
+rxd                         4c23887f48dd61e8e421faab67619a37
+rxd                         e85c147ac35e2d3831e3738ef2da275d
+rxd                         2cda414f7e5cf9d7b91e3c82864945a7
+rxd                         a48f5e172a63b7e88b612e1f7adeb95d
+rxd                         fae9f6ec8e4fcc3463b78a9422feea58
+rxd                         668738eabb4995fce574fb1146436864
+rxd                         f1ca8562f8cdcb9395d829d58e27bf27
+rxd                         8c39ee22c1694b7c9fe6d7eb917da695
+rxd                         84d74e551c359ad329d2a6dd47141817
+rxd                         32f93c17b8ea2ba63f2cc2d499b3b8a3
+rxd                         3f6e769ccbe334e485afc681476518b3
+rxd                         c16938141b6c3662ef4b55ae712d1e2b
+rxd                         579742a79cc455d238d25a6e75ce781c
+rxd                         5de46745a2fba64255e95b7f91ac887d
+rxd                         4bbba2ee4a2992a8fb2e3d25b2cf41a4
+rxd                         2947e66e39e322f5ca6718b42578fa29
+rxd                         7dd5259fff625abe38b4cf555dd54488
+rxd                         ba73c38bf58163fdcfcf3ff7d98a1733
+rxd                         6e83ad5bb9663d29ee8d177cdcd41c4f
+rxd                         3b71fe59c5999976de77253e67a758bd
+rxd                         1eec68c3ccaa7e6ce51ebc3983c5495c
+rxd                         7f76192a6c2158a69ddf34a9f14269ec
+rxd                         412acac1e37c8375c6b82cc3687afc6f
+rxd                         125982937c7f4deddc642b569527b32b
+rxd                         d198f54117d63e1f78a12c2a21fe2f6f
+rxd                         48266b7d1a4ccadd36e253ed82af387a
+rxd                         724266dcd713ecefb596f85af4d62257
+rxd                         f86bbe111b2af321ddcb96c84fd3762a
+rxd                         dd1d549c7cf2a1cd34ae6c7fe7954ac8
+rxd                         5eddccdaa64f2c3b9a4186b31da9e2b2
+rxd                         c7c59cb11329693e51224b721b17a45a
+rxd                         826513bd9662c77b1eb37df454f2bb23
+rxd                         835f3f243c92a8b61bc38282541fb95a
+rxd                         811bdd5c642df59c2aa148e26846e314
+rxd                         348a9c8e3c628e9d121d71bd6a2652e3
+rxd                         79c52e74a43bd544ea7fad5bc5b97291
+rxd                         ca5ae465663baa3d2fbbeb72aef2ac8d
+rxd                         13ef1734f3462ba1c2d7f4714d64716c
+rxd                         16e4a9bb8d25ab44c9a92c9a3d9fe218
+rxd                         39eac883cc1d8325544db24f67d99e69
+rxd                         229163547e9cdd1e285674fcb21fd72f
+rxd                         241a8439b24993e61399a89184bf72a1
+rxd                         bb18ed45abfafbcb4dabde782a48e876
+rxd                         55566bc51a5c964e54381df1d91bddc4
+rxd                         681ed792d22b6b4e21e5b513568a212e
+rxd                         3a894cd56eb1d5e1334e5d615f4aeff1
+rxd                         2325cb2ad6eb6628d3a659ccb84ad4e3
+rxd                         e5d45fe7b1771b937fe9dd7bb2efe713
+rxd                         38b365c694b8e7bddfb7c7f1ef5e295d
+rxd                         de772fc2afd866ecbc8da4cf1242b612
+rxd                         427c8322ad9293fed96c3fbaac6f2975
+rxd                         7f7c9911ba393f67b35a36a8c69d5192
+rxd                         93a17fcfa4c84cd352a848c5f2a1a96b
+rxd                         16ebcdf98c8a4dd6669967ec12f2b732
+rxd                         b232a1ae51a22f57234e6a4a97764dd8
+rxd                         16b57a852f4499fe418efc195892ce25
+rxd                         588167f184b4c4c868627b539eb1587a
+rxd                         ac95d4d7e9d6dd84138fd4943582c1fe
+rxd                         382ef4c9961d8d5c92d5175189689b9a
+rxd                         2ec8868fb5e37aae158723b94eabd93b
+rxd                         a3a7119fdfd9159f3cd78cde22c5cbe5
+rxd                         3d9de5cd7426d139a12ad54b7c64d83b
+rxd                         24664d73d52125b6d364516251b2a779
+rxd                         db4ae54871f72f8446fe8fabef8b4e54
+rxd                         c48af4f3ee2638aac22522ee8996d817
+rxd                         424467737a6585cbc3ca7a886f96c76b
+rxd                         174f96ef124f4b5b83d9ba5885c9efb2
+rxd                         c8b766473d95a6ddbc24dc155d84a149
+rxd                         6aae9fc63519b8dfa92eb117ed556b6f
+rxd                         ea1cdaddf77782edec777a428649b1d5
+rxd                         6d1c6dd918b7212f1126e8316ed2113e
+rxd                         67cc11aee8d65aafcb4f1cb33db61f41
+rxd                         1293ee6c975fb91f339f9bcb6382459b
+rxd                         9522b6b51c7bf9831b12f43b2d57c225
+rxd                         9cea3dea1758357fd1a51f3bd4b6e5e3
+rxd                         65bc7753b9b43f8971eee923965d558a
+rxd                         f653f52d9eb5a62f32b5c9e9fc9f912b
+rxd                         1d2db1c26ddaa9d6826aeebb9e8e596e
+rxd                         2b4fffa1455b9c766d3159d1d2bc5c12
+rxd                         893bea8cc3b7af3f29418dd49796aa4c
+rxd                         6862677828bed55c8ad1262adba1b568
+rxd                         855c6f46c923b3f2ff1793912cffdf57
+rxd                         aefc1b238458dc7f1dc984cfe72d8871
+rxd                         eb2d5ccf44eabbde3148ddd4c4c28b35
+rxd                         fd7aca87a96caa92ac8764a158a435ec
+rxd                         dbe888a4a65a17d4813df816e53d36c5
+rxd                         cff81bec84aa65e45e5db66daf6cd4c3
+rxd                         c6842356da6f113477f712a1afbe8686
+rxd                         c311b62d3e57bad2edfa4157ab9697c8
+rxd                         2efc3684aa591bc6c2f5c71e2c795ee1
+rxd                         692f2fbeb28bec1dc47b447e5e8ae4db
+rxd                         c64e7591192b1ce481ee97b2489171b5
+rxd                         63c999184911bc5a732c431b9cad22d8
+rxd                         4e8c6b8c283dffb4a2e26ea72427777e
+rxd                         45d3bd2b9fc626cc1b314c8b583ea8c6
+rxd                         ad9937f4e5268adf9a6d1fbbaee29a3a
+rxd                         816fbca44f3c9eac6c3c16d6a62cf3fc
+rxd                         6bc983a5b7238a52b633c52125133313
+rxd                         dff5e799326e165ffde6f1e9ea2f4faf
+rxd                         ab68f4b78b854b6af95f35cb822f6bfd
+rxd                         a44d82c8e4f653629da5f29ae7bad181
+rxd                         926d32c2d1565f631996da73af67987c
+rxd                         59a92817c598ed49723d75426b746b36
+rxd                         478a17c2912183b484681eb7b97ccce7
+rxd                         72a1684ce4384a14ebd9c37679c7db4f
+rxd                         53194f964784743d63512b863fb7d4e4
+rxd                         8be36cab7e6c2417ce261f64d4dfffb6
+rxd                         87c5a73dab7a81ebea561f99a2b9f7f8
+rxd                         77d2b1e96ad21f9343e8ee5feac651fb
+rxd                         eb36cf1b74152aa7b4c1f5678b31be6a
+rxd                         479453cf517f87fa31b4c221e6c287de
+rxd                         a3c1a18e39464b87c42ffd76f5e9b575
+rxd                         87ba1e66881f9cac787532e2eb4e2da5
+rxd                         16e16bca7f6a3cb62f5ac4827be75bd9
+rxd                         ec192a916bfcfbb88732564ea835b617
+rxd                         a5ade3e9919a78aba85ebe3d164d2746
+rxd                         419c19cdfcbe2ebe6a68553fb7aaafbe
+rxd                         91c8f22e2e344879f8f8991146836d7d
+rxd                         181c9cdee27321889c2ee3ced51efb24
+rxd                         aa9d348af52dbd4ee974df8a69f3c74f
+rxd                         9926716f81643694f7b25d5bbed3bc48
+rxd                         b64fca9db7c5e79eb7567d6b5ac2181c
+rxd                         ba7147d61616a675d2ce7d77ef6825e2
+rxd                         9e12f3bcc6b892a61e43464172b1e88b
+rxd                         8cbd3dbe75f5cb673b4f527ff3339d91
+rxd                         bd28761e833bb99cf85653e65aa5e359
+rxd                         64fe4926372cc8a5cb879fc7df157d4a
+rxd                         bf4dfd8c162e9f545f9d2ec8cacc398d
+rxd                         5fd278f2479e7e376665acb2af3e472e
+rxd                         7f9553116398f3f2c4d625cd34ca3afa
+rxd                         e1f889e8a56d39c197eca57b916af7b8
+rxd                         212fad8328f2fca44c7965f3129eebb8
+rxd                         6276944bfd54fd139c22eb69c6292af7
+rxd                         e474e2211caf24e26cc7ce1a7eb5c646
+rxd                         9262a3a432d1ec2889f4be996314472e
+rxd                         4cd69dab385f332e3e8955e2e1baee76
+rxd                         75a159b3e7f3b16b8974f77b954e6624
+rxd                         8bfe91eee6cb81cb44866bd8c4332712
+rxd                         675723e797d8a11ba9dcb9f4cfca79e4
+rxd                         68e87d25b6ae9c44c9ebcbfd5a67cb5e
+rxd                         55fd92f73cfa962cb489fea8e726caaa
+rxd                         295bf8b68c12a34a7a1bc99d572f5d2c
+rxd                         99e12afcf5769c1156764d7faf4b5742
+rxd                         65c7c2b2138ba16bad4c47ea628daccd
+rxd                         77b8b277d4c12b435df683f93dabaa2f
+rxd                         2f877395e43bdc22156c4cafb78128b3
+rxd                         661bd5e2868663488676fe2b13c1836e
+rxd                         e37d8844f56bc7a19f2fc271484d79f9
+rxd                         52ca4389255a37d2785b51b784c351d2
+rxd                         375718a16b2eba92fea5f23b1316386a
+rxd                         3b4336fe135d669682ce6696ae3243e6
+rxd                         24cb79cd4a48be4682e21b85a524d568
+rxd                         e7b16adf37f1846aa531c7e954438f1d
+rxd                         9db65b5deecae5cd49bb5ebae41796a3
+rxd                         616e1ed95388abf69ad5ab7729529a2b
+rxd                         4db5cadedbde36edd2e97148325e5fb9
+rxd                         915e8fb168387b43dd568b953987f446
+rxd                         2c44adc3b91d64b291eae66a7cf592fd
+rxd                         ae9251efbfabbbd625c83e41ff6e4515
+rxd                         2e55a291fceefbedbdbd1da422d8eba8
+rxd                         3837952b2c87d1cc6d7da71fce6a3996
+rxd                         46f4f2f5b86cf2fde1f19df46f9fe367
+rxd                         beadbe7ed92de35799a956fcd41d122d
+rxd                         8a85b87c533863b726fd9d92b248cec6
+rxd                         e516f65fd4db7b86bbcfff2427c97aef
+rxd                         cd373e3a2da61e8432b2598f1c52517a
+rxd                         e3571d33f3fb4a59c8fd366a26bd5d3d
+rxd                         f3f2aa2e8269a1e1c198bf4c1f53c3fe
+rxd                         91fecef4971fa1ab3844865c7bcdf568
+rxd                         7563a132f2dcfe7772f3927d486271a8
+rxd                         5fbe4d558cb2961b86b93c2e813f8bd2
+rxd                         f5c6ade1d7af7ab5593eb94a11c2ccce
+rxd                         6aab556d12caad5436b628962ff1cc78
+rxd                         6378de58b728a1dc9df8d9cbc87bb8d1
+rxd                         a95914df82ce856af9e4c8127e3ce1b1
+rxd                         e539e1feb181a51249d2d74185696a8b
+rxd                         59abbbe3ae4574baf34ef6d914a3ea3b
+rxd                         9285e84f9a271164ffb45a8acc679444
+rxd                         da81a5e29bc16bc28e7f5aadabaec4c3
+rxd                         32616fdb3aa38c27df2e32af8a445ab7
+rxd                         9bc2bef7bce3d287e3932311475264ca
+rxd                         b876fbb84a34978ef7393be77d1b85ec
+rxd                         41b2f219c4ef7cc2d91d8a1dc9ef5b97
+rxd                         157b244b78bfa5547181ae94ba3f464b
+rxd                         8d659ccc518881237d3718db7aa42a81
+rxd                         33ece94362ee1fa5339251c171fad8f6
+rxd                         79bb8d78ace3e469fba924aaee1ac7a8
+rxd                         1ef2a9d77f1bfce73fbd13ad14eecdca
+rxd                         985b544e589127c115c7184a64143d51
+rxd                         2fe5b2392413a68c5db6d1ad698322d3
+rxd                         a8d99b5bb5cbb34a6e9a2e3afe495c89
+rxd                         5af4f263535eebfa83e3467a6846b5eb
+rxd                         4ab9bb457d56113d64292dc18eb48edf
+rxd                         aab53b15762bfe7e8525954fbe28b8b1
+rxd                         42baf92faec2e6b2a25cccef54c27e55
+rxd                         ae7791a6fcb86cf877ba15a6ddb8d69b
+rxd                         aff42b5b7864d882331be49c9f3955e7
+rxd                         91a236b7196c35a318949d81a68b5273
+rxd                         7aa8aaba2db8789a31d77f297bb57ad9
+rxd                         64577854a858abad851e43b675691727
+rxd                         9218cb89eeb6f3cd7811e521165ccbab
+rxd                         a6ba99f9a696d17daf3e9325415ea666
+rxd                         acd6cdde6b3343f862f2fa5a41bd1ffa
+rxd                         745131ca7ce296b7fbf3bda18c9a69e1
+rxd                         9ac3cbb87c41db247ef37c13b4d779d8
+rxd                         66bb5b8c9573f6cd49b7e892b6bb9528
+rxd                         1524ee649a4f61dc8cdc747395eedfbb
+rxd                         bc83d5a3d84893f37c4d6d9c8ba61c48
+rxd                         4747ea378fc82a11743babadf561cd5e
+rxd                         939682684cf158ff5fee7ed5ea9b361d
+rxd                         3b6a1a8d462ad32c38a639441b81efc4
+rxd                         525e2dcf1b2b917a65455d1f2ee494fb
+rxd                         babedbb7d2a944df4dc87b4bedffa9f2
+rxd                         9e893224c9c53eb6abb9961cecdec8a8
+rxd                         6fb67d1f28e4ef3692812ea654b45db8
+rxd                         84117727d2a93a16eab3b72122649486
+rxd                         3f9c52c9f2892ea2e9d6be4435271b3a
+rxd                         3781c73f673c65cd84aa73499e91edbe
+rxd                         843dbdb6899bc7ca7b8c66b3967a8f4c
+rxd                         2cf4b449fafb9843c39cf7ddeb5cea51
+rxd                         9de6c7edc24682d3d22f6593fd75675f
+rxd                         bf66a3373ea18c8583f61d9a25ad63a2
+rxd                         2546138cb59df7c135d7ac377a38497e
+rxd                         e6e1bd39aac6a52f9fb68176c359ec19
+rxd                         1646a1251c9f8b7591af2bea7f52359b
+rxd                         1a7daf195fe2c3131b18c66d688e5895
+rxd                         771c14f3c9b6292fb25b2fcce4949d19
+rxd                         48e7e78b1d641cea99a254acc1dc2acb
+rxd                         5c858be7d52f62319f97b1fd341a7591
+rxd                         c324958ff89c22ddb1acf7cdc9f75521
+rxd                         9cdad145dfda1b21cc8e635f8d73dfee
+rxd                         b46174b6e66af2cde97945d1d6697386
+rxd                         75b2e5dd5cbb93cd2b27eae2c3277395
+rxd                         eb1fb74263ed429f1815b6a284f825ed
+rxd                         27bcf9afd5bafbe9c92fab255375d61c
+rxd                         5a9e744129719dd38471dd85c7943561
+rxd                         49b44785ffa1fb9c8925a13d468117b3
+rxd                         669b9a53dcbdaab1dbadfb183f861ea8
+rxd                         bbdbcdcad9df51afc534b741daebc1f2
+rxd                         8a769a1e3433b6bd3333b17575c324b1
+rxd                         fa24331662579768121dd885ea165963
+rxd                         7bc82a1fe7f19a9bbcd96b9a6452c5d8
+rxd                         9f9b15f8a417c9a39c69eecd518d4436
+rxd                         48739db2aaa22e7aa2c1ea1a8c5978a7
+rxd                         73e59a6b95b8c5ff11958c788887e354
+rxd                         9aea73d93bb524e1e6bfa496196d9968
+rxd                         27fe283783777cef1c713532742f7331
+rxd                         cc5f1ce4dd9c571e854fd786c946ce2c
+rxd                         1854397ab4c8745b1674cb47eb24e42b
+rxd                         83965c2c88cf56d36eda36315e322dc9
+rxd                         55fd3deb7527d369741f4156bbabedc1
+rxd                         3aed7f6f3b93b5b789c86d55e9857451
+rxd                         119827969286aed6484231c6b39d1144
+rxd                         2953c8b7db9e286aac378c3fc559883b
+rxd                         327be4cfb113c4db55ab671e34bfe3ae
+rxd                         b9d83a9e1692bf1318e4ee68cd8c1dea
+rxd                         219d9477ee5df6fd9d5a2cd8a6bf68bc
+rxd                         da55642d9cf34e9844c51d9f1c2ea624
+rxd                         be11f967839697c7cf4ccf7cab941746
+rxd                         965bbfa8ce26a868d61c27293cb9e363
+rxd                         d61832f3557d98df834994b13154d7e4
+rxd                         4d5f3fb349f492f6637f3f9a6c8ded46
+rxd                         dfa98a43969a2b4327373eeaa9bfd25d
+rxd                         552162d5ce32b83c8e8b654149ce2c49
+rxd                         7cdfb5e363ffe13d39d6931ff2bdb63b
+rxd                         667fab3dcb6adaa4f7a3775a4dd13c43
+rxd                         8ca7982b8f1a98475fce3a8c79bc232a
+rxd                         441bc7d5a6466529e9e4859f1e18275b
+rxd                         f1fd23b786723b41b2178294aef83212
+rxd                         98befccf6adcf69ffa664b66a6db4387
+rxd                         c24d198658cbeb2f9a435a8d291495b7
+rxd                         5ee85ee6e2e9d351bb68fa8418834719
+rxd                         348dd97366b5c935827a34e3e458d677
+rxd                         e83def6cdc85cd222faa4b14d3e16ece
+rxd                         949fabb9285d72b5ed8bd231ade2913e
+rxd                         4d4ccb497978a71b2a12ce7b9e8e69cd
+rxd                         e919bf1d7cbb2f6e352a9d4e7b185af2
+rxd                         8f66bc2ffac94f1bfaba4cb1d47ab259
+rxd                         366ef8289ecb4892aefbf598b1f93b1a
+rxd                         6d45cf6e16165a753ee3a5a4b38c4715
+rxd                         82bce9fb545aec9de599548c6945aa47
+rxd                         6d656564742b8ae54a68fee6d55b1144
+rxd                         d49c83936175eaaace1bbb9f2b1d4d72
+rxd                         fc52683413377d4b66a6ecf756db59c4
+rxd                         a3ebe534bcf4a755df5f527e86b1de54
+rxd                         dc6faa462cd8cc5d862da1b3e68cfbbf
+rxd                         3c63b1a3cf83c9f2d45b22ee5feb4569
+rxd                         d1d7b372ada5e7d1557ba2e7d6bbc7ba
+rxd                         8518d57a7d888847e9dbe7354a9dad8c
+rxd                         d1a9cf9287d6853654989f3d6c7bd854
+rxd                         9efae8fb5743cd61452d4d1fe666c41d
+rxd                         f94c21eebd47ca91fd8593f5e5b4deae
+rxd                         8c6d4e9e78164323113b1e58f53dcd3a
+rxd                         ee1b1cb48c84773649b73a41774b1e4a
+rxd                         311195462564b79db14811fb718b2849
+rxd                         d29a46b51596591c7a586fc2caac6282
+rxd                         11ce29fbf8b38281fef42e5c99d4a6cd
+rxd                         594c4b3fda665cb32d4d537bbb9fbfb1
+rxd                         1e1d38f77519e3a2fce3b6b68eeb5b79
+rxd                         4155119d1cb5238b6afc41bec56349f5
+rxd                         6c6629a64b51bfb79a171ccdda9ca628
+rxd                         a9f234798ad57a958aad47ebaeccc412
+rxd                         bf7d4c5f6986c91e3c743b51916d9417
+rxd                         6212c6425346ece4a81785d8dbcc4d84
+rxd                         f6a36a891e56e1239a1a6c9f431212cd
+rxd                         bb4d55e9713d5fcf96c848a45346543d
+rxd                         c5e2599a391a67f6bd23dfa58679fafa
+rxd                         ed81fa73f2d5ed64a9ac26376527ffb6
+rxd                         78d7b7e8147435cacbab6a676ff63931
+rxd                         95ed2e84ff4daa675acb69127e7c42cb
+rxd                         94ee348f178688e234b1e745d57879b3
+rxd                         392cc1926c16a763e4fc1b7f443345b9
+rxd                         3d1a97aab19b5435fbf7c3b25c775925
+rxd                         4669ef836bf4cb35f1b3c8e2aa9e9694
+rxd                         7b89b38c6e8321768eab1cbbb956f29e
+rxd                         ace97ba7a525f43ded123bbacfd6c136
+rxd                         4cdf1839697328f354941d6b7d47bac8
+rxd                         8ea1e8356cad447511a134ea589348a6
+rxd                         85391e166bb8dced388ae42618e8ce11
+rxd                         bd43f4c61de45ad72393324bff165ee7
+rxd                         51fe1a5225935b15b6137eb4b8ddbc56
+rxd                         19fa612abe553b1363e3b2b17e7b6acc
+rxd                         ed927784d8f251aacefd7ff95384d415
+rxd                         1a899763ae5951b5d2dafa49466abfef
+rxd                         c378f32122d37bee84e9d5a67147cdc3
+rxd                         38749628b8a1f5b7e29d1a7c46811289
+rxd                         bd53754754f64f1f8c6bde17eb19835a
+rxd                         57353c5dc28f6fbfd74b5bb1f9e8d2c3
+rxd                         fafd555136593da119861f8e829377cc
+rxd                         57d23f1b62cc79eaf56b3b5b
+rxd                         deaddead  -- BAD CRC
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583230    1be4e220
+
+-- check writes to the receive buffer
+dma_wr          1be4e220    7d512168
+dma_wr          1be4e224    79a74618
+dma_wr          1be4e228    15155b6a
+dma_wr          1be4e22c    32880018
+dma_wr          1be4e230    f79ad9de
+dma_wr          1be4e234    9677e121
+dma_wr          1be4e238    3b282355
+dma_wr          1be4e23c    1a117537
+dma_wr          1be4e240    2cd4722f
+dma_wr          1be4e244    17bb5a2c
+dma_wr          1be4e248    816f3a49
+dma_wr          1be4e24c    32cb8be2
+dma_wr          1be4e250    83c93e34
+dma_wr          1be4e254    1b7783a7
+dma_wr          1be4e258    4b1fcee7
+dma_wr          1be4e25c    f5c72e43
+dma_wr          1be4e260    2773efa6
+dma_wr          1be4e264    51bbc9b3
+dma_wr          1be4e268    883e5186
+dma_wr          1be4e26c    9177179a
+dma_wr          1be4e270    a4799156
+dma_wr          1be4e274    52ba2387
+dma_wr          1be4e278    d2de9b59
+dma_wr          1be4e27c    f6618fc7
+dma_wr          1be4e280    f6f4754b
+dma_wr          1be4e284    1983ebff
+dma_wr          1be4e288    eaf886a5
+dma_wr          1be4e28c    1b6e9ee1
+dma_wr          1be4e290    a65a57b6
+dma_wr          1be4e294    9e5771ae
+dma_wr          1be4e298    f3e17915
+dma_wr          1be4e29c    c16951df
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583234    00004000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583230    1be4e221 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583238    1be4e2a0
+
+-- check writes to the receive buffer
+dma_wr          1be4e2a0    99b9f8ff
+dma_wr          1be4e2a4    ac419891
+dma_wr          1be4e2a8    39bb7d4e
+dma_wr          1be4e2ac    3e4d4f27
+dma_wr          1be4e2b0    261dd99d
+dma_wr          1be4e2b4    b9b22995
+dma_wr          1be4e2b8    935b851f
+dma_wr          1be4e2bc    f3714699
+dma_wr          1be4e2c0    5ed16db5
+dma_wr          1be4e2c4    7f58c1f1
+dma_wr          1be4e2c8    3e7f963b
+dma_wr          1be4e2cc    6c9f573f
+dma_wr          1be4e2d0    ffd43994
+dma_wr          1be4e2d4    5fc52a61
+dma_wr          1be4e2d8    ed3d6ab2
+dma_wr          1be4e2dc    f6189fc2
+dma_wr          1be4e2e0    753cacd4
+dma_wr          1be4e2e4    49685766
+dma_wr          1be4e2e8    ba9576c9
+dma_wr          1be4e2ec    dc7374b6
+dma_wr          1be4e2f0    58f53aa2
+dma_wr          1be4e2f4    8f6e13a8
+dma_wr          1be4e2f8    65b6ae25
+dma_wr          1be4e2fc    32c851e7
+dma_wr          1be4e300    37d85e29
+dma_wr          1be4e304    fc7f16eb
+dma_wr          1be4e308    3c2db4fa
+dma_wr          1be4e30c    dada896b
+dma_wr          1be4e310    e3ff297a
+dma_wr          1be4e314    e5e2e7cc
+dma_wr          1be4e318    fd17cace
+dma_wr          1be4e31c    3f55a36c
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958323c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583238    1be4e2a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583240    1be4e320
+
+-- check writes to the receive buffer
+dma_wr          1be4e320    15688379
+dma_wr          1be4e324    8a2f5da6
+dma_wr          1be4e328    bb8198f8
+dma_wr          1be4e32c    6be81ac4
+dma_wr          1be4e330    eca2e739
+dma_wr          1be4e334    7ddff645
+dma_wr          1be4e338    2787d218
+dma_wr          1be4e33c    b147f376
+dma_wr          1be4e340    c93befa7
+dma_wr          1be4e344    717141ca
+dma_wr          1be4e348    47642982
+dma_wr          1be4e34c    e8daf6bd
+dma_wr          1be4e350    518f1988
+dma_wr          1be4e354    d77853ae
+dma_wr          1be4e358    2f5fff7f
+dma_wr          1be4e35c    76df3f61
+dma_wr          1be4e360    fd2fe2b2
+dma_wr          1be4e364    c792bee8
+dma_wr          1be4e368    43c1ac6b
+dma_wr          1be4e36c    48cbaaa2
+dma_wr          1be4e370    3aeb2ecc
+dma_wr          1be4e374    6764c651
+dma_wr          1be4e378    d751c8c5
+dma_wr          1be4e37c    1514822c
+dma_wr          1be4e380    a24779c3
+dma_wr          1be4e384    6b26a796
+dma_wr          1be4e388    68854977
+dma_wr          1be4e38c    1fb49846
+dma_wr          1be4e390    397e667c
+dma_wr          1be4e394    58aa3bd7
+dma_wr          1be4e398    a5a63dbd
+dma_wr          1be4e39c    c1cb9c19
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583244    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583240    1be4e321 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583248    1be4e3a0
+
+-- check writes to the receive buffer
+dma_wr          1be4e3a0    6bee8725
+dma_wr          1be4e3a4    7a18db66
+dma_wr          1be4e3a8    72f7bcea
+dma_wr          1be4e3ac    6b785b79
+dma_wr          1be4e3b0    ca991bb1
+dma_wr          1be4e3b4    978edcac
+dma_wr          1be4e3b8    47d9277d
+dma_wr          1be4e3bc    fd935b34
+dma_wr          1be4e3c0    16428897
+dma_wr          1be4e3c4    193449aa
+dma_wr          1be4e3c8    a9c6c65a
+dma_wr          1be4e3cc    42b1cf86
+dma_wr          1be4e3d0    6bf5d7b2
+dma_wr          1be4e3d4    95a73b59
+dma_wr          1be4e3d8    745e32c8
+dma_wr          1be4e3dc    5f616554
+dma_wr          1be4e3e0    f79e4d2e
+dma_wr          1be4e3e4    5c2d3272
+dma_wr          1be4e3e8    7b59188e
+dma_wr          1be4e3ec    e4bc468c
+dma_wr          1be4e3f0    352b4f64
+dma_wr          1be4e3f4    42d9cddd
+dma_wr          1be4e3f8    8848cd84
+dma_wr          1be4e3fc    61a47c6b
+dma_wr          1be4e400    186fd89d
+dma_wr          1be4e404    a4f7b555
+dma_wr          1be4e408    999c4a86
+dma_wr          1be4e40c    ffa6861a
+dma_wr          1be4e410    b4954837
+dma_wr          1be4e414    756c9ff3
+dma_wr          1be4e418    568e25bc
+dma_wr          1be4e41c    be8d65bc
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958324c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583248    1be4e3a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583250    1be4e420
+
+-- check writes to the receive buffer
+dma_wr          1be4e420    d78721b2
+dma_wr          1be4e424    178ff837
+dma_wr          1be4e428    fb728c8d
+dma_wr          1be4e42c    1eca4efe
+dma_wr          1be4e430    27d42593
+dma_wr          1be4e434    8a845d7b
+dma_wr          1be4e438    1bed14a5
+dma_wr          1be4e43c    f989a5c5
+dma_wr          1be4e440    e325f5d4
+dma_wr          1be4e444    fcdbbc6e
+dma_wr          1be4e448    2538f861
+dma_wr          1be4e44c    8396e8f7
+dma_wr          1be4e450    47172f8a
+dma_wr          1be4e454    596c4dd4
+dma_wr          1be4e458    371668de
+dma_wr          1be4e45c    335b6d79
+dma_wr          1be4e460    2fb3aaea
+dma_wr          1be4e464    5f514dfe
+dma_wr          1be4e468    7fc4db46
+dma_wr          1be4e46c    9639266d
+dma_wr          1be4e470    96c5e9ab
+dma_wr          1be4e474    fba82a97
+dma_wr          1be4e478    8b8c5b34
+dma_wr          1be4e47c    d7c6f5b4
+dma_wr          1be4e480    68c836df
+dma_wr          1be4e484    6f994f95
+dma_wr          1be4e488    3a3eec67
+dma_wr          1be4e48c    9335386e
+dma_wr          1be4e490    a5a285f3
+dma_wr          1be4e494    93275932
+dma_wr          1be4e498    83b84197
+dma_wr          1be4e49c    386dc872
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583254    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583250    1be4e421 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583258    1be4e4a0
+
+-- check writes to the receive buffer
+dma_wr          1be4e4a0    b2dd3133
+dma_wr          1be4e4a4    e9ef67dc
+dma_wr          1be4e4a8    592aef87
+dma_wr          1be4e4ac    512aa9dc
+dma_wr          1be4e4b0    69e6316e
+dma_wr          1be4e4b4    aef151a6
+dma_wr          1be4e4b8    333ab796
+dma_wr          1be4e4bc    fb956a52
+dma_wr          1be4e4c0    12e62ed3
+dma_wr          1be4e4c4    2f2dec34
+dma_wr          1be4e4c8    dff325e3
+dma_wr          1be4e4cc    2964782f
+dma_wr          1be4e4d0    45c636bc
+dma_wr          1be4e4d4    eed9bf47
+dma_wr          1be4e4d8    853ecc8d
+dma_wr          1be4e4dc    5dd9834c
+dma_wr          1be4e4e0    531c4653
+dma_wr          1be4e4e4    52133f49
+dma_wr          1be4e4e8    56fef64c
+dma_wr          1be4e4ec    d5e93cf1
+dma_wr          1be4e4f0    3d26dfe2
+dma_wr          1be4e4f4    8155af9e
+dma_wr          1be4e4f8    116234d9
+dma_wr          1be4e4fc    e888f1eb
+dma_wr          1be4e500    7d22aea6
+dma_wr          1be4e504    b6f71174
+dma_wr          1be4e508    ac75b676
+dma_wr          1be4e50c    fcbe4bff
+dma_wr          1be4e510    b76ac162
+dma_wr          1be4e514    79c574b6
+dma_wr          1be4e518    43e7796e
+dma_wr          1be4e51c    ab53f177
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958325c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583258    1be4e4a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583260    1be4e520
+
+-- check writes to the receive buffer
+dma_wr          1be4e520    d5299496
+dma_wr          1be4e524    ecde384d
+dma_wr          1be4e528    e7993fd7
+dma_wr          1be4e52c    6cc1ed68
+dma_wr          1be4e530    ef2cfef4
+dma_wr          1be4e534    d94fe5a2
+dma_wr          1be4e538    94f5cd51
+dma_wr          1be4e53c    b1ac8c9b
+dma_wr          1be4e540    6b5acac6
+dma_wr          1be4e544    1dfd6182
+dma_wr          1be4e548    dc67d889
+dma_wr          1be4e54c    e2438483
+dma_wr          1be4e550    ebee14a9
+dma_wr          1be4e554    33d71422
+dma_wr          1be4e558    32973a4a
+dma_wr          1be4e55c    48c356f5
+dma_wr          1be4e560    dfceac77
+dma_wr          1be4e564    38d9d18c
+dma_wr          1be4e568    38c462fb
+dma_wr          1be4e56c    bf3bcfe9
+dma_wr          1be4e570    1f9e62ec
+dma_wr          1be4e574    323dfdb5
+dma_wr          1be4e578    7b411223
+dma_wr          1be4e57c    d3a9fea4
+dma_wr          1be4e580    7f88234c
+dma_wr          1be4e584    e861dd48
+dma_wr          1be4e588    abfa21e4
+dma_wr          1be4e58c    379a6167
+dma_wr          1be4e590    7a145ce8
+dma_wr          1be4e594    382d5ec3
+dma_wr          1be4e598    8e73e331
+dma_wr          1be4e59c    5d27daf2
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583264    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583260    1be4e521 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583268    1be4e5a0
+
+-- check writes to the receive buffer
+dma_wr          1be4e5a0    4f41da2c
+dma_wr          1be4e5a4    d7f95c7e
+dma_wr          1be4e5a8    823c1eb9
+dma_wr          1be4e5ac    a7454986
+dma_wr          1be4e5b0    175e8fa4
+dma_wr          1be4e5b4    e8b7632a
+dma_wr          1be4e5b8    1f2e618b
+dma_wr          1be4e5bc    5db9de7a
+dma_wr          1be4e5c0    ecf6e9fa
+dma_wr          1be4e5c4    34cc4f8e
+dma_wr          1be4e5c8    948ab763
+dma_wr          1be4e5cc    58eafe22
+dma_wr          1be4e5d0    ea388766
+dma_wr          1be4e5d4    fc9549bb
+dma_wr          1be4e5d8    11fb74e5
+dma_wr          1be4e5dc    64684346
+dma_wr          1be4e5e0    6285caf1
+dma_wr          1be4e5e4    93cbcdf8
+dma_wr          1be4e5e8    d529d895
+dma_wr          1be4e5ec    27bf278e
+dma_wr          1be4e5f0    22ee398c
+dma_wr          1be4e5f4    7c4b69c1
+dma_wr          1be4e5f8    ebd7e69f
+dma_wr          1be4e5fc    95a67d91
+dma_wr          1be4e600    554ed784
+dma_wr          1be4e604    d39a351c
+dma_wr          1be4e608    dda6d229
+dma_wr          1be4e60c    17181447
+dma_wr          1be4e610    173cf932
+dma_wr          1be4e614    a62beab8
+dma_wr          1be4e618    d4c22c3f
+dma_wr          1be4e61c    a3b8b399
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958326c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583268    1be4e5a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583270    1be4e620
+
+-- check writes to the receive buffer
+dma_wr          1be4e620    9c766e3f
+dma_wr          1be4e624    e434e3cb
+dma_wr          1be4e628    81c6af85
+dma_wr          1be4e62c    b3186547
+dma_wr          1be4e630    143869c1
+dma_wr          1be4e634    62366c1b
+dma_wr          1be4e638    ae554bef
+dma_wr          1be4e63c    2b1e2d71
+dma_wr          1be4e640    a7429757
+dma_wr          1be4e644    d255c49c
+dma_wr          1be4e648    6e5ad238
+dma_wr          1be4e64c    1c78ce75
+dma_wr          1be4e650    4567e45d
+dma_wr          1be4e654    42a6fba2
+dma_wr          1be4e658    7f5be955
+dma_wr          1be4e65c    7d88ac91
+dma_wr          1be4e660    eea2bb4b
+dma_wr          1be4e664    a892294a
+dma_wr          1be4e668    253d2efb
+dma_wr          1be4e66c    a441cfb2
+dma_wr          1be4e670    6ee64729
+dma_wr          1be4e674    f522e339
+dma_wr          1be4e678    b41867ca
+dma_wr          1be4e67c    29fa7825
+dma_wr          1be4e680    9f25d57d
+dma_wr          1be4e684    be5a62ff
+dma_wr          1be4e688    55cfb438
+dma_wr          1be4e68c    8844d55d
+dma_wr          1be4e690    8bc373ba
+dma_wr          1be4e694    fd6381f5
+dma_wr          1be4e698    f73fcfcf
+dma_wr          1be4e69c    33178ad9
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583274    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583270    1be4e621 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583278    1be4e6a0
+
+-- check writes to the receive buffer
+dma_wr          1be4e6a0    5bad836e
+dma_wr          1be4e6a4    293d66b9
+dma_wr          1be4e6a8    7c178dee
+dma_wr          1be4e6ac    4f1cd4dc
+dma_wr          1be4e6b0    59fe713b
+dma_wr          1be4e6b4    769999c5
+dma_wr          1be4e6b8    3e2577de
+dma_wr          1be4e6bc    bd58a767
+dma_wr          1be4e6c0    c368ec1e
+dma_wr          1be4e6c4    6c7eaacc
+dma_wr          1be4e6c8    39bc1ee5
+dma_wr          1be4e6cc    5c49c583
+dma_wr          1be4e6d0    2a19767f
+dma_wr          1be4e6d4    a658216c
+dma_wr          1be4e6d8    a934df9d
+dma_wr          1be4e6dc    ec6942f1
+dma_wr          1be4e6e0    c1ca2a41
+dma_wr          1be4e6e4    75837ce3
+dma_wr          1be4e6e8    c32cb8c6
+dma_wr          1be4e6ec    6ffc7a68
+dma_wr          1be4e6f0    93825912
+dma_wr          1be4e6f4    ed4d7f7c
+dma_wr          1be4e6f8    562b64dc
+dma_wr          1be4e6fc    2bb32795
+dma_wr          1be4e700    41f598d1
+dma_wr          1be4e704    1f3ed617
+dma_wr          1be4e708    2a2ca178
+dma_wr          1be4e70c    6f2ffe21
+dma_wr          1be4e710    7d6b2648
+dma_wr          1be4e714    ddca4c1a
+dma_wr          1be4e718    ed53e236
+dma_wr          1be4e71c    7a38af82
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958327c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583278    1be4e6a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583280    1be4e720
+
+-- check writes to the receive buffer
+dma_wr          1be4e720    dc664272
+dma_wr          1be4e724    efec13d7
+dma_wr          1be4e728    5af896b5
+dma_wr          1be4e72c    5722d6f4
+dma_wr          1be4e730    11be6bf8
+dma_wr          1be4e734    21f32a1b
+dma_wr          1be4e738    c896cbdd
+dma_wr          1be4e73c    2a76d34f
+dma_wr          1be4e740    9c541ddd
+dma_wr          1be4e744    cda1f27c
+dma_wr          1be4e748    7f6cae34
+dma_wr          1be4e74c    c84a95e7
+dma_wr          1be4e750    daccdd5e
+dma_wr          1be4e754    3b2c4fa6
+dma_wr          1be4e758    b386419a
+dma_wr          1be4e75c    b2e2a91d
+dma_wr          1be4e760    b19cc5c7
+dma_wr          1be4e764    3e692913
+dma_wr          1be4e768    724b2251
+dma_wr          1be4e76c    5aa4171b
+dma_wr          1be4e770    bd136582
+dma_wr          1be4e774    7bc76296
+dma_wr          1be4e778    f47db31e
+dma_wr          1be4e77c    23bbf254
+dma_wr          1be4e780    243f5f83
+dma_wr          1be4e784    b6a8923c
+dma_wr          1be4e788    8282c31b
+dma_wr          1be4e78c    5ab91f54
+dma_wr          1be4e790    5cdd1b81
+dma_wr          1be4e794    9cf52d64
+dma_wr          1be4e798    e248a12a
+dma_wr          1be4e79c    14e34668
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583284    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583280    1be4e721 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583288    1be4e7a0
+
+-- check writes to the receive buffer
+dma_wr          1be4e7a0    8e9c8a34
+dma_wr          1be4e7a4    9d8e623c
+dma_wr          1be4e7a8    bd711d12
+dma_wr          1be4e7ac    e352266a
+dma_wr          1be4e7b0    742ec579
+dma_wr          1be4e7b4    44d53ba4
+dma_wr          1be4e7b8    5bad7fea
+dma_wr          1be4e7bc    9172b9c5
+dma_wr          1be4e7c0    65e45aca
+dma_wr          1be4e7c4    3daa3b66
+dma_wr          1be4e7c8    72ebbb2f
+dma_wr          1be4e7cc    8dacf2ae
+dma_wr          1be4e7d0    3417ef13
+dma_wr          1be4e7d4    a12b46f3
+dma_wr          1be4e7d8    71f4d7c2
+dma_wr          1be4e7dc    6c71644d
+dma_wr          1be4e7e0    bba9e416
+dma_wr          1be4e7e4    44ab258d
+dma_wr          1be4e7e8    9a2ca9c9
+dma_wr          1be4e7ec    18e29f3d
+dma_wr          1be4e7f0    83c8ea39
+dma_wr          1be4e7f4    25831dcc
+dma_wr          1be4e7f8    4fb24d54
+dma_wr          1be4e7fc    699ed967
+dma_wr          1be4e800    54639122
+dma_wr          1be4e804    1edd9c7e
+dma_wr          1be4e808    fc745628
+dma_wr          1be4e80c    2fd71fb2
+dma_wr          1be4e810    39841a24
+dma_wr          1be4e814    e69349b2
+dma_wr          1be4e818    91a89913
+dma_wr          1be4e81c    a172bf84
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958328c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583288    1be4e7a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583290    1be4e820
+
+-- check writes to the receive buffer
+dma_wr          1be4e820    45ed18bb
+dma_wr          1be4e824    cbfbfaab
+dma_wr          1be4e828    78deab4d
+dma_wr          1be4e82c    76e8482a
+dma_wr          1be4e830    c56b5655
+dma_wr          1be4e834    4e965c1a
+dma_wr          1be4e838    f11d3854
+dma_wr          1be4e83c    c4dd1bd9
+dma_wr          1be4e840    92d71e68
+dma_wr          1be4e844    4e6b2bd2
+dma_wr          1be4e848    13b5e521
+dma_wr          1be4e84c    2e218a56
+dma_wr          1be4e850    d54c893a
+dma_wr          1be4e854    e1d5b16e
+dma_wr          1be4e858    615d4e33
+dma_wr          1be4e85c    f1ef4a5f
+dma_wr          1be4e860    2acb2523
+dma_wr          1be4e864    2866ebd6
+dma_wr          1be4e868    cc59a6d3
+dma_wr          1be4e86c    e3d44ab8
+dma_wr          1be4e870    e75fd4e5
+dma_wr          1be4e874    931b77b1
+dma_wr          1be4e878    7bdde97f
+dma_wr          1be4e87c    13e7efb2
+dma_wr          1be4e880    c665b338
+dma_wr          1be4e884    bde7b894
+dma_wr          1be4e888    f1c7b7df
+dma_wr          1be4e88c    5d295eef
+dma_wr          1be4e890    c22f77de
+dma_wr          1be4e894    ec66d8af
+dma_wr          1be4e898    cfa48dbc
+dma_wr          1be4e89c    12b64212
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583294    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583290    1be4e821 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583298    1be4e8a0
+
+-- check writes to the receive buffer
+dma_wr          1be4e8a0    22837c42
+dma_wr          1be4e8a4    fe9392ad
+dma_wr          1be4e8a8    ba3f6cd9
+dma_wr          1be4e8ac    75296fac
+dma_wr          1be4e8b0    11997c7f
+dma_wr          1be4e8b4    673f39ba
+dma_wr          1be4e8b8    a8365ab3
+dma_wr          1be4e8bc    92519dc6
+dma_wr          1be4e8c0    cf7fa193
+dma_wr          1be4e8c4    d34cc8a4
+dma_wr          1be4e8c8    c548a852
+dma_wr          1be4e8cc    6ba9a1f2
+dma_wr          1be4e8d0    f9cdeb16
+dma_wr          1be4e8d4    d64d8a8c
+dma_wr          1be4e8d8    ec679966
+dma_wr          1be4e8dc    32b7f212
+dma_wr          1be4e8e0    aea132b2
+dma_wr          1be4e8e4    572fa251
+dma_wr          1be4e8e8    4a6a4e23
+dma_wr          1be4e8ec    d84d7697
+dma_wr          1be4e8f0    857ab516
+dma_wr          1be4e8f4    fe99442f
+dma_wr          1be4e8f8    19fc8e41
+dma_wr          1be4e8fc    25ce9258
+dma_wr          1be4e900    f1678158
+dma_wr          1be4e904    c8c4b484
+dma_wr          1be4e908    537b6268
+dma_wr          1be4e90c    7a58b19e
+dma_wr          1be4e910    d7d495ac
+dma_wr          1be4e914    84ddd6e9
+dma_wr          1be4e918    94d48f13
+dma_wr          1be4e91c    fec18235
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958329c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583298    1be4e8a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695832a0    1be4e920
+
+-- check writes to the receive buffer
+dma_wr          1be4e920    c9f42e38
+dma_wr          1be4e924    5c8d1d96
+dma_wr          1be4e928    5117d592
+dma_wr          1be4e92c    9a9b6889
+dma_wr          1be4e930    8f86c82e
+dma_wr          1be4e934    ae7ae3b5
+dma_wr          1be4e938    b9238715
+dma_wr          1be4e93c    3bd9ab4e
+dma_wr          1be4e940    9f11a7a3
+dma_wr          1be4e944    9f15d9df
+dma_wr          1be4e948    de8cd73c
+dma_wr          1be4e94c    e5cbc522
+dma_wr          1be4e950    cde59d3d
+dma_wr          1be4e954    39d12674
+dma_wr          1be4e958    4bd52aa1
+dma_wr          1be4e95c    3bd8647c
+dma_wr          1be4e960    734d6624
+dma_wr          1be4e964    b62521d5
+dma_wr          1be4e968    625164d3
+dma_wr          1be4e96c    79a7b251
+dma_wr          1be4e970    48e54adb
+dma_wr          1be4e974    842ff771
+dma_wr          1be4e978    ab8ffe46
+dma_wr          1be4e97c    544e8bef
+dma_wr          1be4e980    f3f48ac4
+dma_wr          1be4e984    aa3826ee
+dma_wr          1be4e988    ee2225c2
+dma_wr          1be4e98c    17d89689
+dma_wr          1be4e990    73674442
+dma_wr          1be4e994    cb85657a
+dma_wr          1be4e998    887acac3
+dma_wr          1be4e99c    6bc7966f
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          695832a4    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          695832a0    1be4e921 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695832a8    1be4e9a0
+
+-- check writes to the receive buffer
+dma_wr          1be4e9a0    ef964f17
+dma_wr          1be4e9a4    5b4b4f12
+dma_wr          1be4e9a8    58bad983
+dma_wr          1be4e9ac    b2efc985
+dma_wr          1be4e9b0    4766b7c8
+dma_wr          1be4e9b4    dda6953d
+dma_wr          1be4e9b8    15dc24bc
+dma_wr          1be4e9bc    49a1845d
+dma_wr          1be4e9c0    c69fae6a
+dma_wr          1be4e9c4    dfb81935
+dma_wr          1be4e9c8    17b12ea9
+dma_wr          1be4e9cc    6f6b55ed
+dma_wr          1be4e9d0    ddda1cea
+dma_wr          1be4e9d4    ed8277f7
+dma_wr          1be4e9d8    427a77ec
+dma_wr          1be4e9dc    d5b14986
+dma_wr          1be4e9e0    d96d1c6d
+dma_wr          1be4e9e4    2f21b718
+dma_wr          1be4e9e8    31e82611
+dma_wr          1be4e9ec    3e11d26e
+dma_wr          1be4e9f0    ae11cc67
+dma_wr          1be4e9f4    af5ad6e8
+dma_wr          1be4e9f8    b31c4fcb
+dma_wr          1be4e9fc    411fb63d
+dma_wr          1be4ea00    6cee9312
+dma_wr          1be4ea04    1fb95f97
+dma_wr          1be4ea08    cb9b9f33
+dma_wr          1be4ea0c    9b458263
+dma_wr          1be4ea10    b5b62295
+dma_wr          1be4ea14    83f97b1c
+dma_wr          1be4ea18    3bf4121b
+dma_wr          1be4ea1c    25c2572d
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          695832ac    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          695832a8    1be4e9a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695832b0    1be4ea20
+
+-- check writes to the receive buffer
+dma_wr          1be4ea20    ea3dea9c
+dma_wr          1be4ea24    7f355817
+dma_wr          1be4ea28    3b1fa5d1
+dma_wr          1be4ea2c    e3e5b6d4
+dma_wr          1be4ea30    5377bc65
+dma_wr          1be4ea34    893fb4b9
+dma_wr          1be4ea38    23e9ee71
+dma_wr          1be4ea3c    8a555d96
+dma_wr          1be4ea40    2df553f6
+dma_wr          1be4ea44    2fa6b59e
+dma_wr          1be4ea48    e9c9b532
+dma_wr          1be4ea4c    2b919ffc
+dma_wr          1be4ea50    c2b12d1d
+dma_wr          1be4ea54    d6a9da6d
+dma_wr          1be4ea58    bbee6a82
+dma_wr          1be4ea5c    6e598e9e
+dma_wr          1be4ea60    a1ff4f2b
+dma_wr          1be4ea64    769c5b45
+dma_wr          1be4ea68    d159316d
+dma_wr          1be4ea6c    125cbcd2
+dma_wr          1be4ea70    8cea3b89
+dma_wr          1be4ea74    3fafb7c3
+dma_wr          1be4ea78    d48d4129
+dma_wr          1be4ea7c    4caa9697
+dma_wr          1be4ea80    78676268
+dma_wr          1be4ea84    5cd5be28
+dma_wr          1be4ea88    2a26d18a
+dma_wr          1be4ea8c    68b5a1db
+dma_wr          1be4ea90    466f5c85
+dma_wr          1be4ea94    f2b323c9
+dma_wr          1be4ea98    919317ff
+dma_wr          1be4ea9c    57dfff2c
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          695832b4    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          695832b0    1be4ea21 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695832b8    1be4eaa0
+
+-- check writes to the receive buffer
+dma_wr          1be4eaa0    231bfcae
+dma_wr          1be4eaa4    7fdc5884
+dma_wr          1be4eaa8    cf84c91d
+dma_wr          1be4eaac    71882de7
+dma_wr          1be4eab0    cf5c2deb
+dma_wr          1be4eab4    debbea44
+dma_wr          1be4eab8    d4dd4831
+dma_wr          1be4eabc    358bc2c4
+dma_wr          1be4eac0    87ca7afd
+dma_wr          1be4eac4    92aa6ca9
+dma_wr          1be4eac8    a16487ac
+dma_wr          1be4eacc    ec35a458
+dma_wr          1be4ead0    a488e8db
+dma_wr          1be4ead4    d4175aa6
+dma_wr          1be4ead8    16f83d81
+dma_wr          1be4eadc    c5363de5
+dma_wr          1be4eae0    ec1bf8cf
+dma_wr          1be4eae4    e465aa84
+dma_wr          1be4eae8    6db65d5e
+dma_wr          1be4eaec    c3d46caf
+dma_wr          1be4eaf0    562384c6
+dma_wr          1be4eaf4    34116fda
+dma_wr          1be4eaf8    a112f777
+dma_wr          1be4eafc    8686beaf
+dma_wr          1be4eb00    2db611c3
+dma_wr          1be4eb04    d2ba573e
+dma_wr          1be4eb08    5741faed
+dma_wr          1be4eb0c    c89796ab
+dma_wr          1be4eb10    8436fc2e
+dma_wr          1be4eb14    c61b59aa
+dma_wr          1be4eb18    1ec7f5c2
+dma_wr          1be4eb1c    e15e792c
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          695832bc    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          695832b8    1be4eaa1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695832c0    1be4eb20
+
+-- check writes to the receive buffer
+dma_wr          1be4eb20    be2f2f69
+dma_wr          1be4eb24    1dec8bb2
+dma_wr          1be4eb28    7e447bc4
+dma_wr          1be4eb2c    dbe48a5e
+dma_wr          1be4eb30    91754ec6
+dma_wr          1be4eb34    e41c2b19
+dma_wr          1be4eb38    b297ee81
+dma_wr          1be4eb3c    b5719148
+dma_wr          1be4eb40    1899c963
+dma_wr          1be4eb44    5abc1149
+dma_wr          1be4eb48    1b432c73
+dma_wr          1be4eb4c    d822ad9c
+dma_wr          1be4eb50    8c6b8c4e
+dma_wr          1be4eb54    b4ff3d28
+dma_wr          1be4eb58    a76ee2a2
+dma_wr          1be4eb5c    7e772724
+dma_wr          1be4eb60    2bbdd345
+dma_wr          1be4eb64    cc26c69f
+dma_wr          1be4eb68    8b4c311b
+dma_wr          1be4eb6c    c6a83e58
+dma_wr          1be4eb70    f43799ad
+dma_wr          1be4eb74    df8a26e5
+dma_wr          1be4eb78    bb1f6d9a
+dma_wr          1be4eb7c    3a9ae2ae
+dma_wr          1be4eb80    a4bc6f81
+dma_wr          1be4eb84    ac9e3c4f
+dma_wr          1be4eb88    d6163c6c
+dma_wr          1be4eb8c    fcf32ca6
+dma_wr          1be4eb90    a583c96b
+dma_wr          1be4eb94    528a23b7
+dma_wr          1be4eb98    21c533b6
+dma_wr          1be4eb9c    13331325
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          695832c4    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          695832c0    1be4eb21 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695832c8    1be4eba0
+
+-- check writes to the receive buffer
+dma_wr          1be4eba0    99e7f5df
+dma_wr          1be4eba4    5f166e32
+dma_wr          1be4eba8    e9f1e6fd
+dma_wr          1be4ebac    af4f2fea
+dma_wr          1be4ebb0    b7f468ab
+dma_wr          1be4ebb4    6a4b858b
+dma_wr          1be4ebb8    cb355ff9
+dma_wr          1be4ebbc    fd6b2f82
+dma_wr          1be4ebc0    c8824da4
+dma_wr          1be4ebc4    6253f6e4
+dma_wr          1be4ebc8    9af2a59d
+dma_wr          1be4ebcc    81d1bae7
+dma_wr          1be4ebd0    c2326d92
+dma_wr          1be4ebd4    635f56d1
+dma_wr          1be4ebd8    73da9619
+dma_wr          1be4ebdc    7c9867af
+dma_wr          1be4ebe0    1728a959
+dma_wr          1be4ebe4    49ed98c5
+dma_wr          1be4ebe8    42753d72
+dma_wr          1be4ebec    366b746b
+dma_wr          1be4ebf0    c2178a47
+dma_wr          1be4ebf4    b4832191
+dma_wr          1be4ebf8    b71e6884
+dma_wr          1be4ebfc    e7cc7cb9
+dma_wr          1be4ec00    4c68a172
+dma_wr          1be4ec04    144a38e4
+dma_wr          1be4ec08    76c3d9eb
+dma_wr          1be4ec0c    4fdbc779
+dma_wr          1be4ec10    964f1953
+dma_wr          1be4ec14    3d748447
+dma_wr          1be4ec18    862b5163
+dma_wr          1be4ec1c    e4d4b73f
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          695832cc    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          695832c8    1be4eba1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695832d0    1be4ec20
+
+-- check writes to the receive buffer
+dma_wr          1be4ec20    ab6ce38b
+dma_wr          1be4ec24    17246c7e
+dma_wr          1be4ec28    641f26ce
+dma_wr          1be4ec2c    b6ffdfd4
+dma_wr          1be4ec30    3da7c587
+dma_wr          1be4ec34    eb817aab
+dma_wr          1be4ec38    991f56ea
+dma_wr          1be4ec3c    f8f7b9a2
+dma_wr          1be4ec40    e9b1d277
+dma_wr          1be4ec44    931fd26a
+dma_wr          1be4ec48    5feee843
+dma_wr          1be4ec4c    fb51c6ea
+dma_wr          1be4ec50    1bcf36eb
+dma_wr          1be4ec54    a72a1574
+dma_wr          1be4ec58    67f5c1b4
+dma_wr          1be4ec5c    6abe318b
+dma_wr          1be4ec60    cf539447
+dma_wr          1be4ec64    fa877f51
+dma_wr          1be4ec68    21c2b431
+dma_wr          1be4ec6c    de87c2e6
+dma_wr          1be4ec70    8ea1c1a3
+dma_wr          1be4ec74    874b4639
+dma_wr          1be4ec78    76fd2fc4
+dma_wr          1be4ec7c    75b5e9f5
+dma_wr          1be4ec80    661eba87
+dma_wr          1be4ec84    ac9c1f88
+dma_wr          1be4ec88    e2327578
+dma_wr          1be4ec8c    a52d4eeb
+dma_wr          1be4ec90    ca6be116
+dma_wr          1be4ec94    b63c6a7f
+dma_wr          1be4ec98    82c45a2f
+dma_wr          1be4ec9c    d95be77b
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          695832d4    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          695832d0    1be4ec21 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695832d8    1be4eca0
+
+-- check writes to the receive buffer
+dma_wr          1be4eca0    912a19ec
+dma_wr          1be4eca4    b8fbfc6b
+dma_wr          1be4eca8    4e563287
+dma_wr          1be4ecac    17b635a8
+dma_wr          1be4ecb0    e9e3ada5
+dma_wr          1be4ecb4    ab789a91
+dma_wr          1be4ecb8    3dbe5ea8
+dma_wr          1be4ecbc    46274d16
+dma_wr          1be4ecc0    cd199c41
+dma_wr          1be4ecc4    be2ebefc
+dma_wr          1be4ecc8    3f55686a
+dma_wr          1be4eccc    beafaab7
+dma_wr          1be4ecd0    2ef2c891
+dma_wr          1be4ecd4    7948342e
+dma_wr          1be4ecd8    1199f8f8
+dma_wr          1be4ecdc    7d6d8346
+dma_wr          1be4ece0    de9c1c18
+dma_wr          1be4ece4    882173e2
+dma_wr          1be4ece8    cee32e9c
+dma_wr          1be4ecec    24fb1ed5
+dma_wr          1be4ecf0    8a349daa
+dma_wr          1be4ecf4    4ebd2df5
+dma_wr          1be4ecf8    8adf74e9
+dma_wr          1be4ecfc    4fc7f369
+dma_wr          1be4ed00    6f712699
+dma_wr          1be4ed04    94366481
+dma_wr          1be4ed08    5b5db2f7
+dma_wr          1be4ed0c    48bcd3be
+dma_wr          1be4ed10    9dca4fb6
+dma_wr          1be4ed14    9ee7c5b7
+dma_wr          1be4ed18    6b7d56b7
+dma_wr          1be4ed1c    1c18c25a
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          695832dc    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          695832d8    1be4eca1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695832e0    1be4ed20
+
+-- check writes to the receive buffer
+dma_wr          1be4ed20    d64771ba
+dma_wr          1be4ed24    75a61616
+dma_wr          1be4ed28    777dced2
+dma_wr          1be4ed2c    e22568ef
+dma_wr          1be4ed30    bcf3129e
+dma_wr          1be4ed34    a692b8c6
+dma_wr          1be4ed38    4146431e
+dma_wr          1be4ed3c    8be8b172
+dma_wr          1be4ed40    be3dbd8c
+dma_wr          1be4ed44    67cbf575
+dma_wr          1be4ed48    7f524f3b
+dma_wr          1be4ed4c    919d33f3
+dma_wr          1be4ed50    1e7628bd
+dma_wr          1be4ed54    9cb93b83
+dma_wr          1be4ed58    e65356f8
+dma_wr          1be4ed5c    59e3a55a
+dma_wr          1be4ed60    2649fe64
+dma_wr          1be4ed64    a5c82c37
+dma_wr          1be4ed68    c79f87cb
+dma_wr          1be4ed6c    4a7d15df
+dma_wr          1be4ed70    8cfd4dbf
+dma_wr          1be4ed74    549f2e16
+dma_wr          1be4ed78    c82e9d5f
+dma_wr          1be4ed7c    8d39ccca
+dma_wr          1be4ed80    f278d25f
+dma_wr          1be4ed84    377e9e47
+dma_wr          1be4ed88    b2ac6566
+dma_wr          1be4ed8c    2e473eaf
+dma_wr          1be4ed90    1153957f
+dma_wr          1be4ed94    f2f39863
+dma_wr          1be4ed98    cd25d6c4
+dma_wr          1be4ed9c    fa3aca34
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          695832e4    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          695832e0    1be4ed21 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695832e8    1be4eda0
+
+-- check writes to the receive buffer
+dma_wr          1be4eda0    e889f8e1
+dma_wr          1be4eda4    c1396da5
+dma_wr          1be4eda8    7ba5ec97
+dma_wr          1be4edac    b8f76a91
+dma_wr          1be4edb0    83ad2f21
+dma_wr          1be4edb4    a4fcf228
+dma_wr          1be4edb8    f365794c
+dma_wr          1be4edbc    b8eb9e12
+dma_wr          1be4edc0    4b947662
+dma_wr          1be4edc4    13fd54fd
+dma_wr          1be4edc8    69eb229c
+dma_wr          1be4edcc    f72a29c6
+dma_wr          1be4edd0    21e274e4
+dma_wr          1be4edd4    e224af1c
+dma_wr          1be4edd8    1acec76c
+dma_wr          1be4eddc    46c6b57e
+dma_wr          1be4ede0    a4a36292
+dma_wr          1be4ede4    28ecd132
+dma_wr          1be4ede8    99bef489
+dma_wr          1be4edec    2e471463
+dma_wr          1be4edf0    ab9dd64c
+dma_wr          1be4edf4    2e335f38
+dma_wr          1be4edf8    e255893e
+dma_wr          1be4edfc    76eebae1
+dma_wr          1be4ee00    b359a175
+dma_wr          1be4ee04    6bb1f3e7
+dma_wr          1be4ee08    7bf77489
+dma_wr          1be4ee0c    24664e95
+dma_wr          1be4ee10    ee91fe8b
+dma_wr          1be4ee14    cb81cbe6
+dma_wr          1be4ee18    d86b8644
+dma_wr          1be4ee1c    122733c4
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          695832ec    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          695832e8    1be4eda1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695832f0    1be4ee20
+
+-- check writes to the receive buffer
+dma_wr          1be4ee20    e7235767
+dma_wr          1be4ee24    1ba1d897
+dma_wr          1be4ee28    f4b9dca9
+dma_wr          1be4ee2c    e479cacf
+dma_wr          1be4ee30    257de868
+dma_wr          1be4ee34    449caeb6
+dma_wr          1be4ee38    fdcbebc9
+dma_wr          1be4ee3c    5ecb675a
+dma_wr          1be4ee40    f792fd55
+dma_wr          1be4ee44    2c96fa3c
+dma_wr          1be4ee48    a8fe89b4
+dma_wr          1be4ee4c    aaca26e7
+dma_wr          1be4ee50    b6f85b29
+dma_wr          1be4ee54    4aa3128c
+dma_wr          1be4ee58    9dc91b7a
+dma_wr          1be4ee5c    2c5d2f57
+dma_wr          1be4ee60    fc2ae199
+dma_wr          1be4ee64    119c76f5
+dma_wr          1be4ee68    7f4d7656
+dma_wr          1be4ee6c    42574baf
+dma_wr          1be4ee70    b2c2c765
+dma_wr          1be4ee74    6ba18b13
+dma_wr          1be4ee78    ea474cad
+dma_wr          1be4ee7c    cdac8d62
+dma_wr          1be4ee80    77b2b877
+dma_wr          1be4ee84    432bc1d4
+dma_wr          1be4ee88    f983f65d
+dma_wr          1be4ee8c    2faaab3d
+dma_wr          1be4ee90    9573872f
+dma_wr          1be4ee94    22dc3be4
+dma_wr          1be4ee98    af4c6c15
+dma_wr          1be4ee9c    b32881b7
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          695832f4    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          695832f0    1be4ee21 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695832f8    1be4eea0
+
+-- check writes to the receive buffer
+dma_wr          1be4eea0    e2d51b66
+dma_wr          1be4eea4    48638686
+dma_wr          1be4eea8    2bfe7686
+dma_wr          1be4eeac    6e83c113
+dma_wr          1be4eeb0    44887de3
+dma_wr          1be4eeb4    a1c76bf5
+dma_wr          1be4eeb8    71c22f9f
+dma_wr          1be4eebc    f9794d48
+dma_wr          1be4eec0    8943ca52
+dma_wr          1be4eec4    d2375a25
+dma_wr          1be4eec8    b7515b78
+dma_wr          1be4eecc    d251c384
+dma_wr          1be4eed0    a1185737
+dma_wr          1be4eed4    92ba2e6b
+dma_wr          1be4eed8    3bf2a5fe
+dma_wr          1be4eedc    6a381613
+dma_wr          1be4eee0    fe36433b
+dma_wr          1be4eee4    96665d13
+dma_wr          1be4eee8    9666ce82
+dma_wr          1be4eeec    e64332ae
+dma_wr          1be4eef0    cd79cb24
+dma_wr          1be4eef4    46be484a
+dma_wr          1be4eef8    851be282
+dma_wr          1be4eefc    68d524a5
+dma_wr          1be4ef00    df6ab1e7
+dma_wr          1be4ef04    6a84f137
+dma_wr          1be4ef08    e9c731a5
+dma_wr          1be4ef0c    1d8f4354
+dma_wr          1be4ef10    5d5bb69d
+dma_wr          1be4ef14    cde5caee
+dma_wr          1be4ef18    ba5ebb49
+dma_wr          1be4ef1c    a39617e4
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          695832fc    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          695832f8    1be4eea1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583300    1be4ef20
+
+-- check writes to the receive buffer
+dma_wr          1be4ef20    d91e6e61
+dma_wr          1be4ef24    f6ab8853
+dma_wr          1be4ef28    77abd59a
+dma_wr          1be4ef2c    2b9a5229
+dma_wr          1be4ef30    decab54d
+dma_wr          1be4ef34    ed36dedb
+dma_wr          1be4ef38    4871e9d2
+dma_wr          1be4ef3c    b95f5e32
+dma_wr          1be4ef40    b18f5e91
+dma_wr          1be4ef44    437b3868
+dma_wr          1be4ef48    958b56dd
+dma_wr          1be4ef4c    46f48739
+dma_wr          1be4ef50    c3ad442c
+dma_wr          1be4ef54    b2641db9
+dma_wr          1be4ef58    6ae6ea91
+dma_wr          1be4ef5c    fd92f57c
+dma_wr          1be4ef60    ef5192ae
+dma_wr          1be4ef64    d6bbabbf
+dma_wr          1be4ef68    413ec825
+dma_wr          1be4ef6c    15456eff
+dma_wr          1be4ef70    91a2552e
+dma_wr          1be4ef74    edfbeefc
+dma_wr          1be4ef78    a41dbdbd
+dma_wr          1be4ef7c    a8ebd822
+dma_wr          1be4ef80    2b953738
+dma_wr          1be4ef84    ccd1872c
+dma_wr          1be4ef88    1fa77d6d
+dma_wr          1be4ef8c    96396ace
+dma_wr          1be4ef90    f5f2f446
+dma_wr          1be4ef94    fdf26cb8
+dma_wr          1be4ef98    f49df1e1
+dma_wr          1be4ef9c    67e39f6f
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583304    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583300    1be4ef21 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583308    1be4efa0
+
+-- check writes to the receive buffer
+dma_wr          1be4efa0    7ebeadbe
+dma_wr          1be4efa4    57e32dd9
+dma_wr          1be4efa8    fc56a999
+dma_wr          1be4efac    2d121dd4
+dma_wr          1be4efb0    7cb8858a
+dma_wr          1be4efb4    b7633853
+dma_wr          1be4efb8    929dfd26
+dma_wr          1be4efbc    c6ce48b2
+dma_wr          1be4efc0    5ff616e5
+dma_wr          1be4efc4    867bdbd4
+dma_wr          1be4efc8    24ffcfbb
+dma_wr          1be4efcc    ef7ac927
+dma_wr          1be4efd0    3a3e37cd
+dma_wr          1be4efd4    841ea62d
+dma_wr          1be4efd8    8f59b232
+dma_wr          1be4efdc    7a51521c
+dma_wr          1be4efe0    331d57e3
+dma_wr          1be4efe4    594afbf3
+dma_wr          1be4efe8    6a36fdc8
+dma_wr          1be4efec    3d5dbd26
+dma_wr          1be4eff0    2eaaf2f3
+dma_wr          1be4eff4    e1a16982
+dma_wr          1be4eff8    4cbf98c1
+dma_wr          1be4effc    fec3531f
+dma_wr          1be4f000    f4cefe91
+dma_wr          1be4f004    aba11f97
+dma_wr          1be4f008    5c864438
+dma_wr          1be4f00c    68f5cd7b
+dma_wr          1be4f010    32a16375
+dma_wr          1be4f014    77fedcf2
+dma_wr          1be4f018    7d92f372
+dma_wr          1be4f01c    a8716248
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958330c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583308    1be4efa1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583310    1be4f020
+
+-- check writes to the receive buffer
+dma_wr          1be4f020    554dbe5f
+dma_wr          1be4f024    1b96b28c
+dma_wr          1be4f028    2e3cb986
+dma_wr          1be4f02c    d28b3f81
+dma_wr          1be4f030    e1adc6f5
+dma_wr          1be4f034    b57aafd7
+dma_wr          1be4f038    4ab93e59
+dma_wr          1be4f03c    ceccc211
+dma_wr          1be4f040    6d55ab6a
+dma_wr          1be4f044    54adca12
+dma_wr          1be4f048    9628b636
+dma_wr          1be4f04c    78ccf12f
+dma_wr          1be4f050    58de7863
+dma_wr          1be4f054    dca128b7
+dma_wr          1be4f058    cbd9f89d
+dma_wr          1be4f05c    d1b87bc8
+dma_wr          1be4f060    df1459a9
+dma_wr          1be4f064    6a85ce82
+dma_wr          1be4f068    12c8e4f9
+dma_wr          1be4f06c    b1e13c7e
+dma_wr          1be4f070    fee139e5
+dma_wr          1be4f074    12a581b1
+dma_wr          1be4f078    41d7d249
+dma_wr          1be4f07c    8b6a6985
+dma_wr          1be4f080    e3bbab59
+dma_wr          1be4f084    ba7445ae
+dma_wr          1be4f088    d9f64ef3
+dma_wr          1be4f08c    3beaa314
+dma_wr          1be4f090    4fe88592
+dma_wr          1be4f094    6411279a
+dma_wr          1be4f098    8a5ab4ff
+dma_wr          1be4f09c    449467cc
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583314    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583310    1be4f021 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583318    1be4f0a0
+
+-- check writes to the receive buffer
+dma_wr          1be4f0a0    e2a581da
+dma_wr          1be4f0a4    c26bc19b
+dma_wr          1be4f0a8    ad5a7f8e
+dma_wr          1be4f0ac    c3c4aeab
+dma_wr          1be4f0b0    db6f6132
+dma_wr          1be4f0b4    278ca33a
+dma_wr          1be4f0b8    af322edf
+dma_wr          1be4f0bc    b75a448a
+dma_wr          1be4f0c0    f7bec29b
+dma_wr          1be4f0c4    87d2e3bc
+dma_wr          1be4f0c8    112393e3
+dma_wr          1be4f0cc    ca645247
+dma_wr          1be4f0d0    b8fb76b8
+dma_wr          1be4f0d4    8e97344a
+dma_wr          1be4f0d8    e73b39f7
+dma_wr          1be4f0dc    ec851b7d
+dma_wr          1be4f0e0    19f2b241
+dma_wr          1be4f0e4    c27cefc4
+dma_wr          1be4f0e8    1d8a1dd9
+dma_wr          1be4f0ec    975befc9
+dma_wr          1be4f0f0    4b247b15
+dma_wr          1be4f0f4    54a5bf78
+dma_wr          1be4f0f8    94ae8171
+dma_wr          1be4f0fc    4b463fba
+dma_wr          1be4f100    cc9c658d
+dma_wr          1be4f104    23818851
+dma_wr          1be4f108    db18377d
+dma_wr          1be4f10c    812aa47a
+dma_wr          1be4f110    43e9ec33
+dma_wr          1be4f114    a51fee62
+dma_wr          1be4f118    c1519233
+dma_wr          1be4f11c    f6d8fa71
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958331c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583318    1be4f0a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583320    1be4f120
+
+-- check writes to the receive buffer
+dma_wr          1be4f120    788dbb79
+dma_wr          1be4f124    69e4e3ac
+dma_wr          1be4f128    aa24a9fb
+dma_wr          1be4f12c    a8c71aee
+dma_wr          1be4f130    d7a9f21e
+dma_wr          1be4f134    e7fc1b7f
+dma_wr          1be4f138    ad13bd3f
+dma_wr          1be4f13c    cacdee14
+dma_wr          1be4f140    4e545b98
+dma_wr          1be4f144    c1279158
+dma_wr          1be4f148    4a18c715
+dma_wr          1be4f14c    513d1464
+dma_wr          1be4f150    39b2e52f
+dma_wr          1be4f154    8ca61324
+dma_wr          1be4f158    add1b65d
+dma_wr          1be4f15c    d3228369
+dma_wr          1be4f160    5b9bd9a8
+dma_wr          1be4f164    4ab3cbb5
+dma_wr          1be4f168    3a2e9a6e
+dma_wr          1be4f16c    895c49fe
+dma_wr          1be4f170    63f2f45a
+dma_wr          1be4f174    faeb5e53
+dma_wr          1be4f178    7a46e383
+dma_wr          1be4f17c    ebb54668
+dma_wr          1be4f180    45bbb94a
+dma_wr          1be4f184    3d11567d
+dma_wr          1be4f188    c12d2964
+dma_wr          1be4f18c    df8eb48e
+dma_wr          1be4f190    153bb5aa
+dma_wr          1be4f194    7efe2b76
+dma_wr          1be4f198    4f952585
+dma_wr          1be4f19c    b1b828be
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583324    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583320    1be4f121 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583328    1be4f1a0
+
+-- check writes to the receive buffer
+dma_wr          1be4f1a0    2ff9ba42
+dma_wr          1be4f1a4    b2e6c2ae
+dma_wr          1be4f1a8    efcc5ca2
+dma_wr          1be4f1ac    557ec254
+dma_wr          1be4f1b0    a69177ae
+dma_wr          1be4f1b4    f86cb8fc
+dma_wr          1be4f1b8    a615ba77
+dma_wr          1be4f1bc    9bd6b8dd
+dma_wr          1be4f1c0    5b2bf4af
+dma_wr          1be4f1c4    82d86478
+dma_wr          1be4f1c8    9ce41b33
+dma_wr          1be4f1cc    e755399f
+dma_wr          1be4f1d0    b736a291
+dma_wr          1be4f1d4    a3356c19
+dma_wr          1be4f1d8    819d9418
+dma_wr          1be4f1dc    73528ba6
+dma_wr          1be4f1e0    baaaa87a
+dma_wr          1be4f1e4    9a78b82d
+dma_wr          1be4f1e8    297fd731
+dma_wr          1be4f1ec    d97ab57b
+dma_wr          1be4f1f0    54785764
+dma_wr          1be4f1f4    adab58a8
+dma_wr          1be4f1f8    b6431e85
+dma_wr          1be4f1fc    27176975
+dma_wr          1be4f200    89cb1892
+dma_wr          1be4f204    cdf3b6ee
+dma_wr          1be4f208    21e51178
+dma_wr          1be4f20c    abcb5c16
+dma_wr          1be4f210    f999baa6
+dma_wr          1be4f214    7dd196a6
+dma_wr          1be4f218    25933eaf
+dma_wr          1be4f21c    66a65e41
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958332c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583328    1be4f1a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583330    1be4f220
+
+-- check writes to the receive buffer
+dma_wr          1be4f220    decdd6ac
+dma_wr          1be4f224    f843336b
+dma_wr          1be4f228    5afaf262
+dma_wr          1be4f22c    fa1fbd41
+dma_wr          1be4f230    ca315174
+dma_wr          1be4f234    b796e27c
+dma_wr          1be4f238    a1bdf3fb
+dma_wr          1be4f23c    e1699a8c
+dma_wr          1be4f240    b8cbc39a
+dma_wr          1be4f244    24db417c
+dma_wr          1be4f248    137cf37e
+dma_wr          1be4f24c    d879d7b4
+dma_wr          1be4f250    8c5bbb66
+dma_wr          1be4f254    cdf67395
+dma_wr          1be4f258    92e8b749
+dma_wr          1be4f25c    2895bbb6
+dma_wr          1be4f260    64ee2415
+dma_wr          1be4f264    dc614f9a
+dma_wr          1be4f268    7374dc8c
+dma_wr          1be4f26c    bbdfee95
+dma_wr          1be4f270    a3d583bc
+dma_wr          1be4f274    f39348d8
+dma_wr          1be4f278    9c6d4d7c
+dma_wr          1be4f27c    481ca68b
+dma_wr          1be4f280    37ea4747
+dma_wr          1be4f284    112ac88f
+dma_wr          1be4f288    adab3b74
+dma_wr          1be4f28c    5ecd61f5
+dma_wr          1be4f290    68829693
+dma_wr          1be4f294    ff58f14c
+dma_wr          1be4f298    d57eee5f
+dma_wr          1be4f29c    1d369bea
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583334    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583330    1be4f221 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583338    1be4f2a0
+
+-- check writes to the receive buffer
+dma_wr          1be4f2a0    8d1a6a3b
+dma_wr          1be4f2a4    2cd32a46
+dma_wr          1be4f2a8    4439a638
+dma_wr          1be4f2ac    c4ef811b
+dma_wr          1be4f2b0    cf2d5e52
+dma_wr          1be4f2b4    7a912b1b
+dma_wr          1be4f2b8    1f5d4565
+dma_wr          1be4f2bc    fb94e42e
+dma_wr          1be4f2c0    b7dbbeba
+dma_wr          1be4f2c4    df44a9d2
+dma_wr          1be4f2c8    4b7bc84d
+dma_wr          1be4f2cc    f2a9ffed
+dma_wr          1be4f2d0    2432899e
+dma_wr          1be4f2d4    b63ec5c9
+dma_wr          1be4f2d8    1c96b9ab
+dma_wr          1be4f2dc    a8c8deec
+dma_wr          1be4f2e0    1f7db66f
+dma_wr          1be4f2e4    36efe428
+dma_wr          1be4f2e8    a62e8192
+dma_wr          1be4f2ec    b85db454
+dma_wr          1be4f2f0    27771184
+dma_wr          1be4f2f4    163aa9d2
+dma_wr          1be4f2f8    21b7b3ea
+dma_wr          1be4f2fc    86946422
+dma_wr          1be4f300    c9529c3f
+dma_wr          1be4f304    a22e89f2
+dma_wr          1be4f308    44bed6e9
+dma_wr          1be4f30c    3a1b2735
+dma_wr          1be4f310    3fc78137
+dma_wr          1be4f314    cd653c67
+dma_wr          1be4f318    4973aa84
+dma_wr          1be4f31c    beed919e
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958333c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583338    1be4f2a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583340    1be4f320
+
+-- check writes to the receive buffer
+dma_wr          1be4f320    b6bd3d84
+dma_wr          1be4f324    cac79b89
+dma_wr          1be4f328    b3668c7b
+dma_wr          1be4f32c    4c8f7a96
+dma_wr          1be4f330    49b4f42c
+dma_wr          1be4f334    4398fbfa
+dma_wr          1be4f338    ddf79cc3
+dma_wr          1be4f33c    51ea5ceb
+dma_wr          1be4f340    edc7e69d
+dma_wr          1be4f344    d38246c2
+dma_wr          1be4f348    93652fd2
+dma_wr          1be4f34c    5f6775fd
+dma_wr          1be4f350    37a366bf
+dma_wr          1be4f354    858ca13e
+dma_wr          1be4f358    9a1df683
+dma_wr          1be4f35c    a263ad25
+dma_wr          1be4f360    8c134625
+dma_wr          1be4f364    c1f79db5
+dma_wr          1be4f368    37acd735
+dma_wr          1be4f36c    7e49387a
+dma_wr          1be4f370    39bde1e6
+dma_wr          1be4f374    2fa5c6aa
+dma_wr          1be4f378    7681b69f
+dma_wr          1be4f37c    19ec59c3
+dma_wr          1be4f380    25a14616
+dma_wr          1be4f384    758b9f1c
+dma_wr          1be4f388    ea2baf91
+dma_wr          1be4f38c    9b35527f
+dma_wr          1be4f390    19af7d1a
+dma_wr          1be4f394    13c3e25f
+dma_wr          1be4f398    6dc6181b
+dma_wr          1be4f39c    95588e68
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583344    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583340    1be4f321 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583348    1be4f3a0
+
+-- check writes to the receive buffer
+dma_wr          1be4f3a0    f3141c77
+dma_wr          1be4f3a4    2f29b6c9
+dma_wr          1be4f3a8    cc2f5bb2
+dma_wr          1be4f3ac    199d94e4
+dma_wr          1be4f3b0    8be7e748
+dma_wr          1be4f3b4    ea1c641d
+dma_wr          1be4f3b8    ac54a299
+dma_wr          1be4f3bc    cb2adcc1
+dma_wr          1be4f3c0    e78b855c
+dma_wr          1be4f3c4    31622fd5
+dma_wr          1be4f3c8    fdb1979f
+dma_wr          1be4f3cc    91751a34
+dma_wr          1be4f3d0    8f9524c3
+dma_wr          1be4f3d4    dd229cf8
+dma_wr          1be4f3d8    cdf7acb1
+dma_wr          1be4f3dc    2155f7c9
+dma_wr          1be4f3e0    45d1da9c
+dma_wr          1be4f3e4    211bdadf
+dma_wr          1be4f3e8    5f638ecc
+dma_wr          1be4f3ec    eedf738d
+dma_wr          1be4f3f0    b67461b4
+dma_wr          1be4f3f4    cdf26ae6
+dma_wr          1be4f3f8    d14579e9
+dma_wr          1be4f3fc    867369d6
+dma_wr          1be4f400    dde5b275
+dma_wr          1be4f404    cd93bb5c
+dma_wr          1be4f408    e2ea272b
+dma_wr          1be4f40c    957327c3
+dma_wr          1be4f410    42b71feb
+dma_wr          1be4f414    9f42ed63
+dma_wr          1be4f418    a2b61518
+dma_wr          1be4f41c    ed25f884
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958334c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583348    1be4f3a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583350    1be4f420
+
+-- check writes to the receive buffer
+dma_wr          1be4f420    aff9bc27
+dma_wr          1be4f424    e9fbbad5
+dma_wr          1be4f428    25ab2fc9
+dma_wr          1be4f42c    1cd67553
+dma_wr          1be4f430    41749e5a
+dma_wr          1be4f434    d39d7129
+dma_wr          1be4f438    85dd7184
+dma_wr          1be4f43c    613594c7
+dma_wr          1be4f440    8547b449
+dma_wr          1be4f444    9cfba1ff
+dma_wr          1be4f448    3da12589
+dma_wr          1be4f44c    b3178146
+dma_wr          1be4f450    539a9b66
+dma_wr          1be4f454    b1aabddc
+dma_wr          1be4f458    18fbaddb
+dma_wr          1be4f45c    a81e863f
+dma_wr          1be4f460    cacddbbb
+dma_wr          1be4f464    af51dfd9
+dma_wr          1be4f468    41b734c5
+dma_wr          1be4f46c    f2c1ebda
+dma_wr          1be4f470    1e9a768a
+dma_wr          1be4f474    bdb63334
+dma_wr          1be4f478    75b13333
+dma_wr          1be4f47c    b124c375
+dma_wr          1be4f480    163324fa
+dma_wr          1be4f484    68975762
+dma_wr          1be4f488    85d81d12
+dma_wr          1be4f48c    635916ea
+dma_wr          1be4f490    1f2ac87b
+dma_wr          1be4f494    9b9af1e7
+dma_wr          1be4f498    9a6bd9bc
+dma_wr          1be4f49c    d8c55264
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583354    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583350    1be4f421 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583358    1be4f4a0
+
+-- check writes to the receive buffer
+dma_wr          1be4f4a0    f8159b9f
+dma_wr          1be4f4a4    a3c917a4
+dma_wr          1be4f4a8    cdee699c
+dma_wr          1be4f4ac    36448d51
+dma_wr          1be4f4b0    b29d7348
+dma_wr          1be4f4b4    7a2ea2aa
+dma_wr          1be4f4b8    1aeac1a2
+dma_wr          1be4f4bc    a778598c
+dma_wr          1be4f4c0    6b9ae573
+dma_wr          1be4f4c4    ffc5b895
+dma_wr          1be4f4c8    788c9511
+dma_wr          1be4f4cc    54e38788
+dma_wr          1be4f4d0    d973ea9a
+dma_wr          1be4f4d4    e124b53b
+dma_wr          1be4f4d8    96a4bfe6
+dma_wr          1be4f4dc    68996d19
+dma_wr          1be4f4e0    3728fe27
+dma_wr          1be4f4e4    ef7c7783
+dma_wr          1be4f4e8    3235711c
+dma_wr          1be4f4ec    31732f74
+dma_wr          1be4f4f0    e41c5fcc
+dma_wr          1be4f4f4    1e579cdd
+dma_wr          1be4f4f8    86d74f85
+dma_wr          1be4f4fc    2cce46c9
+dma_wr          1be4f500    7a395418
+dma_wr          1be4f504    5b74c8b4
+dma_wr          1be4f508    47cb7416
+dma_wr          1be4f50c    2be424eb
+dma_wr          1be4f510    2c5c9683
+dma_wr          1be4f514    d356cf88
+dma_wr          1be4f518    3136da6e
+dma_wr          1be4f51c    c92d325e
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958335c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583358    1be4f4a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583360    1be4f520
+
+-- check writes to the receive buffer
+dma_wr          1be4f520    eb3dfd55
+dma_wr          1be4f524    69d32775
+dma_wr          1be4f528    56411f74
+dma_wr          1be4f52c    c1edabbb
+dma_wr          1be4f530    6f7fed3a
+dma_wr          1be4f534    b7b5933b
+dma_wr          1be4f538    556dc889
+dma_wr          1be4f53c    517485e9
+dma_wr          1be4f540    96279811
+dma_wr          1be4f544    d6ae8692
+dma_wr          1be4f548    c6314248
+dma_wr          1be4f54c    44119db3
+dma_wr          1be4f550    b7c85329
+dma_wr          1be4f554    6a289edb
+dma_wr          1be4f558    3f8c37ac
+dma_wr          1be4f55c    3b8859c5
+dma_wr          1be4f560    cfe47b32
+dma_wr          1be4f564    dbc413b1
+dma_wr          1be4f568    1e67ab55
+dma_wr          1be4f56c    aee3bf34
+dma_wr          1be4f570    9e3ad8b9
+dma_wr          1be4f574    13bf9216
+dma_wr          1be4f578    68eee418
+dma_wr          1be4f57c    ea1d8ccd
+dma_wr          1be4f580    77949d21
+dma_wr          1be4f584    fdf65dee
+dma_wr          1be4f588    d82c5a9d
+dma_wr          1be4f58c    bc68bfa6
+dma_wr          1be4f590    2d6455da
+dma_wr          1be4f594    984ef39c
+dma_wr          1be4f598    9f1dc544
+dma_wr          1be4f59c    24a62e1c
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583364    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583360    1be4f521 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583368    1be4f5a0
+
+-- check writes to the receive buffer
+dma_wr          1be4f5a0    67f911be
+dma_wr          1be4f5a4    c7979683
+dma_wr          1be4f5a8    7ccf4ccf
+dma_wr          1be4f5ac    461794ab
+dma_wr          1be4f5b0    a8bf5b96
+dma_wr          1be4f5b4    68a826ce
+dma_wr          1be4f5b8    29271cd6
+dma_wr          1be4f5bc    63e3b93c
+dma_wr          1be4f5c0    f33218d6
+dma_wr          1be4f5c4    df987d55
+dma_wr          1be4f5c8    b1944983
+dma_wr          1be4f5cc    e4d75431
+dma_wr          1be4f5d0    b33f5f4d
+dma_wr          1be4f5d4    f692f449
+dma_wr          1be4f5d8    9a3f7f63
+dma_wr          1be4f5dc    46ed8d6c
+dma_wr          1be4f5e0    438aa9df
+dma_wr          1be4f5e4    432b9a96
+dma_wr          1be4f5e8    ea3e3727
+dma_wr          1be4f5ec    5dd2bfa9
+dma_wr          1be4f5f0    d5622155
+dma_wr          1be4f5f4    3cb832ce
+dma_wr          1be4f5f8    41658b8e
+dma_wr          1be4f5fc    492cce49
+dma_wr          1be4f600    e3b5df7c
+dma_wr          1be4f604    3de1ff63
+dma_wr          1be4f608    1f93d639
+dma_wr          1be4f60c    3bb6bdf2
+dma_wr          1be4f610    3dab7f66
+dma_wr          1be4f614    a4da6acb
+dma_wr          1be4f618    5a77a3f7
+dma_wr          1be4f61c    433cd14d
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958336c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583368    1be4f5a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583370    1be4f620
+
+-- check writes to the receive buffer
+dma_wr          1be4f620    2b98a78c
+dma_wr          1be4f624    47981a8f
+dma_wr          1be4f628    8c3ace5f
+dma_wr          1be4f62c    2a23bc79
+dma_wr          1be4f630    d5c71b44
+dma_wr          1be4f634    296546a6
+dma_wr          1be4f638    9f85e4e9
+dma_wr          1be4f63c    5b27181e
+dma_wr          1be4f640    b723fdf1
+dma_wr          1be4f644    413b7286
+dma_wr          1be4f648    948217b2
+dma_wr          1be4f64c    1232f8ae
+dma_wr          1be4f650    cffcbe98
+dma_wr          1be4f654    9ff6dc6a
+dma_wr          1be4f658    664b66fa
+dma_wr          1be4f65c    8743dba6
+dma_wr          1be4f660    86194dc2
+dma_wr          1be4f664    2febcb58
+dma_wr          1be4f668    8d5a439a
+dma_wr          1be4f66c    b7951429
+dma_wr          1be4f670    e65ee85e
+dma_wr          1be4f674    51d3e9e2
+dma_wr          1be4f678    84fa68bb
+dma_wr          1be4f67c    19478318
+dma_wr          1be4f680    73d98d34
+dma_wr          1be4f684    35c9b566
+dma_wr          1be4f688    e3347a82
+dma_wr          1be4f68c    77d658e4
+dma_wr          1be4f690    6cef3de8
+dma_wr          1be4f694    22cd85dc
+dma_wr          1be4f698    144baa2f
+dma_wr          1be4f69c    ce6ee1d3
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583374    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583370    1be4f621 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583378    1be4f6a0
+
+-- check writes to the receive buffer
+dma_wr          1be4f6a0    b9ab9f94
+dma_wr          1be4f6a4    b5725d28
+dma_wr          1be4f6a8    31d28bed
+dma_wr          1be4f6ac    3e91e2ad
+dma_wr          1be4f6b0    49cb4c4d
+dma_wr          1be4f6b4    1ba77879
+dma_wr          1be4f6b8    7bce122a
+dma_wr          1be4f6bc    cd698e9e
+dma_wr          1be4f6c0    1dbf19e9
+dma_wr          1be4f6c4    6e2fbb7c
+dma_wr          1be4f6c8    4e9d2a35
+dma_wr          1be4f6cc    f25a187b
+dma_wr          1be4f6d0    2fbc668f
+dma_wr          1be4f6d4    1b4fc9fa
+dma_wr          1be4f6d8    b14cbafa
+dma_wr          1be4f6dc    59b27ad4
+dma_wr          1be4f6e0    28f86e36
+dma_wr          1be4f6e4    9248cb9e
+dma_wr          1be4f6e8    98f5fbae
+dma_wr          1be4f6ec    1a3bf9b1
+dma_wr          1be4f6f0    6ecf456d
+dma_wr          1be4f6f4    755a1616
+dma_wr          1be4f6f8    a4a5e33e
+dma_wr          1be4f6fc    15478cb3
+dma_wr          1be4f700    fbe9bc82
+dma_wr          1be4f704    9dec5a54
+dma_wr          1be4f708    8c5499e5
+dma_wr          1be4f70c    47aa4569
+dma_wr          1be4f710    6465656d
+dma_wr          1be4f714    e58a2b74
+dma_wr          1be4f718    e6fe684a
+dma_wr          1be4f71c    44115bd5
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958337c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583378    1be4f6a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583380    1be4f720
+
+-- check writes to the receive buffer
+dma_wr          1be4f720    93839cd4
+dma_wr          1be4f724    aaea7561
+dma_wr          1be4f728    9fbb1bce
+dma_wr          1be4f72c    724d1d2b
+dma_wr          1be4f730    346852fc
+dma_wr          1be4f734    4b7d3713
+dma_wr          1be4f738    f7eca666
+dma_wr          1be4f73c    c459db56
+dma_wr          1be4f740    34e5eba3
+dma_wr          1be4f744    55a7f4bc
+dma_wr          1be4f748    7e525fdf
+dma_wr          1be4f74c    54deb186
+dma_wr          1be4f750    46aa6fdc
+dma_wr          1be4f754    5dccd82c
+dma_wr          1be4f758    b3a12d86
+dma_wr          1be4f75c    bffb8ce6
+dma_wr          1be4f760    a3b1633c
+dma_wr          1be4f764    f2c983cf
+dma_wr          1be4f768    ee225bd4
+dma_wr          1be4f76c    6945eb5f
+dma_wr          1be4f770    72b3d7d1
+dma_wr          1be4f774    d1e7a5ad
+dma_wr          1be4f778    e7a27b55
+dma_wr          1be4f77c    bac7bbd6
+dma_wr          1be4f780    7ad51885
+dma_wr          1be4f784    4788887d
+dma_wr          1be4f788    35e7dbe9
+dma_wr          1be4f78c    8cad9d4a
+dma_wr          1be4f790    92cfa9d1
+dma_wr          1be4f794    3685d687
+dma_wr          1be4f798    3d9f9854
+dma_wr          1be4f79c    54d87b6c
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583384    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583380    1be4f721 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583388    1be4f7a0
+
+-- check writes to the receive buffer
+dma_wr          1be4f7a0    fbe8fa9e
+dma_wr          1be4f7a4    61cd4357
+dma_wr          1be4f7a8    1f4d2d45
+dma_wr          1be4f7ac    1dc466e6
+dma_wr          1be4f7b0    ee214cf9
+dma_wr          1be4f7b4    91ca47bd
+dma_wr          1be4f7b8    f59385fd
+dma_wr          1be4f7bc    aedeb4e5
+dma_wr          1be4f7c0    9e4e6d8c
+dma_wr          1be4f7c4    23431678
+dma_wr          1be4f7c8    581e3b11
+dma_wr          1be4f7cc    3acd3df5
+dma_wr          1be4f7d0    b41c1bee
+dma_wr          1be4f7d4    3677848c
+dma_wr          1be4f7d8    413ab749
+dma_wr          1be4f7dc    4a1e4b77
+dma_wr          1be4f7e0    46951131
+dma_wr          1be4f7e4    9db76425
+dma_wr          1be4f7e8    fb1148b1
+dma_wr          1be4f7ec    49288b71
+dma_wr          1be4f7f0    b5469ad2
+dma_wr          1be4f7f4    1c599615
+dma_wr          1be4f7f8    c26f587a
+dma_wr          1be4f7fc    8262acca
+dma_wr          1be4f800    fb29ce11
+dma_wr          1be4f804    8182b3f8
+dma_wr          1be4f808    5c2ef4fe
+dma_wr          1be4f80c    cda6d499
+dma_wr          1be4f810    3f4b4c59
+dma_wr          1be4f814    b35c66da
+dma_wr          1be4f818    7b534d2d
+dma_wr          1be4f81c    b1bf9fbb
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958338c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583388    1be4f7a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583390    1be4f820
+
+-- check writes to the receive buffer
+dma_wr          1be4f820    f7381d1e
+dma_wr          1be4f824    a2e31975
+dma_wr          1be4f828    b6b6e3fc
+dma_wr          1be4f82c    795beb8e
+dma_wr          1be4f830    9d115541
+dma_wr          1be4f834    8b23b51c
+dma_wr          1be4f838    be41fc6a
+dma_wr          1be4f83c    f54963c5
+dma_wr          1be4f840    a629666c
+dma_wr          1be4f844    b7bf514b
+dma_wr          1be4f848    cd1c179a
+dma_wr          1be4f84c    28a69cda
+dma_wr          1be4f850    7934f2a9
+dma_wr          1be4f854    957ad58a
+dma_wr          1be4f858    eb47ad8a
+dma_wr          1be4f85c    12c4ccae
+dma_wr          1be4f860    5f4c7dbf
+dma_wr          1be4f864    1ec98669
+dma_wr          1be4f868    513b743c
+dma_wr          1be4f86c    17946d91
+dma_wr          1be4f870    42c61262
+dma_wr          1be4f874    e4ec4653
+dma_wr          1be4f878    d88517a8
+dma_wr          1be4f87c    844dccdb
+dma_wr          1be4f880    896aa3f6
+dma_wr          1be4f884    23e1561e
+dma_wr          1be4f888    9f6c1a9a
+dma_wr          1be4f88c    cd121243
+dma_wr          1be4f890    e9554dbb
+dma_wr          1be4f894    cf5f3d71
+dma_wr          1be4f898    a448c896
+dma_wr          1be4f89c    3d544653
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          69583394    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583390    1be4f821 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          69583398    1be4f8a0
+
+-- check writes to the receive buffer
+dma_wr          1be4f8a0    9a59e2c5
+dma_wr          1be4f8a4    f6671a39
+dma_wr          1be4f8a8    a5df23bd
+dma_wr          1be4f8ac    fafa7986
+dma_wr          1be4f8b0    73fa81ed
+dma_wr          1be4f8b4    64edd5f2
+dma_wr          1be4f8b8    3726aca9
+dma_wr          1be4f8bc    b6ff2765
+dma_wr          1be4f8c0    e8b7d778
+dma_wr          1be4f8c4    ca357414
+dma_wr          1be4f8c8    676aabcb
+dma_wr          1be4f8cc    3139f66f
+dma_wr          1be4f8d0    842eed95
+dma_wr          1be4f8d4    67aa4dff
+dma_wr          1be4f8d8    1269cb5a
+dma_wr          1be4f8dc    cb427c7e
+dma_wr          1be4f8e0    8f34ee94
+dma_wr          1be4f8e4    e2888617
+dma_wr          1be4f8e8    45e7b134
+dma_wr          1be4f8ec    b37978d5
+dma_wr          1be4f8f0    92c12c39
+dma_wr          1be4f8f4    63a7166c
+dma_wr          1be4f8f8    7f1bfce4
+dma_wr          1be4f8fc    b9453344
+dma_wr          1be4f900    aa971a3d
+dma_wr          1be4f904    35549bb1
+dma_wr          1be4f908    b2c3f7fb
+dma_wr          1be4f90c    2559775c
+dma_wr          1be4f910    83ef6946
+dma_wr          1be4f914    35cbf46b
+dma_wr          1be4f918    e2c8b3f1
+dma_wr          1be4f91c    94969eaa
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          6958339c    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          69583398    1be4f8a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695833a0    1be4f920
+
+-- check writes to the receive buffer
+dma_wr          1be4f920    8cb3897b
+dma_wr          1be4f924    7621836e
+dma_wr          1be4f928    bb1cab8e
+dma_wr          1be4f92c    9ef256b9
+dma_wr          1be4f930    a77be9ac
+dma_wr          1be4f934    3df425a5
+dma_wr          1be4f938    ba3b12ed
+dma_wr          1be4f93c    36c1d6cf
+dma_wr          1be4f940    3918df4c
+dma_wr          1be4f944    f3287369
+dma_wr          1be4f948    6b1d9454
+dma_wr          1be4f94c    c8ba477d
+dma_wr          1be4f950    35e8a18e
+dma_wr          1be4f954    7544ad6c
+dma_wr          1be4f958    ea34a111
+dma_wr          1be4f95c    a6489358
+dma_wr          1be4f960    161e3985
+dma_wr          1be4f964    eddcb86b
+dma_wr          1be4f968    26e48a38
+dma_wr          1be4f96c    11cee818
+dma_wr          1be4f970    c6f443bd
+dma_wr          1be4f974    d75ae41d
+dma_wr          1be4f978    4b329323
+dma_wr          1be4f97c    e75e16ff
+dma_wr          1be4f980    521afe51
+dma_wr          1be4f984    155b9325
+dma_wr          1be4f988    b47e13b6
+dma_wr          1be4f98c    56bcddb8
+dma_wr          1be4f990    2a61fa19
+dma_wr          1be4f994    133b55be
+dma_wr          1be4f998    b1b2e363
+dma_wr          1be4f99c    cc6a7b7e
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          695833a4    00000000 -- dma writes an intermediate buffer's status
+dma_wr rx_descr          695833a0    1be4f921 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695833a8    1be4f9a0
+
+-- check writes to the receive buffer
+dma_wr          1be4f9a0    847792ed
+dma_wr          1be4f9a4    aa51f2d8
+dma_wr          1be4f9a8    f97ffdce
+dma_wr          1be4f9ac    15d48453
+dma_wr          1be4f9b0    6397891a
+dma_wr          1be4f9b4    b55159ae
+dma_wr          1be4f9b8    49fadad2
+dma_wr          1be4f9bc    efbf6a46
+dma_wr          1be4f9c0    21f378c3
+dma_wr          1be4f9c4    ee7bd322
+dma_wr          1be4f9c8    a6d5e984
+dma_wr          1be4f9cc    c3cd4771
+dma_wr          1be4f9d0    28967438
+dma_wr          1be4f9d4    b7f5a1b8
+dma_wr          1be4f9d8    7c1a9de2
+dma_wr          1be4f9dc    89128146
+dma_wr          1be4f9e0    477553bd
+dma_wr          1be4f9e4    1f4ff654
+dma_wr          1be4f9e8    17de6b8c
+dma_wr          1be4f9ec    5a8319eb
+dma_wr          1be4f9f0    5d3c3557
+dma_wr          1be4f9f4    bf6f8fc2
+dma_wr          1be4f9f8    b15b4bd7
+dma_wr          1be4f9fc    c3d2e8f9
+dma_wr          1be4fa00    5155fdfa
+dma_wr          1be4fa04    a13d5936
+dma_wr          1be4fa08    8e1f8619
+dma_wr          1be4fa0c    cc779382
+dma_wr          1be4fa10    1b3fd257
+dma_wr          1be4fa14    ea79cc62
+dma_wr          1be4fa18    5b3b6bf5
+dma_wr          1be4fa1c    addeadde -- Bad CRC
+
+-- write back the intermediate queue descriptor's status
+dma_wr rx_descr          695833ac    08009800 -- dma writes EOF status - bit[13]=0
+dma_wr rx_descr          695833a8    1be4f9a1 -- dma writes ownership bit
+
+-- read the next receive queue descriptor
+dma_rd rx_descr          695833b0    1be4fa20
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "SCENARIO 3. complete - received 6144 byte frame"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00001800  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000001  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000001  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000001  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+dma_rd rx_descr 695833b8 12345678 -- Supply final descriptor - this is not used for any data buffers, but the EDMA tries to keep its buffer full so it reads it
+end(80000)
+
+bus_grant_delay 0

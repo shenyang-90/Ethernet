@@ -1,0 +1,536 @@
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Basic Background Test for Incsiv Functional Safety (IFSS) simulations
+--
+-- 5 random frames are transmitted to Q0-Q2
+-- 5 random frames are received to Q0-Q2
+-- 
+--------------------------------------------------------------------------------
+
+-- Set the seed for the test ...
+-- set_random_seed 0;
+
+-- enable automatic ifss Checker function
+-- It will also automatically check interrupts.
+-- set to one when error injected
+set_auto_fault_checker 1;
+
+-- Set AHB clock freq to 250MHz
+-- At 32bit, this means we have maximum bandwidth of 8Gbit/s shared between
+-- TX and RX. Randomize hready, keeping the maximum to 5 (averages around 2.5)
+-- to ensure no RX overflows occur, and max line rate is acheivable on TX
+sel_ahb_freq 3 
+randomize_hready -descr_max 5 -data_max 5 -read_max 5 -write_max 5
+
+-- check and initialise the relevant registers
+-- apbrd(100) 00 00000000  -- check reset value of network control register
+-- apbwr      10 01a00710
+-- apbwr      28 00000fff  -- enable all interrupts
+-- apbwr      600 00000fff -- enable q1 interrupts
+-- apbwr      604 00000fff -- enable q2 interrupts
+-- apbwr      e08 00000000 -- enable ASF interrupts (write to mask)
+-- apbwr      440 88000000 -- write transmit queue pointer 1
+-- apbwr      444 99000000 -- write transmit queue pointer 2
+-- apbwr      480 f0010000 -- write receive queue pointer 1
+-- apbwr      484 f0020000 -- write receive queue pointer 2
+-- apbwr      04 0008040a  -- 64bit enable, gigabit mode, full duplex
+-- apbwr      04 0108040a  -- check reset value of network config register
+-- apbwr      1c 11111100  -- write address of transmit buffer q0 descriptor in memory
+-- apbwr      88 12345678  -- specific address register 1 bottom
+-- apbwr      8C 00001111  -- specific address register 1 top
+-- apbwr      90 abababab  -- specific address register 2 bottom (multicast)
+-- apbwr      94 0000abab  -- specific address register 2 top
+-- apbwr      98 abcdef10  -- specific address register 3 bottom (unicast)
+-- apbwr      9C 0000a5a5  -- specific address register 3 top
+-- apbwr      a0 cccccccc  -- specific address register 4 bottom (unicast)
+-- apbwr      a4 00005a5a  -- specific address register 4 top
+-- apbwr      4a0 00000001 -- Buffer size Q1
+-- apbwr      4a4 00000001 -- Buffer size Q1
+-- apbwr      500 31234aa1 -- Screener 1
+-- apbwr      504 31234bb2 -- Screener 2 
+-- apbwr       18 ffff0000  -- write receive queue pointer
+
+-- CSR parity writes --
+apbwr(100) e08 00000000 -- enable ASF interrupts (write to mask)
+apbwr      04 00000000  -- network_config
+apbwr      10 00000000  -- dma_config
+apbwr      18 00000000  -- receive_q_ptr_0
+apbwr     480 00000000  -- receive_q_ptr_1
+apbwr     484 00000000  -- receive_q_ptr_2
+apbwr     488 00000000  -- receive_q_ptr_3
+apbwr     48c 00000000  -- receive_q_ptr_4
+apbwr     490 00000000  -- receive_q_ptr_5
+apbwr     494 00000000  -- receive_q_ptr_6
+apbwr     498 00000000  -- receive_q_ptr_7
+apbwr     5c0 00000000  -- receive_q_ptr_8
+apbwr     5c4 00000000  -- receive_q_ptr_9
+apbwr     5c8 00000000  -- receive_q_ptr_10
+apbwr     5cc 00000000  -- receive_q_ptr_11
+apbwr     5d0 00000000  -- receive_q_ptr_12
+apbwr     5d4 00000000  -- receive_q_ptr_13
+apbwr     5d8 00000000  -- receive_q_ptr_14
+apbwr     5dc 00000000  -- receive_q_ptr_15
+apbwr      1c 00000000  -- transmit_q_ptr_0
+apbwr     440 00000000  -- transmit_q_ptr_1
+apbwr     444 00000000  -- transmit_q_ptr_2
+apbwr     448 00000000  -- transmit_q_ptr_3
+apbwr     44c 00000000  -- transmit_q_ptr_4
+apbwr     450 00000000  -- transmit_q_ptr_5
+apbwr     454 00000000  -- transmit_q_ptr_6
+apbwr     458 00000000  -- transmit_q_ptr_7
+apbwr     45c 00000000  -- transmit_q_ptr_8
+apbwr     460 00000000  -- transmit_q_ptr_9
+apbwr     464 00000000  -- transmit_q_ptr_10
+apbwr     468 00000000  -- transmit_q_ptr_11
+apbwr     46c 00000000  -- transmit_q_ptr_12
+apbwr     470 00000000  -- transmit_q_ptr_13
+apbwr     474 00000000  -- transmit_q_ptr_14
+apbwr     478 00000000  -- transmit_q_ptr_15
+apbwr      28 ffffffff  -- int_mask (enable all interrupts - all 0's)
+apbwr      3c 00000000  -- tx_pause_quantum
+apbwr      40 00000000  -- pbuf_tx_cutthru
+apbwr      44 00000000  -- pbuf_rx_cutthru
+apbwr      48 00000000  -- jumbo_max_length
+apbwr      4c 00000000  -- external_fifo_interface
+apbwr      54 00000000  -- axi_max_pipeline
+apbwr      58 00000000  -- rsc_control
+apbwr      5c 00000000  -- int_moderation
+apbwr      60 00000000  -- sys_wake_time
+apbwr      64 00000000  -- fatal_or_non_fatal_int_sel
+apbwr      68 00000000  -- lockup_config
+apbwr      6c 00000000  -- lockup_config_2
+apbwr      80 00000000  -- hash_bottom
+apbwr      84 00000000  -- hash_top
+apbwr      88 00000000  -- specific address register 1 bottom
+apbwr      8C 00000000  -- specific address register 1 top
+apbwr      90 00000000  -- specific address register 2 bottom (multicast)
+apbwr      94 00000000  -- specific address register 2 top
+apbwr      98 00000000  -- specific address register 3 bottom (unicast)
+apbwr      9C 00000000  -- specific address register 3 top
+apbwr      a0 00000000  -- specific address register 4 bottom (unicast)
+apbwr      a4 00000000  -- specific address register 4 top
+apbwr      a8 00000000  -- spec_type_1
+apbwr      ac 00000000  -- spec_type_2
+apbwr      b0 00000000  -- spec_type_3
+apbwr      b4 00000000  -- spec_type_4
+apbwr      b8 00000000  -- wol_register
+apbwr      bc 00000000  -- stretch_ratio
+apbwr      c0 00000000  -- stacked_vlan
+apbwr      c4 00000000  -- tx_pfc_pause
+apbwr      c8 00000000  -- mask_add1_bottom
+apbwr      cc 00000000  -- mask_add1_top
+apbwr      d0 00000000  -- dma_addr_or_mask
+apbwr      d4 00000000  -- rx_ptp_unicast
+apbwr      d8 00000000  -- tx_ptp_unicast
+apbwr      e0 00000000  -- tsu_nsec_cmp
+apbwr      e4 00000000  -- tsu_sec_cmp_bottom
+apbwr      dc 00000000  -- tsu_sec_cmp_top
+
+apbwr(200) 04 ffffffff  -- network_config
+apbwr      10 ffffffff  -- dma_config
+apbwr      18 ffffffff  -- receive_q_ptr_0
+apbwr     480 ffffffff  -- receive_q_ptr_1
+apbwr     484 ffffffff  -- receive_q_ptr_2
+apbwr     488 ffffffff  -- receive_q_ptr_3
+apbwr     48c ffffffff  -- receive_q_ptr_4
+apbwr     490 ffffffff  -- receive_q_ptr_5
+apbwr     494 ffffffff  -- receive_q_ptr_6
+apbwr     498 ffffffff  -- receive_q_ptr_7
+apbwr     5c0 ffffffff  -- receive_q_ptr_8
+apbwr     5c4 ffffffff  -- receive_q_ptr_9
+apbwr     5c8 ffffffff  -- receive_q_ptr_10
+apbwr     5cc ffffffff  -- receive_q_ptr_11
+apbwr     5d0 ffffffff  -- receive_q_ptr_12
+apbwr     5d4 ffffffff  -- receive_q_ptr_13
+apbwr     5d8 ffffffff  -- receive_q_ptr_14
+apbwr     5dc ffffffff  -- receive_q_ptr_15
+apbwr      1c ffffffff  -- transmit_q_ptr_0
+apbwr     440 ffffffff  -- transmit_q_ptr_1
+apbwr     444 ffffffff  -- transmit_q_ptr_2
+apbwr     448 ffffffff  -- transmit_q_ptr_3
+apbwr     44c ffffffff  -- transmit_q_ptr_4
+apbwr     450 ffffffff  -- transmit_q_ptr_5
+apbwr     454 ffffffff  -- transmit_q_ptr_6
+apbwr     458 ffffffff  -- transmit_q_ptr_7
+apbwr     45c ffffffff  -- transmit_q_ptr_8
+apbwr     460 ffffffff  -- transmit_q_ptr_9
+apbwr     464 ffffffff  -- transmit_q_ptr_10
+apbwr     468 ffffffff  -- transmit_q_ptr_11
+apbwr     46c ffffffff  -- transmit_q_ptr_12
+apbwr     470 ffffffff  -- transmit_q_ptr_13
+apbwr     474 ffffffff  -- transmit_q_ptr_14
+apbwr     478 ffffffff  -- transmit_q_ptr_15
+apbwr      2c ffffffff  -- int_mask (disable all interrupts - all 1's)
+apbwr      3c ffffffff  -- tx_pause_quantum
+apbwr      40 ffffffff  -- pbuf_tx_cutthru
+apbwr      44 ffffffff  -- pbuf_rx_cutthru
+apbwr      48 ffffffff  -- jumbo_max_length
+apbwr      4c ffffffff  -- external_fifo_interface
+apbwr      54 ffffffff  -- axi_max_pipeline
+apbwr      58 ffffffff  -- rsc_control
+apbwr      5c ffffffff  -- int_moderation
+apbwr      60 ffffffff  -- sys_wake_time
+apbwr      64 ffffffff  -- fatal_or_non_fatal_int_sel
+apbwr      68 ffffffff  -- lockup_config
+apbwr      6c ffffffff  -- lockup_config_2
+apbwr      80 ffffffff  -- hash_bottom
+apbwr      84 ffffffff  -- hash_top
+apbwr      88 ffffffff  -- specific address register 1 bottom
+apbwr      8C ffffffff  -- specific address register 1 top
+apbwr      90 ffffffff  -- specific address register 2 bottom (multicast)
+apbwr      94 ffffffff  -- specific address register 2 top
+apbwr      98 ffffffff  -- specific address register 3 bottom (unicast)
+apbwr      9C ffffffff  -- specific address register 3 top
+apbwr      a0 ffffffff  -- specific address register 4 bottom (unicast)
+apbwr      a4 ffffffff  -- specific address register 4 top
+apbwr      a8 ffffffff  -- spec_type_1
+apbwr      ac ffffffff  -- spec_type_2
+apbwr      b0 ffffffff  -- spec_type_3
+apbwr      b4 ffffffff  -- spec_type_4
+apbwr      b8 ffffffff  -- wol_register
+apbwr      bc ffffffff  -- stretch_ratio
+apbwr      c0 ffffffff  -- stacked_vlan
+apbwr      c4 ffffffff  -- tx_pfc_pause
+apbwr      c8 ffffffff  -- mask_add1_bottom
+apbwr      cc ffffffff  -- mask_add1_top
+apbwr      d0 ffffffff  -- dma_addr_or_mask
+apbwr      d4 ffffffff  -- rx_ptp_unicast
+apbwr      d8 ffffffff  -- tx_ptp_unicast
+apbwr      e0 ffffffff  -- tsu_nsec_cmp
+apbwr      e4 ffffffff  -- tsu_sec_cmp_bottom
+apbwr      dc ffffffff  -- tsu_sec_cmp_top
+apbwr      2c ffffffff  -- int_mask (disable all interrupts - all 1's)
+apbwr     e08 ffffffff  -- disable ASF interrupts (write to mask)
+apbwr     e08 fffffff7  -- enable ASF CSR interrupt only
+
+-- write FFFFFFFE to achieve different parity values (00000000 and FFFFFFFF have the same value - just in case)
+apbwr(500) 04 fffffffe  -- network_config
+apbwr      10 fffffffe  -- dma_config
+apbwr      18 fffffffe  -- receive_q_ptr_0
+apbwr     480 fffffffe  -- receive_q_ptr_1
+apbwr     484 fffffffe  -- receive_q_ptr_2
+apbwr     488 fffffffe  -- receive_q_ptr_3
+apbwr     48c fffffffe  -- receive_q_ptr_4
+apbwr     490 fffffffe  -- receive_q_ptr_5
+apbwr     494 fffffffe  -- receive_q_ptr_6
+apbwr     498 fffffffe  -- receive_q_ptr_7
+apbwr     5c0 fffffffe  -- receive_q_ptr_8
+apbwr     5c4 fffffffe  -- receive_q_ptr_9
+apbwr     5c8 fffffffe  -- receive_q_ptr_10
+apbwr     5cc fffffffe  -- receive_q_ptr_11
+apbwr     5d0 fffffffe  -- receive_q_ptr_12
+apbwr     5d4 fffffffe  -- receive_q_ptr_13
+apbwr     5d8 fffffffe  -- receive_q_ptr_14
+apbwr     5dc fffffffe  -- receive_q_ptr_15
+apbwr      1c fffffffe  -- transmit_q_ptr_0
+apbwr     440 fffffffe  -- transmit_q_ptr_1
+apbwr     444 fffffffe  -- transmit_q_ptr_2
+apbwr     448 fffffffe  -- transmit_q_ptr_3
+apbwr     44c fffffffe  -- transmit_q_ptr_4
+apbwr     450 fffffffe  -- transmit_q_ptr_5
+apbwr     454 fffffffe  -- transmit_q_ptr_6
+apbwr     458 fffffffe  -- transmit_q_ptr_7
+apbwr     45c fffffffe  -- transmit_q_ptr_8
+apbwr     460 fffffffe  -- transmit_q_ptr_9
+apbwr     464 fffffffe  -- transmit_q_ptr_10
+apbwr     468 fffffffe  -- transmit_q_ptr_11
+apbwr     46c fffffffe  -- transmit_q_ptr_12
+apbwr     470 fffffffe  -- transmit_q_ptr_13
+apbwr     474 fffffffe  -- transmit_q_ptr_14
+apbwr     478 fffffffe  -- transmit_q_ptr_15
+apbwr      2c fffffffe  -- int_mask (disable all interrupts - all 1's)
+apbwr      3c fffffffe  -- tx_pause_quantum
+apbwr      40 fffffffe  -- pbuf_tx_cutthru
+apbwr      44 fffffffe  -- pbuf_rx_cutthru
+apbwr      48 fffffffe  -- jumbo_max_length
+apbwr      4c fffffffe  -- external_fifo_interface
+apbwr      54 fffffffe  -- axi_max_pipeline
+apbwr      58 fffffffe  -- rsc_control
+apbwr      5c fffffffe  -- int_moderation
+apbwr      60 fffffffe  -- sys_wake_time
+apbwr      64 fffffffe  -- fatal_or_non_fatal_int_sel
+apbwr      68 fffffffe  -- lockup_config
+apbwr      6c fffffffe  -- lockup_config_2
+apbwr      80 fffffffe  -- hash_bottom
+apbwr      84 fffffffe  -- hash_top
+apbwr      88 fffffffe  -- specific address register 1 bottom
+apbwr      8C fffffffe  -- specific address register 1 top
+apbwr      90 fffffffe  -- specific address register 2 bottom (multicast)
+apbwr      94 fffffffe  -- specific address register 2 top
+apbwr      98 fffffffe  -- specific address register 3 bottom (unicast)
+apbwr      9C fffffffe  -- specific address register 3 top
+apbwr      a0 fffffffe  -- specific address register 4 bottom (unicast)
+apbwr      a4 fffffffe  -- specific address register 4 top
+apbwr      a8 fffffffe  -- spec_type_1
+apbwr      ac fffffffe  -- spec_type_2
+apbwr      b0 fffffffe  -- spec_type_3
+apbwr      b4 fffffffe  -- spec_type_4
+apbwr      b8 fffffffe  -- wol_register
+apbwr      bc fffffffe  -- stretch_ratio
+apbwr      c0 fffffffe  -- stacked_vlan
+apbwr      c4 fffffffe  -- tx_pfc_pause
+apbwr      c8 fffffffe  -- mask_add1_bottom
+apbwr      cc fffffffe  -- mask_add1_top
+apbwr      d0 fffffffe  -- dma_addr_or_mask
+apbwr      d4 fffffffe  -- rx_ptp_unicast
+apbwr      d8 fffffffe  -- tx_ptp_unicast
+apbwr      e0 fffffffe  -- tsu_nsec_cmp
+apbwr      e4 fffffffe  -- tsu_sec_cmp_bottom
+apbwr      dc fffffffe  -- tsu_sec_cmp_top
+apbwr     e08 fffffffe  -- disable ASF interrupts (write to mask)
+apbwr      2c fffffffe  -- int_mask (disable all interrupts - all 1's)
+
+-- ********************************************** zero all registers
+apbwr(700) 04 00000000  -- network_config
+apbwr      10 00000000  -- dma_config
+apbwr      18 00000000  -- receive_q_ptr_0
+apbwr     480 00000000  -- receive_q_ptr_1
+apbwr     484 00000000  -- receive_q_ptr_2
+apbwr     488 00000000  -- receive_q_ptr_3
+apbwr     48c 00000000  -- receive_q_ptr_4
+apbwr     490 00000000  -- receive_q_ptr_5
+apbwr     494 00000000  -- receive_q_ptr_6
+apbwr     498 00000000  -- receive_q_ptr_7
+apbwr     5c0 00000000  -- receive_q_ptr_8
+apbwr     5c4 00000000  -- receive_q_ptr_9
+apbwr     5c8 00000000  -- receive_q_ptr_10
+apbwr     5cc 00000000  -- receive_q_ptr_11
+apbwr     5d0 00000000  -- receive_q_ptr_12
+apbwr     5d4 00000000  -- receive_q_ptr_13
+apbwr     5d8 00000000  -- receive_q_ptr_14
+apbwr     5dc 00000000  -- receive_q_ptr_15
+apbwr      1c 00000000  -- transmit_q_ptr_0
+apbwr     440 00000000  -- transmit_q_ptr_1
+apbwr     444 00000000  -- transmit_q_ptr_2
+apbwr     448 00000000  -- transmit_q_ptr_3
+apbwr     44c 00000000  -- transmit_q_ptr_4
+apbwr     450 00000000  -- transmit_q_ptr_5
+apbwr     454 00000000  -- transmit_q_ptr_6
+apbwr     458 00000000  -- transmit_q_ptr_7
+apbwr     45c 00000000  -- transmit_q_ptr_8
+apbwr     460 00000000  -- transmit_q_ptr_9
+apbwr     464 00000000  -- transmit_q_ptr_10
+apbwr     468 00000000  -- transmit_q_ptr_11
+apbwr     46c 00000000  -- transmit_q_ptr_12
+apbwr     470 00000000  -- transmit_q_ptr_13
+apbwr     474 00000000  -- transmit_q_ptr_14
+apbwr     478 00000000  -- transmit_q_ptr_15
+apbwr      28 ffffffff  -- int_mask (enable all interrupts - all 0's)
+apbwr      3c 00000000  -- tx_pause_quantum
+apbwr      40 00000000  -- pbuf_tx_cutthru
+apbwr      44 00000000  -- pbuf_rx_cutthru
+apbwr      48 00000000  -- jumbo_max_length
+apbwr      4c 00000000  -- external_fifo_interface
+apbwr      54 00000000  -- axi_max_pipeline
+apbwr      58 00000000  -- rsc_control
+apbwr      5c 00000000  -- int_moderation
+apbwr      60 00000000  -- sys_wake_time
+apbwr      64 00000000  -- fatal_or_non_fatal_int_sel
+apbwr      68 00000000  -- lockup_config
+apbwr      6c 00000000  -- lockup_config_2
+apbwr      80 00000000  -- hash_bottom
+apbwr      84 00000000  -- hash_top
+apbwr      88 00000000  -- specific address register 1 bottom
+apbwr      8C 00000000  -- specific address register 1 top
+apbwr      90 00000000  -- specific address register 2 bottom (multicast)
+apbwr      94 00000000  -- specific address register 2 top
+apbwr      98 00000000  -- specific address register 3 bottom (unicast)
+apbwr      9C 00000000  -- specific address register 3 top
+apbwr      a0 00000000  -- specific address register 4 bottom (unicast)
+apbwr      a4 00000000  -- specific address register 4 top
+apbwr      a8 00000000  -- spec_type_1
+apbwr      ac 00000000  -- spec_type_2
+apbwr      b0 00000000  -- spec_type_3
+apbwr      b4 00000000  -- spec_type_4
+apbwr      b8 00000000  -- wol_register
+apbwr      bc 00000000  -- stretch_ratio
+apbwr      c0 00000000  -- stacked_vlan
+apbwr      c4 00000000  -- tx_pfc_pause
+apbwr      c8 00000000  -- mask_add1_bottom
+apbwr      cc 00000000  -- mask_add1_top
+apbwr      d0 00000000  -- dma_addr_or_mask
+apbwr      d4 00000000  -- rx_ptp_unicast
+apbwr      d8 00000000  -- tx_ptp_unicast
+apbwr      e0 00000000  -- tsu_nsec_cmp
+apbwr      e4 00000000  -- tsu_sec_cmp_bottom
+apbwr      dc 00000000  -- tsu_sec_cmp_top
+
+-- write to set all parity bits '1'
+apbwr(900) 04 01010101  -- network_config
+apbwr      10 01010101  -- dma_config
+apbwr      10 01010102  -- dma_config
+apbwr      10 01010104  -- dma_config
+apbwr      10 01010108  -- dma_config
+apbwr      10 01010110  -- dma_config
+apbwr      18 01010101  -- receive_q_ptr_0
+apbwr     480 01010101  -- receive_q_ptr_1
+apbwr     484 01010101  -- receive_q_ptr_2
+apbwr     488 01010101  -- receive_q_ptr_3
+apbwr     48c 01010101  -- receive_q_ptr_4
+apbwr     490 01010101  -- receive_q_ptr_5
+apbwr     494 01010101  -- receive_q_ptr_6
+apbwr     498 01010101  -- receive_q_ptr_7
+apbwr     5c0 01010101  -- receive_q_ptr_8
+apbwr     5c4 01010101  -- receive_q_ptr_9
+apbwr     5c8 01010101  -- receive_q_ptr_10
+apbwr     5cc 01010101  -- receive_q_ptr_11
+apbwr     5d0 01010101  -- receive_q_ptr_12
+apbwr     5d4 01010101  -- receive_q_ptr_13
+apbwr     5d8 01010101  -- receive_q_ptr_14
+apbwr     5dc 01010101  -- receive_q_ptr_15
+apbwr      1c 01010101  -- transmit_q_ptr_0
+apbwr     440 01010101  -- transmit_q_ptr_1
+apbwr     444 01010101  -- transmit_q_ptr_2
+apbwr     448 01010101  -- transmit_q_ptr_3
+apbwr     44c 01010101  -- transmit_q_ptr_4
+apbwr     450 01010101  -- transmit_q_ptr_5
+apbwr     454 01010101  -- transmit_q_ptr_6
+apbwr     458 01010101  -- transmit_q_ptr_7
+apbwr     45c 01010101  -- transmit_q_ptr_8
+apbwr     460 01010101  -- transmit_q_ptr_9
+apbwr     464 01010101  -- transmit_q_ptr_10
+apbwr     468 01010101  -- transmit_q_ptr_11
+apbwr     46c 01010101  -- transmit_q_ptr_12
+apbwr     470 01010101  -- transmit_q_ptr_13
+apbwr     474 01010101  -- transmit_q_ptr_14
+apbwr     478 01010101  -- transmit_q_ptr_15
+apbwr      2c 01010101  -- int_mask (disable all interrupts - all 1's)
+apbwr      3c 01010101  -- tx_pause_quantum
+apbwr      40 01010101  -- pbuf_tx_cutthru
+apbwr      44 01010101  -- pbuf_rx_cutthru
+apbwr      48 01010101  -- jumbo_max_length
+apbwr      4c 01010101  -- external_fifo_interface
+apbwr      54 01010101  -- axi_max_pipeline
+apbwr      58 01010101  -- rsc_control
+apbwr      5c 01010101  -- int_moderation
+apbwr      60 01010101  -- sys_wake_time
+apbwr      64 01010101  -- fatal_or_non_fatal_int_sel
+apbwr      68 01010101  -- lockup_config
+apbwr      6c 01010101  -- lockup_config_2
+apbwr      80 01010101  -- hash_bottom
+apbwr      84 01010101  -- hash_top
+apbwr      88 01010101  -- specific address register 1 bottom
+apbwr      8C 01010101  -- specific address register 1 top
+apbwr      90 01010101  -- specific address register 2 bottom (multicast)
+apbwr      94 01010101  -- specific address register 2 top
+apbwr      98 01010101  -- specific address register 3 bottom (unicast)
+apbwr      9C 01010101  -- specific address register 3 top
+apbwr      a0 01010101  -- specific address register 4 bottom (unicast)
+apbwr      a4 01010101  -- specific address register 4 top
+apbwr      a8 01010101  -- spec_type_1
+apbwr      ac 01010101  -- spec_type_2
+apbwr      b0 01010101  -- spec_type_3
+apbwr      b4 01010101  -- spec_type_4
+apbwr      b8 01010101  -- wol_register
+apbwr      bc 01010101  -- stretch_ratio
+apbwr      c0 01010101  -- stacked_vlan
+apbwr      c4 01010101  -- tx_pfc_pause
+apbwr      c8 01010101  -- mask_add1_bottom
+apbwr      cc 01010101  -- mask_add1_top
+apbwr      d0 01010101  -- dma_addr_or_mask
+apbwr      d4 01010101  -- rx_ptp_unicast
+apbwr      d8 01010101  -- tx_ptp_unicast
+apbwr      e0 01010101  -- tsu_nsec_cmp
+apbwr      e4 01010101  -- tsu_sec_cmp_bottom
+apbwr      dc 01010101  -- tsu_sec_cmp_top
+
+-- ********************************************** again zero all registers
+apbwr(1200) 04 00000000  -- network_config
+apbwr      10 00000000  -- dma_config
+apbwr      18 00000000  -- receive_q_ptr_0
+apbwr     480 00000000  -- receive_q_ptr_1
+apbwr     484 00000000  -- receive_q_ptr_2
+apbwr     488 00000000  -- receive_q_ptr_3
+apbwr     48c 00000000  -- receive_q_ptr_4
+apbwr     490 00000000  -- receive_q_ptr_5
+apbwr     494 00000000  -- receive_q_ptr_6
+apbwr     498 00000000  -- receive_q_ptr_7
+apbwr     5c0 00000000  -- receive_q_ptr_8
+apbwr     5c4 00000000  -- receive_q_ptr_9
+apbwr     5c8 00000000  -- receive_q_ptr_10
+apbwr     5cc 00000000  -- receive_q_ptr_11
+apbwr     5d0 00000000  -- receive_q_ptr_12
+apbwr     5d4 00000000  -- receive_q_ptr_13
+apbwr     5d8 00000000  -- receive_q_ptr_14
+apbwr     5dc 00000000  -- receive_q_ptr_15
+apbwr      1c 00000000  -- transmit_q_ptr_0
+apbwr     440 00000000  -- transmit_q_ptr_1
+apbwr     444 00000000  -- transmit_q_ptr_2
+apbwr     448 00000000  -- transmit_q_ptr_3
+apbwr     44c 00000000  -- transmit_q_ptr_4
+apbwr     450 00000000  -- transmit_q_ptr_5
+apbwr     454 00000000  -- transmit_q_ptr_6
+apbwr     458 00000000  -- transmit_q_ptr_7
+apbwr     45c 00000000  -- transmit_q_ptr_8
+apbwr     460 00000000  -- transmit_q_ptr_9
+apbwr     464 00000000  -- transmit_q_ptr_10
+apbwr     468 00000000  -- transmit_q_ptr_11
+apbwr     46c 00000000  -- transmit_q_ptr_12
+apbwr     470 00000000  -- transmit_q_ptr_13
+apbwr     474 00000000  -- transmit_q_ptr_14
+apbwr     478 00000000  -- transmit_q_ptr_15
+apbwr      28 ffffffff  -- int_mask (enable all interrupts - all 0's)
+apbwr      3c 00000000  -- tx_pause_quantum
+apbwr      40 00000000  -- pbuf_tx_cutthru
+apbwr      44 00000000  -- pbuf_rx_cutthru
+apbwr      48 00000000  -- jumbo_max_length
+apbwr      4c 00000000  -- external_fifo_interface
+apbwr      54 00000000  -- axi_max_pipeline
+apbwr      58 00000000  -- rsc_control
+apbwr      5c 00000000  -- int_moderation
+apbwr      60 00000000  -- sys_wake_time
+apbwr      64 00000000  -- fatal_or_non_fatal_int_sel
+apbwr      68 00000000  -- lockup_config
+apbwr      6c 00000000  -- lockup_config_2
+apbwr      80 00000000  -- hash_bottom
+apbwr      84 00000000  -- hash_top
+apbwr      88 00000000  -- specific address register 1 bottom
+apbwr      8C 00000000  -- specific address register 1 top
+apbwr      90 00000000  -- specific address register 2 bottom (multicast)
+apbwr      94 00000000  -- specific address register 2 top
+apbwr      98 00000000  -- specific address register 3 bottom (unicast)
+apbwr      9C 00000000  -- specific address register 3 top
+apbwr      a0 00000000  -- specific address register 4 bottom (unicast)
+apbwr      a4 00000000  -- specific address register 4 top
+apbwr      a8 00000000  -- spec_type_1
+apbwr      ac 00000000  -- spec_type_2
+apbwr      b0 00000000  -- spec_type_3
+apbwr      b4 00000000  -- spec_type_4
+apbwr      b8 00000000  -- wol_register
+apbwr      bc 00000000  -- stretch_ratio
+apbwr      c0 00000000  -- stacked_vlan
+apbwr      c4 00000000  -- tx_pfc_pause
+apbwr      c8 00000000  -- mask_add1_bottom
+apbwr      cc 00000000  -- mask_add1_top
+apbwr      d0 00000000  -- dma_addr_or_mask
+apbwr      d4 00000000  -- rx_ptp_unicast
+apbwr      d8 00000000  -- tx_ptp_unicast
+apbwr      e0 00000000  -- tsu_nsec_cmp
+apbwr      e4 00000000  -- tsu_sec_cmp_bottom
+apbwr      dc 00000000  -- tsu_sec_cmp_top
+
+-- ***************** -- 
+
+-- apbwr      00 0000000c  -- enable tx, enable rx
+-- delay for enable rx to propagate though design
+-- apbrd     20 00000000  
+-- apbrd     20 00000000  
+-- apbrd     20 00000000  
+-- apbrd     20 00000000  
+-- apbrd     20 00000000  
+-- apbrd     20 00000000  
+-- apbrd     20 00000000  
+-- apbrd     20 00000000  
+-- apbrd     20 00000000  
+-- apbrd     284 6ef13fff  -- read design cfg reg to set axi test in trans.pl
+-- apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+apbrd(2000)     20 00000000  
+
+-- force end of test in case it doesn't stop of its own accord
+end(50000)
+

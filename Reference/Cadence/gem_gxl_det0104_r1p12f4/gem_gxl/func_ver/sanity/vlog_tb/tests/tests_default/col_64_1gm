@@ -1,0 +1,3087 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : col_64_1gm
+--
+--   Author         : Stewart Penman (spenman@tality.com)
+--
+--   Date           : 08 March 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+-- 
+-- This tests ensures that the GEM deals with collisions properly in 
+-- both normal gigabit mode and burst gigabit mode.
+-- 
+-- Functional coverage
+-- -------------------
+-- � Ensures that early collisions are detected in both normal gigabit 
+--     mode and burst gigabit mode.  
+--     i.e. Tests for collisions during preamble and SFD in normal 
+--           gigabit mode.
+--          Tests for collisions during preamble and SFD within a burst 
+--           of frames in burst gigabit mode.
+--          Tests for collisions during crc in both normal gigabit 
+--           mode and burst gigabit mode
+-- � Tests for collisions during carrier extension in normal gigabit mode.
+-- � Tests for collisions during inter-packet gap (IPG) within a burst.
+-- � Tests for late collisions during carrier extension in burst gigabit mode.
+-- � Tests for collisions during padding in both normal gigabit mode and 
+--     burst gigabit mode.
+-- 
+-- Detailed Test Description
+-- -------------------------
+-- 
+-- In Normal Gigabit Mode:
+-- 1. Initialise the GEM for gigabit operation.
+-- 2. Transmit a minimum sized frame plus extension with a collision at 
+--     the beginning of preamble (2nd byte).
+-- 3. Transmit a minimum sized frame plus extension with a collision 
+--     towards the end of preamble (6th byte).
+-- 4. Transmit a minimum sized frame plus extension with a collision 
+--     in the  (8th byte) start of frame delimiter (SFD). 
+-- 5. Transmit a minimum sized frame plus extension with a collision 
+--     at the start of the carrier extension (64th byte).
+-- 6. Transmit a minimum sized frame plus extension with a collision 
+--     at the start of the carrier extension (65th byte).
+-- 7. Transmit a minimum sized frame plus extension with a collision 
+--     towards the end of the carrier extension (512th byte).
+-- 8. Transmit a minimum sized frame plus extension with a collision 
+--     in the beginning of the data portion of the frame (24th byte).
+-- 9. Transmit a minimum sized frame plus extension with a collision 
+--     towards the end of the data portion of the frame (58th byte).
+-- 10. Transmit a minimum sized frame with padding plus extension with 
+--      a collision at the start of the padding (36th byte).
+-- 11. Transmit a minimum sized frame with padding plus extension with 
+--      a collision towards the end of the padding (50th byte).
+-- 12. Transmit a minimum sized frame with extension with a collision at 
+--      the start of crc (61st byte).
+-- 13. Transmit a minimum sized frame with extension with a collision 
+--      towards the end the crc (63rd byte).
+--      
+-- In Burst Gigabit Mode:
+-- 14. In burst mode, transmit a minimum sized frame plus extension.  
+--      Then, transmit a minimum sized frame with a collision at the 
+--      beginning of preamble (2nd byte).
+-- 15. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision towards 
+--      the end of preamble (6th byte).
+-- 16. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision in the  
+--      (8th byte) start of frame delimiter (SFD).
+-- 17  In burst mode, transmit a minimum sized frame plus extension.
+--      Then, transmit a minimum sized frame plus extension with a collision 
+--      just before the start of the interframe gap (64th byte)
+-- 18. In burst mode, transmit a minimum sized frame plus extension 
+--      with a collision at the start of the interframe gap (65th byte).
+-- 19. In burst mode, transmit a minimum sized frame plus extension with 
+--      a collision towards the end of the frame extension (512th byte).
+-- 20. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision in the 
+--      beginning of the data portion of the frame (24th byte).
+-- 21. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision towards 
+--      the end of the data portion of the frame (58th byte).
+-- 22. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with padding with a collision 
+--      at the start of the padding (36th byte).
+-- 23. In burst mode, transmit a minimum sized frame. 
+--      Then, transmit a minimum sized frame with padding with a collision 
+--      towards the end of the padding (50th byte).
+-- 24. In burst mode, transmit a minimum sized frame with extension. 
+--      Then, transmit a minimum sized frame with a collision at the start 
+--      of crc (61st byte).
+-- 25. In burst mode, transmit a minimum sized frame with extension. 
+--      Then, transmit a minimum sized frame with a collision towards the 
+--      end the crc (63rd byte).
+-- 26. In burst mode, transmit a minimum sized frame with extension. 
+--      Then, transmit a collision between the first frame and second 
+--      frame (IFG). Finally, Transmit a minimum sized frame.
+-- 27. Check statistics
+--------------------------------------------------------------------------------
+
+wait_states 0
+bus_grant_delay 1
+
+--******************************************************************************
+-- Normal Gigabit Mode
+--******************************************************************************
+ 
+----------------------------------------
+-- 1. Initialise the GEM for gigabit operation.
+
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00280400  -- network config register - 1gig mode
+apbwr      00 00000008  -- write enable tx
+apbrdf     00 00000008  -- confirm tx enable (apb trigger to trigger FIFO)
+
+----------------------------------------
+-- 2. Transmit a minimum sized frame plus extension with a collision at 
+--     the beginning of preamble (2nd byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xf5bfb454' 
+-- dmard buf: '0xb1342850' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xc2fa34e829e7' multicast
+-- srcaddr:   '0xc1cb66235df9' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  f5bfb454    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+apbwr           00  00000408    -- write tx halt immediately keeping tx enabled
+                                -- this stops fetch of second frame
+
+-- read the first transmit queue descriptor
+dma_rd          f5bfb458    0000803c
+dma_rd          f5bfb454    b1342850
+
+-- read the transmit buffer
+dma_rd          b1342850    34e829e7
+dma_rd          b1342854    5df9c2fa
+dma_rd          b1342858    c1cb6623
+dma_rd          b134285c    bee62e00
+dma_rd          b1342860    7ce6e3b4
+dma_rd          b1342864    cac78af6
+dma_rd          b1342868    664c6bf8
+dma_rd          b134286c    bbe1c55d
+dma_rd          b1342870    5c3df84a
+dma_rd          b1342874    653b29dc
+dma_rd          b1342878    335cfa3b
+dma_rd          b134287c    39f433b7
+dma_rd          b1342880    6c48425e
+dma_rd          b1342884    d6fe24b7
+dma_rd          b1342888    9443b851
+dma_rd          b134288c    d6f5c255
+
+-- write back the first queue descriptors status
+--dma_wr          f5bfb458    8000803c
+-- write back blocked by collision
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xc2fa34e829e7' multicast
+-- srcaddr:  '0xc1cb66235df9' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x6c318434'
+
+txd         55x555555555555d5e7e7e7e7 -- collision
+
+-- re-read the transmit buffer
+dma_rd          b1342850    34e829e7
+dma_rd          b1342854    5df9c2fa
+dma_rd          b1342858    c1cb6623
+dma_rd          b134285c    bee62e00
+dma_rd          b1342860    7ce6e3b4
+dma_rd          b1342864    cac78af6
+dma_rd          b1342868    664c6bf8
+dma_rd          b134286c    bbe1c55d
+dma_rd          b1342870    5c3df84a
+dma_rd          b1342874    653b29dc
+dma_rd          b1342878    335cfa3b
+dma_rd          b134287c    39f433b7
+dma_rd          b1342880    6c48425e
+dma_rd          b1342884    d6fe24b7
+dma_rd          b1342888    9443b851
+dma_rd          b134288c    94483cf9
+
+-- write back the first queue descriptors status
+dma_wr          f5bfb458    8000803c
+
+txd         55555555555555d5e729e834fac2f95d2366cbc1002ee6be
+txd                         b4e3e67cf68ac7caf86b4c665dc5e1bb
+txd                         4af83d5cdc293b653bfa5c33b733f439
+txd                         5e42486cb724fed651b84394434813c6
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 2. complete - preamble collision"
+                        -- check interrupt status - receive complete
+apbrd      14 00000022  -- tx status - frame transmitted, always enabled
+apbwr      14 00000022  -- clear it
+apbrd      14 00000000  -- check it again - frame transmitted, always enabled
+
+-- check transmit statistics
+apbrd     100 00000040  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000001  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+----------------------------------------
+-- 3. Transmit a minimum sized frame plus extension with a collision 
+--     towards the end of preamble (6th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0x71cb81a4' 
+-- dmard buf: '0xd415ff60' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x72bbe365153d' multicast
+-- srcaddr:   '0xfc17b729c958' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  71cb81a4    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+apbwr           00  00000408    -- write tx halt immediately keeping tx enabled
+                                -- this stops fetch of second frame
+
+-- read the first transmit queue descriptor
+dma_rd          71cb81a8    0000803c
+dma_rd          71cb81a4    d415ff60
+
+-- read the transmit buffer
+dma_rd          d415ff60    e365153d
+dma_rd          d415ff64    c95872bb
+dma_rd          d415ff68    fc17b729
+dma_rd          d415ff6c    ad242e00
+dma_rd          d415ff70    7c16d7d3
+dma_rd          d415ff74    c7bac42c
+dma_rd          d415ff78    48eac1d1
+dma_rd          d415ff7c    eefc2451
+dma_rd          d415ff80    8898e16d
+dma_rd          d415ff84    52229531
+dma_rd          d415ff88    a76d62ea
+dma_rd          d415ff8c    2e84acbd
+dma_rd          d415ff90    fee9dea8
+dma_rd          d415ff94    dbdf76b7
+dma_rd          d415ff98    98acffda
+dma_rd          d415ff9c    765efccd
+
+-- write back the first queue descriptors status
+--dma_wr          71cb81a8    8000803c
+-- read back blocked by collision
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x72bbe365153d' multicast
+-- srcaddr:  '0xfc17b729c958' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x09d8facd'
+
+txd         555555x55555555d53d3d3d3d -- collision
+
+-- SCENARIO 3. complete - no interrupt is generated
+
+----------------------------------------
+-- 4. Transmit a minimum sized frame plus extension with a collision 
+--     in the  (8th byte) start of frame delimiter (SFD). 
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0x71cb81a4' 
+-- dmard buf: '0xd415ff60' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x412b4fe8b240' unicast
+-- srcaddr:   '0x549a9eb74f96' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the transmit buffer
+dma_rd          d415ff60    4fe8b240
+dma_rd          d415ff64    4f96412b
+dma_rd          d415ff68    549a9eb7
+dma_rd          d415ff6c    efb22e00
+dma_rd          d415ff70    dd6f3457
+dma_rd          d415ff74    ad9d3115
+dma_rd          d415ff78    f8fd25ef
+dma_rd          d415ff7c    947d5112
+dma_rd          d415ff80    7c9231f4
+dma_rd          d415ff84    ce21bc62
+dma_rd          d415ff88    4f55db2c
+dma_rd          d415ff8c    ba41b2f3
+dma_rd          d415ff90    2da77e4c
+dma_rd          d415ff94    727265e1
+dma_rd          d415ff98    6fa311cc
+dma_rd          d415ff9c    2d7d6f5e
+
+-- write back the first queue descriptors status
+--dma_wr          71cb81a8    8000803c
+-- write back blocked by collision
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x412b4fe8b240' unicast
+-- srcaddr:  '0x549a9eb74f96' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xddd9313d'
+
+txd        555555x55555555d540404040
+
+-- re-read the transmit buffer
+dma_rd          d415ff60    4fe8b240
+dma_rd          d415ff64    4f96412b
+dma_rd          d415ff68    549a9eb7
+dma_rd          d415ff6c    efb22e00
+dma_rd          d415ff70    dd6f3457
+dma_rd          d415ff74    ad9d3115
+dma_rd          d415ff78    f8fd25ef
+dma_rd          d415ff7c    947d5112
+dma_rd          d415ff80    7c9231f4
+dma_rd          d415ff84    ce21bc62
+dma_rd          d415ff88    4f55db2c
+dma_rd          d415ff8c    ba41b2f3
+dma_rd          d415ff90    2da77e4c
+dma_rd          d415ff94    727265e1
+dma_rd          d415ff98    6fa311cc
+dma_rd          d415ff9c    a41bbfd2
+
+-- write back the first queue descriptors status
+dma_wr          71cb81a8    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x412b4fe8b240' unicast
+-- srcaddr:  '0x549a9eb74f96' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xddd9313d'
+
+txd         55555555555555d540b2e84f2b41964fb79e9a54002eb2ef
+txd                         57346fdd15319dadef25fdf812517d94
+txd                         f431927c62bc21ce2cdb554ff3b241ba
+txd                         4c7ea72de1657272cc11a36fd3139ddd
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 4. complete - preamble collision"
+                        -- check interrupt status - receive complete
+apbrd      14 00000022  -- tx status - frame transmitted, always enabled
+apbwr      14 00000022  -- clear it
+apbrd      14 00000000  -- check it again - frame transmitted, always enabled
+
+-- check transmit statistics
+apbrd     100 00000040  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000001  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+----------------------------------------
+-- 5. Transmit a minimum sized frame plus extension with a collision 
+--     at the start of the carrier extension (64th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xcaf74454' 
+-- dmard buf: '0x672ed988' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xbf8549ae978f' multicast
+-- srcaddr:   '0xbff6e739b61e' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  caf74454    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+apbwr           00  00000408    -- write tx halt immediately keeping tx enabled
+                                -- this stops fetch of second frame
+
+-- read the first transmit queue descriptor
+dma_rd          caf74458    0000803c
+dma_rd          caf74454    672ed988
+
+-- read the transmit buffer
+dma_rd          672ed988    49ae978f
+dma_rd          672ed98c    b61ebf85
+dma_rd          672ed990    bff6e739
+dma_rd          672ed994    68612e00
+dma_rd          672ed998    e5afbfc2
+dma_rd          672ed99c    2681153b
+dma_rd          672ed9a0    57cfe517
+dma_rd          672ed9a4    42dadbfb
+dma_rd          672ed9a8    5e8fd1c8
+dma_rd          672ed9ac    28628463
+dma_rd          672ed9b0    a89a2632
+dma_rd          672ed9b4    942addc8
+dma_rd          672ed9b8    3e15a423
+dma_rd          672ed9bc    265b5fc5
+dma_rd          672ed9c0    6cdd3fb7
+dma_rd          672ed9c4    ae39f20d
+
+-- write back the first queue descriptors status
+--dma_wr          caf74458    8000803c
+-- write back blocked by collision
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xbf8549ae978f' multicast
+-- srcaddr:  '0xbff6e739b61e' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xcb0ce4d8'
+
+txd(60x)    55555555555555d58f97ae4985bf1eb639e7f6bf002e6168
+txd                         c2bfafe53b15812617e5cf57fbdbda42
+txd                         c8d18f5e6384622832269aa8c8dd2a94
+txd                         23a4153ec55f5b26b73fdd6c8d4ec0bc0d0d0d0d
+
+-- SCENARIO 5 complete - no interrupt generated
+
+----------------------------------------
+-- 6. Transmit a minimum sized frame plus extension with a collision 
+--     at the start of the carrier extension (65th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xcaf74454' 
+-- dmard buf: '0x672ed988' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x2fd1f3b264d6' unicast
+-- srcaddr:   '0xf4c19d32fe98' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the transmit buffer
+dma_rd          672ed988    f3b264d6
+dma_rd          672ed98c    fe982fd1
+dma_rd          672ed990    f4c19d32
+dma_rd          672ed994    49192e00
+dma_rd          672ed998    76886225
+dma_rd          672ed99c    7efa267c
+dma_rd          672ed9a0    f5115ab5
+dma_rd          672ed9a4    bf4c5f61
+dma_rd          672ed9a8    f82c8fb6
+dma_rd          672ed9ac    75ef128e
+dma_rd          672ed9b0    8c3c61c7
+dma_rd          672ed9b4    7259a7dd
+dma_rd          672ed9b8    2bd464a6
+dma_rd          672ed9bc    584a34cd
+dma_rd          672ed9c0    53afb6ec
+dma_rd          672ed9c4    72f1f662
+
+-- write back the first queue descriptors status
+--dma_wr          caf74458    8000803c
+-- write back blocked by collision
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x2fd1f3b264d6' unicast
+-- srcaddr:  '0xf4c19d32fe98' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x0ed047e0'
+
+txd(61x)    55555555555555d5d664b2f3d12f98fe329dc1f4002e1949
+txd                         256288767c26fa7eb55a11f5615f4cbf
+txd                         b68f2cf88e12ef75c7613c8cdda75972
+txd                         a664d42bcd344a58ecb6af530e740de0   --d6d6d6d6
+
+-- read the transmit buffer
+dma_rd          672ed988    f3b264d6
+dma_rd          672ed98c    fe982fd1
+dma_rd          672ed990    f4c19d32
+dma_rd          672ed994    49192e00
+dma_rd          672ed998    76886225
+dma_rd          672ed99c    7efa267c
+dma_rd          672ed9a0    f5115ab5
+dma_rd          672ed9a4    bf4c5f61
+dma_rd          672ed9a8    f82c8fb6
+dma_rd          672ed9ac    75ef128e
+dma_rd          672ed9b0    8c3c61c7
+dma_rd          672ed9b4    7259a7dd
+dma_rd          672ed9b8    2bd464a6
+dma_rd          672ed9bc    584a34cd
+dma_rd          672ed9c0    53afb6ec
+dma_rd          672ed9c4    58596125
+
+-- write back the first queue descriptors status
+dma_wr          caf74458    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x2fd1f3b264d6' unicast
+-- srcaddr:  '0xf4c19d32fe98' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x0ed047e0'
+
+txd         55555555555555d5d664b2f3d12f98fe329dc1f4002e1949
+txd                         256288767c26fa7eb55a11f5615f4cbf
+txd                         b68f2cf88e12ef75c7613c8cdda75972
+txd                         a664d42bcd344a58ecb6af530e740de0
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 6. complete - carrier extension collision"
+                        -- check interrupt status - receive complete
+apbrd      14 00000022  -- tx status - frame transmitted, always enabled
+apbwr      14 00000022  -- clear it
+apbrd      14 00000000  -- check it again - frame transmitted, always enabled
+
+-- check transmit statistics
+apbrd     100 00000040  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000001  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+----------------------------------------
+-- 7. Transmit a minimum sized frame plus extension with a collision 
+--     towards the end of the carrier extension (512th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xe9dbce38' 
+-- dmard buf: '0x2967be10' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x9ec7a642be5a' unicast
+-- srcaddr:   '0x1e4c845cf15c' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  e9dbce38    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+apbwr           00  00000408    -- write tx halt immediately keeping tx enabled
+                                -- this stops fetch of second frame
+
+-- read the first transmit queue descriptor
+dma_rd          e9dbce3c    0000803c
+dma_rd          e9dbce38    2967be10
+
+-- read the transmit buffer
+dma_rd          2967be10    a642be5a
+dma_rd          2967be14    f15c9ec7
+dma_rd          2967be18    1e4c845c
+dma_rd          2967be1c    293b2e00
+dma_rd          2967be20    f596249a
+dma_rd          2967be24    157d5c8e
+dma_rd          2967be28    738ed7a8
+dma_rd          2967be2c    718ae534
+dma_rd          2967be30    b7e6bb83
+dma_rd          2967be34    7573912e
+dma_rd          2967be38    9b8a47ae
+dma_rd          2967be3c    fbf3bed2
+dma_rd          2967be40    8ac59711
+dma_rd          2967be44    dece1e6b
+dma_rd          2967be48    df33fcca
+dma_rd          2967be4c    ec3bbbd5
+
+-- write back the first queue descriptors status
+dma_wr          e9dbce3c    8400803c
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x9ec7a642be5a' unicast
+-- srcaddr:  '0x1e4c845cf15c' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xcf9ab8ae'
+
+txd(504x)   55555555555555d55abe42a6c79e5cf15c844c1e002e3b29
+txd                         9a2496f58e5c7d15a8d78e7334e58a71
+txd                         83bbe6b72e917375ae478a9bd2bef3fb
+txd                         1197c58a6b1ecedecafc33dfea8ba9fc
+
+-- check status on reception of late collision interrupt
+apbrd(int) 24 00000020  "SCENARIO 7. COMPLETE - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000080  -- tx status - frame transmitted, always enabled
+apbwr      14 00000080  -- clear it
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000001  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+----------------------------------------
+-- 8. Transmit a minimum sized frame plus extension with a collision 
+--     in the beginning of the data portion of the frame (24th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xbd5bcda0' 
+-- dmard buf: '0xe62eb870' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x2a414c2df9d8' unicast
+-- srcaddr:   '0x97ae11d6e69a' 
+-- idfield:   '0x26f5'  typeid field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  bd5bcda0    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+apbwr           00  00000408    -- write tx halt immediately keeping tx enabled
+                                -- this stops fetch of second frame
+
+-- read the first transmit queue descriptor
+dma_rd          bd5bcda4    0000803c
+dma_rd          bd5bcda0    e62eb870
+
+-- read the transmit buffer
+dma_rd          e62eb870    4c2df9d8
+dma_rd          e62eb874    e69a2a41
+dma_rd          e62eb878    97ae11d6
+dma_rd          e62eb87c    92b4f526
+dma_rd          e62eb880    a7c7c293
+dma_rd          e62eb884    696d3c61
+dma_rd          e62eb888    7d893879
+dma_rd          e62eb88c    eab8e88d
+dma_rd          e62eb890    5127f3eb
+dma_rd          e62eb894    8443244c
+dma_rd          e62eb898    cd158253
+dma_rd          e62eb89c    d7ce6b47
+dma_rd          e62eb8a0    bda9ae66
+dma_rd          e62eb8a4    e45fe971
+dma_rd          e62eb8a8    de4161ee
+dma_rd          e62eb8ac    2e68a3d2
+
+-- write back the first queue descriptors status
+--dma_wr          bd5bcda4    8000803c
+-- write back is blocked by the collision
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x2a414c2df9d8' unicast
+-- srcaddr:  '0x97ae11d6e69a' 
+-- idfield:  '0x26f5'  typeid field
+-- data:      46 bytes
+-- crc:      '0x8ae5161b'
+
+txd(20x)    55555555555555d5d8f92d4c412a9ae6d611ae9726f5b492
+txd                         93c2c7a7613c6d6979797979
+
+----------------------------------------
+-- 9. Transmit a minimum sized frame plus extension with a collision 
+--     towards the end of the data portion of the frame (58th byte).
+
+-- read the transmit buffer
+dma_rd          e62eb870    ffffffff
+dma_rd          e62eb874    39dbffff
+dma_rd          e62eb878    8889645b
+dma_rd          e62eb87c    68dcbf22
+dma_rd          e62eb880    c676891d
+dma_rd          e62eb884    de298793
+dma_rd          e62eb888    69c7b23c
+dma_rd          e62eb88c    ccb1a5c6
+dma_rd          e62eb890    623ad8ed
+dma_rd          e62eb894    881ae8cf
+dma_rd          e62eb898    25f7c89b
+dma_rd          e62eb89c    47f9e8d9
+dma_rd          e62eb8a0    2ef7ca73
+dma_rd          e62eb8a4    947a9a81
+dma_rd          e62eb8a8    ee1282d5
+dma_rd          e62eb8ac    a4818934
+
+-- write back the first queue descriptors status
+--dma_wr          bd5bcda4    8000803c
+-- write back is blocked by the collision
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xffffffffffff' broadcast
+-- srcaddr:  '0x8889645b39db' 
+-- idfield:  '0x22bf'  typeid field
+-- data:      46 bytes
+-- crc:      '0x5dc0921a'
+
+txd(54x)    55555555555555d5ffffffffffffdb395b64898822bfdc68
+txd                         1d8976c6938729de3cb2c769c6a5b1cc
+txd                         edd83a62cfe81a889bc8f725d9e8f947
+txd                         73caf72e819a7a94d58212121212
+
+----------------------------------------
+-- 10. Transmit a minimum sized frame with padding plus extension with 
+--      a collision at the start of the padding (36th byte).
+
+-- read the transmit buffer
+dma_rd          e62eb870    ffffffff
+dma_rd          e62eb874    41b3ffff
+dma_rd          e62eb878    78a319b6
+dma_rd          e62eb87c    4bb72e00
+dma_rd          e62eb880    8b67a7e7
+dma_rd          e62eb884    4974abea
+dma_rd          e62eb888    9563c14a
+dma_rd          e62eb88c    f9369f6b
+dma_rd          e62eb890    73c687ba
+dma_rd          e62eb894    28d488e8
+dma_rd          e62eb898    57169552
+dma_rd          e62eb89c    265a8e45
+dma_rd          e62eb8a0    18a4175f
+dma_rd          e62eb8a4    b211efdb
+dma_rd          e62eb8a8    54f4b4c7
+dma_rd          e62eb8ac    6b6ee4f3
+
+-- write back the first queue descriptors status
+--dma_wr          bd5bcda4    8000803c
+-- write back is blocked by the collision
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xffffffffffff' broadcast
+-- srcaddr:  '0x78a319b641b3' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x1b5fbe85'
+
+txd(32x)    55555555555555d5ffffffffffffb341b619a378002eb74b
+txd                         e7a7678beaab74494ac163956b9f36f9
+txd                         ba87c673e8e8e8e8
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xbd5bcda0' 
+-- dmard buf: '0xe62eb870' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x7ce49958cb47' multicast
+-- srcaddr:   '0x316de11274e4' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- re-read the transmit buffer
+dma_rd          e62eb870    9958cb47
+dma_rd          e62eb874    74e47ce4
+dma_rd          e62eb878    316de112
+dma_rd          e62eb87c    d4a92e00
+dma_rd          e62eb880    d522a54e
+dma_rd          e62eb884    88f289d8
+dma_rd          e62eb888    3cd921c5
+dma_rd          e62eb88c    62ada3ca
+dma_rd          e62eb890    63335e12
+dma_rd          e62eb894    f85a8878
+dma_rd          e62eb898    48ddc518
+dma_rd          e62eb89c    2c1d6bef
+dma_rd          e62eb8a0    e958cc3a
+dma_rd          e62eb8a4    b3e4b5e2
+dma_rd          e62eb8a8    8ac9e4fb
+dma_rd          e62eb8ac    7b33fca4
+
+-- write back the first queue descriptors status
+dma_wr          bd5bcda4    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x7ce49958cb47' multicast
+-- srcaddr:  '0x316de11274e4' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x0d2329f0'
+
+txd         55555555555555d547cb5899e47ce47412e16d31002ea9d4
+txd                         4ea522d5d889f288c521d93ccaa3ad62
+txd                         125e336378885af818c5dd48ef6b1d2c
+txd                         3acc58e9e2b5e4b3fbe4c98a0f9232d0
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 10. complete - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000022  -- tx status - frame transmitted
+apbwr      14 00000022  -- clear it
+apbrd      14 00000000  -- check it again - frame transmitted, always enabled
+
+-- check transmit statistics
+apbrd     100 00000040  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000001  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+----------------------------------------
+-- 11. Transmit a minimum sized frame with padding plus extension with 
+--      a collision towards the end of the padding (50th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xf62b67c0' 
+-- dmard buf: '0xa9db19a8' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x9819a76c4f84' unicast
+-- srcaddr:   '0xd714bff54ca4' 
+-- idfield:   '0x925f'  typeid field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  f62b67c0    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+apbwr           00  00000408    -- write tx halt immediately keeping tx enabled
+                                -- this stops fetch of second frame
+
+-- read the first transmit queue descriptor
+dma_rd          f62b67c4    0000803c
+dma_rd          f62b67c0    a9db19a8
+
+-- read the transmit buffer
+dma_rd          a9db19a8    a76c4f84
+dma_rd          a9db19ac    4ca49819
+dma_rd          a9db19b0    d714bff5
+dma_rd          a9db19b4    36925f92
+dma_rd          a9db19b8    bb974b6b
+dma_rd          a9db19bc    d1d45833
+dma_rd          a9db19c0    3ffffafd
+dma_rd          a9db19c4    5ee7ee86
+dma_rd          a9db19c8    668ace86
+dma_rd          a9db19cc    45c334f1
+dma_rd          a9db19d0    d16a9ba8
+dma_rd          a9db19d4    ce55d56d
+dma_rd          a9db19d8    6f34ea1b
+dma_rd          a9db19dc    36751424
+dma_rd          a9db19e0    2612eb48
+dma_rd          a9db19e4    b451a537
+
+-- write back the first queue descriptors status
+--dma_wr          f62b67c4    8000803c
+-- write back is blocked by the collision
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x9819a76c4f84' unicast
+-- srcaddr:  '0xd714bff54ca4' 
+-- idfield:  '0x925f'  typeid field
+-- data:      46 bytes
+-- crc:      '0xe7737dca'
+
+txd(46x)    55555555555555d5844f6ca71998a44cf5bf14d7925f9236
+txd                         6b4b97bb3358d4d1fdfaff3f86eee75e
+txd                         86ce8a66f134c345a89b6ad16dd555ce
+txd                         1bea34343434
+
+----------------------------------------
+-- 12. Transmit a minimum sized frame with extension with a collision at 
+--      the start of crc (61st byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xf62b67c0' 
+-- dmard buf: '0xa9db19a8' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x2ef7ac6a4198' unicast
+-- srcaddr:   '0x26a6eecf4db2' 
+-- idfield:   '0xfdec'  typeid field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the transmit buffer
+dma_rd          a9db19a8    ac6a4198
+dma_rd          a9db19ac    4db22ef7
+dma_rd          a9db19b0    26a6eecf
+dma_rd          a9db19b4    d681ecfd
+dma_rd          a9db19b8    a9872e6f
+dma_rd          a9db19bc    bc792316
+dma_rd          a9db19c0    d51e8aa8
+dma_rd          a9db19c4    3fc87137
+dma_rd          a9db19c8    fa57bcf3
+dma_rd          a9db19cc    7fb22942
+dma_rd          a9db19d0    eb9ca5f5
+dma_rd          a9db19d4    98c25671
+dma_rd          a9db19d8    5a21735e
+dma_rd          a9db19dc    b5aeb37a
+dma_rd          a9db19e0    ebee7666
+dma_rd          a9db19e4    4e18e666
+
+-- write back the first queue descriptors status
+--dma_wr          f62b67c4    8000803c
+-- write back is blocked by the collision
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x2ef7ac6a4198' unicast
+-- srcaddr:  '0x26a6eecf4db2' 
+-- idfield:  '0xfdec'  typeid field
+-- data:      46 bytes
+-- crc:      '0x4e312945'
+
+txd(57x)    55555555555555d598416aacf72eb24dcfeea626fdec81d6
+txd                         6f2e87a9162379bca88a1ed53771c83f
+txd                         f3bc57fa4229b27ff5a59ceb7156c298
+txd                         5e73215a7ab3aeb56676eeeb5466666666
+
+----------------------------------------
+-- 13. Transmit a minimum sized frame with extension with a collision 
+--      towards the end the crc (63rd byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xf62b67c0' 
+-- dmard buf: '0xa9db19a8' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xfe644c17358c' unicast
+-- srcaddr:   '0x278efcb8ed73' 
+-- idfield:   '0x58cd'  typeid field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the transmit buffer
+dma_rd          a9db19a8    4c17358c
+dma_rd          a9db19ac    ed73fe64
+dma_rd          a9db19b0    278efcb8
+dma_rd          a9db19b4    b8aecd58
+dma_rd          a9db19b8    d9ac9fdf
+dma_rd          a9db19bc    6c55d472
+dma_rd          a9db19c0    1baf751d
+dma_rd          a9db19c4    41fad86d
+dma_rd          a9db19c8    9e3fb66d
+dma_rd          a9db19cc    75dae138
+dma_rd          a9db19d0    8f3eee8f
+dma_rd          a9db19d4    afa9d32e
+dma_rd          a9db19d8    77a49c1c
+dma_rd          a9db19dc    5a929c26
+dma_rd          a9db19e0    c2b347e2
+dma_rd          a9db19e4    52c512bd
+
+-- write back the first queue descriptors status
+--dma_wr          f62b67c4    8000803c
+-- write back blocked by the collision
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xfe644c17358c' unicast
+-- srcaddr:  '0x278efcb8ed73' 
+-- idfield:  '0x58cd'  typeid field
+-- data:      46 bytes
+-- crc:      '0xa88d7ebf'
+
+txd(59x)    55555555555555d58c35174c64fe73edb8fc8e2758cdaeb8
+txd                         df9facd972d4556c1d75af1b6dd8fa41
+txd                         6db63f9e38e1da758fee3e8f2ed3a9af
+txd                         1c9ca477269c925ae247b3c2fbe7d8bdbdbdbd
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xf62b67c0' 
+-- dmard buf: '0xa9db19a8' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x41b815e82f12' unicast
+-- srcaddr:   '0x38bbf79e2a5e' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the transmit buffer
+dma_rd          a9db19a8    15e82f12
+dma_rd          a9db19ac    2a5e41b8
+dma_rd          a9db19b0    38bbf79e
+dma_rd          a9db19b4    da352e00
+dma_rd          a9db19b8    3a883ecd
+dma_rd          a9db19bc    6c224d43
+dma_rd          a9db19c0    93624d38
+dma_rd          a9db19c4    8e6dcf1d
+dma_rd          a9db19c8    75c4fb41
+dma_rd          a9db19cc    9e4e65b7
+dma_rd          a9db19d0    822e8c5e
+dma_rd          a9db19d4    3622da4f
+dma_rd          a9db19d8    55db7ff5
+dma_rd          a9db19dc    ea775567
+dma_rd          a9db19e0    6244ebeb
+dma_rd          a9db19e4    fcde264e
+
+-- write back the first queue descriptors status
+dma_wr          f62b67c4    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x41b815e82f12' unicast
+-- srcaddr:  '0x38bbf79e2a5e' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x1f77d042'
+
+txd         55555555555555d5122fe815b8415e2a9ef7bb38002e35da
+txd                         cd3e883a434d226c384d62931dcf6d8e
+txd                         41fbc475b7654e9e5e8c2e824fda2236
+txd                         f57fdb55675577eaebeb4462240d77f1
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 13. complete - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000022  -- tx status - frame transmitted
+apbwr      14 00000022  -- clear it
+apbrd      14 00000000  -- check it again - frame transmitted, always enabled
+
+-- check transmit statistics
+apbrd     100 00000040  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000001  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+--******************************************************************************
+-- Burst Gigabit Mode
+--******************************************************************************
+
+----------------------------------------
+-- 14. In burst mode, transmit a minimum sized frame plus extension.  
+--      Then, transmit a minimum sized frame with a collision at the 
+--      beginning of preamble (2nd byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0x19457930' 
+-- dmard buf: '0xcc6d1470' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x91cd4d1df86f' multicast
+-- srcaddr:   '0xbc41673b1a4a' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  19457930    -- set address of the transmit queue descriptor
+apbrd           1c  19457930    -- check address
+apbwr           00  00000208    -- write tx_go and enable tx
+
+-- read the first transmit queue descriptor
+dma_rd          19457934    0000803c
+dma_rd          19457930    cc6d1470
+
+-- read the transmit buffer
+dma_rd          cc6d1470    4d1df86f
+dma_rd          cc6d1474    1a4a91cd
+dma_rd          cc6d1478    bc41673b
+dma_rd          cc6d147c    387a2e00
+dma_rd          cc6d1480    e6ada946
+dma_rd          cc6d1484    be3d5ed9
+dma_rd          cc6d1488    9817a79a
+dma_rd          cc6d148c    a83b6c7f
+dma_rd          cc6d1490    2a5fcdb6
+dma_rd          cc6d1494    3597b96f
+dma_rd          cc6d1498    464e12d6
+dma_rd          cc6d149c    59314d48
+dma_rd          cc6d14a0    33b558ef
+dma_rd          cc6d14a4    1d6f8983
+dma_rd          cc6d14a8    51d3834b
+dma_rd          cc6d14ac    d53abf3e
+
+-- write back the first queue descriptors status
+dma_wr          19457934    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x91cd4d1df86f' multicast
+-- srcaddr:  '0xbc41673b1a4a' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x36d07f61'
+
+txd(r)      55555555555555d56ff81d4dcd914a1a3b6741bc002e7a38
+txd                         46a9ade6d95e3dbe9aa717987f6c3ba8
+txd                         b6cd5f2a6fb99735d6124e46484d3159
+txd                         ef58b53383896f1d4b83d35116f70d63
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0x19457938' 
+-- dmard buf: '0xce469480' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xdbc35195da16' unicast
+-- srcaddr:   '0x39fcb253ef72' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the first transmit queue descriptor
+dma_rd          1945793c    0000803c
+dma_rd          19457938    ce469480
+
+-- read the transmit buffer
+dma_rd          ce469480    5195da16
+dma_rd          ce469484    ef72dbc3
+dma_rd          ce469488    39fcb253
+dma_rd          ce46948c    1a8c2e00
+dma_rd          ce469490    a1fa69f9
+dma_rd          ce469494    94acf336
+dma_rd          ce469498    2cd81e87
+dma_rd          ce46949c    ec11c5a4
+dma_rd          ce4694a0    addda449
+dma_rd          ce4694a4    f2d362ca
+dma_rd          ce4694a8    cef485b8
+dma_rd          ce4694ac    c63a85aa
+dma_rd          ce4694b0    6dfdf6ce
+dma_rd          ce4694b4    9618e596
+dma_rd          ce4694b8    ad153cdf
+dma_rd          ce4694bc    38a11557
+
+-- write back the first queue descriptors status
+dma_wr          1945793c    8400803c
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xdbc35195da16' unicast
+-- srcaddr:  '0x39fcb253ef72' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x11844af2'
+
+txd         55x555555555555d516161616
+
+-- pre-read the next transmit queue descriptor
+dma_rd          19457944    0000803c
+dma_rd          19457940    48c6e490
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 14. ongoing - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000020  "SCENARIO 14. complete - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000080  -- tx status - frame transmitted
+apbwr      14 00000080  -- clear it
+apbrd      14 00000000  -- check it again
+
+----------------------------------------
+-- 15. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision towards 
+--      the end of preamble (6th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xda1425d0' 
+-- dmard buf: '0xb32167c0' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xbc276623727e' unicast
+-- srcaddr:   '0xbf8bf1ec555a' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  da1425d0    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+
+-- read the first transmit queue descriptor
+dma_rd          da1425d4    0000803c
+dma_rd          da1425d0    b32167c0
+
+-- read the transmit buffer
+dma_rd          b32167c0    6623727e
+dma_rd          b32167c4    555abc27
+dma_rd          b32167c8    bf8bf1ec
+dma_rd          b32167cc    1ae72e00
+dma_rd          b32167d0    baf1329a
+dma_rd          b32167d4    3983fc8f
+dma_rd          b32167d8    b154bf43
+dma_rd          b32167dc    ec1318f1
+dma_rd          b32167e0    c94bec45
+dma_rd          b32167e4    ccb155ce
+dma_rd          b32167e8    c3961957
+dma_rd          b32167ec    cd6a9ce6
+dma_rd          b32167f0    9bba831c
+dma_rd          b32167f4    4f2b3724
+dma_rd          b32167f8    833f2dff
+dma_rd          b32167fc    52e82f9e
+
+-- write back the first queue descriptors status
+dma_wr          da1425d4    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xbc276623727e' unicast
+-- srcaddr:  '0xbf8bf1ec555a' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xd18a14a0'
+
+txd(r)      55555555555555d57e72236627bc5a55ecf18bbf002ee71a
+txd                         9a32f1ba8ffc833943bf54b1f11813ec
+txd                         45ec4bc9ce55b1cc571996c3e69c6acd
+txd                         1c83ba9b24372b4fff2d3f830a41a81d
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xde52d424' 
+-- dmard buf: '0x79681f20' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xfd4da97861ee' unicast
+-- srcaddr:   '0x869f3bba6d95' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the first transmit queue descriptor
+dma_rd          da1425dc    0000803c
+dma_rd          da1425d8    79681f20
+
+-- read the transmit buffer
+dma_rd          79681f20    a97861ee
+dma_rd          79681f24    6d95fd4d
+dma_rd          79681f28    869f3bba
+dma_rd          79681f2c    36de2e00
+dma_rd          79681f30    44f7c81f
+dma_rd          79681f34    434c78c2
+dma_rd          79681f38    c745fca9
+dma_rd          79681f3c    d62bc2af
+dma_rd          79681f40    11c2d433
+dma_rd          79681f44    58bb3e28
+dma_rd          79681f48    5866dd78
+dma_rd          79681f4c    32a6f5f6
+dma_rd          79681f50    f4fac875
+dma_rd          79681f54    4beefc67
+dma_rd          79681f58    97e35d2d
+dma_rd          79681f5c    b88fa8de
+
+-- write back the first queue descriptors status
+dma_wr          da1425dc    8400803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xfd4da97861ee' unicast
+-- srcaddr:  '0x869f3bba6d95' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xc8575952'
+
+txd         555555x55555555d5eeeeeeee
+
+-- pre-read the next transmit queue descriptor
+dma_rd          da1425e4    0000803c
+dma_rd          da1425e0    1f789620
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 15. ongoing - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000020  "SCENARIO 15. complete - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000080  -- tx status - frame transmitted
+apbwr      14 00000080  -- clear it
+apbrd      14 00000000  -- check it again
+
+----------------------------------------
+-- 16. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision in the  
+--      (8th byte) start of frame delimiter (SFD).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xd8273a64' 
+-- dmard buf: '0x4539afa0' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xffffffffffff' broadcast
+-- srcaddr:   '0xab7ac7cf9581' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  d8273a64    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+
+-- read the first transmit queue descriptor
+dma_rd          d8273a68    0000803c
+dma_rd          d8273a64    4539afa0
+
+-- read the transmit buffer
+dma_rd          4539afa0    ffffffff
+dma_rd          4539afa4    9581ffff
+dma_rd          4539afa8    ab7ac7cf
+dma_rd          4539afac    646b2e00
+dma_rd          4539afb0    d524ff1f
+dma_rd          4539afb4    31b6488e
+dma_rd          4539afb8    14b1ba34
+dma_rd          4539afbc    937cfbf4
+dma_rd          4539afc0    8976d8f4
+dma_rd          4539afc4    e8a57476
+dma_rd          4539afc8    81346cc8
+dma_rd          4539afcc    c2b7b565
+dma_rd          4539afd0    43381f9c
+dma_rd          4539afd4    e7ca34f1
+dma_rd          4539afd8    259a4493
+dma_rd          4539afdc    427994ba
+
+-- write back the first queue descriptors status
+dma_wr          d8273a68    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xffffffffffff' broadcast
+-- srcaddr:  '0xab7ac7cf9581' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x94327085'
+
+txd(r)      55555555555555d5ffffffffffff8195cfc77aab002e6b64
+txd                         1fff24d58e48b63134bab114f4fb7c93
+txd                         f4d876897674a5e8c86c348165b5b7c2
+txd                         9c1f3843f134cae793449a2558072349
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xd8273a6c' 
+-- dmard buf: '0xa1e926a8' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x94489f572bb6' unicast
+-- srcaddr:   '0xa126b1e4aedb' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the first transmit queue descriptor
+dma_rd          d8273a70    0000803c
+dma_rd          d8273a6c    a1e926a8
+
+-- read the transmit buffer
+dma_rd          a1e926a8    9f572bb6
+dma_rd          a1e926ac    aedb9448
+dma_rd          a1e926b0    a126b1e4
+dma_rd          a1e926b4    72a92e00
+dma_rd          a1e926b8    fec683a5
+dma_rd          a1e926bc    4d3a1a47
+dma_rd          a1e926c0    548e2d81
+dma_rd          a1e926c4    3bae9352
+dma_rd          a1e926c8    84f9fbdf
+dma_rd          a1e926cc    7c7ad37c
+dma_rd          a1e926d0    8f4f3119
+dma_rd          a1e926d4    37ee223b
+dma_rd          a1e926d8    a4199caf
+dma_rd          a1e926dc    7237d9f2
+dma_rd          a1e926e0    c91ca1c3
+dma_rd          a1e926e4    e88e56c7
+
+-- write back the first queue descriptors status
+dma_wr          d8273a70    8400803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x94489f572bb6' unicast
+-- srcaddr:  '0xa126b1e4aedb' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x93eda3f4'
+
+txd         555555x55555555d5b6b6b6b6
+
+-- pre-read the next transmit queue descriptor
+dma_rd          d8273a78    0000803c
+dma_rd          d8273a74    16aea928
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 16. ongoing - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000020  "SCENARIO 16. complete - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000080  -- tx status - frame transmitted
+apbwr      14 00000080  -- clear it
+apbrd      14 00000000  -- check it again
+
+----------------------------------------
+-- 17. In burst mode, transmit a minimum sized frame plus extension.
+--      Then, transmit a minimum sized frame plus extension with a collision 
+--      just before the start of the interframe gap (64th byte)
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xc453928c' 
+-- dmard buf: '0x45b27db0' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x4dfc2145ed40' unicast
+-- srcaddr:   '0xd7f1ad64556b' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  c453928c    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+
+-- read the first transmit queue descriptor
+dma_rd          c4539290    0000803c
+dma_rd          c453928c    45b27db0
+
+-- read the transmit buffer
+dma_rd          45b27db0    2145ed40
+dma_rd          45b27db4    556b4dfc
+dma_rd          45b27db8    d7f1ad64
+dma_rd          45b27dbc    7bdc2e00
+dma_rd          45b27dc0    22bf9a6f
+dma_rd          45b27dc4    5acb3159
+dma_rd          45b27dc8    d8f7cafd
+dma_rd          45b27dcc    8a2299fc
+dma_rd          45b27dd0    1a9f6622
+dma_rd          45b27dd4    9cec484f
+dma_rd          45b27dd8    a94e4e52
+dma_rd          45b27ddc    a4d41ec7
+dma_rd          45b27de0    bf2e37c7
+dma_rd          45b27de4    c58a62ca
+dma_rd          45b27de8    f5836a23
+dma_rd          45b27dec    f84f641d
+
+-- write back the first queue descriptors status
+dma_wr          c4539290    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x4dfc2145ed40' unicast
+-- srcaddr:  '0xd7f1ad64556b' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xe08a3a43'
+
+txd(r)      55555555555555d540ed4521fc4d6b5564adf1d7002edc7b
+txd                         6f9abf225931cb5afdcaf7d8fc99228a
+txd                         22669f1a4f48ec9c524e4ea9c71ed4a4
+txd                         c7372ebfca628ac5236a83f534a3a80e
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xc453928c' 
+-- dmard buf: '0xb7192630' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xfef62bf189bf' multicast
+-- srcaddr:   '0xb579b83de6eb' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the first transmit queue descriptor
+dma_rd          c4539298    0000803c
+dma_rd          c4539294    b7192630
+
+-- read the transmit buffer
+dma_rd          b7192630    2bf189bf
+dma_rd          b7192634    e6ebfef6
+dma_rd          b7192638    b579b83d
+dma_rd          b719263c    8d8c2e00
+dma_rd          b7192640    67c9c74e
+dma_rd          b7192644    4b56975a
+dma_rd          b7192648    c8517579
+dma_rd          b719264c    5423eff5
+dma_rd          b7192650    ae51a3f9
+dma_rd          b7192654    68875ca7
+dma_rd          b7192658    5455b437
+dma_rd          b719265c    14fc1381
+dma_rd          b7192660    8bb9d365
+dma_rd          b7192664    346a7eb8
+dma_rd          b7192668    1574a8cf
+dma_rd          b719266c    b2a6dd22
+
+-- write back the first queue descriptors status
+dma_wr          c4539298    8400803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xfef62bf189bf' multicast
+-- srcaddr:  '0xb579b83de6eb' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x47ffa5e0'
+
+txd(60x)    55555555555555d5bf89f12bf6feebe63db879b5002e8c8d
+txd                         4ec7c9675a97564b797551c8f5ef2354
+txd                         f9a351aea75c876837b455548113fc14
+txd                         65d3b98bb87e6a34cfa874150e5aff7464646464
+
+-- pre-read the next transmit queue descriptor
+dma_rd          c45392a0    0000803c
+dma_rd          c453929c    b2a7baf0
+
+-- pre-read the next transmit buffer
+dma_rd          b2a7baf0    59917264
+dma_rd          b2a7baf4    4dd8479a
+dma_rd          b2a7baf8    8fcafefa
+dma_rd          b2a7bafc    9f342e00
+dma_rd          b2a7bb00    cffd337d
+dma_rd          b2a7bb04    8f8caff7
+dma_rd          b2a7bb08    67564861
+dma_rd          b2a7bb0c    3dbb8b69
+dma_rd          b2a7bb10    3554a6d5
+dma_rd          b2a7bb14    9ca58c13
+dma_rd          b2a7bb18    13484b72
+dma_rd          b2a7bb1c    ee9a63d7
+dma_rd          b2a7bb20    43d1dcce
+dma_rd          b2a7bb24    86a69bea
+dma_rd          b2a7bb28    21b7a525
+dma_rd          b2a7bb2c    23249591
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 17. ongoing - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000020  "SCENARIO 17. complete - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000080  -- tx status - frame transmitted
+apbwr      14 00000080  -- clear it
+apbrd      14 00000000  -- check it again
+
+----------------------------------------
+-- 18. In burst mode, transmit a minimum sized frame plus extension 
+--      with a collision at the start of the interframe gap (65th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0x25c62d80' 
+-- dmard buf: '0xb7c88cd0' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x4d82c37288e4' unicast
+-- srcaddr:   '0x1b4f673fb6fb' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  25c62d80    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+
+-- read the first transmit queue descriptor
+dma_rd          25c62d84    0000803c
+dma_rd          25c62d80    b7c88cd0
+
+-- read the transmit buffer
+dma_rd          b7c88cd0    c37288e4
+dma_rd          b7c88cd4    b6fb4d82
+dma_rd          b7c88cd8    1b4f673f
+dma_rd          b7c88cdc    89b12e00
+dma_rd          b7c88ce0    65283cfe
+dma_rd          b7c88ce4    89394cab
+dma_rd          b7c88ce8    41f19126
+dma_rd          b7c88cec    72fb2b7c
+dma_rd          b7c88cf0    328783c5
+dma_rd          b7c88cf4    82179138
+dma_rd          b7c88cf8    effe38f1
+dma_rd          b7c88cfc    2351bf51
+dma_rd          b7c88d00    8cc3ce56
+dma_rd          b7c88d04    44245ae8
+dma_rd          b7c88d08    a5da7b18
+dma_rd          b7c88d0c    5771a2a4
+
+-- write back the first queue descriptors status
+dma_wr          25c62d84    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x4d82c37288e4' unicast
+-- srcaddr:  '0x1b4f673fb6fb' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x1a5fbc40'
+
+txd(r)      55555555555555d5e48872c3824dfbb63f674f1b002eb189
+txd                         fe3c2865ab4c39892691f1417c2bfb72
+txd                         c583873238911782f138feef51bf5123
+txd                         56cec38ce85a2444187bdaa504cbf5a1
+
+-- transmit a 46 (0x2e) byte frame:
+-- txdqd:     '0x25c62d88' 
+-- dmard buf: '0xd7a6f3f0' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xd9fa85d13f77' multicast
+-- srcaddr:   '0xe6af2fcb7214' 
+-- idfield:   '0x001c'  length field
+-- data:       28 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the first transmit queue descriptor
+dma_rd          25c62d8c    0000802a
+dma_rd          25c62d88    d7a6f3f0
+
+-- read the transmit buffer
+dma_rd          d7a6f3f0    85d13f77
+dma_rd          d7a6f3f4    7214d9fa
+dma_rd          d7a6f3f8    e6af2fcb
+dma_rd          d7a6f3fc    423b1c00
+dma_rd          d7a6f400    e99be55d
+dma_rd          d7a6f404    b797ea74
+dma_rd          d7a6f408    7f75ed56
+dma_rd          d7a6f40c    cd491f4f
+dma_rd          d7a6f410    afa732cf
+dma_rd          d7a6f414    cedab768
+dma_rd          d7a6f418    00008895
+dma_rd          d7a6f41c    d3ad2952
+
+-- write back the first queue descriptors status
+dma_wr          25c62d8c    8000802a
+
+
+-- check the 46 (0x2e) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xd9fa85d13f77' multicast
+-- srcaddr:  '0xe6af2fcb7214' 
+-- idfield:  '0x001c'  length field
+-- data:      28 bytes
+-- crc:      '0x761fc32a'
+
+txd(61x)    55555555555555d5773fd185fad91472cb2fafe6001c3b42
+txd                         5de59be974ea97b756ed757f4f1f49cd
+txd                         cf32a7af68b7dace9588000000000000
+txd                         000000000000000000000000a23cf167
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0x25c62d90' 
+-- dmard buf: '0xb62c3eb0' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xffffffffffff' broadcast
+-- srcaddr:   '0x896f5cf458a2' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the first transmit queue descriptor
+dma_rd          25c62d94    0000803c
+dma_rd          25c62d90    b62c3eb0
+
+-- read the transmit buffer
+dma_rd          b62c3eb0    ffffffff
+dma_rd          b62c3eb4    58a2ffff
+dma_rd          b62c3eb8    896f5cf4
+dma_rd          b62c3ebc    f9482e00
+dma_rd          b62c3ec0    79e5e5ac
+dma_rd          b62c3ec4    f42159b4
+dma_rd          b62c3ec8    f4ac5e59
+dma_rd          b62c3ecc    f1f61f97
+dma_rd          b62c3ed0    25521aac
+dma_rd          b62c3ed4    dee87f6d
+dma_rd          b62c3ed8    efcc7fb9
+dma_rd          b62c3edc    766291f2
+dma_rd          b62c3ee0    d6e3b6e8
+dma_rd          b62c3ee4    1a7d762c
+dma_rd          b62c3ee8    eddaccc1
+dma_rd          b62c3eec    7e4745bf
+
+-- write back the first queue descriptors status
+dma_wr          25c62d94    8400803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xffffffffffff' broadcast
+-- srcaddr:  '0x896f5cf458a2' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xb3cf5d55'
+
+--txd         55555555555555d5ffffffffffffa258f45c6f89002e48f9
+--txd                         ace5e579b45921f4595eacf4971ff6f1
+--txd                         ac1a52256d7fe8deb97fcceff2916276
+--txd                         e8b6e3d62c767d1ac1ccdaed55d5fc3b
+-- transmission is blocked by late collision in previous frame
+
+-- pre-read the next transmit queue descriptor
+dma_rd          25c62d9c    0000803c
+dma_rd          25c62d98    c3b602eb
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 18. ongoing - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 18. ongoing - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000020  "SCENARIO 18. complete - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000080  -- tx status - frame transmitted
+apbwr      14 00000080  -- clear it
+apbrd      14 00000000  -- check it again
+
+----------------------------------------
+-- 19. In burst mode, transmit a minimum sized frame plus extension with 
+--      a collision towards the end of the frame extension (512th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xfca78158' 
+-- dmard buf: '0xbea15e78' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x17de9339ea3a' unicast
+-- srcaddr:   '0x53434752286c' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  fca78158    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+
+-- read the first transmit queue descriptor
+dma_rd          fca7815c    0000803c
+dma_rd          fca78158    bea15e78
+
+-- read the transmit buffer
+dma_rd          bea15e78    9339ea3a
+dma_rd          bea15e7c    286c17de
+dma_rd          bea15e80    53434752
+dma_rd          bea15e84    a5dd2e00
+dma_rd          bea15e88    53691f46
+dma_rd          bea15e8c    ef23a7b7
+dma_rd          bea15e90    dce612ed
+dma_rd          bea15e94    1edc7921
+dma_rd          bea15e98    c346e9d9
+dma_rd          bea15e9c    31512d96
+dma_rd          bea15ea0    9c1e2287
+dma_rd          bea15ea4    24ef2295
+dma_rd          bea15ea8    74b4e579
+dma_rd          bea15eac    276186a5
+dma_rd          bea15eb0    7db86d81
+dma_rd          bea15eb4    b5bdefd4
+
+-- write back the first queue descriptors status
+dma_wr          fca7815c    8400803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x17de9339ea3a' unicast
+-- srcaddr:  '0x53434752286c' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x8bb8392d'
+
+txd(504x)   55555555555555d53aea3993de176c2852474353002edda5
+txd                         461f6953b7a723efed12e6dc2179dc1e
+txd                         d9e946c3962d513187221e9c9522ef24
+txd                         79e5b474a5866127816db87dd2938bb8
+
+-- pre-read the next transmit queue descriptor
+dma_rd          fca78164    0000803c
+dma_rd          fca78160    97344260
+
+-- pre-read the next transmit buffer
+dma_rd          97344260    48f8bf74
+dma_rd          97344264    35aa59fe
+dma_rd          97344268    58be216d
+dma_rd          9734426c    74f72e00
+dma_rd          97344270    1dfd3394
+dma_rd          97344274    275aea2a
+dma_rd          97344278    bc9166cc
+dma_rd          9734427c    d9ddd218
+dma_rd          97344280    fee15b2c
+dma_rd          97344284    17e6ded6
+dma_rd          97344288    56c39efd
+dma_rd          9734428c    9719d4e4
+dma_rd          97344290    9df72141
+dma_rd          97344294    9674969b
+dma_rd          97344298    227e47a9
+dma_rd          9734429c    d824f573
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000020  "SCENARIO 19. complete - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000080  -- tx status - frame transmitted
+apbwr      14 00000080  -- clear it
+apbrd      14 00000000  -- check it again
+
+----------------------------------------
+-- 20. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision in the 
+--      beginning of the data portion of the frame (24th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0x2a5a73e8' 
+-- dmard buf: '0xeaacd1d8' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x7dcca63ee458' unicast
+-- srcaddr:   '0x5e47e69dc936' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  2a5a73e8    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+
+-- read the first transmit queue descriptor
+dma_rd          2a5a73ec    0000803c
+dma_rd          2a5a73e8    eaacd1d8
+
+-- read the transmit buffer
+dma_rd          eaacd1d8    a63ee458
+dma_rd          eaacd1dc    c9367dcc
+dma_rd          eaacd1e0    5e47e69d
+dma_rd          eaacd1e4    e6d62e00
+dma_rd          eaacd1e8    98b89246
+dma_rd          eaacd1ec    61e632e2
+dma_rd          eaacd1f0    87818472
+dma_rd          eaacd1f4    c5926eaa
+dma_rd          eaacd1f8    5a159df1
+dma_rd          eaacd1fc    94ccb726
+dma_rd          eaacd200    f5626973
+dma_rd          eaacd204    6f7478bb
+dma_rd          eaacd208    694e4ef4
+dma_rd          eaacd20c    a3c43f91
+dma_rd          eaacd210    4ea2c21b
+dma_rd          eaacd214    24d7d561
+
+-- write back the first queue descriptors status
+dma_wr          2a5a73ec    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x7dcca63ee458' unicast
+-- srcaddr:  '0x5e47e69dc936' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xffd2d0cc'
+
+txd(r)      55555555555555d558e43ea6cc7d36c99de6475e002ed6e6
+txd                         4692b898e232e66172848187aa6e92c5
+txd                         f19d155a26b7cc94736962f5bb78746f
+txd                         f44e4e69913fc4a31bc2a24ecc0d2dff
+
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0x2a5a73f0' 
+-- dmard buf: '0xe21f5628' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x25ba5285ff88' unicast
+-- srcaddr:   '0x15eb7b35ef26' 
+-- idfield:   '0xd32c'  typeid field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the first transmit queue descriptor
+dma_rd          2a5a73f4    0000803c
+dma_rd          2a5a73f0    e21f5628
+
+-- read the transmit buffer
+dma_rd          e21f5628    5285ff88
+dma_rd          e21f562c    ef2625ba
+dma_rd          e21f5630    15eb7b35
+dma_rd          e21f5634    f8362cd3
+dma_rd          e21f5638    fc91b7f2
+dma_rd          e21f563c    99b2d367
+dma_rd          e21f5640    eaf8a737
+dma_rd          e21f5644    68b95165
+dma_rd          e21f5648    ba386e94
+dma_rd          e21f564c    14eacd92
+dma_rd          e21f5650    a4e94c7d
+dma_rd          e21f5654    97ac72ad
+dma_rd          e21f5658    dbdff64b
+dma_rd          e21f565c    3919bf5a
+dma_rd          e21f5660    b74a4726
+dma_rd          e21f5664    7b5a8fcd
+
+-- write back the first queue descriptors status
+dma_wr          2a5a73f4    8400803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x25ba5285ff88' unicast
+-- srcaddr:  '0x15eb7b35ef26' 
+-- idfield:  '0xd32c'  typeid field
+-- data:      46 bytes
+-- crc:      '0x4c4287ef'
+
+txd(20x)    55555555555555d588ff8552ba2526ef357beb15d32c36f8
+txd                         f2b791fc67d3b29937373737
+
+-- pre-read the next transmit queue descriptor
+dma_rd          2a5a73fc    0000803c
+dma_rd          2a5a73f8    13a94960
+
+-- pre_read the next transmit buffer
+dma_rd          13a94960    ffffffff
+dma_rd          13a94964    4ee6ffff
+dma_rd          13a94968    f3c3ac36
+dma_rd          13a9496c    3c212e00
+dma_rd          13a94970    e87ef988
+dma_rd          13a94974    111965ea
+dma_rd          13a94978    66d5f195
+dma_rd          13a9497c    7759c83c
+--dma_rd          13a94980    219eac1c
+--dma_rd          13a94984    e9eaf3ac
+--dma_rd          13a94988    9f4aa431
+--dma_rd          13a9498c    35558f53
+--dma_rd          13a94990    6483c8cd
+--dma_rd          13a94994    f3c35d12
+--dma_rd          13a94998    5a9238fa
+--dma_rd          13a9499c    f6e83a9a
+-- dma reads blocked by late collision
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 20. ongoing - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000020  "SCENARIO 20. complete - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000080  -- tx status - frame transmitted
+apbwr      14 00000080  -- clear it
+apbrd      14 00000000  -- check it again
+
+----------------------------------------
+-- 21. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with a collision towards 
+--      the end of the data portion of the frame (58th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xf4d4a6d0' 
+-- dmard buf: '0x47e8db68' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xffffffffffff' broadcast
+-- srcaddr:   '0x31cad42be114' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  f4d4a6d0    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+
+-- read the first transmit queue descriptor
+dma_rd          f4d4a6d4    0000803c
+dma_rd          f4d4a6d0    47e8db68
+
+-- read the transmit buffer
+dma_rd          47e8db68    ffffffff
+dma_rd          47e8db6c    e114ffff
+dma_rd          47e8db70    31cad42b
+dma_rd          47e8db74    31dd2e00
+dma_rd          47e8db78    8bc7145c
+dma_rd          47e8db7c    ae7c88f3
+dma_rd          47e8db80    a7a5715f
+dma_rd          47e8db84    bb2b1dc2
+dma_rd          47e8db88    ecaffd16
+dma_rd          47e8db8c    4452d5ae
+dma_rd          47e8db90    ad53f774
+dma_rd          47e8db94    6758b24a
+dma_rd          47e8db98    19656285
+dma_rd          47e8db9c    5c94ce4e
+dma_rd          47e8dba0    7cb5ba74
+dma_rd          47e8dba4    8d48364d
+
+-- write back the first queue descriptors status
+dma_wr          f4d4a6d4    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xffffffffffff' broadcast
+-- srcaddr:  '0x31cad42be114' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x91f24827'
+
+txd(r)      55555555555555d5ffffffffffff14e12bd4ca31002edd31
+txd                         5c14c78bf3887cae5f71a5a7c21d2bbb
+txd                         16fdafecaed5524474f753ad4ab25867
+txd                         856265194ece945c74bab57c72842f19
+
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xf4d4a6d8' 
+-- dmard buf: '0x212f6388' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xffffffffffff' broadcast
+-- srcaddr:   '0x67a498a82d38' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the first transmit queue descriptor
+dma_rd          f4d4a6dc    0000803c
+dma_rd          f4d4a6d8    212f6388
+
+-- read the transmit buffer
+dma_rd          212f6388    ffffffff
+dma_rd          212f638c    2d38ffff
+dma_rd          212f6390    67a498a8
+dma_rd          212f6394    c51d2e00
+dma_rd          212f6398    32a3f4b7
+dma_rd          212f639c    6a4ff5bd
+dma_rd          212f63a0    d6873789
+dma_rd          212f63a4    e52d7251
+dma_rd          212f63a8    7edb45c6
+dma_rd          212f63ac    3c134316
+dma_rd          212f63b0    18f65638
+dma_rd          212f63b4    192de617
+dma_rd          212f63b8    c3afc327
+dma_rd          212f63bc    7781b3b5
+dma_rd          212f63c0    b4b84cc7
+dma_rd          212f63c4    33cec171
+
+-- write back the first queue descriptors status
+dma_wr          f4d4a6dc    8400803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xffffffffffff' broadcast
+-- srcaddr:  '0x67a498a82d38' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x595aa3b0'
+
+txd(54x)    55555555555555d5ffffffffffff382da898a467002e1dc5
+txd                         b7f4a332bdf54f6a893787d651722de5
+txd                         c645db7e1643133c3856f61817e62d19
+txd                         27c3afc3b5b38177c74cb8b8b8b8
+
+-- pre-read the next transmit queue descriptor
+dma_rd          f4d4a6e4    0000803c
+dma_rd          f4d4a6e0    7339a4e0
+
+-- pre-read the next transmit buffer
+dma_rd          7339a4e0    ffffffff
+dma_rd          7339a4e4    5920ffff
+dma_rd          7339a4e8    1cd21712
+dma_rd          7339a4ec    beb22e00
+dma_rd          7339a4f0    acaf9cee
+dma_rd          7339a4f4    71d3ae89
+dma_rd          7339a4f8    4e77b66a
+dma_rd          7339a4fc    bf55d34a
+dma_rd          7339a500    687fff6e
+dma_rd          7339a504    33c239aa
+dma_rd          7339a508    8172a34d
+dma_rd          7339a50c    3af47f55
+dma_rd          7339a510    c4ebfab8
+dma_rd          7339a514    b5d6fa36
+dma_rd          7339a518    b1b2f159
+dma_rd          7339a51c    2113728d
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 21. ongoing - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000020  "SCENARIO 21. complete - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000080  -- tx status - frame transmitted
+apbwr      14 00000080  -- clear it
+apbrd      14 00000000  -- check it again
+
+----------------------------------------
+-- 22. In burst mode, transmit a minimum sized frame plus extension. 
+--      Then, transmit a minimum sized frame with padding with a collision 
+--      at the start of the padding (36th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xd5292238' 
+-- dmard buf: '0x4a7c6d50' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xb2282be1c9b0' unicast
+-- srcaddr:   '0x9613c3593a8c' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  d5292238    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+
+-- read the first transmit queue descriptor
+dma_rd          d529223c    0000803c
+dma_rd          d5292238    4a7c6d50
+
+-- read the transmit buffer
+dma_rd          4a7c6d50    2be1c9b0
+dma_rd          4a7c6d54    3a8cb228
+dma_rd          4a7c6d58    9613c359
+dma_rd          4a7c6d5c    698c2e00
+dma_rd          4a7c6d60    9be84cbf
+dma_rd          4a7c6d64    88e6beb5
+dma_rd          4a7c6d68    739535ba
+dma_rd          4a7c6d6c    51ef5bc2
+dma_rd          4a7c6d70    13aaccc5
+dma_rd          4a7c6d74    756e654a
+dma_rd          4a7c6d78    566e8849
+dma_rd          4a7c6d7c    e1ac8957
+dma_rd          4a7c6d80    8217cee2
+dma_rd          4a7c6d84    4de72ce5
+dma_rd          4a7c6d88    ee9f567e
+dma_rd          4a7c6d8c    c47c681d
+
+-- write back the first queue descriptors status
+dma_wr          d529223c    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xb2282be1c9b0' unicast
+-- srcaddr:  '0x9613c3593a8c' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xf8f31875'
+
+txd(r)      55555555555555d5b0c9e12b28b28c3a59c31396002e8c69
+txd                         bf4ce89bb5bee688ba359573c25bef51
+txd                         c5ccaa134a656e7549886e565789ace1
+txd                         e2ce1782e52ce74d7e569fee57813f8f
+
+-- transmit a 40 (0x28) byte frame:
+-- txdqd:     '0xd5292240' 
+-- dmard buf: '0xe5274ad0' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xffffffffffff' broadcast
+-- srcaddr:   '0x15e456426f7a' 
+-- idfield:   '0x0016'  length field
+-- data:       22 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the first transmit queue descriptor
+dma_rd          d5292244    00008024
+dma_rd          d5292240    e5274ad0
+
+-- read the transmit buffer
+dma_rd          e5274ad0    ffffffff
+dma_rd          e5274ad4    6f7affff
+dma_rd          e5274ad8    15e45642
+dma_rd          e5274adc    dedb1600
+dma_rd          e5274ae0    12cbd444
+dma_rd          e5274ae4    163b6168
+dma_rd          e5274ae8    4b5e9c67
+dma_rd          e5274aec    c9d3d266
+dma_rd          e5274af0    26842379
+dma_rd          e5274af4    268ebd46
+
+-- write back the first queue descriptors status
+dma_wr          d5292244    84008024
+
+
+-- check the 40 (0x28) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xffffffffffff' broadcast
+-- srcaddr:  '0x15e456426f7a' 
+-- idfield:  '0x0016'  length field
+-- data:      22 bytes
+-- crc:      '0x284801c5'
+
+txd(32x)    55555555555555d5ffffffffffff7a6f4256e4150016dbde
+txd                         44d4cb1268613b16679c5e4b66d2d3c9
+txd                         7923842646464646
+
+-- pre-read the next transmit queue descriptor
+dma_rd          d529224c    0000803c
+dma_rd          d5292248    2b72db80
+
+-- pre-read the next transmit buffer
+dma_rd          2b72db80    5254659a
+dma_rd          2b72db84    c8eed94c
+dma_rd          2b72db88    8cdebdc3
+dma_rd          2b72db8c    c9c22e00
+dma_rd          2b72db90    c278456d
+dma_rd          2b72db94    e1a7795b
+dma_rd          2b72db98    361215b7
+dma_rd          2b72db9c    c9b6dbae
+dma_rd          2b72dba0    57e45ad9
+dma_rd          2b72dba4    a1883449
+dma_rd          2b72dba8    1d1d473b
+dma_rd          2b72dbac    add5b947
+dma_rd          2b72dbb0    99d3b194
+dma_rd          2b72dbb4    94bec428
+dma_rd          2b72dbb8    b5841cf5
+dma_rd          2b72dbbc    dae97851
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 22. ongoing - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000020  "SCENARIO 22. complete - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000080  -- tx status - frame transmitted
+apbwr      14 00000080  -- clear it
+apbrd      14 00000000  -- check it again
+
+----------------------------------------
+-- 23. In burst mode, transmit a minimum sized frame. 
+--      Then, transmit a minimum sized frame with padding with a collision 
+--      towards the end of the padding (50th byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xa9fde844' 
+-- dmard buf: '0x462685c0' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x83bb5f1cfbf4' unicast
+-- srcaddr:   '0x3b9ff58ae41e' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  a9fde844    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+
+-- read the first transmit queue descriptor
+dma_rd          a9fde848    0000803c
+dma_rd          a9fde844    462685c0
+
+-- read the transmit buffer
+dma_rd          462685c0    5f1cfbf4
+dma_rd          462685c4    e41e83bb
+dma_rd          462685c8    3b9ff58a
+dma_rd          462685cc    73982e00
+dma_rd          462685d0    9f346f77
+dma_rd          462685d4    a54a4a53
+dma_rd          462685d8    4345a8b6
+dma_rd          462685dc    8f87f1f9
+dma_rd          462685e0    f8ef176a
+dma_rd          462685e4    fa23ce17
+dma_rd          462685e8    cd6363fa
+dma_rd          462685ec    6dcfe23a
+dma_rd          462685f0    bb2de7f2
+dma_rd          462685f4    a94b1ccf
+dma_rd          462685f8    fca5d454
+dma_rd          462685fc    a3a32da7
+
+-- write back the first queue descriptors status
+dma_wr          a9fde848    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x83bb5f1cfbf4' unicast
+-- srcaddr:  '0x3b9ff58ae41e' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xe4b843d2'
+
+txd(r)      55555555555555d5f4fb1c5fbb831ee48af59f3b002e9873
+txd                         776f349f534a4aa5b6a84543f9f1878f
+txd                         6a17eff817ce23fafa6363cd3ae2cf6d
+txd                         f2e72dbbcf1c4ba954d4a5fc2d348b4e
+
+-- transmit a 46 (0x2e) byte frame:
+-- txdqd:     '0xa9fde84c' 
+-- dmard buf: '0xbf4f6670' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x6547b876d290' unicast
+-- srcaddr:   '0x541ae5ff263c' 
+-- idfield:   '0x001c'  length field
+-- data:       28 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the first transmit queue descriptor
+dma_rd          a9fde850    0000802a
+dma_rd          a9fde84c    bf4f6670
+
+-- read the transmit buffer
+dma_rd          bf4f6670    b876d290
+dma_rd          bf4f6674    263c6547
+dma_rd          bf4f6678    541ae5ff
+dma_rd          bf4f667c    3caf1c00
+dma_rd          bf4f6680    81d9a913
+dma_rd          bf4f6684    2f9fdce1
+dma_rd          bf4f6688    6dfe7511
+dma_rd          bf4f668c    1d9e329a
+dma_rd          bf4f6690    54d6da51
+dma_rd          bf4f6694    9a6c5948
+dma_rd          bf4f6698    0000c3b5
+dma_rd          bf4f669c    356235fe
+
+-- write back the first queue descriptors status
+dma_wr          a9fde850    8400802a
+
+
+-- check the 46 (0x2e) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x6547b876d290' unicast
+-- srcaddr:  '0x541ae5ff263c' 
+-- idfield:  '0x001c'  length field
+-- data:      28 bytes
+-- crc:      '0x5ab5a11b'
+
+txd(46x)    55555555555555d590d276b847653c26ffe51a54001caf3c
+txd                         13a9d981e1dc9f2f1175fe6d9a329e1d
+txd                         51dad65448596c9ab5c3000000000000
+txd                         000022222222
+
+-- pre-read the next transmit queue descriptor
+dma_rd          a9fde858    0000803c
+dma_rd          a9fde854    ed81b788
+
+-- pre-read the next transmit buffer
+dma_rd          ed81b788    bb26a922
+dma_rd          ed81b78c    7122f55e
+dma_rd          ed81b790    752ed1cd
+dma_rd          ed81b794    6ce52e00
+dma_rd          ed81b798    bfc28848
+dma_rd          ed81b79c    df7461d5
+dma_rd          ed81b7a0    4f418864
+dma_rd          ed81b7a4    cc6a1456
+dma_rd          ed81b7a8    9b18a794
+dma_rd          ed81b7ac    5b5473c3
+dma_rd          ed81b7b0    ca8d3532
+dma_rd          ed81b7b4    4deffcc2
+dma_rd          ed81b7b8    9441f346
+dma_rd          ed81b7bc    136b163c
+dma_rd          ed81b7c0    57e9b83e
+dma_rd          ed81b7c4    b9f198b6
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 23. ongoing - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000020  "SCENARIO 23. complete - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000080  -- tx status - frame transmitted
+apbwr      14 00000080  -- clear it
+apbrd      14 00000000  -- check it again
+
+----------------------------------------
+-- 24. In burst mode, transmit a minimum sized frame with extension. 
+--      Then, transmit a minimum sized frame with a collision at the start 
+--      of crc (61st byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0x48ccae8c' 
+-- dmard buf: '0xce39fe28' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x6ca3151768c4' unicast
+-- srcaddr:   '0xfd397e721662' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  48ccae8c    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+
+-- read the first transmit queue descriptor
+dma_rd          48ccae90    0000803c
+dma_rd          48ccae8c    ce39fe28
+
+-- read the transmit buffer
+dma_rd          ce39fe28    151768c4
+dma_rd          ce39fe2c    16626ca3
+dma_rd          ce39fe30    fd397e72
+dma_rd          ce39fe34    55522e00
+dma_rd          ce39fe38    8163d349
+dma_rd          ce39fe3c    8223784f
+dma_rd          ce39fe40    d633f72d
+dma_rd          ce39fe44    6886c713
+dma_rd          ce39fe48    6552fcef
+dma_rd          ce39fe4c    9eef135b
+dma_rd          ce39fe50    6ca146c2
+dma_rd          ce39fe54    5ebf1f94
+dma_rd          ce39fe58    e2362257
+dma_rd          ce39fe5c    38adf2a6
+dma_rd          ce39fe60    435eb672
+dma_rd          ce39fe64    f48b9bd3
+
+-- write back the first queue descriptors status
+dma_wr          48ccae90    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x6ca3151768c4' unicast
+-- srcaddr:  '0xfd397e721662' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x168469e2'
+
+txd(r)      55555555555555d5c4681715a36c6216727e39fd002e5255
+txd                         49d363814f7823822df733d613c78668
+txd                         effc52655b13ef9ec246a16c941fbf5e
+txd                         572236e2a6f2ad3872b65e432e964861
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0x48ccae94' 
+-- dmard buf: '0xf15c9260' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x971a16c9196c' unicast
+-- srcaddr:   '0x86a9fb93aea6' 
+-- idfield:   '0x7625'  typeid field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the first transmit queue descriptor
+dma_rd          48ccae98    0000803c
+dma_rd          48ccae94    f15c9260
+
+-- read the transmit buffer
+dma_rd          f15c9260    16c9196c
+dma_rd          f15c9264    aea6971a
+dma_rd          f15c9268    86a9fb93
+dma_rd          f15c926c    e98f2576
+dma_rd          f15c9270    87e52ab7
+dma_rd          f15c9274    8c95819d
+dma_rd          f15c9278    8ec42b14
+dma_rd          f15c927c    dd8a8a84
+dma_rd          f15c9280    c237c484
+dma_rd          f15c9284    84464911
+dma_rd          f15c9288    babcbf95
+dma_rd          f15c928c    f27ac791
+dma_rd          f15c9290    2dade854
+dma_rd          f15c9294    f361856d
+dma_rd          f15c9298    c9bfa6ba
+dma_rd          f15c929c    edb3595e
+
+-- write back the first queue descriptors status
+dma_wr          48ccae98    8400803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x971a16c9196c' unicast
+-- srcaddr:  '0x86a9fb93aea6' 
+-- idfield:  '0x7625'  typeid field
+-- data:      46 bytes
+-- crc:      '0x4c23cc41'
+
+txd(57x)    55555555555555d56c19c9161a97a6ae93fba98676258fe9
+txd                         b72ae5879d81958c142bc48e848a8add
+txd                         84c437c21149468495bfbcba91c77af2
+txd                         54e8ad2d6d8561f3baa6bfc9145e5e5e5e 
+
+-- pre-read the next transmit queue descriptor
+dma_rd          48ccaea0    0000803c
+dma_rd          48ccae9c    2dc24f88
+
+-- pre-read the next transmit buffer
+dma_rd          2dc24f88    b87fcaf8
+dma_rd          2dc24f8c    a1286a82
+dma_rd          2dc24f90    263489be
+dma_rd          2dc24f94    b6ba2e00
+dma_rd          2dc24f98    867d4881
+dma_rd          2dc24f9c    1c2bdb6e
+dma_rd          2dc24fa0    3716299d
+dma_rd          2dc24fa4    9bc31fb8
+dma_rd          2dc24fa8    134c7365
+dma_rd          2dc24fac    ec35959d
+dma_rd          2dc24fb0    2cde78ca
+dma_rd          2dc24fb4    192b7cd1
+dma_rd          2dc24fb8    c13a8e38
+dma_rd          2dc24fbc    5efe5728
+dma_rd          2dc24fc0    66bc6dbf
+dma_rd          2dc24fc4    6a698141
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 24. ongoing - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000020  "SCENARIO 24. complete - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000080  -- tx status - frame transmitted
+apbwr      14 00000080  -- clear it
+apbrd      14 00000000  -- check it again
+
+----------------------------------------
+-- 25. In burst mode, transmit a minimum sized frame with extension. 
+--      Then, transmit a minimum sized frame with a collision towards the 
+--      end the crc (63rd byte).
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0x152e7544' 
+-- dmard buf: '0xc2c29930' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xdf76c89b2592' unicast
+-- srcaddr:   '0xcab22fa6e32a' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  152e7544    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+
+-- read the first transmit queue descriptor
+dma_rd          152e7548    0000803c
+dma_rd          152e7544    c2c29930
+
+-- read the transmit buffer
+dma_rd          c2c29930    c89b2592
+dma_rd          c2c29934    e32adf76
+dma_rd          c2c29938    cab22fa6
+dma_rd          c2c2993c    8a7b2e00
+dma_rd          c2c29940    368645df
+dma_rd          c2c29944    f7548c56
+dma_rd          c2c29948    b6346e5f
+dma_rd          c2c2994c    4f2444b1
+dma_rd          c2c29950    6592559a
+dma_rd          c2c29954    fe8aaff9
+dma_rd          c2c29958    55b1312c
+dma_rd          c2c2995c    218d7ffd
+dma_rd          c2c29960    5352e384
+dma_rd          c2c29964    5d2fa69a
+dma_rd          c2c29968    17588577
+dma_rd          c2c2996c    2acadc42
+
+-- write back the first queue descriptors status
+dma_wr          152e7548    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xdf76c89b2592' unicast
+-- srcaddr:  '0xcab22fa6e32a' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0x8d8424c9'
+
+txd(r)      55555555555555d592259bc876df2ae3a62fb2ca002e7b8a
+txd                         df458636568c54f75f6e34b6b144244f
+txd                         9a559265f9af8afe2c31b155fd7f8d21
+txd                         84e352539aa62f5d778558179c4248d8
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0x152e754c' 
+-- dmard buf: '0x4f2d4ff0' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xbd43f4d8ca5e' unicast
+-- srcaddr:   '0x81b7dc234c3c' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the first transmit queue descriptor
+dma_rd          152e7550    0000803c
+dma_rd          152e754c    4f2d4ff0
+
+-- read the transmit buffer
+dma_rd          4f2d4ff0    f4d8ca5e
+dma_rd          4f2d4ff4    4c3cbd43
+dma_rd          4f2d4ff8    81b7dc23
+dma_rd          4f2d4ffc    6e852e00
+dma_rd          4f2d5000    5b9fa432
+dma_rd          4f2d5004    5c64b221
+dma_rd          4f2d5008    7c86e49b
+dma_rd          4f2d500c    4f8a9f3b
+dma_rd          4f2d5010    f919475c
+dma_rd          4f2d5014    6c196437
+dma_rd          4f2d5018    497fb14a
+dma_rd          4f2d501c    3912ef72
+dma_rd          4f2d5020    ae4adbbf
+dma_rd          4f2d5024    824a9c15
+dma_rd          4f2d5028    eb56f5e7
+dma_rd          4f2d502c    2a28c33c
+
+-- write back the first queue descriptors status
+dma_wr          152e7550    8400803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xbd43f4d8ca5e' unicast
+-- srcaddr:  '0x81b7dc234c3c' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xd8d39c68'
+
+txd(59x)    55555555555555d55ecad8f443bd3c4c23dcb781002e856e
+txd                         32a49f5b21b2645c9be4867c3b9f8a4f
+txd                         5c4719f93764196c4ab17f4972ef1239
+txd                         bfdb4aae159c4a82e7f556eb86c93d3c3c3c3c
+
+-- pre-read the next transmit queue descriptor
+dma_rd          152e7558    0000803c
+dma_rd          152e7554    4628acd0
+
+-- pre-read the next transmit buffer
+dma_rd          4628acd0    47e8b695
+dma_rd          4628acd4    cf428bbc
+dma_rd          4628acd8    b8a98da1
+dma_rd          4628acdc    1a522e00
+dma_rd          4628ace0    aa4ce8e5
+dma_rd          4628ace4    edbbf884
+dma_rd          4628ace8    6167f489
+dma_rd          4628acec    166a79f2
+dma_rd          4628acf0    4f4447db
+dma_rd          4628acf4    68224fbc
+dma_rd          4628acf8    6f2dfbed
+dma_rd          4628acfc    25593cea
+dma_rd          4628ad00    b82c1e8b
+dma_rd          4628ad04    9e733eee
+dma_rd          4628ad08    8ff8edc7
+dma_rd          4628ad0c    ae4223fc
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 25. ongoing - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000020  "SCENARIO 25. complete - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000080  -- tx status - frame transmitted
+apbwr      14 00000080  -- clear it
+apbrd      14 00000000  -- check it again
+
+----------------------------------------
+-- 26. In burst mode, transmit a minimum sized frame with extension. 
+--      Then, transmit a collision between the first frame and second 
+--      frame (IFG). Finally, Transmit a minimum sized frame.
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xf539bfbc' 
+-- dmard buf: '0x2c38ce98' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0xffffffffffff' broadcast
+-- srcaddr:   '0xa8c9436f6e4c' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- setup the dma interface
+apbwr           1c  f539bfbc    -- set address of the transmit queue descriptor
+apbwr           00  00000208    -- write tx_go and enable tx
+
+-- read the first transmit queue descriptor
+dma_rd          f539bfc0    0000803c
+dma_rd          f539bfbc    2c38ce98
+
+-- read the transmit buffer
+dma_rd          2c38ce98    ffffffff
+dma_rd          2c38ce9c    6e4cffff
+dma_rd          2c38cea0    a8c9436f
+dma_rd          2c38cea4    94e12e00
+dma_rd          2c38cea8    b2db27ef
+dma_rd          2c38ceac    af62b572
+dma_rd          2c38ceb0    4b48e588
+dma_rd          2c38ceb4    66a9c854
+dma_rd          2c38ceb8    1dd429a2
+dma_rd          2c38cebc    45899a3a
+dma_rd          2c38cec0    2b1acc13
+dma_rd          2c38cec4    9d34b2f8
+dma_rd          2c38cec8    a477d2f3
+dma_rd          2c38cecc    5f6de786
+dma_rd          2c38ced0    c3383632
+dma_rd          2c38ced4    be2d4b76
+
+-- write back the first queue descriptors status
+dma_wr          f539bfc0    8000803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0xffffffffffff' broadcast
+-- srcaddr:  '0xa8c9436f6e4c' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xaadaca3f'
+
+txd(512x)  55555555555555d5ffffffffffff4c6e6f43c9a8002ee194
+txd                        ef27dbb272b562af88e5484b54c8a966
+txd                        a229d41d3a9a894513cc1a2bf8b2349d
+txd                        f3d277a486e76d5f323638c3f3acadaa
+
+-- transmit a 64 (0x40) byte frame:
+-- txdqd:     '0xf539bfc4' 
+-- dmard buf: '0xa61b1268' 128 bytes
+-- preamble:  '0x55555555555555' 
+-- sfd:       '0xd5' 
+-- destaddr:  '0x5e8231d3255c' unicast
+-- srcaddr:   '0xcc395c812b1e' 
+-- idfield:   '0x002e'  length field
+-- data:       46 bytes
+-- crc:        autogenerated
+--
+-- Supply the transmit data to the AHB interface
+
+-- read the first transmit queue descriptor
+dma_rd          f539bfc8    0000803c
+dma_rd          f539bfc4    a61b1268
+
+-- read the transmit buffer
+dma_rd          a61b1268    31d3255c
+dma_rd          a61b126c    2b1e5e82
+dma_rd          a61b1270    cc395c81
+dma_rd          a61b1274    cfb52e00
+dma_rd          a61b1278    d4ca24e6
+dma_rd          a61b127c    b2a9c3f7
+dma_rd          a61b1280    292783db
+dma_rd          a61b1284    a9a617c8
+dma_rd          a61b1288    b747b46a
+dma_rd          a61b128c    b372dfba
+dma_rd          a61b1290    697e7c1b
+dma_rd          a61b1294    423bddca
+dma_rd          a61b1298    18171a89
+dma_rd          a61b129c    a2b41e7a
+dma_rd          a61b12a0    7b2c1648
+dma_rd          a61b12a4    7785189b
+
+-- write back the first queue descriptors status
+dma_wr          f539bfc8    8400803c
+
+
+-- check the 64 (0x40) byte frame as it is transmitted:
+-- preamble: '0x55555555555555' 
+-- sfd:      '0xd5' 
+-- destaddr: '0x5e8231d3255c' unicast
+-- srcaddr:  '0xcc395c812b1e' 
+-- idfield:  '0x002e'  length field
+-- data:      46 bytes
+-- crc:      '0xea2c4d3b'
+
+--txd         55555555555555d55c25d331825e1e2b815c39cc002eb5cf
+--txd                         e624cad4f7c3a9b2db832729c817a6a9
+--txd                         6ab447b7badf72b31b7c7e69cadd3b42
+--txd                         891a17187a1eb4a248162c7bb3d4c2ae
+-- txd blocked by late collision of previous frame
+
+-- pre-read the next transmit queue descriptor
+dma_rd          f539bfd0    0000803c
+dma_rd          f539bfcc    5245e6f0
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "SCENARIO 26. ongoing - frame transmitted"
+                        -- check interrupt status - receive complete
+apbrd      14 00000028  -- tx status - frame transmitted
+apbwr      14 00000028  -- clear it
+apbrd      14 00000008  -- check it again
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000020  "SCENARIO 26. complete - late collision detected"
+                        -- check interrupt status - receive complete
+apbrd      14 00000080  -- tx status - frame transmitted
+apbwr      14 00000080  -- clear it
+apbrd      14 00000000  -- check it again
+
+----------------------------------------
+-- 27. Check statistics
+
+-- check transmit statistics
+apbrd     100 00000340  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 0000000d  -- check frames transmitted ok
+apbrd     10C 00000003  -- check broadcast frames transmitted
+apbrd     110 00000002  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 0000000d  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 0000000d  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(10000)

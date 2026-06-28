@@ -1,0 +1,177 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : sched_rnd_queue
+--
+--   Author         : Ewan McCulloch
+--
+--   Date           : 25 Feb 2008
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Random TX and RX operating together - all RX packets accepted, to maximize
+-- AHB B/W - also operating at gigabit speeds
+--
+-- This is an 802.3br random test running with TBI interface
+-- For this, we use external loopback
+-- In the defs file, the pMAC has 2 queues active
+-- We fool the packet generator into thinking there are 3 queues
+-- the eMAC becomes the 3rd queue effectively
+-- 
+--------------------------------------------------------------------------------
+
+two_pt_five_gig;
+
+sel_ahb_freq 2 
+
+randomize_hready -read_max 4 -write_max 4
+--check_txlinerate
+bus_grant_delay 0 -- This sets hgrant to 1 always
+
+set_random_seed 45;
+--tog_cnt_en 1
+
+-- Disable txd checking for this test
+set_tx_data_check   0;
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100)  00 00000000  -- check reset value of network control register
+apbwr      04 0128041a  -- 64bit enable, gigabit mode, full duplex, no PCS yet ...
+apbwr    1004 0128041a  
+apbwr     f00 000000ac  -- enable pre-empt, disable verify & route all frames to pMAC until negotiated, invert_mcrc set
+apbwr      10 01a00701
+apbwr    1010 01a00701
+apbwr    1018 f0020000  -- write receive queue pointer 2
+apbwr    101c 99000000  -- write transmit queue pointer 2
+apbrd    101c 99000000  -- check transmit queue pointer
+
+-- initialise the relevant pcs registers
+apbrd      200 00009140  -- check reset value
+apbwr      200 00000140  -- disable auto-negotiation prior to enabling PCS
+
+apbwr      28 00000200  -- enable PCS interrupt
+--apbwr     600 00000c06  -- enable q1 interrupts
+--apbwr     604 00000c06  -- enable q2 interrupts
+apbwr      1c 11111100  -- write address of transmit buffer q0 descriptor in memory
+apbwr     440 88000000  -- write transmit queue pointer 1
+apbwr     444 99000000  -- repeat transmit queue pointer 2, just need this for TB (pkt generator)
+apbwr      18 ffff0000  -- write receive queue pointer
+apbwr     480 f0010000  -- write receive queue pointer 1
+apbwr     484 f0020000  -- repeat receive queue pointer 2, just need this for TB (pkt generator)
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      1c 11111100  -- check transmit queue pointer
+
+apbwr     4a0 00000001  -- Buffer size Q1
+apbwr     4a4 000000a0  -- Buffer size Q2 -- just need this for TB (pkt generator)
+
+apbwr      540 00040000  -- Screener2 reg 0, comp reg = 0
+apbwr      544 00042011  -- Screener2 reg 1, comp reg = 1
+apbwr      548 00044022  -- Screener2 reg 2, comp reg = 2
+apbwr      54c 00046033  -- Screener2 reg 3, comp reg = 3
+
+apbwr      700 000000ff  -- Compare reg 0a
+apbwr      704 00000000  -- Compare reg 0b, offset is 0
+apbwr      708 000100ff  -- Compare reg 1a
+apbwr      70c 00000000  -- Compare reg 1b, offset is 0
+apbwr      710 000200ff  -- Compare reg 2a
+apbwr      714 00000000  -- Compare reg 2b, offset is 0
+apbwr      718 000300ff  -- Compare reg 3a
+apbwr      71c 00000000  -- Compare reg 3b, offset is 0
+
+apbwr      00 20000009  -- enable rx, 2.5G
+apbwr    1000 20000009  -- enable rx, 2.5G
+apbwr     f1c ffffffff  -- interrupt enable for the mmsl
+
+apbwr      04 01280c1a  -- 64bit enable, gigabit mode, full duplex, add PCS  ...
+apbwr    1004 01280c1a  
+
+
+-- check for link status change
+apbrd(int) 24 00000200  -- check interrupt status - link status change 
+apbwr 24 00000200       -- clear interrupt 
+apbrd 08 00000007       -- link OK and sync achieved 
+apbrd 24 00000000       -- check interrupt status - link status change cleared
+
+-- check for link status change
+apbrd(int) 24 00000200  -- check interrupt status - link status change 
+apbwr 24 00000200       -- clear interrupt 
+apbrd 08 00000407       -- sync achieved and remote fault (in loopback receiving txed remote fault)
+apbrd 24 00000000       -- check interrupt status - link status change cleared
+
+-- check for link status change
+apbrd(int) 24 00000200  -- check interrupt status - link status change 
+apbwr 24 00000200       -- clear interrupt 
+apbrd 08 00000007       -- sync achieved and link fault OK (remote fault cleared)
+apbrd 24 00000000       -- check interrupt status - link status change cleared
+
+-- need extra delay because of new link fault state machine
+-- initially local fault will be seen and then remote fault because the TB is in loopback
+-- RF takes a while to clear 
+apbrd(800) 20 00000000  
+
+apbrd    284 6ef13fff  -- read design cfg reg to set axi test in trans.pl
+
+apbwr      00 2000020d  -- write tx_go and enable tx, enable rx, 2.5G
+apbwr    1000 2000020d  -- write tx_go and enable tx, enable rx, 2.5G
+
+# Enable TX loopback ...
+tx_frame  50
+      number_of_bufs  1
+      auto_gen_int    0
+      num_dma_queues  3
+      ext_loopback    1
+      buffer_size     64-1900
+      data            add_queue_id
+      data            random
+      fcs             YES
+
+
+# Loopback mode
+# The RX part here must equal number of tx frames - 1
+# The RX DMA data will be taken from an array filled by the tx_frame command
+# dest_addr is dont care
+# preamble_size should be '7' to match what is generated
+# dest_addr is dont care
+# src_addr is dont care
+# data field is dont care
+# data_size field is dont care
+# fcs should be set to 'good'
+rx_frame (apb)  1
+      preamble_size  7
+      dest_addr      broadcast
+      src_addr       111122222222
+      num_dma_queues  3
+      type_len_field random
+      data_size      16 
+      data           random
+      auto_gen_int   0
+      resource_err   0
+      fcs            good
+
+rx_frame (gap)  49
+      preamble_size  7
+      dest_addr      broadcast
+      src_addr       111122222222
+      num_dma_queues  3
+      type_len_field random
+      data_size      16 
+      data           random
+      auto_gen_int   0
+      resource_err   0
+      fcs            good
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(20000)
+

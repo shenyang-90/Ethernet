@@ -1,0 +1,381 @@
+ RGMII clocking application note for
+ GEM GXL
+
+
+
+
+   Released:                  8th March 2019
+
+
+
+
+© 2019 Cadence Design Systems Inc Confidential   Page i
+RGMII clocking
+The RGMII standard specifies a source synchronous clock. In the egress direction, the data and clock are
+transmitted from the SoC chip containing the GEM GXL to the RGMII PHY chip. In the ingress direction,
+the data and clock are transmitted from the RGMII PHY chip to the SoC chip containing the GEM GXL. The
+data is sampled at the receiving end using the same edge of the clock on which it was generated. To do
+this safely, the clock must have a longer path delay than the data. The RGMII standard supports two
+different versions. Version 1.3 relies on a PCB trace delay of 1.5 to 2.0 ns for the clock, whereas version
+2.0 and later offers the option of introducing the delay on-chip at the source. Devices which support the
+internal delay (ID) are referred to as RGMII-ID. The GEM GXL does not have any clock generation logic
+within the IP and therefore it is the responsibility of the implementer to drive the tx_clk transmit clock
+output from the SoC appropriately.
+Most RGMII PHY chips will provide support for delaying the input clock and output clock. If this is available,
+the integrator may decide to not implement any egress clock delays (either inside the SoC, or on the PCB
+trace). The GEM GXL IP supports both versions of the RGMII spec but it is the responsibility of the
+implementer to insert the appropriate delay to support RGMII-ID if it is needed. A buffer with programmable
+delay could for example be used to drive the delayed tx_clk signal going to the RGMII PHY.
+The other main difference between version 1.3 and 2.0 is the type of pads used. Version 2.0 utilizes 1.5 V
+HSTL pads, whereas version 1.3 uses 2.5 V CMOS pads.
+An example clocking diagram is shown below. In RGMII or gigabit mode, tx_clk is source synchronous
+and needs to be output from the ASIC along with the transmit data signals. In 10/100 MII mode, tx_clk is
+sourced externally from the PHY.
+
+
+
+                                                                                                      GEM
+                                                                                                      Clock
+                                                                                                      Trees
+
+
+ rx_clk from PHY
+                                                                                                              rx_clk
+
+
+
+  tx_clk to PHY
+       On chip
+      generated                                                           1
+      125 MHz
+                   x1
+                        Di v 5
+                                 u1         25 MHz                        0                                              GEM_GXL
+                                                                   1
+                                           Di v 5 0
+                                                           2.5 MHz 0
+                                      x1              u1
+                                                                       speed_mode[1]
+
+ tx_clk from PHY                                            speed_mode[0]
+                                                                                       1
+                                                                                       0
+                                                                                                              tx_clk
+
+                                                                                                              n_tx_clk
+
+                                                                              gigabit or rgmii_mode
+
+
+
+
+© 2019 Cadence Design Systems Inc Confidential                                                                                     Page 2
+RGMII Receive
+It is the responsibility of the system clock controller to provide the rx_clk source and the inverted
+n_rx_clk source to the IP. The following diagram shows the demultiplexing of the RGMII DDR receive
+signals.
+
+                             5
+   rgmii_rxd, rgmii_rx_ctl
+                                          5
+
+                 n_rx_clk
+
+                                                  10
+
+
+                             5
+
+                                          5
+                                                                                                     gmii_rxd
+                   rx_clk                                                                            gmii_rx_dv
+                                                                                                     gmii_rx_er
+
+
+
+
+It can be assumed that at the receiving end within the SoC containing the GEM GXL IP, the clock from the
+RGMII PHY will already be delayed with respect to the data (centre-aligned). From the RGMII standard,
+this delay must be at minimum 1ns at the receiving end. There is also a hold requirement of at least 1ns,
+so this infers the delay between clock and data will always be between 1ns and 3ns. We assume that
+differences between the clock/data trace delay, pad delays, pin capacitance, and rise/fall time are negligible.
+Within the SoC, we must ensure that the delays from rgmii_rxd/rgmii_rx_ctl input and the generated
+rx_clk/n_rx_clk clocks to the first flops are constrained appropriately to ensure the data can be
+sampled safely – a difference of more than 1ns will cause a problem.
+
+RGMII Transmit
+For RGMII operation, the system clock controller is required to provide the tx_clk source and the inverted
+n_tx_clk source to the IP, and the external tx_clk output for the PHY. To ensure that the skew
+requirements of the RGMII are met, for RGMII version 1.3 the delays on this external clock output should
+be matched to the RGMII transmit data and control outputs (edge-aligned), for RGMII-ID the transmit clock
+output should be delayed 2ns relative to these outputs (centre-aligned).
+The rgmii_txd and rgmii_tx_ctl outputs to the RGMII PHY are DDR in nature. The GEM_GXL
+implements this using two flip-flops and a multiplexor to drive the final pad outputs as follows:
+
+                                                      gmii_txd_r
+         gmii_txd                10                 gmii_tx_en_r
+       gmii_tx_en                                   gmii_tx_er_r
+       gmii_tx_er                                10             5
+
+                                                       5
+                                                                                    rgmii_txd
+                                                                                    rgmii_tx_ctl
+                                                                     5
+             tx_clk
+
+          n_tx_clk                                                    gmii_txd_f
+                                                                    gmii_tx_en_f
+                                                                    gmii_tx_er_f
+        tx_clk_sig
+
+
+
+
+In the diagram the gmii_txd[7:0] data signals are sampled on the rising edge of tx_clk (to produce
+gmii_txd_r) and bits [7:4] of this then resampled on the rising edge of n_tx_clk (which is the inverted
+tx_clk). This is illustrated in the following timing diagram:
+
+
+© 2019 Cadence Design Systems Inc Confidential                                           Page 3
+            tx_clk
+
+
+
+            n_tx_clk
+
+
+
+
+         gmii_txd[7:0]                   10           32       54       76       98       ba       dc
+
+
+        gmii_txd_r[7:0]                               10       32       54       76       98       ba       dc
+
+
+         gmii_txd_f[3:0]                                   1        3        5        7        9        b        d
+
+
+              tx_clk_sig
+
+
+
+
+                         tx_clk to tx_clk_sig delay
+
+
+         rgmii_txd[3:0]                               0    1   2    3   4    5   6    7   8    9   a    b   c    d
+      (output from GEM IP)
+
+
+    Sampling clock in PHY
+
+
+
+
+The lower nibble of the data byte rgmii_txd[3:0] is available on the rising edge of tx_clk and the
+upper nibble is available on the following falling edge of tx_clk. The signal tx_clk_sig selects the lower
+nibble to be output on rgmii_txd when high and the upper nibble when low.
+tx_clk_sig is an input to the GEM_GXL used to control the multiplexer logic feeding the DDR outputs. It
+is the responsibility of the system integrator to produce this signal, but it can be sourced from tx_clk.
+Since the main RGMII outputs directly feed chip level pads, it is generally recommended to avoid glitches
+on these signals. In the diagram above, tx_clk_sig is delayed by approximately 2ns (a 90 degree shift
+of tx_clk). It does not necessarily have to be set to this value, but delaying the mux select by a sufficient
+amount ensures the relevant inputs to that mux are stable when tx_clk_sig changes. Note that ensuring
+the mux outputs are glitch-free is not an RGMII specific timing requirement bus is considered a sensible
+approach. Two examples that the integrator may choose for generating tx_clk_sig are shown below:
+
+
+
+
+© 2019 Cadence Design Systems Inc Confidential                                                              Page 4
+Example 1:
+    gmii_txd                 10
+  gmii_tx_en
+  gmii_tx_er                                     10            5
+
+                                                      5
+                                                                               rgmii_txd
+                                                                               rgmii_tx_ctl
+                                                                       5
+      tx_clk
+
+                                      n_tx_clk
+
+
+
+                                        tx_clk_sig
+                                                                                   tx_clk_to_phy
+
+                              Delay
+
+The delay here would have to be greater than the clock insertion delay to the flops plus the clock to Q
+delay of the flops themselves. For example, a value of 1ns should in most cases be sufficient to ensure
+clean transitions.
+
+
+Example 2:
+        gmii_txd                  10
+      gmii_tx_en
+      gmii_tx_er                                      10           5
+
+                                                           5
+                                                                                                     rgmii_txd
+                                                                                                     rgmii_tx_ctl
+                                                                           5
+           tx_clk
+
+                                           n_tx_clk
+                                                                                        tx_clk_sig
+
+
+
+
+                                                                                                     tx_clk_to_phy
+
+                                                                               Delay
+
+
+
+
+This example shows an implementation where tx_clk_sig can be generated using two toggling flops.
+The added delay in the diagram only needs to be marginal. The reset states of each flop and the
+initialization of the clocks feeding the flops must carefully be controlled to ensure the polarity of
+tx_clk_sig is correct and that it matches tx_clk rather than n_tx_clk.
+In all cases, it is recommended the integrator reviews the timing reports for the 3 key paths as shown
+below.
+
+
+© 2019 Cadence Design Systems Inc Confidential                                            Page 5
+                  gmii_txd                 10
+                gmii_tx_en
+                gmii_tx_er                                              10            5
+
+                      tx_clk                                                     5
+                                                                                                                           rgmii_txd
+                                                                                                                           rgmii_tx_ctl
+                                                                                                 5
+
+                     n_tx_clk
+
+
+
+
+                                                                             Timing path B
+                     tx_clk
+                                                           tx_clk_sig
+
+
+
+
+                                                                                     Timing path C
+
+
+
+
+The delay shown in timing path C should be greater than both timing path A and B. STA of the 3 paths
+needs to include the clock tree delays and should be performed across all corners.
+In terms of synthesis constraints, rgmii_txd and rgmii_tx_ctl are top level outputs and the paths from
+final flop to output should be tightly constrained to avoid major routing or cell delays being added. There is
+some margin allowed within the standard (up to 1ns drift at the receiving end) but it is recommended that
+the path from the tx_clk and n_tx_clk sources through the flop and mux to the outputs be constrained
+tightly. The RGMII standard states the variation should be within 500ps at the transmitting end before any
+delay to offset the clock/data is added. Similarly, the path from tx_clk_sig through to the outputs should
+be constrained similarly tightly.
+The following diagram includes the expected chip level pad, assuming no added delay to tx_clk output:
+
+
+
+                 gmii_txd         10
+               gmii_tx_en
+               gmii_tx_er                           10           5
+
+                                                           5                                 rgmii_txd
+                   tx_clk                                                                                         pad_tx_clk
+                                                                                             rgmii_tx_ctl
+                                                                                                                  pad_rgmii_txd
+                                                                                             FROM IP              pad_rgmii_tx_ctl
+                                                                             5
+                                                                                                                  FROM CHIP
+                  n_tx_clk
+                                                                                                            PAD
+
+
+
+
+                                                         Timing path B
+                   tx_clk
+                                       tx_clk_sig
+
+
+
+
+                                                                Timing path C
+
+
+
+
+© 2019 Cadence Design Systems Inc Confidential                                                                             Page 6
+tx_clk, rgmii_txd and rgmii_tx_ctl will all output the chip via pads and will be routed across a
+board to the PHY. Most RGMII PHYs have a programmable delay feature built in to allow various degrees
+of clock shifting to help ensure stable sampling, but essentially the sampling clock within the PHY must
+have a relationship as follows:
+
+
+        Source clock (IP)
+
+
+
+      Sampling Clock (PHY)
+
+
+
+This delay on the sampling clock will allow the PHY to sample the DDR data in a stable window. As
+previously mentioned, this delay will be either added by the RGMII PHY (if it has that option), or will be
+added at source within the SoC (as per RGMII-ID standard), or will be added in the PCB (original RGMII
+v1.3). If the decision is to implement the delay within the SoC, the diagram above changes to:
+
+
+
+
+                 gmii_txd          10
+               gmii_tx_en
+               gmii_tx_er                             10           5
+
+                                                             5                     rgmii_txd
+                   tx_clk                                                                               pad_tx_clk
+                                                                                   rgmii_tx_ctl
+                                                                                                        pad_rgmii_txd
+                                                                                   FROM IP              pad_rgmii_tx_ctl
+                                                                           5
+                                                                                                        FROM CHIP
+                  n_tx_clk
+                                                                                                  PAD
+
+
+
+
+                                                           Timing path B
+                   tx_clk        delay                                            delay
+                                         tx_clk_sig
+
+
+
+
+                                                                  Timing path C
+
+
+
+
+Note that from release 1p09 onwards, when RGMII is configured the core supports operating in MII mode
+by selecting “sel_mii_on_rgmii”, bit 28 of the network control register, offset 0x0. When this is active
+gmii_txd in the Transmit RGMII diagram above is replaced with {txd[3:0], txd[3:0]} to make the
+upper and lower nibbles identical. rgmii_txd becomes the MII txd output, rgmii_tx_ctl becomes
+the MII tx_en and a delayed version of gmii_tx_er is output at the top-level to create the MII tx_er
+output. tx_clk will be sourced from the PHY in MII mode, but the clock trees will be identical and no
+specific synthesis constraints considerations are needed to support this mode.
+
+
+
+
+© 2019 Cadence Design Systems Inc Confidential                                                                   Page 7
+

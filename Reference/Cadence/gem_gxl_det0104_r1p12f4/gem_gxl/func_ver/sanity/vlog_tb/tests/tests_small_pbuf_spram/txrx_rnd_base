@@ -1,0 +1,106 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2013
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : txrx_rnd_base
+--
+--   Author         : Scot McKelvie
+--
+--   Date           : 12th April, 2013
+--
+--------------------------------------------------------------------------------
+--
+-- Description:
+--
+-- Note. This is the base test for all SPRAM random tests, and each SPRAM test
+-- is derived from this test, and will refer to this test.
+--
+-- The purpose of this test is to conentrate testing of small frames with
+-- SPRAM operation. Small frames are the worst combination for SPRAM operation
+-- as the percentage of writes per frame is higher - i.e. every frame has a
+-- status word write, so as a percentage of a packet 1 status word will be
+-- significant. This is apparent in SPRAM operation as the SPRAM is shared
+-- between the read and write side, so a concentrated number of writes is more
+-- difficult for the SPRAM solution. For a 64 byte packet there will be 4 data
+-- writes (128b ram data width) and 1 status word write.
+--
+-- This tests applies a large number of 64 byte packets and ensures data
+-- integrity. Other checkers within the system will ensure maximium
+-- throughput, as this test has 0 idles and maximum throughput should
+-- therefore be maintained.
+--
+-- Configuration:
+--    1G mode
+--    AHB/AXI random frequency - range between 1.5x to 8x.
+--    AHB/AXI width - 64b
+-- 
+-- endDescription
+--
+--------------------------------------------------------------------------------
+
+sel_ahb_freq 5
+wait_states 0
+bus_grant_delay 0 -- This sets hgrant to 1 always
+set_random_seed 1000;
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      10 09040710
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      04 00280412  -- 64bit enable, gigabit mode, full duplex, copy all
+apbwr      1c 11111100  -- write address of transmit buffer q0 descriptor in memory
+apbrd      1c 11111100  -- check transmit queue pointer
+apbwr      18 ffff0000  -- write receive queue pointer
+apbwr      00 0000020c  -- write tx_go and enable tx, enable rx
+
+-- delay for enable rx to propagate though design
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrdf    20 00000000
+
+rx_frame (apb)  1
+      preamble_size  1-14
+      auto_gen_int        0
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      data_size      16 
+      data           random
+      fcs            good
+
+rx_frame (gap)  1000
+      preamble_size  1-14
+      auto_gen_int   0
+      number_of_bufs 1
+      dest_addr      broadcast
+      src_addr       111122222222
+      type_len_field random
+      data_size      64
+      data           random
+      fcs            good
+
+tx_frame  1000
+      number_of_bufs 1
+      auto_gen_int   0
+      buffer_size    64
+      data           random
+      fcs            YES
+
+dma_rd rx_q_ptr ddddd000 
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(300000)
+

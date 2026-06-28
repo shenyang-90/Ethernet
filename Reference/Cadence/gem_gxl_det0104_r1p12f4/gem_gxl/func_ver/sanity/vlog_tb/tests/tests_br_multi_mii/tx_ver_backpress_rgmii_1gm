@@ -1,0 +1,136 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : sched_rnd_queue
+--
+--   Author         : Ewan McCulloch
+--
+--   Date           : 25 Feb 2008
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Random TX and RX operating together - all RX packets accepted, to maximize
+-- AHB B/W - also operating at gigabit speeds
+--
+-- This is an 802.3br random test running with TBI interface
+-- This test wants to prove the capability of the MMSL of backpressuring the 
+-- transmission of the verify packet waiting for the preemptible frame to be
+-- finished.
+--------------------------------------------------------------------------------
+
+-- 64 bit,
+-- gigabit, 
+-- 250Mhz AHB
+
+sel_ahb_freq 2 
+
+randomize_hready -read_max 4 -write_max 4
+--check_txlinerate
+bus_grant_delay 0 -- This sets hgrant to 1 always
+
+set_random_seed 45;
+--tog_cnt_en 1
+
+-- Disable txd checking for this test
+set_tx_data_check   0;
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr     f00 000000ac  -- enable pre-empt, disable verify & route all frames to pMAC until negotiated, invert_mcrc set
+apbwr      10 01a00701
+apbwr    1010 01a00701
+apbwr    1018 f0020000  -- write receive queue pointer 2
+apbwr    101c 99000000  -- write transmit queue pointer 2
+apbrd    101c 99000000  -- check transmit queue pointer
+
+apbwr     f1c ffffffff  -- interrupt enable for the mmsl
+apbwr      1c 11111100  -- write address of transmit buffer q0 descriptor in memory
+apbwr     440 88000000  -- write transmit queue pointer 1
+apbwr     444 99000000  -- repeat transmit queue pointer 2, just need this for TB (pkt generator)
+apbwr      18 ffff0000  -- write receive queue pointer
+apbwr     480 f0010000  -- write receive queue pointer 1
+apbwr     484 f0020000  -- repeat receive queue pointer 2, just need this for TB (pkt generator)
+apbwr      04 0128041a  -- 64bit enable, gigabit mode, full duplex
+apbwr    1004 0128041a  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      1c 11111100  -- check transmit queue pointer
+
+apbwr     4a0 00000001  -- Buffer size Q1
+apbwr     4a4 000000a0  -- Buffer size Q2 -- just need this for TB (pkt generator)
+
+apbwr      540 00040000  -- Screener2 reg 0, comp reg = 0
+apbwr      544 00042011  -- Screener2 reg 1, comp reg = 1
+apbwr      548 00044022  -- Screener2 reg 2, comp reg = 2
+apbwr      54c 00046033  -- Screener2 reg 3, comp reg = 3
+
+apbwr      700 000000ff  -- Compare reg 0a
+apbwr      704 00000000  -- Compare reg 0b, offset is 0
+apbwr      708 000100ff  -- Compare reg 1a
+apbwr      70c 00000000  -- Compare reg 1b, offset is 0
+apbwr      710 000200ff  -- Compare reg 2a
+apbwr      714 00000000  -- Compare reg 2b, offset is 0
+apbwr      718 000300ff  -- Compare reg 3a
+apbwr      71c 00000000  -- Compare reg 3b, offset is 0
+
+-- delay for enable rx to propagate though design
+apbwr      00 00000208  -- write tx_go and enable tx
+apbwr    1000 00000208  -- write tx_go and enable tx
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd    284 6ef13fff  -- read design cfg reg to set axi test in trans.pl
+apbrd(1000)     20 00000000  
+apbrdf          20 00000000  -- check contents of the receive status register 
+                      
+
+-- Enables the verify state machine to send a Verify packet 
+-- And now just after that we will send a packet.
+-- This will cause the verify packet to be backpressured by the MMSL TX
+tx_frame  5
+      number_of_bufs  1
+      auto_gen_int    0
+      num_dma_queues  1
+      ext_loopback    0
+      buffer_size     64-1900
+      data            add_queue_id
+      data            random
+      fcs             YES
+
+
+apbrd(1100) f00 000000ac -- reading to specify the timing 
+apbrd       f00 000000ac -- trigger the transmit of the frames
+apbwr       f00 00000088  -- enable pre-empt, route all frames to pMAC until negotiated
+
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(40000)

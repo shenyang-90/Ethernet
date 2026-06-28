@@ -1,0 +1,1506 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_short_tbi
+--
+--   Author         : Martin James (martinj@tality.com)
+--
+--   Date           : 06 May 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------------
+-- This test checks the handling of very short frames by the receive path.
+-- NOTE : PCS mode will not run at 32-bit DMA mode because of 
+--        bandwidth limitations. Test will be run at 64 bits instead.
+--
+-- 
+-- Functional Coverage
+----------------------
+-- * Checks the start of data detection of gem_rx
+-- * Checks that preamble and SFD only frames are not falsely recognised
+-- * Checks that 1 byte frame can be recognised and reported
+-- * Checks that code errors are recognised in preamble and SFD.
+-- * Checks that varying length preamble is received OK (including odd nibbles).
+--
+--  
+-- Detailed Test Description
+----------------------------
+-- 1. Setup DMA wait states for the test.
+-- 2. Initialise the GEM for 1Gbits/s, TBI, 64-bit DMA mode.
+-- 3. Enable all interrupts, and then enable receive.
+-- 4. Receive a frame consisting of only preamble.
+--    Ensure that the frame is dropped with no status.
+-- 5. Receive a frame consisting of only preamble and SFD.
+--    Ensure that the frame is dropped with no status.
+-- 6. Receive a frame consisting of only SFD.
+--    Ensure that the frame is dropped with no status.
+-- 7. Receive a frame consisting of preamble, SFD and one byte of data.
+--    Ensure that the frame is dropped with an undersize & bad CRC frame status.
+--    (Note that bad CRC and too short will not get reported in a statistic)
+-- 9. Receive a frame consisting of preamble, SFD and four bytes of data (good
+--    CRC). Ensure that the frame is dropped with an undersize frame status.
+--10. Receive a 64 byte frame with good CRC.
+--    Ensure that the frame is successfully received, with good status.
+--11. Check statistics for the above operations.
+--
+--12. Set the no FCS bit in the network configuration register.
+--13. Receive a frame consisting of preamble, SFD and four bytes of data (good
+--    CRC). Ensure that the frame is dropped with an undersize frame status.
+--14. Receive a frame consisting of preamble, SFD and five bytes of data (good
+--    CRC). Ensure that the frame is dropped with an undersize frame status.
+--15. Receive a 64 byte frame with good CRC.
+--    Ensure that the frame is successfully received, with good status.
+--16. Check statistics for the above operations.
+--17. Reset the no FCS bit in the network configuration register.
+--
+--18. Receive a frame consisting of only preamble that has a code error.
+--    Ensure that the frame is dropped with no status.
+--19. Receive a frame consisting of only preamble and SFD that has a code error
+--    during the SFD.
+--    Ensure that the frame is dropped with no status.
+--20. Receive a frame consisting of only SFD, with a code error.
+--    Ensure that the frame is dropped with no status.
+--21. Receive a frame consisting of preamble, SFD and one byte of data, with
+--    a code error during the byte of data.
+--    Ensure that the frame is dropped with no status. This is because code
+--    errors are only reported in gigabit mode if length checks are satisfied.
+--22. Receive a frame consisting of preamble, SFD and one byte of data, with
+--    a code error during the SFD.
+--    Ensure that the frame is dropped with no status. This is because code
+--    errors are only reported in gigabit mode if length checks are satisfied.
+--23. Receive a frame consisting of preamble, SFD and one byte of data, with
+--    a code error during the preamble.
+--    Ensure that the frame is dropped with no status. This is because code
+--    errors are only reported in gigabit mode if length checks are satisfied.
+--24. Receive a 64 byte frame with good CRC.
+--    Ensure that the frame is successfully received, with good status.
+--25. Check statistics for the above operations.
+--
+--26. Set the copy all frames bit in the network configuration register.
+--27. Receive a frame consisting of only preamble.
+--    Ensure that the frame is dropped with no status.
+--28. Receive a frame consisting of only preamble and SFD.
+--    Ensure that the frame is dropped with no status.
+--29. Receive a frame consisting of only SFD.
+--    Ensure that the frame is dropped with no status.
+--30. Receive a frame consisting of preamble, SFD and one byte of data.
+--    Ensure that the frame is dropped with an undersize & bad CRC frame status.
+--    (Note that bad CRC and too short will not get reported in a statistic)
+--32. Receive a frame consisting of preamble, SFD and four bytes of data (good
+--    CRC). Ensure that the frame is dropped with an undersize frame status.
+--33. Receive a 64 byte frame with good CRC.
+--    Ensure that the frame is successfully received, with good status.
+--34. Check statistics for the above operations.
+--
+--35. Receive a 64 bytes frame with valid CRC that has 0 preamble bytes, and
+--    valid SFD.
+--    Ensure that the frame is successfully received, with good status.
+--36. Receive a 64 bytes frame with valid CRC that has 1 preamble byte, and
+--    valid SFD.
+--    Ensure that the frame is successfully received, with good status.
+--37. Receive a 64 bytes frame with valid CRC that has 2 preamble bytes, and
+--    valid SFD.
+--    Ensure that the frame is successfully received, with good status.
+--38. Receive a 64 bytes frame with valid CRC that has 3 preamble bytes, and
+--    valid SFD.
+--    Ensure that the frame is successfully received, with good status.
+--39. Receive a 64 bytes frame with valid CRC that has 7 preamble bytes, but
+--    has corrupted SFD (make sure data does not have "d5" in it).
+--    Ensure that the frame is not recognised.
+--40. Receive a 64 bytes frame with valid CRC that has corrupted preamble, but
+--    has valid SFD.
+--    Ensure that the frame is not recognised.
+--41. Receive a 64 bytes frame with valid CRC, preamble, and SFD. This time
+--    the data consists of all 55's (preamble).
+--    Ensure that the frame is successfully received, with good status.
+--42. Receive a 64 bytes frame with valid CRC, preamble, and SFD. This time
+--    the data consists of all 5d's (SFD).
+--    Ensure that the frame is successfully received, with good status.
+--43. Receive a 64 bytes frame with valid CRC, preamble, and SFD. This time
+--    the data consists of all 5d's (reversed SFD).
+--    Ensure that the frame is successfully received, with good status.
+--45. Receive a 64 bytes frame with valid CRC, and SFD. This time
+--    the data consists of all 5d's (reversed SFD) and no preamble.
+--    Ensure that the frame is successfully received, with good status.
+--46. Check statistics for the above operations.
+--------------------------------------------------------------------------------
+
+-- *****************************************************************************
+-- 1. Setup DMA wait states for the test.
+-- *****************************************************************************
+wait_states     0
+bus_grant_delay 0
+
+
+-- *****************************************************************************
+-- 2. Initialise the GEM for 1Gbits/s, TBI, 64-bit DMA mode.
+-- 3. Enable all interrupts, and then enable receive.
+-- *****************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      98 12345678  -- specific address register 1 bottom
+apbwr      9C 00001111  -- specific address register 1 top
+apbwr     200 00000040  -- disable autonegotioation
+apbrd     200 00008040  -- check autoneg disabled
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00280c00  -- 32 bit AHB & gigabit/TBI
+apbrd      04 00280c00  -- check new value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      18 fffff000  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      20 00000000  -- check contents of the receive status register
+
+
+-- check for link status change
+apbrd(int) 24 00000200  -- check interrupt status - link status change
+
+
+apbrdf     20 00000000  "Scenarios 1-7 : short frames (dropped) + good one"
+
+
+-- *****************************************************************************
+-- 4. Receive a frame consisting of only preamble.
+--    Ensure that the frame is dropped with no status.
+-- *****************************************************************************
+pcs_synch_rx(apb) sfb o55 o55 o55 o55 o55 -- SOP & 6 preamble
+pcs_synch_rx      sfd sf7 -- EOP /T/R/
+
+-- *****************************************************************************
+-- 5. Receive a frame consisting of only preamble and SFD.
+--    Ensure that the frame is dropped with no status.
+-- *****************************************************************************
+
+-- interframe gap
+pcs_synch_rx      sbc oc5 -- IDLE 1
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_synch_rx      sfb o55 o55 o55 o55 o55 o55 od5 -- SOP & 6 preamble & SFD
+pcs_synch_rx      sfd sf7 -- EOP /T/R/
+
+
+-- *****************************************************************************
+-- 6. Receive a frame consisting of only SFD.
+--    Ensure that the frame is dropped with no status.
+-- *****************************************************************************
+
+-- interframe gap
+pcs_synch_rx      sbc oc5 -- IDLE 1
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_synch_rx      sfb od5 -- SOP & SFD
+pcs_synch_rx      sfd sf7 -- EOP /T/R/
+
+
+
+-- *****************************************************************************
+-- 7. Receive a frame consisting of preamble, SFD and one byte of data.
+--    Ensure that the frame is dropped with an undersize & bad CRC frame status.
+--    (Note that bad CRC and too short will not get reported in a statistic)
+-- *****************************************************************************
+
+-- interframe gap
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_synch_rx      sfb o55 o55 o55 o55 o55 o55 od5 o11 -- SOP & 6 preamble & SFD & 1 byte data
+pcs_synch_rx      sfd sf7 sf7 -- EOP /T/R/R/
+
+
+
+-- *****************************************************************************
+-- 9. Receive a frame consisting of preamble, SFD and four bytes of data (good
+--    CRC). Ensure that the frame is dropped with an undersize frame status.
+-- *****************************************************************************
+
+-- interframe gap (extra to allow for pipeline overflow)
+pcs_synch_rx      sbc oc5 -- IDLE 1
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_synch_rx      sfb o55 o55 o55 o55 o55 o55 od5 o00 o00 o00 o00 -- SOP & 6 preamble & SFD & CRC
+pcs_synch_rx      sfd sf7 -- EOP /T/R/
+
+
+
+-- *****************************************************************************
+--10. Receive a 64 byte frame with good CRC, and no extra nibbles.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+-- interframe gap (extra to allow for pipeline overflow)
+pcs_synch_rx      sbc oc5 -- IDLE 1
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_rxd(_x)      55d578563412111111112222222233333333
+pcs_rxd              44444444555555556666666677777777
+pcs_rxd              8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd              ccccccccddddddddeeeeeeee
+pcs_rxd              gggggggg  -- good CRC
+
+-- Check memory accesses
+dma_rd fffff000 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c 33333333
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 cccccccc
+dma_wr 22222034 dddddddd
+dma_wr 22222038 eeeeeeee
+dma_wr 2222203c c307629e -- good CRC
+
+dma_wr fffff000 22222001 -- dma writes ownership bit
+dma_wr fffff004 0c00c040 -- dma writes rx status, local address match and 64 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 7 : Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+-- *****************************************************************************
+--11. Check statistics for the above operations.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000040  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000001  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000001  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000001  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+
+-- *****************************************************************************
+--12. Set the no FCS bit in the network configuration register.
+-- *****************************************************************************
+apbwrf     04 002a0c00  "Scenarios 8-10 : short frames & no fcs + good one"
+                        -- Set the no FCS bit[17]
+
+
+-- *****************************************************************************
+--13. Receive a frame consisting of preamble, SFD and four bytes of data (good
+--    CRC). Ensure that the frame is dropped with an undersize frame status.
+-- *****************************************************************************
+pcs_rxd(apb_x)     55555555555555d5
+pcs_rxd            gggggggg
+
+
+
+-- *****************************************************************************
+--14. Receive a frame consisting of preamble, SFD and five bytes of data (good
+--    CRC). Ensure that the frame is dropped with an undersize frame status.
+-- *****************************************************************************
+pcs_rxd(gap_x)     55555555555555d511
+pcs_rxd            gggggggg
+
+
+
+-- *****************************************************************************
+--15. Receive a 64 byte frame with good CRC, and no extra nibbles.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+
+pcs_rxd(gap_x)   55d578563412111111112222222233333333
+pcs_rxd              44444444555555556666666677777777
+pcs_rxd              8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd              ccccccccddddddddeeeeeeee
+pcs_rxd              gggggggg  -- good CRC
+
+-- Check memory accesses
+dma_rd fffff008 22222100 -- dma reads pointer of 22222100
+dma_wr 22222100 12345678 -- store frame to memory
+dma_wr 22222104 11111111
+dma_wr 22222108 22222222
+dma_wr 2222210c 33333333
+dma_wr 22222110 44444444
+dma_wr 22222114 55555555
+dma_wr 22222118 66666666
+dma_wr 2222211c 77777777
+dma_wr 22222120 88888888
+dma_wr 22222124 99999999
+dma_wr 22222128 aaaaaaaa
+dma_wr 2222212c bbbbbbbb
+dma_wr 22222130 cccccccc
+dma_wr 22222134 dddddddd
+dma_wr 22222138 eeeeeeee
+-- dma_wr 2222213c c307629e -- good CRC but not written
+dma_wr 2222213c 00000000 -- make up to 64 bits
+
+dma_wr fffff008 22222101 -- dma writes ownership bit
+dma_wr fffff00c 0c00c03c -- dma writes rx status, local address match and 60 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 10 : Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+
+-- *****************************************************************************
+--16. Check statistics for the above operations.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000040  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000001  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000001  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000002  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+
+
+-- *****************************************************************************
+--17. Reset the no FCS bit in the network configuration register.
+-- *****************************************************************************
+apbwrf     04 00280c00  "Scenarios 11-17 : short frames & code error + good one"
+                        -- reset the no FCS bit[17]
+
+
+
+
+-- *****************************************************************************
+--18. Receive a frame consisting of only preamble that has a code error.
+--    Ensure that the frame is dropped with no status.
+-- *****************************************************************************
+pcs_synch_rx(apb) sfb o55 sfe o55 o55 o55 -- SOP & 6 preamble & code error /V/
+pcs_synch_rx      sfd sf7 -- EOP /T/R/
+
+
+
+
+-- *****************************************************************************
+--19. Receive a frame consisting of only preamble and SFD that has a code error
+--    during the SFD.
+--    Ensure that the frame is dropped with no status.
+-- *****************************************************************************
+-- interframe gap
+pcs_synch_rx      sbc oc5 -- IDLE 1
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_synch_rx      sfb o55 o55 o55 o55 o55 o55 sfe -- SOP & 6 preamble & SFD & code error /V/
+pcs_synch_rx      sfd sf7 -- EOP /T/R/
+
+
+
+-- *****************************************************************************
+--20. Receive a frame consisting of only SFD, with a code error.
+--    Ensure that the frame is dropped with no status.
+-- *****************************************************************************
+-- interframe gap
+pcs_synch_rx      sbc oc5 -- IDLE 1
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_synch_rx      sfb sfe -- SOP & SFD & code error /V/
+pcs_synch_rx      sfd sf7 -- EOP /T/R/
+
+
+
+
+-- *****************************************************************************
+--21. Receive a frame consisting of preamble, SFD and one byte of data, with
+--    a code error during the byte of data.
+--    Ensure that the frame is dropped with no status. This is because code
+--    errors are only reported in gigabit mode if length checks are satisfied.
+-- *****************************************************************************
+
+-- interframe gap
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_synch_rx      sfb o55 o55 o55 o55 o55 o55 od5 sfe -- SOP & 6 preamble & SFD & 1 byte data
+pcs_synch_rx      sfd sf7 sf7 -- EOP /T/R/R/
+
+
+
+
+-- *****************************************************************************
+--22. Receive a frame consisting of preamble, SFD and one byte of data, with
+--    a code error during the SFD.
+--    Ensure that the frame is dropped with no status. This is because code
+--    errors are only reported in gigabit mode if length checks are satisfied.
+-- *****************************************************************************
+
+-- interframe gap
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_synch_rx      sfb o55 o55 o55 o55 o55 o55 sfe o11 -- SOP & 6 preamble & SFD & 1 byte data
+pcs_synch_rx      sfd sf7 sf7 -- EOP /T/R/R/
+
+
+
+
+-- *****************************************************************************
+--23. Receive a frame consisting of preamble, SFD and one byte of data, with
+--    a code error during the preamble.
+--    Ensure that the frame is dropped with no status. This is because code
+--    errors are only reported in gigabit mode if length checks are satisfied.
+-- *****************************************************************************
+
+-- interframe gap
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_synch_rx      sfb o55 o55 o55 sfe o55 o55 od5 o11 -- SOP & 6 preamble & SFD & 1 byte data
+pcs_synch_rx      sfd sf7 sf7 -- EOP /T/R/R/
+
+
+
+
+-- *****************************************************************************
+--24. Receive a 64 byte frame with good CRC.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+-- interframe gap (extend to prevent pipeline overflow problems)
+pcs_synch_rx      sbc oc5 -- IDLE 1
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_rxd(_x)      55d578563412111111112222222233333333
+pcs_rxd              44444444555555556666666677777777
+pcs_rxd              8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd              ccccccccddddddddeeeeeeee
+pcs_rxd              gggggggg  -- good CRC
+
+-- Check memory accesses
+dma_rd fffff010 22222200 -- dma reads pointer of 22222200
+dma_wr 22222200 12345678 -- store frame to memory
+dma_wr 22222204 11111111
+dma_wr 22222208 22222222
+dma_wr 2222220c 33333333
+dma_wr 22222210 44444444
+dma_wr 22222214 55555555
+dma_wr 22222218 66666666
+dma_wr 2222221c 77777777
+dma_wr 22222220 88888888
+dma_wr 22222224 99999999
+dma_wr 22222228 aaaaaaaa
+dma_wr 2222222c bbbbbbbb
+dma_wr 22222230 cccccccc
+dma_wr 22222234 dddddddd
+dma_wr 22222238 eeeeeeee
+dma_wr 2222223c c307629e -- good CRC
+
+dma_wr fffff010 22222201 -- dma writes ownership bit
+dma_wr fffff014 0c00c040 -- dma writes rx status, local address match and 64 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 17 : Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+
+-- *****************************************************************************
+--25. Check statistics for the above operations.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000040  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000001  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000001  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors (must satisfy length in gigabit mode)
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+-- *****************************************************************************
+--26. Set the copy all frames bit in the network configuration register.
+-- *****************************************************************************
+apbwrf     04 00280c10  "Scenarios 18-24 : short frames & copy all + good one"
+                        -- set the copy all frames bit[4]
+
+
+
+-- *****************************************************************************
+--27. Receive a frame consisting of only preamble.
+--    Ensure that the frame is dropped with no status.
+-- *****************************************************************************
+pcs_synch_rx(apb) sfb o55 o55 o55 o55 o55 -- SOP & 6 preamble
+pcs_synch_rx      sfd sf7 -- EOP /T/R/
+
+
+
+-- *****************************************************************************
+--28. Receive a frame consisting of only preamble and SFD.
+--    Ensure that the frame is dropped with no status.
+-- *****************************************************************************
+
+-- interframe gap
+pcs_synch_rx      sbc oc5 -- IDLE 1
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_synch_rx      sfb o55 o55 o55 o55 o55 o55 od5 -- SOP & 6 preamble & SFD
+pcs_synch_rx      sfd sf7 -- EOP /T/R/
+
+
+-- *****************************************************************************
+--29. Receive a frame consisting of only SFD.
+--    Ensure that the frame is dropped with no status.
+-- *****************************************************************************
+
+-- interframe gap
+pcs_synch_rx      sbc oc5 -- IDLE 1
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_synch_rx      sfb od5 -- SOP & SFD
+pcs_synch_rx      sfd sf7 -- EOP /T/R/
+
+
+
+-- *****************************************************************************
+--30. Receive a frame consisting of preamble, SFD and one byte of data.
+--    Ensure that the frame is dropped with an undersize & bad CRC frame status.
+--    (Note that bad CRC and too short will not get reported in a statistic)
+-- *****************************************************************************
+
+-- interframe gap
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_synch_rx      sfb o55 o55 o55 o55 o55 o55 od5 o11 -- SOP & 6 preamble & SFD & 1 byte data
+pcs_synch_rx      sfd sf7 sf7 -- EOP /T/R/R/
+
+
+
+-- *****************************************************************************
+--32. Receive a frame consisting of preamble, SFD and four bytes of data (good
+--    CRC). Ensure that the frame is dropped with an undersize frame status.
+-- *****************************************************************************
+
+-- interframe gap (extra to allow for pipeline overflow)
+pcs_synch_rx      sbc oc5 -- IDLE 1
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_synch_rx      sfb o55 o55 o55 o55 o55 o55 od5 o00 o00 o00 o00 -- SOP & 6 preamble & SFD & CRC
+pcs_synch_rx      sfd sf7 -- EOP /T/R/
+
+
+
+-- *****************************************************************************
+--33. Receive a 64 byte frame with good CRC, and no extra nibbles.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+-- interframe gap (extra to allow for pipeline overflow)
+pcs_synch_rx      sbc oc5 -- IDLE 1
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+pcs_synch_rx      sbc o50 -- IDLE 2
+
+pcs_rxd(_x)      55d578563412111111112222222233333333
+pcs_rxd              44444444555555556666666677777777
+pcs_rxd              8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd              ccccccccddddddddeeeeeeee
+pcs_rxd              gggggggg  -- good CRC
+
+-- Check memory accesses
+dma_rd fffff018 22222300 -- dma reads pointer of 22222300
+dma_wr 22222300 12345678 -- store frame to memory
+dma_wr 22222304 11111111
+dma_wr 22222308 22222222
+dma_wr 2222230c 33333333
+dma_wr 22222310 44444444
+dma_wr 22222314 55555555
+dma_wr 22222318 66666666
+dma_wr 2222231c 77777777
+dma_wr 22222320 88888888
+dma_wr 22222324 99999999
+dma_wr 22222328 aaaaaaaa
+dma_wr 2222232c bbbbbbbb
+dma_wr 22222330 cccccccc
+dma_wr 22222334 dddddddd
+dma_wr 22222338 eeeeeeee
+dma_wr 2222233c c307629e -- good CRC
+
+dma_wr fffff018 22222301 -- dma writes ownership bit
+dma_wr fffff01c 0c00c040 -- dma writes rx status, local address match and 64 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 24 : Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+-- read the next descriptor
+dma_rd fffff020 22222400 -- dma reads pointer of 22222400
+
+
+-- *****************************************************************************
+--34. Check statistics for the above operations.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000040  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000001  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000001  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000001  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+
+
+-- *****************************************************************************
+--35. Receive a 64 bytes frame with valid CRC that has 0 preamble bytes, and
+--    valid SFD.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+-- first disable rx to rewrite queue pointer
+apbwr      00 00000000  -- disable receive
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      18 fffff000  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive again
+apbwr      04 00280c10  -- set the copy all frames bit[4]
+apbrdf     20 00000000  "Scenario 25 : valid frame with 0 preamble bytes"
+
+
+pcs_rxd(2440_x)  55d578563412111111112222222233333333 --need at least one preamble to replace with SOP
+pcs_rxd              44444444555555556666666677777777
+pcs_rxd              8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd              ccccccccddddddddeeeeeeee
+pcs_rxd              gggggggg  -- good CRC
+
+-- Check memory accesses
+dma_rd fffff000 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c 33333333
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 cccccccc
+dma_wr 22222034 dddddddd
+dma_wr 22222038 eeeeeeee
+dma_wr 2222203c c307629e -- good CRC
+
+dma_wr fffff000 22222001 -- dma writes ownership bit
+dma_wr fffff004 0c00c040 -- dma writes rx status, local address match and 64 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 25 : Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+-- *****************************************************************************
+--36. Receive a 64 bytes frame with valid CRC that has 1 preamble byte, and
+--    valid SFD.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+apbrdf     20 00000000  "Scenario 26 : valid frame with 1 preamble bytes"
+
+
+pcs_rxd(apb_x)   55d578563412111111112222222233333333 -- 1 preamble byte
+pcs_rxd              44444444555555556666666677777777
+pcs_rxd              8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd              ccccccccddddddddeeeeeeee
+pcs_rxd              gggggggg  -- good CRC
+
+-- Check memory accesses
+dma_rd fffff008 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c 33333333
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 cccccccc
+dma_wr 22222034 dddddddd
+dma_wr 22222038 eeeeeeee
+dma_wr 2222203c c307629e -- good CRC
+
+dma_wr fffff008 22222001 -- dma writes ownership bit
+dma_wr fffff00c 0c00c040 -- dma writes rx status, local address match and 64 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 26 : Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+-- *****************************************************************************
+--37. Receive a 64 bytes frame with valid CRC that has 2 preamble bytes, and
+--    valid SFD.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+apbrdf     20 00000000  "Scenario 27 : valid frame with 2 preamble bytes"
+
+
+pcs_rxd(apb_x) 5555d578563412111111112222222233333333
+pcs_rxd              44444444555555556666666677777777
+pcs_rxd              8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd              ccccccccddddddddeeeeeeee
+pcs_rxd              gggggggg  -- good CRC
+
+-- Check memory accesses
+dma_rd fffff010 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c 33333333
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 cccccccc
+dma_wr 22222034 dddddddd
+dma_wr 22222038 eeeeeeee
+dma_wr 2222203c c307629e -- good CRC
+
+dma_wr fffff010 22222001 -- dma writes ownership bit
+dma_wr fffff014 0c00c040 -- dma writes rx status, local address match and 64 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 27 : Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+-- *****************************************************************************
+--38. Receive a 64 bytes frame with valid CRC that has 3 preamble bytes, and
+--    valid SFD.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+apbrdf     20 00000000  "Scenario 28 : valid frame with 3 preamble bytes"
+
+
+pcs_rxd(apb_x) 555555d578563412111111112222222233333333 -- 3 preamble bytes
+pcs_rxd                44444444555555556666666677777777
+pcs_rxd                8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd                ccccccccddddddddeeeeeeee
+pcs_rxd                gggggggg  -- good CRC
+
+-- Check memory accesses
+dma_rd fffff018 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 12345678 -- store frame to memory
+dma_wr 22222004 11111111
+dma_wr 22222008 22222222
+dma_wr 2222200c 33333333
+dma_wr 22222010 44444444
+dma_wr 22222014 55555555
+dma_wr 22222018 66666666
+dma_wr 2222201c 77777777
+dma_wr 22222020 88888888
+dma_wr 22222024 99999999
+dma_wr 22222028 aaaaaaaa
+dma_wr 2222202c bbbbbbbb
+dma_wr 22222030 cccccccc
+dma_wr 22222034 dddddddd
+dma_wr 22222038 eeeeeeee
+dma_wr 2222203c c307629e -- good CRC
+
+dma_wr fffff018 22222001 -- dma writes ownership bit
+dma_wr fffff01c 0c00c040 -- dma writes rx status, local address match and 64 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 28 : Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+-- *****************************************************************************
+--39. Receive a 64 bytes frame with valid CRC that has 7 preamble bytes, but
+--    has corrupted SFD (make sure data does not have "d5" in it).
+--    Ensure that the frame is not recognised.
+-- *****************************************************************************
+apbrdf     20 00000000  "Scenario 29 & 30 : frames with corrupted SFD/preamble"
+
+
+pcs_rxd(apb_x)   55555555555555c578563412111111112222222233333333 -- "D" corrupted
+pcs_rxd                          44444444555555556666666677777777
+pcs_rxd                          8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd                          ccccccccddddddddeeeeeeee
+pcs_rxd                          gggggggg  -- good CRC
+
+pcs_rxd(gap_x)   55555555555555d178563412111111112222222233333333 -- "5" corrupted
+pcs_rxd                          44444444555555556666666677777777
+pcs_rxd                          8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd                          ccccccccddddddddeeeeeeee
+pcs_rxd                          gggggggg  -- good CRC
+
+
+
+-- *****************************************************************************
+--40. Receive a 64 bytes frame with valid CRC that has corrupted preamble, but
+--    has valid SFD.
+--    Ensure that the frame is not recognised.
+-- *****************************************************************************
+
+
+pcs_rxd(gap_x)   55555555555515d578563412111111112222222233333333 -- corrupted preamble
+pcs_rxd                          44444444555555556666666677777777
+pcs_rxd                          8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd                          ccccccccddddddddeeeeeeee
+pcs_rxd                          gggggggg  -- good CRC
+
+pcs_rxd(gap_x)   55555555555155d578563412111111112222222233333333 -- corrupted preamble
+pcs_rxd                          44444444555555556666666677777777
+pcs_rxd                          8888888899999999aaaaaaaabbbbbbbb
+pcs_rxd                          ccccccccddddddddeeeeeeee
+pcs_rxd                          gggggggg  -- good CRC
+
+
+
+-- *****************************************************************************
+--41. Receive a 64 bytes frame with valid CRC, preamble, and SFD. This time
+--    the data consists of all 55's (preamble).
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+apbrd      20 00000000  "Scenario 31 : valid frame with all 55 data"
+
+
+pcs_rxd(gap_x)   55d555555555555555555555555555555555
+pcs_rxd              55555555555555555555555555555555
+pcs_rxd              55555555555555555555555555555555
+pcs_rxd              555555555555555555555555
+pcs_rxd              gggggggg  -- good CRC
+
+-- Check memory accesses
+dma_rd fffff020 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 55555555 -- store frame to memory
+dma_wr 22222004 55555555
+dma_wr 22222008 55555555
+dma_wr 2222200c 55555555
+dma_wr 22222010 55555555
+dma_wr 22222014 55555555
+dma_wr 22222018 55555555
+dma_wr 2222201c 55555555
+dma_wr 22222020 55555555
+dma_wr 22222024 55555555
+dma_wr 22222028 55555555
+dma_wr 2222202c 55555555
+dma_wr 22222030 55555555
+dma_wr 22222034 55555555
+dma_wr 22222038 55555555
+dma_wr 2222203c 54675ecb -- good CRC
+
+dma_wr fffff020 22222001 -- dma writes ownership bit
+dma_wr fffff024 0000c040 -- dma writes rx status, no address match and 64 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 31 : Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+-- *****************************************************************************
+--42. Receive a 64 bytes frame with valid CRC, preamble, and SFD. This time
+--    the data consists of all d5's (SFD).
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+apbrdf     20 00000000  "Scenario 32 : valid frame with all D5 data"
+
+
+pcs_rxd(apb_x)   55d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5
+pcs_rxd              d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5
+pcs_rxd              d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5
+pcs_rxd              d5d5d5d5d5d5d5d5d5d5d5d5
+pcs_rxd              gggggggg  -- good CRC
+
+-- Check memory accesses
+dma_rd fffff028 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 d5d5d5d5 -- store frame to memory
+dma_wr 22222004 d5d5d5d5
+dma_wr 22222008 d5d5d5d5
+dma_wr 2222200c d5d5d5d5
+dma_wr 22222010 d5d5d5d5
+dma_wr 22222014 d5d5d5d5
+dma_wr 22222018 d5d5d5d5
+dma_wr 2222201c d5d5d5d5
+dma_wr 22222020 d5d5d5d5
+dma_wr 22222024 d5d5d5d5
+dma_wr 22222028 d5d5d5d5
+dma_wr 2222202c d5d5d5d5
+dma_wr 22222030 d5d5d5d5
+dma_wr 22222034 d5d5d5d5
+dma_wr 22222038 d5d5d5d5
+dma_wr 2222203c e9be6b63 -- good CRC
+
+dma_wr fffff028 22222001 -- dma writes ownership bit
+dma_wr fffff02c 0000c040 -- dma writes rx status, no address match and 64 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 32 : Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+-- *****************************************************************************
+--43. Receive a 64 bytes frame with valid CRC, preamble, and SFD. This time
+--    the data consists of all 5d's (reversed SFD).
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+apbrdf     20 00000000  "Scenario 33 : valid frame with all 5D data"
+
+
+pcs_rxd(apb_x)   55d55d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d
+pcs_rxd              5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d
+pcs_rxd              5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d
+pcs_rxd              5d5d5d5d5d5d5d5d5d5d5d5d
+pcs_rxd              gggggggg  -- good CRC
+
+-- Check memory accesses
+dma_rd fffff030 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 5d5d5d5d -- store frame to memory
+dma_wr 22222004 5d5d5d5d
+dma_wr 22222008 5d5d5d5d
+dma_wr 2222200c 5d5d5d5d
+dma_wr 22222010 5d5d5d5d
+dma_wr 22222014 5d5d5d5d
+dma_wr 22222018 5d5d5d5d
+dma_wr 2222201c 5d5d5d5d
+dma_wr 22222020 5d5d5d5d
+dma_wr 22222024 5d5d5d5d
+dma_wr 22222028 5d5d5d5d
+dma_wr 2222202c 5d5d5d5d
+dma_wr 22222030 5d5d5d5d
+dma_wr 22222034 5d5d5d5d
+dma_wr 22222038 5d5d5d5d
+dma_wr 2222203c b2024eb1 -- good CRC
+
+dma_wr fffff030 22222001 -- dma writes ownership bit
+dma_wr fffff034 0000c040 -- dma writes rx status, no address match and 64 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 33 : Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+-- *****************************************************************************
+--44. Receive a 64 bytes frame with valid CRC, preamble, and SFD. This time
+--    the data consists of all 5d's (reversed SFD) and one nibble of preamble.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+
+-- N/A for gigabit test
+
+
+-- *****************************************************************************
+--45. Receive a 64 bytes frame with valid CRC, and SFD. This time
+--    the data consists of all 5d's (reversed SFD) and no preamble.
+--    Ensure that the frame is successfully received, with good status.
+-- *****************************************************************************
+apbrdf     20 00000000  "Scenario 35 : valid frame with all 5D data & no pre"
+
+
+pcs_rxd(apb_x) 5555d55d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d -- need at least one preamble for TBI
+pcs_rxd              5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d
+pcs_rxd              5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d
+pcs_rxd              5d5d5d5d5d5d5d5d5d5d5d5d
+pcs_rxd              gggggggg  -- good CRC
+
+-- Check memory accesses
+dma_rd fffff038 22222000 -- dma reads pointer of 22222000
+dma_wr 22222000 5d5d5d5d -- store frame to memory
+dma_wr 22222004 5d5d5d5d
+dma_wr 22222008 5d5d5d5d
+dma_wr 2222200c 5d5d5d5d
+dma_wr 22222010 5d5d5d5d
+dma_wr 22222014 5d5d5d5d
+dma_wr 22222018 5d5d5d5d
+dma_wr 2222201c 5d5d5d5d
+dma_wr 22222020 5d5d5d5d
+dma_wr 22222024 5d5d5d5d
+dma_wr 22222028 5d5d5d5d
+dma_wr 2222202c 5d5d5d5d
+dma_wr 22222030 5d5d5d5d
+dma_wr 22222034 5d5d5d5d
+dma_wr 22222038 5d5d5d5d
+dma_wr 2222203c b2024eb1 -- good CRC
+
+dma_wr fffff038 22222001 -- dma writes ownership bit
+dma_wr fffff03c 0000c040 -- dma writes rx status, no address match and 64 bytes received
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Scenario 35 : Complete"
+                        -- check interrupt status - receive complete
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+
+
+
+
+-- read the next descriptor
+dma_rd fffff040 22222400 -- dma reads pointer of 22222400
+
+
+-- *****************************************************************************
+--46. Check statistics for the above operations.
+-- *****************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000200  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000008  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000004  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000008  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(10000)
+

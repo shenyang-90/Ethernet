@@ -1,0 +1,291 @@
+-------------------------------------------------
+-- rx_random_sfcs_10m test scenario for the Ethernet MAC --
+-------------------------------------------------
+--
+-- Written by Alastair Boomer/Arthur Marris
+--
+-- Cadence Design Systems Ltd
+-- Livingston Design Centre,
+-- West Lothian.
+--
+-- 15Aug2003     Arthur finished it off
+--
+-- This is a copy of rx_random to test the strip fcs feature
+--
+-- This shows the ability of the trans.pl to generate random
+-- receive frames.
+--
+-- 17 frames of varying lengths are generated, 14 of which
+-- are address recognized
+--
+-- trans.pl picks destination addresses from the values written
+-- to the specific address registers.
+--
+-- trans.pl reads the value written to the receive queue pointer
+-- and checks reads and writes to the rx buffer queue. trans.pl
+-- generates random values for the rx buffer locations and sets
+-- the wrap bit from time to time.
+--
+-- 
+-- ************************************************************************** --
+
+
+ten_meg_bit  -- 10Mbit/s operation (2.5Mhz tx_clk and rx_clk, 50MHz Pclk and Hclk)
+wait_states 2
+bus_grant_delay 0
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 01234000  -- write receive queue pointer
+apbrd      18 01234000  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      90 abababab  -- specific address register 2 bottom (multicast)
+apbwr      94 0000abab  -- specific address register 2 top
+apbwr      98 abcdef10  -- specific address register 3 bottom (unicast)
+apbwr      9C 0000a5a5  -- specific address register 3 top
+apbwr      c0 cccccccc  -- specific address register 3 bottom (unicast)
+apbwr      c4 00005a5a  -- specific address register 3 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 000a0000  -- indicate 10M operation and strip rx fcs
+apbrd      04 000a0000  -- verify write to speed register..
+apbwr      10 00020304  
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+---------------------------------------
+-- TEST 1: FRAME SIZE 64 BYTES (PADDED)
+---------------------------------------
+
+rx_frame (apb)  1
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      auto_gen_int  0
+      type_len_field 3333
+      data_size      16 
+      data           random
+      fcs            good
+
+
+---------------------------------------------
+-- TEST 2: TWO MINIMUM SIZE FRAMES (PADDED)
+---------------------------------------------
+
+rx_frame (gap)  2
+      preamble_size  1-14
+      dest_addr      unicast
+      src_addr       111122222222
+      auto_gen_int  0
+      type_len_field 3333
+      data_size      20-30 
+      data           random
+      fcs            good
+
+
+-----------------------------------------------------------------
+-- TEST 3: THREE RANDOM FRAMES WITH INCORRECT DEST ADDR
+-----------------------------------------------------------------
+
+rx_frame (gap)  3
+      preamble_size  1-14
+      dest_addr      random
+      src_addr       111122222222
+      auto_gen_int  0
+      type_len_field 3333
+      data_size      0-200 
+      data           random
+      fcs            good
+
+
+------------------------------------------
+-- TEST 4: FRAME SIZE 118 BYTES (1 buffer)
+------------------------------------------
+
+rx_frame (gap)  1
+      preamble_size  1-14
+      dest_addr      multicast
+      src_addr       111122222222
+      auto_gen_int  0
+      type_len_field 3333
+      data_size      100
+      data           random
+      fcs            good
+
+
+------------------------------------------
+-- TEST 5: FRAME SIZE 128 BYTES (1 buffer)
+------------------------------------------
+
+rx_frame (gap)  1
+      preamble_size  1-14
+      dest_addr      unicast
+      src_addr       111122222222
+      auto_gen_int  0
+      type_len_field 3333
+      data_size      110
+      data           random
+      fcs            good
+
+
+-------------------------------------------
+-- TEST 6: FRAME SIZE 129 BYTES (2 buffers)
+-------------------------------------------
+
+rx_frame (gap)  1
+      preamble_size  1-14
+      dest_addr      unicast
+      src_addr       111122222222
+      auto_gen_int  0
+      type_len_field 3333
+      data_size      111
+      data           random
+      fcs            good
+
+
+-------------------------------------------
+-- TEST 7: FRAME SIZE 350 BYTES (3 buffers)
+-------------------------------------------
+
+rx_frame (gap)  1
+      preamble_size  1-14
+      dest_addr      unicast
+      src_addr       111122222222
+      auto_gen_int  0
+      type_len_field 3333
+      data_size      332
+      data           random
+      fcs            good
+
+
+-------------------------------------------
+-- TEST 8: FRAME SIZE 64 BYTES (1 buffer)
+-------------------------------------------
+
+rx_frame (gap)  1
+      preamble_size  1-14
+      dest_addr      unicast
+      src_addr       111122222222
+      type_len_field 3333
+       auto_gen_int  0
+     data_size      64
+      data           random
+      fcs            good
+
+
+-------------------------------------------
+-- TEST 9: FRAME SIZE 64 BYTES WITH FIXED DATA AND PADDED (1 buffer)
+-------------------------------------------
+
+rx_frame (gap)  1
+      preamble_size  2
+      dest_addr      unicast
+      src_addr       111122222222
+      type_len_field 3333
+       auto_gen_int  0
+     data_size      34
+      data           333344444444555555556666666677777777
+      data           8888888899999999aaaaaaaabbbbbbbb
+      fcs            good
+
+
+-----------------------------------------------------------------
+-- TEST 10: FIVE RANDOM FRAMES WITH CORRECT DEST ADDR
+-----------------------------------------------------------------
+
+rx_frame (gap)  5
+      preamble_size  1-14
+      dest_addr      unicast
+      src_addr       random
+      type_len_field random
+      auto_gen_int  0
+      data_size      0-1500 
+      data           random
+      fcs            good
+
+
+-- supply last dma read
+dma_rd rx_q_ptr ddddd000 -- reads location of next rx buffer
+
+-- check for 9 receive complete interrupts and then check status
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear it
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear it
+apbrd      20 00000002  -- check contents of the receive status register- frame received
+apbrd      20 00000002  -- check it again
+apbwr      20 0000fffd  -- don't clear it
+apbrd      20 00000002  -- check it again
+apbwr      20 00000002  -- clear it
+apbrd      20 00000000  -- check it again
+apbrd      38 00000000  -- check rx pause time
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     158 0000000e  -- check frames received ok
+apbrd     164 00000000  -- check pause frames received
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(450000)

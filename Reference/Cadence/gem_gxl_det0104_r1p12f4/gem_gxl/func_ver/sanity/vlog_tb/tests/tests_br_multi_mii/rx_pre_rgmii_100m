@@ -1,0 +1,212 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : sched_rnd_queue
+--
+--   Author         : Ewan McCulloch
+--
+--   Date           : 25 Feb 2008
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Random TX and RX operating together - all RX packets accepted, to maximize
+-- AHB B/W - also operating at gigabit speeds
+--
+-- This is an 802.3br random test running with RGMII interface
+-- Just receiving some precise sequences of frames in order to get some code coverage
+-- no DMA Activity will be performed as all the frames will have a crc error
+--------------------------------------------------------------------------------
+
+sel_ahb_freq 2 
+
+randomize_hready -read_max 4 -write_max 4
+--check_txlinerate
+bus_grant_delay 0 -- This sets hgrant to 1 always
+
+set_random_seed 45;
+--tog_cnt_en 1
+
+-- Disable txd checking for this test
+set_tx_data_check   0;
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr     f00 000000ac  -- enable pre-empt, disable verify & route all frames to pMAC until negotiated, invert_mcrc set
+apbwr      10 01a00701
+apbwr    1010 01a00701
+apbwr    1018 f0020000  -- write receive queue pointer 2
+apbwr    101c 99000000  -- write transmit queue pointer 2
+apbrd    101c 99000000  -- check transmit queue pointer
+apbwr     f1c ffffffff  -- interrupt enable for the mmsl
+apbwr      1c 11111100  -- write address of transmit buffer q0 descriptor in memory
+apbwr     440 88000000  -- write transmit queue pointer 1
+apbwr     444 99000000  -- repeat transmit queue pointer 2, just need this for TB (pkt generator)
+apbwr      18 ffff0000  -- write receive queue pointer
+apbwr     480 f0010000  -- write receive queue pointer 1
+apbwr     484 f0020000  -- repeat receive queue pointer 2, just need this for TB (pkt generator)
+apbwr      04 0128001b  -- 64bit enable, 100M mode, full duplex
+apbwr    1004 0128001b  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      1c 11111100  -- check transmit queue pointer
+
+apbwr     4a0 00000001  -- Buffer size Q1
+apbwr     4a4 000000a0  -- Buffer size Q2 -- just need this for TB (pkt generator)
+
+apbwr      540 00040000  -- Screener2 reg 0, comp reg = 0
+apbwr      544 00042011  -- Screener2 reg 1, comp reg = 1
+apbwr      548 00044022  -- Screener2 reg 2, comp reg = 2
+apbwr      54c 00046033  -- Screener2 reg 3, comp reg = 3
+
+apbwr      700 000000ff  -- Compare reg 0a
+apbwr      704 00000000  -- Compare reg 0b, offset is 0
+apbwr      708 000100ff  -- Compare reg 1a
+apbwr      70c 00000000  -- Compare reg 1b, offset is 0
+apbwr      710 000200ff  -- Compare reg 2a
+apbwr      714 00000000  -- Compare reg 2b, offset is 0
+apbwr      718 000300ff  -- Compare reg 3a
+apbwr      71c 00000000  -- Compare reg 3b, offset is 0
+
+apbwr      00 00000004  -- write tx_go and enable tx, enable rx
+apbwr    1000 00000004  -- write tx_go and enable tx, enable rx
+
+-- delay for enable rx to propagate though design
+
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd    284 6ef13fff  -- read design cfg reg to set axi test in trans.pl
+apbrdf    20 00000000  -- check contents of the receive status register 
+                       -- and trigger reception of frame
+
+apbwr      00 00000004  -- write tx_go and enable tx, enable rx
+apbwr    1000 00000004  -- write tx_go and enable tx, enable rx
+
+
+-- Receiving first a START preemptible packet. 
+rxd(apb)      555555555555555555e6
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           aa
+rxd           649e9cd1  
+
+-- Receiving first another START preemptible packet
+-- causing a particular series of states in 
+-- gem_mmsl_rx_proc, in the rx_halt FSM
+-- moreover the previous frame will be errored
+ 
+rxd(gap)      555555555555555555e6
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           aa
+rxd           649e9cd1  
+
+--------------------------------------------
+-- reading the status/stats registers ------
+--------------------------------------------
+apbrd(mmsl_int) f04 00000080 -- mmsl_status    : smds_error
+apbrd      f18 00000004 -- mmsl_int_status: smds_error
+apbwr      f18 00000004 -- clearing mmsl_int
+
+-- Receiving now a continuation preemptible packet
+-- the Packet has to contain an odd number of
+-- payload bytes to hit a particular state in the
+-- rx_halt FSM
+ 
+rxd(gap)      555555555555555561e6
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           aa
+rxd           649e9cd1  
+
+
+-- Receiving now a new start packet packet
+ 
+rxd(gap)      5555555555555555e6
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           f1950627  
+
+-- Receiving now a new start packet packet
+-- the Packet has to contain an even number of
+-- payload bytes to hit a particular state in the
+-- rx_halt FSM. This will have no continuation
+-- the previous packet will be errored
+ 
+rxd(gap)      55555555555555554c
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           445511f4ff6700dcaafb
+rxd           f1950626  
+
+--------------------------------------------
+-- reading the stats registers -------------
+--------------------------------------------
+-- we should read smds_error (bit 7) in the mmsl status register because of the last packet
+-- also we will have mmsl_ass_ok_count = 1 having assembled one total packet
+-- and mmsl_frag_count_rx = 1 as well because that was constituted of 2 fragments
+
+apbrd(mmsl_int)  f04 00000080 -- mmsl_status: smds_error
+apbrd       f08 00000000 -- mmsl_err_status
+apbrd       f0c 00000001 -- mmsl_ass_ok_count
+apbrd       f10 00000001 -- mmsl_frag_count_rx
+apbrd       f14 00000000 -- mmsl_frag_count_tx
+apbrd       f18 00000004 -- mmsl_int_status: smds_error
+apbwr       f18 00000004 -- mmsl_int_status: smds_error (clearing it)
+
+-- Giving the time to the dpram to get empty
+apbrd(2400)     20 00000000  
+
+--------------------------------------------------------------------
+----------- NO DMA ACTIVITY AS WE ARE TESTING HERE ERROR CONDITIONS 
+--------------------------------------------------------------------
+
+-- force end of test in case it doesn't stop of its own accord
+end(400000)
+

@@ -1,0 +1,863 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_control_fifo
+--
+--   Author         : Brian Torley (briant@tality.com)
+--
+--   Date           : Jan 2013
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- This test is based on tx_control_fifo from fifo configuration
+-- but has been modified for 64b dma bus width.
+-- This test checks the operation of the TX exposed FIFO interface (read).
+-- 
+-- Functional Coverage
+-- * Checks the operation of the tx_r_mod signal
+-- * Checks the operation of the tx_r_data_rdy signal
+-- * Checks combinations of the tx_r_sop and other control signals
+-- * Checks the operation of the tx_r_control signal
+-- * Checks the operation of the handshaking signals
+-- * Checks the operation of the tx_r_status signal
+-- * Checks the operation of the tx_r_flushed signal
+-- 
+-- Detailed Test Description
+--     Enable fifo interface using apb write.
+--  1. Initialise suitable wait states for the test.
+--
+--  tx_r_mod testing
+--  ----------------
+--  2. Enable fifo interface using apb write.
+--     Check reset values of registers and setup interrupts and then enable 
+--     transmit in 100M half duplex mode from a 128-bit FIFO data bus.
+--  3. Transmit a frame of 16 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--  4. Transmit a frame of 17 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--  5. Transmit a frame of 18 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--  6. Transmit a frame of 19 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--  7. Transmit a frame of 20 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--  8. Transmit a frame of 21 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--  9. Transmit a frame of 22 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+-- 10. Transmit a frame of 23 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+-- 11 to 18. removed from original test as tx_r_mod only valid for 0 to 7 bytes
+-- 19. Transmit a frame of 32 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+-- 20. Check statistics for above operations.
+--
+--  tx_r_data_rdy testing (also includes combinations of control signals)
+--  ---------------------
+-- 21. Transmit a 64 byte frame. After the TX MAC has performed the SOP read
+--     drop the tx_r_data_rdy signal. Queue up another 16 byte frame, but
+--     tx_r_data_rdy is only asserted once an apb trigger is performed. By 
+--     delaying this trigger until after the first frame has completed, verify
+--     that the TX MAC does not perform any more FIFO reads after it has 
+--     seen the EOP for the first frame. Then verify that the 2nd frame is 
+--     successfully transmitted once tx_r_data_rdy is asserted.
+-- 22. Transmit a 64 byte frame. Ensure that tx_r_data_rdy is high at the EOP
+--     read of the first frame. This means that the TX MAC will keep reading
+--     the FIFO searching for the next SOP.
+--     On each successive read provide combinations of the control and data
+--     signals except SOP. Ensure that these combinations are ignored.
+--     Finally provide an SOP and a valid 16 bytes frame. Ensure that this
+--     frame is correctly transmitted.
+-- 23. Force a start of packet read by asserting tx_r_data_rdy, but before the
+--     tx_r_valid is signalled for the read, drop tx_r_data_rdy.
+--     This should be ignored and the frame will be transmitted successfully.
+-- 24. Check statistics for above operations.
+--
+--  tx_r_control testing
+--  --------------------
+-- 25. Transmit a frame of 32 bytes with no padding or CRC.
+--     On the first FIFO read set the tx_no_crc bit, and on the second FIFO read
+--     ensure that the tx_no_crc bit is low. Verify that the frame is
+--     transmitted without padding and CRC and the the correct number of bytes
+--     are transmitted and correct status is reported.
+-- 26. Transmit a frame of 32 bytes with padding and CRC.
+--     On the first FIFO read reset the tx_no_crc bit, and on the second FIFO
+--     read ensure that the tx_no_crc bit is high. Verify that the frame is
+--     transmitted with padding and CRC and the the correct number of bytes
+--     are transmitted and correct status is reported.
+-- 27. Check statistics for above operations.
+--
+--
+--------------------------------------------------------------------------------
+
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 3
+bus_grant_delay 3
+
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts and then enable 
+--     transmit in 100M half duplex mode from a 128-bit FIFO data bus.
+--******************************************************************************
+apbwr(60)  4c 00000001  -- enable soft config fifo port bit when available
+apbrd      4c 00000001  -- check enable soft config bit when available
+
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbrd      30 00000000  -- check that all interrupts are now enabled
+apbwr      04 00680000  -- enable 100M mode into 128-bit bus
+apbwr      00 00000008  -- enable transmit
+apbrd      14 00000000  -- check tx status, wait for tx_go when enabled
+apbrd      14 00000008  -- check tx status, always tx_go when enabled
+
+
+
+--******************************************************************************
+--  3. Transmit a frame of 16 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--******************************************************************************
+
+apbrdf     14 00000008  "Scenario 1: Check tx_r_mod - 16 bytes frame"
+                        -- check tx status, always tx_go in fifo mode
+                        -- and trigger data ready for first test
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd(apb)    01001010   0   00000000    8877665544332211
+fifo_rd         01001001   0   00000000    10ffeeddccbbaa99
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d511223344
+txd   5566778899aabbccddeeff10
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 1: Complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+
+--******************************************************************************
+--  4. Transmit a frame of 17 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--******************************************************************************
+
+apbrd      14 00000008  "Scenario 2: Check tx_r_mod - 17 bytes frame"
+                        -- check tx status, always tx_go in fifo mode
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         01001010   0   00000000     8877665544332211
+fifo_rd         01001000   0   00000000    10ffeeddccbbaa99 
+fifo_rd         01001001   1   00000000     1817161514131211
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d511223344
+txd   5566778899aabbccddeeff10
+txd                   11
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 2: Complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+
+--******************************************************************************
+--  5. Transmit a frame of 18 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--******************************************************************************
+
+apbrd      14 00000008  "Scenario 3: Check tx_r_mod - 18 bytes frame"
+                        -- check tx status, always tx_go in fifo mode
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         01001010   0   00000000     8877665544332211
+fifo_rd         01001000   0   00000000    10ffeeddccbbaa99 
+fifo_rd         01001001   2   00000000     1817161514131211
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d511223344
+txd   5566778899aabbccddeeff10
+txd                   1112
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 3: Complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+
+--******************************************************************************
+--  6. Transmit a frame of 19 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--******************************************************************************
+
+apbrd      14 00000008  "Scenario 4: Check tx_r_mod - 19 bytes frame"
+                        -- check tx status, always tx_go in fifo mode
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         01001010   0   00000000     8877665544332211
+fifo_rd         01001000   0   00000000    10ffeeddccbbaa99 
+fifo_rd         01001001   3   00000000     1817161514131211
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d511223344
+txd   5566778899aabbccddeeff10
+txd                   111213
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 4: Complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+
+--******************************************************************************
+--  7. Transmit a frame of 20 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--******************************************************************************
+
+apbrd      14 00000008  "Scenario 5: Check tx_r_mod - 20 bytes frame"
+                        -- check tx status, always tx_go in fifo mode
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         01001010   0   00000000     8877665544332211
+fifo_rd         01001000   0   00000000    10ffeeddccbbaa99 
+fifo_rd         01001001   4   00000000     1817161514131211
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d511223344
+txd   5566778899aabbccddeeff10
+txd                   11121314
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 5: Complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+
+--******************************************************************************
+--  8. Transmit a frame of 21 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--******************************************************************************
+
+apbrd      14 00000008  "Scenario 6: Check tx_r_mod - 21 bytes frame"
+                        -- check tx status, always tx_go in fifo mode
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         01001010   0   00000000     8877665544332211
+fifo_rd         01001000   0   00000000    10ffeeddccbbaa99 
+fifo_rd         01001001   5   00000000     1817161514131211
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d511223344
+txd   5566778899aabbccddeeff10
+txd                   1112131415
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 6: Complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+
+--******************************************************************************
+--  9. Transmit a frame of 22 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--******************************************************************************
+
+apbrd      14 00000008  "Scenario 7: Check tx_r_mod - 22 bytes frame"
+                        -- check tx status, always tx_go in fifo mode
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         01001010   0   00000000     8877665544332211
+fifo_rd         01001000   0   00000000    10ffeeddccbbaa99 
+fifo_rd         01001001   6   00000000     1817161514131211
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d511223344
+txd   5566778899aabbccddeeff10
+txd                   111213141516
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 7: Complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+
+--******************************************************************************
+-- 10. Transmit a frame of 23 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--******************************************************************************
+
+apbrd      14 00000008  "Scenario 8: Check tx_r_mod - 23 bytes frame"
+                        -- check tx status, always tx_go in fifo mode
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         01001010   0   00000000     8877665544332211
+fifo_rd         01001000   0   00000000    10ffeeddccbbaa99 
+fifo_rd         01001001   7   00000000     1817161514131211
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d511223344
+txd   5566778899aabbccddeeff10
+txd                   11121314151617
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 8: Complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+
+
+--******************************************************************************
+-- 19. Transmit a frame of 32 bytes with no padding or CRC.
+--     The correct tx_r_mod value must be used on the final read. Verify
+--     that the correct number of bytes are transmitted and correct status is
+--     reported.
+--******************************************************************************
+
+apbrd      14 00000008  "Scenario 17: Check tx_r_mod - 32 bytes frame"
+                        -- check tx status, always tx_go in fifo mode
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         01001010   0   00000000     8877665544332211
+fifo_rd         01001000   0   00000000    10ffeeddccbbaa99 
+fifo_rd         01000000   0   00000000     1817161514131211
+fifo_rd         01000001   0   00000000    201f1e1d1c1b1a19 
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d511223344
+txd   5566778899aabbccddeeff10
+txd   1112131415161718191a1b1c1d1e1f20
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 17: Complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+
+--******************************************************************************
+-- 20. Check statistics for above operations.
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 000000bc  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000009  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000009  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-******************************************************************************
+-- 21. Transmit a 64 byte frame. After the TX MAC has performed the SOP read
+--     drop the tx_r_data_rdy signal. Queue up another 16 byte frame, but
+--     tx_r_data_rdy is only asserted once an apb trigger is performed. By 
+--     delaying this trigger until after the first frame has completed, verify
+--     that the TX MAC does not perform any more FIFO reads after it has 
+--     seen the EOP for the first frame. Then verify that the 2nd frame is 
+--     successfully transmitted once tx_r_data_rdy is asserted.
+--******************************************************************************
+
+apbrdf     14 00000008  "Scenario 18: Check tx_r_data_rdy operation"
+                        -- check tx status, always tx_go in fifo mode
+                        -- and trigger data ready for first frame
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd(apb)    01001010   0   00000000     8877665544332211
+fifo_rd         01001000   0   00000000    10ffeeddccbbaa99 
+fifo_rd         01000000   0   00000000     1817161514131211
+fifo_rd         01000000   0   00000000    201f1e1d1c1b1a19 
+fifo_rd         01000000   0   00000000     2827262524232221
+fifo_rd         01000000   0   00000000    302f2e2d2c2b2a29 
+fifo_rd         01000000   0   00000000     3837363534333231
+fifo_rd         01000001   0   00000000    403f3e3d3c3b3a39 
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d5112233445566778899aabbccddeeff10
+txd                   1112131415161718191a1b1c1d1e1f20
+txd                   2122232425262728292a2b2c2d2e2f30
+txd                   3132333435363738393a3b3c3d3e3f40
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 18: Received first frame"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+
+apbrd(4500) 14 00000008 -- check that tx has not yet happened
+apbrdf     14 00000008  -- trigger data ready for second frame
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd(apb)    01001010   0   00000000     8877665544332211
+fifo_rd         01000000   0   00000000    10ffeeddccbbaa99 
+fifo_rd         01000000   0   00000000     1817161514131211
+fifo_rd         01000000   0   00000000    201f1e1d1c1b1a19 
+fifo_rd         01000000   0   00000000     2827262524232221
+fifo_rd         01000000   0   00000000    302f2e2d2c2b2a29 
+fifo_rd         01000000   0   00000000     3837363534333231
+fifo_rd         01000001   0   00000000    403f3e3d3c3b3a39 
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d5112233445566778899aabbccddeeff10
+txd                   1112131415161718191a1b1c1d1e1f20
+txd                   2122232425262728292a2b2c2d2e2f30
+txd                   3132333435363738393a3b3c3d3e3f40
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 18: Complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+
+--******************************************************************************
+-- 22. Transmit a 64 byte frame. Ensure that tx_r_data_rdy is high at the EOP
+--     read of the first frame. This means that the TX MAC will keep reading
+--     the FIFO searching for the next SOP.
+--     On each successive read provide combinations of the control and data
+--     signals except SOP. Ensure that these combinations are ignored.
+--     Finally provide an SOP and a valid 16 bytes frame. Ensure that this
+--     frame is correctly transmitted.
+--******************************************************************************
+
+apbrdf     14 00000008  "Scenario 19: Check searching of SOP operation"
+                        -- check tx status, always tx_go in fifo mode
+                        -- and trigger data ready for first frame
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd(apb)    01001010   0   00000000     8877665544332211
+fifo_rd         01000000   0   00000000    10ffeeddccbbaa99 
+fifo_rd         01000000   0   00000000     1817161514131211
+fifo_rd         01000000   0   00000000    201f1e1d1c1b1a19 
+fifo_rd         01000000   0   00000000     2827262524232221
+fifo_rd         01000000   0   00000000    302f2e2d2c2b2a29 
+fifo_rd         01000000   0   00000000     3837363534333231
+fifo_rd         01001001   0   00000000    403f3e3d3c3b3a39 
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d5112233445566778899aabbccddeeff10
+txd                   1112131415161718191a1b1c1d1e1f20
+txd                   2122232425262728292a2b2c2d2e2f30
+txd                   3132333435363738393a3b3c3d3e3f40
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 19: Received first frame"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+-- Supply combinations of control signals (no SOP, no UNDERFLOW, RDY always 1)
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         00001000   0   00000000    0123456789abcdef 
+fifo_rd         00001001   1   00000000    0123456789abcdef 
+fifo_rd         00001100   2   00000000    0123456789abcdef 
+fifo_rd         00001101   3   00000000    0123456789abcdef 
+fifo_rd         00101000   4   00000000    0123456789abcdef 
+fifo_rd         00101001   5   00000000    0123456789abcdef 
+fifo_rd         00101100   6   00000000    0123456789abcdef 
+fifo_rd         00101101   7   00000000    0123456789abcdef 
+
+
+-- Supply data to TX FIFO interface for 2nd frame
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd         01001010   0   00000000     8877665544332211
+fifo_rd         01000000   0   00000000    10ffeeddccbbaa99 
+fifo_rd         01000000   0   00000000     1817161514131211
+fifo_rd         01000000   0   00000000    201f1e1d1c1b1a19 
+fifo_rd         01000000   0   00000000     2827262524232221
+fifo_rd         01000000   0   00000000    302f2e2d2c2b2a29 
+fifo_rd         01000000   0   00000000     3837363534333231
+fifo_rd         01000001   0   00000000    403f3e3d3c3b3a39 
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d5112233445566778899aabbccddeeff10
+txd                   1112131415161718191a1b1c1d1e1f20
+txd                   2122232425262728292a2b2c2d2e2f30
+txd                   3132333435363738393a3b3c3d3e3f40
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 19: Complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+
+--******************************************************************************
+-- 23. Force a start of packet read by asserting tx_r_data_rdy, but before the
+--     tx_r_valid is signalled for the read, drop tx_r_data_rdy.
+--     This should be ignored and the frame will be transmitted successfully.
+--******************************************************************************
+
+apbrdf     14 00000008  "Scenario 20: Check tx_r_data_rdy dropped before valid"
+                        -- check tx status, always tx_go in fifo mode
+                        -- and trigger data ready for first frame
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <FORCE RDY LOW>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd(apb)    00001000   0   00000000    0000000000000000 -- No SOP to get things going
+fifo_rd         11000011   0   00000000    8877665544332211 -- SOP read but rdy taken away
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d51122334455667788
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 20: Complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+--******************************************************************************
+-- 24. Check statistics for above operations.
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000108  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000005  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000005  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000004  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+--******************************************************************************
+-- 25. Transmit a frame of 32 bytes with no padding or CRC.
+--     On the first FIFO read set the tx_no_crc bit, and on the second FIFO read
+--     ensure that the tx_no_crc bit is low. Verify that the frame is
+--     transmitted without padding and CRC and the the correct number of bytes
+--     are transmitted and correct status is reported.
+--******************************************************************************
+
+apbrdf     14 00000008  "Scenario 21: Check tx_no_crc control (part 1)"
+                        -- check tx status, always tx_go in fifo mode
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd(apb)    01001010   0   00000000     8877665544332211
+fifo_rd         00000000   0   00000000    10ffeeddccbbaa99 
+fifo_rd         00000000   0   00000000     1817161514131211
+fifo_rd         00000001   0   00000000    201f1e1d1c1b1a19 
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d5112233445566778899aabbccddeeff10
+txd                   1112131415161718191a1b1c1d1e1f20
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 21: Complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+
+--******************************************************************************
+-- 26. Transmit a frame of 32 bytes with padding and CRC.
+--     On the first FIFO read reset the tx_no_crc bit, and on the second FIFO
+--     read ensure that the tx_no_crc bit is high. Verify that the frame is
+--     transmitted with padding and CRC and the the correct number of bytes
+--     are transmitted and correct status is reported.
+--******************************************************************************
+
+apbrdf     14 00000008  "Scenario 22: Check tx_no_crc control (part 2)"
+                        -- check tx status, always tx_go in fifo mode
+
+-- Supply data to TX FIFO interface
+--
+-- CONTROL =  <RESERVED>, NO CRC, FLUSH, UNDERFLOW, RDY, ERR, SOP, EOP.
+--
+--              CONTROL   MOD  STATUS          DATA
+fifo_rd(apb)    00001010   0   00000000     8877665544332211
+fifo_rd         00000000   0   00000000    10ffeeddccbbaa99 
+fifo_rd         00000000   0   00000000     1817161514131211
+fifo_rd         01000001   0   00000000    201f1e1d1c1b1a19 
+
+-- check for correct preamble, SFD, data, pad and crc
+txd   55555555555555d5112233445566778899aabbccddeeff10
+txd                   1112131415161718191a1b1c1d1e1f20
+txd                   00000000000000000000000000000000
+txd                   00000000000000000000000051b7b75d
+
+
+-- check status on reception of transmit complete interrupt
+apbrd(int) 24 00000080  "Scenario 22: Complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+
+
+
+--******************************************************************************
+-- 27. Check statistics for above operations.
+--******************************************************************************
+
+-- check transmit statistics
+apbrd     100 00000060  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000002  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000002  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(10000)
+

@@ -1,0 +1,410 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_pbuf_flush_rd_64
+--
+--   Author         : Ewan McCulloch
+--
+--   Date           : 1st May 2006
+--
+--------------------------------------------------------------------------------
+--   Test Description
+--   
+--   The purpose of this test is to verify the functionality of the
+--   num_pkts_needing_read read counter in gem_dma_tx_pbuf_rd.v
+--   To achieve this, we must test 4 separate conditions
+--
+
+--------------
+-- Test 1
+--
+-- Hit the following 2 conditions consecutively
+-- 1. A collision has occurred after 100% of the current packet has been 
+--    read from the DPRAM but there is still a fragment of the packet left 
+--    in the MAC pipeline
+-- 2. A new packet has has been successfully written into the DPRAM
+--
+--------------
+-- Test 2
+--
+-- Hit the following 2 conditions consecutively
+-- 1. A collision has occurred after 100% of the current packet has been 
+--    read from the DPRAM but there is still a fragment of the packet left 
+--    in the MAC pipeline
+-- 2. Reading the last word of a packet out of the DPRAM
+--
+--------------
+-- Test 3
+--
+-- Pass 2 full packets into the MAC BEFORE a collision occurs on the first frame
+--
+--
+-------------------------------------------------------------------------------
+
+
+wait_states 1      
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- ************************************************************************** --
+--   1. Initialise the GEM for 100M mode operation.
+-- ************************************************************************** --
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      04 00280000  -- check reset value of network config register
+apbrd      04 00280000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      00 00000008  -- enable transmit
+apbrd      14 00000000  -- read transmit status register
+apbwr      1c ffffff00  -- write address of transmit buffer descriptor in memory
+apbrd      1c ffffff00  -- check transmit queue pointer
+apbwr      00 00000208  -- write transmit start bit and enable tx
+
+
+-- ************************************************************************** --
+-- Test 1
+--
+-- For code coverage, we need to hit the following 2 conditions consecutively
+-- 1. A collision has occurred after 100% of the current packet has been 
+--    read from the DPRAM but there is still a fragment of the packet left 
+--    in the MAC pipeline
+-- 2. A new packet has has been successfully written into the DPRAM
+
+-- supply the transmit buffer location for frame 1.
+-- With TX packet buffer included all of frame is read in once and retried
+-- from the packet buffer.
+dma_rd tx_descr ffffff00 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr ffffff04 00008030 -- reads tx control of eof and length of 48 bytes
+dma_rd 98765000 12345678 -- read transmit data
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+
+-- DMA will now move onto processing frame 2.
+-- This packet is extremely short
+dma_rd tx_descr ffffff08 98765100 -- dma reads pointer of 98765100
+dma_rd tx_descr ffffff0c 00000000 -- 0 length buffer (for delay)
+dma_rd tx_descr ffffff10 98765100 -- dma reads pointer of 98765100
+dma_rd tx_descr ffffff14 00000000 -- 0 length buffer (for delay)
+dma_rd tx_descr ffffff18 98765100 -- dma reads pointer of 98765100
+dma_rd tx_descr ffffff1c 00000000 -- 0 length buffer (for delay)
+dma_rd tx_descr ffffff20 98765100 -- dma reads pointer of 98765100
+dma_rd tx_descr ffffff24 00000000 -- 0 length buffer (for delay)
+dma_rd tx_descr ffffff28 98765100 -- dma reads pointer of 98765100
+dma_rd tx_descr ffffff2c 00000000 -- 0 length buffer (for delay)
+dma_rd tx_descr ffffff30 98765100 -- dma reads pointer of 98765100
+dma_rd tx_descr ffffff34 00000000 -- 0 length buffer (for delay)
+dma_rd tx_descr ffffff38 98765100 -- dma reads pointer of 98765100
+dma_rd tx_descr ffffff3c 00000000 -- 0 length buffer (for delay)
+dma_rd tx_descr ffffff40 98765100 -- dma reads pointer of 98765100
+dma_rd tx_descr ffffff44 00008009 -- 
+
+dma_rd 98765100 ffffffff -- read transmit data
+dma_rd 98765104 ffffffff -- read transmit data
+dma_rd 98765108 ffffffff -- read transmit data
+dma_rd 9876510c 00000000 -- read transmit data
+
+
+-- "x" forces data collision - jam must be at least 32 bits
+txd        55555555555555d578563412111111112222222233333333
+txd                        44444444555555556666666677777777
+txd                        8888888899999999aaaaaaaabbbbbbbb
+txd                        000000000000000000000000x2638
+txd                        ffffffff -- jam
+
+-- Successfully read frame 1
+txd        55555555555555d578563412111111112222222233333333
+txd                        44444444555555556666666677777777
+txd                        8888888899999999aaaaaaaabbbbbbbb
+txd                        0000000000000000000000002638309b
+
+
+-- write used bit for frame 1
+dma_wr ffffff04 80008030
+
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002a  -- transmit status - frame transmitted, collision & tx_go
+apbwr      14 0000002a  -- clear transmit status
+
+------------------
+--  Successfully transmit frame 2 and read a used bit on frame 3.
+
+txd        55555555555555d5ffffffffffffffffff00000000000000
+txd                        00000000000000000000000000000000
+txd                        00000000000000000000000000000000
+txd                        000000000000000000000000c35f99b2 -- pad & CRC
+
+
+-- write used bit for frame 2
+dma_wr ffffff0c 80000000
+
+--DMA starts reading ahead to frame 3. This time it reads a used bit on frame 3.
+dma_rd tx_descr ffffff48 98765100 -- dma reads pointer of 98765000
+dma_rd tx_descr ffffff4c 80008020 -- 
+
+
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd(int) 24 00000008  
+apbwr      24 00000008  -- clear interrupt status
+apbrd      14 00000021  -- transmit status - frame transmitted and used
+
+-- ************************************************************************** --
+-- Test 2
+--
+-- Set the flush_post_pkt_read a couple of cycles after the second packet
+-- has been written into the DPRAM.  This will cause a unique condition 
+-- where a 'restart' is required, but this occurs at the same time as 
+-- the identifier used to initiate the read of the second packet.  Ensure
+-- the packet is indeed restarted
+
+apbwr      00 00000208  -- write transmit start bit and enable tx
+
+-- supply the transmit buffer location for frame 1.
+-- With TX packet buffer included all of frame is read in once and retried
+-- from the packet buffer.
+dma_rd tx_descr ffffff48 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr ffffff4c 00008004 -- reads tx control of eof and length of 48 bytes
+dma_rd 98765000 12345678 -- read transmit data
+dma_rd 98765004 00000000
+
+-- DMA will now move onto processing frame 2.
+-- This packet is extremely short
+dma_rd tx_descr ffffff50 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr ffffff54 00008004 
+dma_rd 98765000 98765432 -- read transmit data
+dma_rd 98765004 00000000
+
+
+-- "x" forces data collision - jam must be at least 32 bits
+txd        55555555555555d5785634x1200
+txd                        22222222 -- jam
+
+-- Successfully read frame 1
+txd        55555555555555d578563412000000000000000000000000
+txd                        00000000000000000000000000000000
+txd                        00000000000000000000000000000000
+txd                        000000000000000000000000ec00b6ab -- pad & CRC
+
+
+-- write used bit for frame 1
+dma_wr ffffff4c 80008004
+
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002b  -- transmit status - frame transmitted, collision & tx_go
+apbwr      14 0000002b  -- clear transmit status
+
+------------------
+--  Successfully transmit frame 2 and read a used bit on frame 3.
+
+txd        55555555555555d532547698000000000000000000000000
+txd                        00000000000000000000000000000000
+txd                        00000000000000000000000000000000
+txd                        0000000000000000000000001cad8b3f -- pad & CRC
+
+
+-- write used bit for frame 2
+dma_wr ffffff54 80008004
+
+--DMA starts reading ahead to frame 3. This time it reads a used bit on frame 3.
+dma_rd tx_descr ffffff58 98765100 -- dma reads pointer of 98765000
+dma_rd tx_descr ffffff5c 80008020 -- 
+
+
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd(int) 24 00000008  
+apbwr      24 00000008  -- clear interrupt status
+apbrd      14 00000021  -- transmit status - frame transmitted and used
+
+
+-- ************************************************************************** --
+-- Test 3
+--
+-- Pass 2 full packets into the MAC BEFORE a collision occurs on the first frame
+
+
+apbwr      00 00000208  -- write transmit start bit and enable tx
+
+-- supply the transmit buffer location for frame 1.
+-- With TX packet buffer included all of frame is read in once and retried
+-- from the packet buffer.
+dma_rd tx_descr ffffff58 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr ffffff5c 00008004 -- reads tx control of eof and length of 48 bytes
+dma_rd 98765000 12345678 -- read transmit data
+dma_rd 98765004 00000000
+
+-- DMA will now move onto processing frame 2.
+-- This packet is extremely short
+dma_rd tx_descr ffffff60 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr ffffff64 00008004 
+dma_rd 98765000 98765432 -- read transmit data
+dma_rd 98765004 00000000
+
+
+-- "x" forces data collision - jam must be at least 32 bits
+txd        55555555555555d57856341200x0000
+txd                         22222222 -- jam
+
+-- Successfully read frame 1
+txd        55555555555555d578563412000000000000000000000000
+txd                        00000000000000000000000000000000
+txd                        00000000000000000000000000000000
+txd                        000000000000000000000000ec00b6ab
+
+-- write used bit for frame 1
+dma_wr ffffff5c 80008004
+
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 0000002b  -- transmit status - frame transmitted, collision & tx_go
+apbwr      14 0000002b  -- clear transmit status
+
+------------------
+--  Successfully transmit frame 2 and read a used bit on frame 3.
+
+txd        55555555555555d532547698000000000000000000000000
+txd                        00000000000000000000000000000000
+txd                        00000000000000000000000000000000
+txd                        0000000000000000000000001cad8b3f -- pad & CRC
+
+
+-- write used bit for frame 2
+dma_wr ffffff64 80008004
+
+--DMA starts reading ahead to frame 3. This time it reads a used bit on frame 3.
+dma_rd tx_descr ffffff68 98765100 -- dma reads pointer of 98765000
+dma_rd tx_descr ffffff6c 80008020 -- 
+
+
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd(int) 24 00000008  
+apbwr      24 00000008  -- clear interrupt status
+apbrd      14 00000021  -- transmit status - frame transmitted and used
+
+
+-- ************************************************************************** --
+-- Test 4
+--
+-- Hit the following condition 
+--  -  a packet is completely written into the DPRAM andis ready to be read 
+--     (pkt_written_dpram_r is set)
+--  - The last word of a different packet is currently being read from the DPRAM
+
+apbwr      00 00000208  -- write transmit start bit and enable tx
+
+-- supply the transmit buffer location for frame 1.
+-- With TX packet buffer included all of frame is read in once and retried
+-- from the packet buffer.
+dma_rd tx_descr ffffff68 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr ffffff6c 00008030 -- reads tx control of eof and length of 48 bytes
+dma_rd 98765000 12345678 -- read transmit data
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+
+-- DMA will now move onto processing frame 2.
+-- This packet is extremely short
+dma_rd tx_descr ffffff70 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr ffffff74 00000000 
+
+dma_rd tx_descr ffffff78 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr ffffff7c 00008060 
+dma_rd 98765000 12345678 -- read transmit data
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+dma_rd 98765030 bbbbbbbb
+dma_rd 98765034 bbbbbbbb
+dma_rd 98765038 bbbbbbbb
+dma_rd 9876503c bbbbbbbb
+dma_rd 98765040 bbbbbbbb
+dma_rd 98765044 bbbbbbbb
+dma_rd 98765048 bbbbbbbb
+dma_rd 9876504c bbbbbbbb
+dma_rd 98765050 bbbbbbbb
+dma_rd 98765054 bbbbbbbb
+dma_rd 98765058 bbbbbbbb
+dma_rd 9876505c bbbbbbbb
+
+-- Successfully read frame 1
+txd        55555555555555d578563412111111112222222233333333
+txd                        44444444555555556666666677777777
+txd                        8888888899999999aaaaaaaabbbbbbbb
+txd                        0000000000000000000000002638309b
+
+-- write used bit for frame 1
+dma_wr ffffff6c 80008030
+
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 00000029  -- transmit status - frame transmitted, collision & tx_go
+apbwr      14 00000022  -- clear transmit status
+
+------------------
+--  Successfully transmit frame 2 and read a used bit on frame 3.
+
+txd        55555555555555d578563412111111112222222233333333
+txd                        44444444555555556666666677777777
+txd                        8888888899999999aaaaaaaabbbbbbbb
+txd                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+txd                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+txd                        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+txd                        f5b285d1
+
+-- write used bit for frame 2
+dma_wr ffffff74 80000000
+
+--DMA starts reading ahead to frame 3. This time it reads a used bit on frame 3.
+dma_rd tx_descr ffffff80 98765100 -- dma reads pointer of 98765000
+dma_rd tx_descr ffffff84 80008020 -- 
+
+
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear interrupt status
+apbrd(int) 24 00000008  
+apbwr      24 00000008  -- clear interrupt status
+apbrd      14 00000021  -- transmit status - frame transmitted and used
+
+
+end(100000)
+
+

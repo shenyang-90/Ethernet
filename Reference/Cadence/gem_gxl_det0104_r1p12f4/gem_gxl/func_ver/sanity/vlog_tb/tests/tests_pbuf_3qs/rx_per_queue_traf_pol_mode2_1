@@ -1,0 +1,347 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_traf_pol_mode2_1
+--
+--   Author         : fmalaspi@cadence.com
+--
+--   Date           : 6 Feb 2017
+--
+--------------------------------------------------------------------------------
+--
+--   Test Description
+--   This test checks the functionality of Mode2 of the per queue rx traffic policing
+--   In particular this test receives a frame and after that it receives another one 
+--   right away, before the eDMA rx-rd stores the 1st frame to the memory. Since the
+--   mode2 is set, the second frame will be discarded, hence no eDMA activity will be
+--   performed. This is done for all 3 queues.
+--------------------------------------------------------------------------------
+two_pt_five_gig;
+
+sel_ahb_freq 0
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+
+
+-- *****************************************************************************
+-- Initialise the GEM for 2.5 Gbps operation.
+-- Check the receive status and control registers.
+-- Write an address to specific address register one.
+-- *****************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 f0000000  -- write receive queue pointer
+apbwr     480 f0010000  -- write receive queue pointer
+apbwr     484 f0020000  -- write receive queue pointer
+apbwr     488 f0030000  -- write receive queue pointer
+apbwr     48c f0040000  -- write receive queue pointer
+apbwr     490 f0050000  -- write receive queue pointer
+apbwr     494 f0060000  -- write receive queue pointer
+apbwr     498 f0070000  -- write receive queue pointer
+apbwr      04 0008041a  -- setting gigabit mode
+apbwr      00 20000004  -- enable receive and 2.5 Gbps
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      98 12345678  -- specific address register 3 bottom
+apbwr      9C 00001111  -- specific address register 3 top
+
+apbwr      540 00000102  -- Screener2 reg 0, vlan enabled, pri = 0
+apbwr      544 00000111  -- Screener2 reg 1, vlan enabled, pri = 1
+apbwr      548 00000121  -- Screener2 reg 2, vlan enabled, pri = 2
+apbwr      54c 00000131  -- Screener2 reg 3, vlan enabled, pri = 3
+apbwr      550 00000141  -- Screener2 reg 4, vlan enabled, pri = 4
+apbwr      554 00000151  -- Screener2 reg 5, vlan enabled, pri = 5
+apbwr      558 00000160  -- Screener2 reg 6, vlan enabled, pri = 6
+apbwr      55c 00000170  -- Screener2 reg 7, vlan enabled, pri = 7
+
+apbwr      6e0 0000ffff  -- Ethtype reg 0
+apbwr      6e4 00005a5a  -- Ethtype reg 1
+apbwr      6e8 0000a5a5  -- Ethtype reg 2
+apbwr      6ec 0000def0  -- Ethtype reg 3
+apbwr      6f0 00009abc  -- Ethtype reg 4
+apbwr      6f4 00005678  -- Ethtype reg 5
+apbwr      6f8 00001234  -- Ethtype reg 6
+apbwr      6fc 00000080  -- Ethtype reg 7
+
+apbwr      700 2211ffff  -- Compare reg 0a
+apbwr      704 00000007  -- Compare reg 0b
+apbwr      708 a334ffff  -- Compare reg 1a
+apbwr      70c 00000022  -- Compare reg 1b
+
+-- rx traffic policing registers
+apbwr     b00  00000000 -- initially mode2 is disabled for queue0, max set to 0
+apbwr     b04  00000000 -- initially mode2 is disabled for queue1  max set to 0
+apbwr     b08  00000000 -- initially mode2 is disabled for queue2  max set to 0
+
+apbrdf 20 00000000 
+
+-- *****************************************************************************
+-- Frame n1 to queue0
+-- *****************************************************************************
+                          
+rxd(apb) 555555d5FFFFFFFFFFFF1111222222228100ffffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              111111112222222233333333gggggggg
+
+dma_rd f0000000 88888004
+
+dma_wr 88888004 FFFFFFFF -- store frame to memory
+dma_wr 88888008 1111FFFF
+dma_wr 8888800c 22222222
+dma_wr 88888010 ffff0081
+dma_wr 88888014 4444ffff
+dma_wr 88888018 55554444
+dma_wr 8888801c 66665555
+dma_wr 88888020 77776666
+dma_wr 88888024 88887777
+dma_wr 88888028 99998888
+dma_wr 8888802c aaaa9999
+dma_wr 88888030 bbbbaaaa
+dma_wr 88888034 ccccbbbb
+dma_wr 88888038 11111111
+dma_wr 8888803c 22222222
+dma_wr 88888040 33333333
+dma_wr 88888044 11111111
+dma_wr 88888048 22222222
+dma_wr 8888804c 33333333
+dma_wr 88888050 44444444
+dma_wr 88888054 11111111
+dma_wr 88888058 22222222
+dma_wr 8888805c 33333333
+dma_wr 88888060 44444444
+dma_wr 88888064 11111111
+dma_wr 88888068 22222222
+dma_wr 8888806c 33333333
+dma_wr 88888070 44444444
+dma_wr 88888074 11111111
+dma_wr 88888078 22222222
+dma_wr 8888807c 33333333
+dma_wr 88888080 54087db1
+
+dma_wr f0000004 802fc080
+dma_wr f0000000 88888005
+
+apbwr(200) b00  00000004 -- mode2  is enabled for queue0, max set to 0                             
+
+-- *****************************************************************************
+-- Frame n2 to queue0
+-- *****************************************************************************
+-- This will be discarded 
+-- Hence there will be no eDMA activity
+
+rxd(gap) 555555d5FFFFFFFFFFFF1111222222228100ffffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              111111112222222233333333gggggggg
+
+-- read stats register
+apbrd(242) 1b4  00000001 -- frames discarded
+
+-- *****************************************************************************
+-- Frame n3 to queue0
+-- *****************************************************************************
+-- This frame should not be discarded
+
+rxd(gap) 555555d5FFFFFFFFFFFF1111222222228100ffffffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              111111112222222233333333gggggggg
+
+dma_rd f0000008 88888004
+
+dma_wr 88888004 FFFFFFFF -- store frame to memory
+dma_wr 88888008 1111FFFF
+dma_wr 8888800c 22222222
+dma_wr 88888010 ffff0081
+dma_wr 88888014 4444ffff
+dma_wr 88888018 55554444
+dma_wr 8888801c 66665555
+dma_wr 88888020 77776666
+dma_wr 88888024 88887777
+dma_wr 88888028 99998888
+dma_wr 8888802c aaaa9999
+dma_wr 88888030 bbbbaaaa
+dma_wr 88888034 ccccbbbb
+dma_wr 88888038 11111111
+dma_wr 8888803c 22222222
+dma_wr 88888040 33333333
+dma_wr 88888044 11111111
+dma_wr 88888048 22222222
+dma_wr 8888804c 33333333
+dma_wr 88888050 44444444
+dma_wr 88888054 11111111
+dma_wr 88888058 22222222
+dma_wr 8888805c 33333333
+dma_wr 88888060 44444444
+dma_wr 88888064 11111111
+dma_wr 88888068 22222222
+dma_wr 8888806c 33333333
+dma_wr 88888070 44444444
+dma_wr 88888074 11111111
+dma_wr 88888078 22222222
+dma_wr 8888807c 33333333
+dma_wr 88888080 54087db1
+
+dma_wr f000000c 802fc080
+dma_wr f0000008 88888005
+
+-- *****************************************************************************
+-- Frame n1 to queue1
+-- *****************************************************************************
+
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281005a5affff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              111111112222222233333333gggggggg
+
+dma_rd f0010000 88888004
+
+dma_wr 88888004 FFFFFFFF -- store frame to memory
+dma_wr 88888008 1111FFFF
+dma_wr 8888800c 22222222
+dma_wr 88888010 5a5a0081
+dma_wr 88888014 4444ffff
+dma_wr 88888018 55554444
+dma_wr 8888801c 66665555
+dma_wr 88888020 77776666
+dma_wr 88888024 88887777
+dma_wr 88888028 99998888
+dma_wr 8888802c aaaa9999
+dma_wr 88888030 bbbbaaaa
+dma_wr 88888034 ccccbbbb
+dma_wr 88888038 11111111
+dma_wr 8888803c 22222222
+dma_wr 88888040 33333333
+dma_wr 88888044 11111111
+dma_wr 88888048 22222222
+dma_wr 8888804c 33333333
+dma_wr 88888050 44444444
+dma_wr 88888054 11111111
+dma_wr 88888058 22222222
+dma_wr 8888805c 33333333
+dma_wr 88888060 44444444
+dma_wr 88888064 11111111
+dma_wr 88888068 22222222
+dma_wr 8888806c 33333333
+dma_wr 88888070 44444444
+dma_wr 88888074 11111111
+dma_wr 88888078 22222222
+dma_wr 8888807c 33333333
+dma_wr 88888080 aff5227f
+
+dma_wr f0010004 8025c080
+dma_wr f0010000 88888005
+
+-- *****************************************************************************
+-- Frame n2 to queue1
+-- *****************************************************************************
+-- This will be discarded 
+-- Hence there will be no eDMA activity
+
+apbwr(300)  b04  00000004 -- mode2 is enabled for queue1  max set to 0
+
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281005a5affff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              111111112222222233333333gggggggg
+
+-- *****************************************************************************
+-- Frame n1 to queue2
+-- *****************************************************************************
+
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281000000ffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              111111112222222233333333gggggggg
+
+dma_rd f0020000 88888004
+
+dma_wr 88888004 FFFFFFFF -- store frame to memory
+dma_wr 88888008 1111FFFF
+dma_wr 8888800c 22222222
+dma_wr 88888010 00000081
+dma_wr 88888014 4444ffff
+dma_wr 88888018 55554444
+dma_wr 8888801c 66665555
+dma_wr 88888020 77776666
+dma_wr 88888024 88887777
+dma_wr 88888028 99998888
+dma_wr 8888802c aaaa9999
+dma_wr 88888030 bbbbaaaa
+dma_wr 88888034 ccccbbbb
+dma_wr 88888038 11111111
+dma_wr 8888803c 22222222
+dma_wr 88888040 33333333
+dma_wr 88888044 11111111
+dma_wr 88888048 22222222
+dma_wr 8888804c 33333333
+dma_wr 88888050 44444444
+dma_wr 88888054 11111111
+dma_wr 88888058 22222222
+dma_wr 8888805c 33333333
+dma_wr 88888060 44444444
+dma_wr 88888064 11111111
+dma_wr 88888068 22222222
+dma_wr 8888806c 33333333
+dma_wr 88888070 44444444
+dma_wr 88888074 11111111
+dma_wr 88888078 22222222
+dma_wr 8888807c 33333333
+dma_wr 88888080 cdc92020
+
+dma_wr f0020004 8030c080
+dma_wr f0020000 88888005
+
+apbwr(323)  b08  00000004 -- mode2 is enabled for queue2  max set to 0
+
+-- *****************************************************************************
+-- Frame n2 to queue2
+-- *****************************************************************************
+-- This will be discarded 
+-- Hence there will be no eDMA activity
+
+-- read stats register
+apbrd(382) 1b4  00000002 -- frames discarded
+
+rxd(gap) 555555d5FFFFFFFFFFFF11112222222281000000ffff
+rxd              44444444555555556666666677777777
+rxd              8888888899999999aaaaaaaabbbbbbbb
+rxd              cccc111111112222222233333333
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              11111111222222223333333344444444
+rxd              111111112222222233333333gggggggg
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(50000)

@@ -1,0 +1,448 @@
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_toe_ipv6_64_1
+--
+--   Author         : Ewan McCulloch (ewanm@cadence.com)
+--
+--   Date           : 24 April 2006
+--
+--------------------------------------------------------------------------------
+--
+-- Description
+--------------
+--
+-- This test covers some missing block statements in the code coverage (64 bit)
+--
+--
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 0000ffff  -- enable all interrupts
+apbwr      440 88000000  -- write transmit queue pointer 1
+apbwr      444 99000000  -- write transmit queue pointer 2
+apbwr      04 00280000  -- check reset value of network config register
+apbrd      04 00280000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      10 00020c04  -- enable 4k ram and tcp offload
+apbwr      00 00000208  -- write tx_go and enable tx
+
+--******************************************************************************
+-- Test 1
+--    ipv6_indicator_2 & ~ipv6_valid_3 when in START state
+--******************************************************************************
+
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd 55555504 00008101 -- start of frame, 
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 6f24a000
+dma_rd 98765004 a000a3b6
+dma_rd 98765008 02b76f24
+dma_rd 9876500c 0080dd86
+dma_rd 98765010 cb000000
+dma_rd 98765014 155f4006
+dma_rd 98765018 c0820050
+dma_rd 9876501c bd00000e
+dma_rd 98765020 6f24a000
+dma_rd 98765024 155f02b7
+dma_rd 98765028 c0820050                              
+dma_rd 9876502c bd00000e                              
+dma_rd 98765030 6f24a000                              
+dma_rd 98765034 3f23a3b6                                 
+dma_rd 98765038 a9630604
+dma_rd 9876503c 411e4abc
+dma_rd 98765040 188080b0
+dma_rd 98765044 ffff8043      --tcp checksum in here
+dma_rd 98765048 01010000
+dma_rd 9876504c 0a000a08
+dma_rd 98765050 0000d996
+dma_rd 98765054 614Cd514
+dma_rd 98765058 6C207473
+dma_rd 9876505c 6E69676F
+dma_rd 98765060 7554203A
+dma_rd 98765064 614A2065
+dma_rd 98765068 3720206E
+dma_rd 9876506c 3A373120
+dma_rd 98765070 343A3330
+dma_rd 98765074 72662036
+dma_rd 98765078 61206D6F
+dma_rd 9876507c 6563696C
+dma_rd 98765080 2E36762D
+dma_rd 98765084 36767069
+dma_rd 98765088 61570A0D
+dma_rd 9876508c 6E696E72
+dma_rd 98765090 6E203A67
+dma_rd 98765094 654B206F
+dma_rd 98765098 72656272
+dma_rd 9876509c 7420736F
+dma_rd 987650a0 656B6369
+dma_rd 987650a4 69207374
+dma_rd 987650a8 65757373
+dma_rd 987650ac 0A0D2E64
+dma_rd 987650b0 6E65704F
+dma_rd 987650b4 20445342
+dma_rd 987650b8 20322E31
+dma_rd 987650bc 4E504928
+dma_rd 987650c0 52454B47
+dma_rd 987650c4 31232029
+dma_rd 987650c8 7246203A
+dma_rd 987650cc 6F4E2069
+dma_rd 987650d0 35312076
+dma_rd 987650d4 3A383020
+dma_rd 987650d8 343A3330
+dma_rd 987650dc 53502032
+dma_rd 987650e0 39312054
+dma_rd 987650e4 0A0D3639
+dma_rd 987650e8 65570A0D
+dma_rd 987650ec 6D6F636C
+dma_rd 987650f0 6F742065
+dma_rd 987650f4 65704F20
+dma_rd 987650f8 4453426E
+dma_rd 987650fc 0D0A0D2E
+dma_rd 98765100 0000000A
+dma_rd 98765104 00000000
+
+
+txd        55555555555555d5-- preamble & SDF
+txd        00a0246fb6a3    -- MAC DA
+txd        00a0246fb702    -- MAC SA
+txd        86dd            -- IPV6 type
+txd        80000000        -- Version, Traffic Class, Flow Label  
+txd        00cb            -- Payload length  (==203)                
+txd        0640            -- Next Header, Hop Limit                             
+txd        5f155000        -- Source Address (1st 32)
+txd        82c00e00        -- Source Address (2nd 32) 
+txd        00bd00a0        -- Source Address (3rd 32)
+txd        246fb702        -- Source Address (4th 32) 
+txd        5f155000        -- Dest Address (1st 32)
+txd        82c00e00        -- Dest Address (2nd 32)
+txd        00bd00a0        -- Dest Address (3rd 32)
+txd        246fb6a3        -- Dest Address (4th 32)
+txd        233f            -- TCP source port                
+txd        0406            -- TCP destination port           
+txd        63a9bc4a        -- Sequence number                
+txd        1e41b080        -- Acknowledgement Number         
+txd        80184380        -- Flags and window               
+txd        ffff            -- TCP checksum (not added due to lack of valid ipv6)
+txd        0000            -- TCP urgent pointer             
+txd        0101
+txd        080a000a96d90000-- Padding
+txd        14d5            -- Padding
+txd        4c617374206c6f67696e3a2054756520
+txd        4a616e2020372031373a30333a343620
+txd        66726f6d20616c6963652d76362e6970
+txd        76360d0a5761726e696e673a206e6f20
+txd        4b65726265726f73207469636b657473
+txd        206973737565642e0d0a4f70656e4253
+txd        4420312e32202849504e474b45522920
+txd        23313a20467269204e6f762031352030
+txd        383a30333a3432205053542031393936
+txd        0d0a0d0a57656c636f6d6520746f204f
+txd        70656e4253442e0d0a0d0a
+txd        8d3cae45
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 80308101 -- write used bit -- TCP status is bad
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+--******************************************************************************
+-- Test 2
+--    ~ipv6_indicator_2 & ~ipv4_indicator_2 when in SNAP2 state
+--******************************************************************************
+
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555508 98765000 -- dma reads pointer of 98765000
+dma_rd 5555550c 00008109 -- start of frame, 
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 6f24a000
+dma_rd 98765004 a000a3b6
+dma_rd 98765008 02b76f24
+dma_rd 9876500c AAAA2400
+dma_rd 98765010 00000003
+dma_rd 98765014 0060dd85
+dma_rd 98765018 cb000000
+dma_rd 9876501c 155f4006
+dma_rd 98765020 c0820050
+dma_rd 98765024 bd00000e
+dma_rd 98765028 6f24a000
+dma_rd 9876502c 155f02b7
+dma_rd 98765030 c0820050
+dma_rd 98765034 bd00000e
+dma_rd 98765038 6f24a000
+dma_rd 9876503c 3f23a3b6
+dma_rd 98765040 a9630604
+dma_rd 98765044 411e4abc
+dma_rd 98765048 188080b0
+dma_rd 9876504c ffff8043      --tcp checksum in here
+dma_rd 98765050 01010000
+dma_rd 98765054 0a000a08
+dma_rd 98765058 0000d996
+dma_rd 9876505c 614Cd514
+dma_rd 98765060 6C207473
+dma_rd 98765064 6E69676F
+dma_rd 98765068 7554203A
+dma_rd 9876506c 614A2065
+dma_rd 98765070 3720206E
+dma_rd 98765074 3A373120
+dma_rd 98765078 343A3330
+dma_rd 9876507c 72662036
+dma_rd 98765080 61206D6F
+dma_rd 98765084 6563696C
+dma_rd 98765088 2E36762D
+dma_rd 9876508c 36767069
+dma_rd 98765090 61570A0D
+dma_rd 98765094 6E696E72
+dma_rd 98765098 6E203A67
+dma_rd 9876509c 654B206F
+dma_rd 987650a0 72656272
+dma_rd 987650a4 7420736F
+dma_rd 987650a8 656B6369
+dma_rd 987650ac 69207374
+dma_rd 987650b0 65757373
+dma_rd 987650b4 0A0D2E64
+dma_rd 987650b8 6E65704F
+dma_rd 987650bc 20445342
+dma_rd 987650c0 20322E31
+dma_rd 987650c4 4E504928
+dma_rd 987650c8 52454B47
+dma_rd 987650cc 31232029
+dma_rd 987650d0 7246203A
+dma_rd 987650d4 6F4E2069
+dma_rd 987650d8 35312076
+dma_rd 987650dc 3A383020
+dma_rd 987650e0 343A3330
+dma_rd 987650e4 53502032
+dma_rd 987650e8 39312054
+dma_rd 987650ec 0A0D3639
+dma_rd 987650f0 65570A0D
+dma_rd 987650f4 6D6F636C
+dma_rd 987650f8 6F742065
+dma_rd 987650fc 65704F20
+dma_rd 98765100 4453426E
+dma_rd 98765104 0D0A0D2E
+dma_rd 98765108 0000000A
+dma_rd 9876510c 00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        00a0246fb6a3     -- MAC DA
+txd        00a0246fb702     -- MAC SA
+txd        0024             -- Length/typeID
+txd        AAAA             -- DSAP and SSAP
+txd        0300             -- Control / Protocol ID[7:0]
+txd        0000             -- Protocol ID [23:8]
+txd        85dd             -- IPV6 type
+txd        60000000         -- Version, Traffic Class, Flow Label  
+txd        00cb             -- Payload length  (==203)                
+txd        0640             -- Next Header, Hop Limit                             
+txd        5f155000         -- Source Address (1st 32)
+txd        82c00e00         -- Source Address (2nd 32) 
+txd        00bd00a0         -- Source Address (3rd 32)
+txd        246fb702         -- Source Address (4th 32) 
+txd        5f155000         -- Dest Address (1st 32)
+txd        82c00e00         -- Dest Address (2nd 32)
+txd        00bd00a0         -- Dest Address (3rd 32)
+txd        246fb6a3         -- Dest Address (4th 32)
+txd        233f             -- TCP source port                
+txd        0406             -- TCP destination port           
+txd        63a9bc4a         -- Sequence number                
+txd        1e41b080         -- Acknowledgement Number         
+txd        80184380         -- Flags and window               
+txd        ffff             -- TCP checksum                   
+txd        0000             -- TCP urgent pointer             
+txd        0101
+txd        080a000a96d90000 -- Padding
+txd        14d5             -- Padding
+txd        4C617374206C6F67696E3A2054756520
+txd        4A616E2020372031373A30333A343620
+txd        66726F6D20616C6963652D76362E6970
+txd        76360D0A5761726E696E673A206E6F20
+txd        4B65726265726F73207469636B657473
+txd        206973737565642E0D0A4F70656E4253
+txd        4420312E32202849504E474B45522920
+txd        23313A20467269204E6F762031352030
+txd        383A30333A3432205053542031393936
+txd        0D0A0D0A57656C636F6D6520746F204F
+txd        70656E4253442E0D0A0D0A
+txd        3fd29d68
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555550c 80308109 -- write used bit -- TCP status is bad
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+--******************************************************************************
+-- Test 3
+--    ipv6_indicator_0 & ~ipv6_valid_1 when in SNAP4 state
+--******************************************************************************
+
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555510 98765000 -- dma reads pointer of 98765000
+dma_rd 55555514 0000810d -- start of frame, 
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 6f24a000
+dma_rd 98765004 a000a3b6
+dma_rd 98765008 02b76f24
+dma_rd 9876500c 01000081
+dma_rd 98765010 AAAA2400
+dma_rd 98765014 00000003
+dma_rd 98765018 0060ed86
+dma_rd 9876501c cb000000
+dma_rd 98765020 155f4006
+dma_rd 98765024 c0820050
+dma_rd 98765028 bd00000e
+dma_rd 9876502c 6f24a000
+dma_rd 98765030 155f02b7
+dma_rd 98765034 c0820050
+dma_rd 98765038 bd00000e
+dma_rd 9876503c 6f24a000
+dma_rd 98765040 3f23a3b6
+dma_rd 98765044 a9630604
+dma_rd 98765048 411e4abc
+dma_rd 9876504c 188080b0
+dma_rd 98765050 ffff8043      --tcp checksum in here
+dma_rd 98765054 01010000
+dma_rd 98765058 0a000a08
+dma_rd 9876505c 0000d996
+dma_rd 98765060 614Cd514
+dma_rd 98765064 6C207473
+dma_rd 98765068 6E69676F
+dma_rd 9876506c 7554203A
+dma_rd 98765070 614A2065
+dma_rd 98765074 3720206E
+dma_rd 98765078 3A373120
+dma_rd 9876507c 343A3330
+dma_rd 98765080 72662036
+dma_rd 98765084 61206D6F
+dma_rd 98765088 6563696C
+dma_rd 9876508c 2E36762D
+dma_rd 98765090 36767069
+dma_rd 98765094 61570A0D
+dma_rd 98765098 6E696E72
+dma_rd 9876509c 6E203A67
+dma_rd 987650a0 654B206F
+dma_rd 987650a4 72656272
+dma_rd 987650a8 7420736F
+dma_rd 987650ac 656B6369
+dma_rd 987650b0 69207374
+dma_rd 987650b4 65757373
+dma_rd 987650b8 0A0D2E64
+dma_rd 987650bc 6E65704F
+dma_rd 987650c0 20445342
+dma_rd 987650c4 20322E31
+dma_rd 987650c8 4E504928
+dma_rd 987650cc 52454B47
+dma_rd 987650d0 31232029
+dma_rd 987650d4 7246203A
+dma_rd 987650d8 6F4E2069
+dma_rd 987650dc 35312076
+dma_rd 987650e0 3A383020
+dma_rd 987650e4 343A3330
+dma_rd 987650e8 53502032
+dma_rd 987650ec 39312054
+dma_rd 987650f0 0A0D3639
+dma_rd 987650f4 65570A0D
+dma_rd 987650f8 6D6F636C
+dma_rd 987650fc 6F742065
+dma_rd 98765100 65704F20
+dma_rd 98765104 4453426E
+dma_rd 98765108 0D0A0D2E
+dma_rd 9876510c 0000000A
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        00a0246fb6a3     -- MAC DA
+txd        00a0246fb702     -- MAC SA
+txd        8100             -- Length/typeID
+txd        0001             -- VLAN tag
+txd        0024             -- Length/typeID
+txd        AAAA             -- DSAP and SSAP
+txd        0300             -- Control / Protocol ID[7:0]
+txd        0000             -- Protocol ID [23:8]
+txd        86ed             -- IPV6 type
+txd        60000000         -- Version, Traffic Class, Flow Label  
+txd        00cb             -- Payload length  (==203)                
+txd        0640             -- Next Header, Hop Limit                             
+txd        5f155000         -- Source Address (1st 32)
+txd        82c00e00         -- Source Address (2nd 32) 
+txd        00bd00a0         -- Source Address (3rd 32)
+txd        246fb702         -- Source Address (4th 32) 
+txd        5f155000         -- Dest Address (1st 32)
+txd        82c00e00         -- Dest Address (2nd 32)
+txd        00bd00a0         -- Dest Address (3rd 32)
+txd        246fb6a3         -- Dest Address (4th 32)
+txd        233f             -- TCP source port                
+txd        0406             -- TCP destination port           
+txd        63a9bc4a         -- Sequence number                
+txd        1e41b080         -- Acknowledgement Number         
+txd        80184380         -- Flags and window               
+txd        ffff             -- TCP checksum                   
+txd        0000             -- TCP urgent pointer             
+txd        0101
+txd        080a000a96d90000 -- Padding
+txd        14d5             -- Padding
+txd        4C617374206C6F67696E3A2054756520
+txd        4A616E2020372031373A30333A343620
+txd        66726F6D20616C6963652D76362E6970
+txd        76360D0A5761726E696E673A206E6F20
+txd        4B65726265726F73207469636B657473
+txd        206973737565642E0D0A4F70656E4253
+txd        4420312E32202849504E474B45522920
+txd        23313A20467269204E6F762031352030
+txd        383A30333A3432205053542031393936
+txd        0D0A0D0A57656C636F6D6520746F204F
+txd        70656E4253442E0D0A0D0A
+txd        24331168
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555514 8030810d -- write used bit -- TCP status is bad
+
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete
+apbwr       24 00000088  -- check interrupt status - transmit complete
+
+apbrd	      14 00000021  -- tx status - frame transmitted,
+
+
+
+dma_rd 99000000 99990000 -- dma reads pointer for Queue 2
+dma_rd 99000004 99990000 -- dma reads pointer for Queue 2
+dma_rd 88000000 88880000 -- dma reads pointer for Queue 1
+dma_rd 88000004 88880000 -- dma reads pointer for Queue 1
+dma_rd 55555518 98765000 -- dma reads pointer of 98765000
+dma_rd 5555551c 80008169 -- start of frame, 
+
+
+
+
+bus_grant_delay 0

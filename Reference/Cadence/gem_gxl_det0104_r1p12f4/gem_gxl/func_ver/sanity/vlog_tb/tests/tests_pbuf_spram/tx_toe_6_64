@@ -1,0 +1,160 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_toe_6_64
+--
+--   Author         : Ewan McCulloch (ewanm@cadence.com)
+--
+--   Date           : 24 April 2006
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This test verifies the tcp protocol can pause while processing multi-buffer
+-- frames
+--
+--
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      04 00280000  -- check reset value of network config register
+apbrd      04 00280000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      10 00020c04  -- enable 4k ram and tcp offload
+apbwr      00 00000208  -- write tx_go and enable tx
+
+
+--******************************************************************************
+-- Test 2.1
+--    Broadcast frame, Valid TCP, even length, no IP options, no VLAN, no SNAP
+--    The frame should be copied to memory, with status indicating IP & TCP
+--    checksums checked (bits [23:22] = 10) and no SNAP (bit 24 low).
+-- Send as a multi-buffer frame
+-- Full frame is 60 bytes long
+--******************************************************************************
+
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd 55555504 00000003 -- start of frame, 1st buffer
+dma_rd 98765000 00FFFFFF
+dma_rd 98765004 00000000
+
+dma_rd 55555508 98765000 -- dma reads pointer of 98765000
+dma_rd 5555550c 00000001
+dma_rd 98765000 000000FF
+dma_rd 98765004 00000000
+
+dma_rd 55555510 98765000 -- dma reads pointer of 98765000
+dma_rd 55555514 00000004
+dma_rd 98765000 0008FFFF
+dma_rd 98765004 00000000
+
+dma_rd 55555518 98765000 -- dma reads pointer of 98765000
+dma_rd 5555551c 00000006
+dma_rd 98765000 56341239
+dma_rd 98765004 00000008
+
+dma_rd 55555520 98765000 -- dma reads pointer of 98765000
+dma_rd 55555524 00000003
+dma_rd 98765000 00000045
+dma_rd 98765004 00000000
+
+dma_rd 55555528 98765000 -- dma reads pointer of 98765000
+dma_rd 5555552c 00000008
+dma_rd 98765000 40FADF28
+dma_rd 98765004 FF068000 -- Half of IP Checksum placed here
+
+dma_rd 55555530 98765000 -- dma reads pointer of 98765000
+dma_rd 55555534 00000009
+dma_rd 98765000 00A8C0FF -- OtherHalf of IP Checksum placed here
+dma_rd 98765004 00A8C001
+dma_rd 98765008 00000091
+dma_rd 9876500c 00000000
+
+dma_rd 55555538 98765000 -- dma reads pointer of 98765000
+dma_rd 5555553c 00000002
+dma_rd 98765000 00001500 
+dma_rd 98765004 00000000 
+
+dma_rd 55555540 98765000 -- dma reads pointer of 98765000
+dma_rd 55555544 00000005
+dma_rd 98765000 BB3D8A04 
+dma_rd 98765004 0000005C 
+
+dma_rd 55555548 98765000 -- dma reads pointer of 98765000
+dma_rd 5555554c 0000000a
+dma_rd 98765000 4D22EA60
+dma_rd 98765004 44105076
+dma_rd 98765008 0000FF28 -- half of TCP Checksum placed here
+dma_rd 9876500c 00000000
+
+dma_rd 55555550 98765000 -- dma reads pointer of 98765000
+dma_rd 55555554 00000000
+
+dma_rd 55555558 98765000 -- dma reads pointer of 98765000
+dma_rd 5555555c 00000007
+dma_rd 98765000 AC0000FF -- half of TCP Checksum placed here
+dma_rd 98765004 00DBDBAC -- half of TCP Checksum placed here
+
+dma_rd 55555560 98765000 -- dma reads pointer of 98765000
+dma_rd 55555564 00008002
+dma_rd 98765000 0000B0B0
+dma_rd 98765004 00000000
+
+dma_rd 55555568 98765000 
+dma_rd 5555556c 80008001 -- read used bit
+
+
+txd         55555555555555d5 -- preamble & SDF
+txd         FFFFFFFFFFFF -- MAC DA
+txd         080039123456 -- MAC SA
+txd         0800         -- Length/typeID
+txd         4500         -- Version, IHL, type of service
+txd         0028         -- total length
+txd         DFFA         -- ID
+txd         4000         -- flags & fragmentation
+txd         8006         -- time to live and protocol
+txd         98F2         -- IP Header checksum
+txd         C0A80001     -- IP SA
+txd         C0A80091     -- IP DA
+txd         0015         -- TCP source port
+txd         048A         -- TCP destination port
+txd         3DBB5C60     -- Sequence number
+txd         EA224D76     -- Acknowledgement Number
+txd         50104428     -- Flags and window
+txd         1376         -- TCP checksum
+txd         0000         -- TCP urgent pointer
+txd         ACACDBDBB0B0 -- options or padding
+txd         589E112F     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 80000003 -- write used bit -- TCP status is okay
+
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete
+apbwr       24 00000088  -- check interrupt status - transmit complete
+
+apbrd	      14 00000021  -- tx status - frame transmitted,
+
+
+
+
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(30000)
+
+bus_grant_delay 0

@@ -1,0 +1,486 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : basic_rx
+--
+--   Author         : Arthur Marris (arthurm@cadence.com)
+--
+--   Date           : 24 January 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This checks the pkt flush functionality of the RX packet buffer
+-- this test is HIGHLY timing sensitive, so any changes to latency will
+-- affect this test
+--
+-- In cut-thru, a used bit read automatically discards the frame, so 
+-- actually the auto flush mechanism is redundant here.
+-- 
+--------------------------------------------------------------------------------
+
+wait_states 0
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr     4ec 0000000f  -- reduce freq of restart trigger
+apbwr      18 fffffff0  -- write receive queue pointer
+apbrd      18 fffffff0  -- check receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      04 00080001  -- indicate 100M operation, will check pin l8r.
+apbrd      04 00080001  -- verify write to speed register..
+apbwr      44 80000015  -- enable rx cut thru with threshold
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+-- drive the receive frame data into the MII interface
+rxd(apb)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- supply the receive buffer location
+dma_rd rx_descr fffffff0 33222005 -- dma reads pointer of 22222004, used bit is set
+
+-- receive a new frame
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+apbrd(int) 24 00000004  -- check interrupt status - used
+apbwr      24 00000004  -- clear interrupt status
+apbwr      00 00040004  -- flush the packet
+
+dma_rd rx_descr fffffff0 22222004 -- dma reads pointer of 22222004
+dma_rd rx_descr fffffff8 33222005 -- dma reads pointer of 22222004, used bit is set (will be ignored)
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 9b303826
+
+dma_wr rx_descr fffffff4 0800c040 -- dma writes rx status, local address match and 64 bytes received
+dma_wr rx_descr fffffff0 22222005 -- dma writes ownership bit
+
+apbwr(835)      00 00040004  -- attempt to flush the packet while packet is being written to memory - should be ignored
+
+
+-----------------------------------------------------
+-- 2)
+-- Now  receive 2 frames.   used bit is read on the 1st frame. A flush occurs
+-- while the 2nd descr rd is taking place. used bit is not high on 2nd attempt
+-- Both frames should be copied to memory 
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- 1st descr rd for pkt 1
+dma_rd rx_descr fffffff8 33222005 -- dma reads pointer of 22222004, used bit is set
+
+-- check status on reception of receive complete interrupt
+
+apbrd(int) 24 00000004  -- check interrupt status - used bit read
+apbwr      24 00000004  -- clear interrupt status
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+
+
+-- 2nd descr rd for pkt 1
+-- State moves from RX_DMA_IDLE to RX_DMA_MAN_RD when 
+-- event count is approx 1422
+dma_rd rx_descr fffffff8 22222004 -- dma reads pointer of 22222004
+dma_rd rx_descr 00000000 33222005 -- dma reads pointer of 22222004, used bit is set (will be ignored)
+apbwr(1108) 00 00040004  -- attempt to flush the packet at start of RX_DMA_MAN_RD state
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 9b303826
+
+dma_wr rx_descr fffffffc 0800c040 -- dma writes rx status, local address match and 64 bytes received
+dma_wr rx_descr fffffff8 22222005 -- dma writes ownership bit
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+
+-- 3rd descr rd for pkt 2
+dma_rd rx_descr 00000000 22222004 -- dma reads pointer of 22222004
+dma_rd rx_descr 00000008 33222005 -- dma reads pointer of 22222004, used bit is set (will be ignored)
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 9b303826
+
+dma_wr rx_descr 00000004 0800c040 -- dma writes rx status, local address match and 64 bytes received
+dma_wr rx_descr 00000000 22222005 -- dma writes ownership bit
+
+
+
+-----------------------------------------------------
+-- 3)
+-- Now  receive 2 frames.   used bit is read on the 1st frame. A flush occurs
+-- while the 2nd descr rd is taking place. used bit is not high on 2nd attempt
+-- Both frames should be copied to memory 
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- 1st descr rd for pkt 1
+dma_rd rx_descr 00000008 33222005 -- dma reads pointer of 22222004, used bit is set
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000004  -- check interrupt status - used bit read
+apbwr      24 00000004  -- clear interrupt status
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+
+-- 2nd descr rd for pkt 1
+-- State moves from RX_DMA_IDLE to RX_DMA_MAN_RD when 
+-- event count is approx 1422
+dma_rd rx_descr 00000008 22222004 -- dma reads pointer of 22222004
+dma_rd rx_descr 00000010 33222005 -- used bit is set (will be ignored)
+apbwr(1735) 00 00040004  -- attempt to flush the packet at end of RX_DMA_MAN_RD state
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 9b303826
+
+dma_wr rx_descr 0000000c 0800c040 -- dma writes rx status, local address match and 64 bytes received
+dma_wr rx_descr 00000008 22222005 -- dma writes ownership bit
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+
+-- 3rd descr rd for pkt 2
+dma_rd rx_descr 00000010 22222004 -- dma reads pointer of 22222004
+dma_rd rx_descr 00000018 33222005 -- ignored
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 9b303826
+
+dma_wr rx_descr 00000014 0800c040 -- dma writes rx status, local address match and 64 bytes received
+dma_wr rx_descr 00000010 22222005 -- dma writes ownership bit
+
+
+
+
+
+-----------------------------------------------------
+-- 4)
+-- Now  receive 3 frames.   used bit is read on the 1st frame. A flush occurs
+-- while the 2nd descr rd is taking place. used bit is  high on 2nd attempt
+-- Only the 2nd frame should be copied 
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- 1st descr rd for pkt 1
+dma_rd rx_descr 00000018 33222005 -- dma reads pointer of 22222004, used bit is set
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000004  -- check interrupt status - used bit read
+apbwr      24 00000004  -- clear interrupt status
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+
+
+-- 2nd descr rd for pkt 1
+dma_rd rx_descr 00000018 22222005 -- dma reads pointer of 22222004
+apbwr(2356) 00 00040004  -- attempt to flush the packet at start of RX_DMA_MAN_RD state
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000004  -- check interrupt status - used bit read
+apbwr      24 00000004  -- clear interrupt status
+
+
+-- 3rd descr rd for pkt 2
+dma_rd rx_descr 00000018 22222004 -- dma reads pointer of 22222004
+dma_rd rx_descr 00000020 33222005 --ignored
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 9b303826
+
+dma_wr rx_descr 0000001c 0800c040 -- dma writes rx status, local address match and 64 bytes received
+dma_wr rx_descr 00000018 22222005 -- dma writes ownership bit
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+
+-- 4th descr rd for pkt 3
+dma_rd rx_descr 00000020 22222004 -- dma reads pointer of 22222004
+dma_rd rx_descr 00000028 33222005 --ignored
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 9b303826
+
+dma_wr rx_descr 00000024 0800c040 -- dma writes rx status, local address match and 64 bytes received
+dma_wr rx_descr 00000020 22222005 -- dma writes ownership bit
+
+
+
+
+
+
+-----------------------------------------------------
+-- 5)
+-- Now  receive 3 frames.   used bit is read on the 1st frame. A flush occurs
+-- while the 2nd descr rd is taking place. used bit is  high on 2nd attempt
+-- Only the 2nd frame should be copied 
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+rxd(gap)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- 1st descr rd for pkt 1
+dma_rd rx_descr 00000028 33222005 -- dma reads pointer of 22222004, used bit is set
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000004  -- check interrupt status - used bit read
+apbwr      24 00000004  -- clear interrupt status
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+
+
+-- 2nd descr rd for pkt 1
+dma_rd rx_descr 00000028 22222005 -- dma reads pointer of 22222004
+apbwr(3296) 00 00040004  -- attempt to flush the packet at end of RX_DMA_MAN_RD state
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000004  -- check interrupt status - used bit read
+apbwr      24 00000004  -- clear interrupt status
+
+
+-- 3rd descr rd for pkt 2
+dma_rd rx_descr 00000028 22222004 -- dma reads pointer of 22222004
+dma_rd rx_descr 00000030 33222005 -- used bit is set (will be ignored)
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 9b303826
+
+dma_wr rx_descr 0000002c 0800c040 -- dma writes rx status, local address match and 64 bytes received
+dma_wr rx_descr 00000028 22222005 -- dma writes ownership bit
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+
+-- 4th descr rd for pkt 3
+dma_rd rx_descr 00000030 22222004 -- dma reads pointer of 22222004
+dma_rd rx_descr 00000038 33222005 -- dma reads pointer of 22222004, used bit is set (will be ignored)
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 9b303826
+
+dma_wr rx_descr 00000034 0800c040 -- dma writes rx status, local address match and 64 bytes received
+dma_wr rx_descr 00000030 22222005 -- dma writes ownership bit
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+
+
+-- Final descr rd
+dma_rd rx_descr 00000038 22222004 -- dma reads pointer of 22222004
+dma_rd rx_descr 00000040 33222005 -- used bit is set (will be ignored)
+
+
+-----------------------------------------------------
+-- 7)
+-- Check that nothing happens when you attempt to flush when there are no packets in the DPRAM
+apbwr(7000) 00 00040004  -- attempt to flush the packet
+
+
+
+
+
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+dma_rd rx_descr 00000040 12345678 -- Supply final descriptor - this is not used for any data buffers, but the EDMA tries to keep its buffer full so it reads it
+end(10000)
+
+bus_grant_delay 0

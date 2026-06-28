@@ -1,0 +1,170 @@
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Basic Background Test for Incsiv Functional Safety (IFSS) simulations
+--
+-- 5 random frames are transmitted to Q0-Q2
+-- 5 random frames are received to Q0-Q2
+-- 
+--------------------------------------------------------------------------------
+
+-- Set the seed for the test ...
+-- set_random_seed 0;
+
+-- enable automatic ifss Checker function
+-- It will also automatically check interrupts.
+-- set to one when error injected
+set_auto_fault_checker 1;;
+
+-- Set AHB clock freq to 250MHz
+-- At 32bit, this means we have maximum bandwidth of 8Gbit/s shared between
+-- TX and RX. Randomize hready, keeping the maximum to 5 (averages around 2.5)
+-- to ensure no RX overflows occur, and max line rate is acheivable on TX
+sel_ahb_freq 3 
+randomize_hready -descr_max 5 -data_max 5 -read_max 5 -write_max 5
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      10 01a00710
+apbwr      28 C0000fff  -- enable all interrupts
+apbwr      600 00000fff -- enable q1 interrupts
+apbwr      604 00000fff -- enable q2 interrupts
+apbwr      e08 00000000 -- enable ASF interrupts (write to mask)
+apbwr     440 91000000 -- write transmit queue pointer 1
+apbwr     444 92000000 -- write transmit queue pointer 2
+apbwr     448 93000000 -- write transmit queue pointer 3
+apbwr     44c 94000000 -- write transmit queue pointer 4
+apbwr     450 95000000 -- write transmit queue pointer 5
+apbwr     454 96000000 -- write transmit queue pointer 6
+apbwr     458 97000000 -- write transmit queue pointer 7
+apbwr     45c 98000000 -- write transmit queue pointer 8
+apbwr     460 99000000 -- write transmit queue pointer 9
+apbwr     464 9a000000 -- write transmit queue pointer 10
+apbwr     468 9b000000 -- write transmit queue pointer 11
+apbwr     46c 9c000000 -- write transmit queue pointer 12
+apbwr     470 9d000000 -- write transmit queue pointer 13
+apbwr     474 9e000000 -- write transmit queue pointer 14
+apbwr     478 9f000000 -- write transmit queue pointer 15
+apbwr     480 f1000000 -- write receive queue pointer 1
+apbwr     484 f2000000 -- write receive queue pointer 2
+apbwr     488 f3000000 -- write receive queue pointer 3
+apbwr     48c f4000000 -- write receive queue pointer 4
+apbwr     490 f5000000 -- write receive queue pointer 5
+apbwr     494 f6000000 -- write receive queue pointer 6
+apbwr     498 f7000000 -- write receive queue pointer 7
+apbwr     5c0 f8000000 -- write receive queue pointer 8
+apbwr     5c4 f9000000 -- write receive queue pointer 9
+apbwr     5c8 fa000000 -- write receive queue pointer 10
+apbwr     5cc fb000000 -- write receive queue pointer 11
+apbwr     5d0 fc000000 -- write receive queue pointer 12
+apbwr     5d4 fd000000 -- write receive queue pointer 13
+apbwr     5d8 fe000000 -- write receive queue pointer 14
+apbwr     5dc ff000000 -- write receive queue pointer 15
+apbwr      04 0008040a  -- 64bit enable, gigabit mode, full duplex
+apbwr      04 0108040a  -- check reset value of network config register
+apbwr      1c 11111100  -- write address of transmit buffer q0 descriptor in memory
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      90 abababab  -- specific address register 2 bottom (multicast)
+apbwr      94 0000abab  -- specific address register 2 top
+apbwr      98 abcdef10  -- specific address register 3 bottom (unicast)
+apbwr      9C 0000a5a5  -- specific address register 3 top
+apbwr      a0 cccccccc  -- specific address register 3 bottom (unicast)
+apbwr      a4 00005a5a  -- specific address register 3 top
+apbwr      4a0 00000001 -- Buffer size Q1
+apbwr      4a4 00000001 -- Buffer size Q1
+apbwr      500 31234aa1 -- Screener 1
+apbwr      504 31234bb2 -- Screener 2 
+apbwr      18 ffff0000  -- write receive queue pointer
+apbwr      50 E00000FF  -- lockup detection and recovery enable and set lockup time
+apbwr      64 00800000  -- fatal or non fatal register
+apbwr      00 0000020c  -- write tx_go and enable tx, enable rx
+-- delay for enable rx to propagate though design
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     20 00000000  
+apbrd     284 6df12800  -- read design cfg reg to set axi test in trans.pl
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+rx_frame (apb)  1
+      preamble_size  1-14
+      dest_addr      broadcast
+      num_dma_queues      16
+      src_addr       111122222222
+      type_len_field random
+      data_size      16 
+      data           random
+      data_check     0
+      auto_gen_int   0
+      resource_err   0
+      fcs            good
+
+rx_frame (gap)  5
+      preamble_size  1-14
+      dest_addr      broadcast
+      src_addr       111122222222
+      num_dma_queues      16
+      type_len_field random
+      data_size      64-256 
+      data           random
+      auto_gen_int   0
+      resource_err   0
+      data_check     0
+       fcs            good
+
+tx_frame  5
+      number_of_bufs 2
+      num_dma_queues 16
+      auto_gen_int   0
+      buffer_size    60-128
+      data           random
+      fcs            YES
+
+-- Write to base address registers with enabled tx and rx 
+apbwr(400)      00 0000020c  -- write tx_go and enable tx, enable rx
+apbwr      18 01010101  -- receive_q_ptr_0
+apbwr     480 01010101  -- receive_q_ptr_1
+apbwr     484 01010101  -- receive_q_ptr_2
+apbwr     488 01010101  -- receive_q_ptr_3
+apbwr     48c 01010101  -- receive_q_ptr_4
+apbwr     490 01010101  -- receive_q_ptr_5
+apbwr     494 01010101  -- receive_q_ptr_6
+apbwr     498 01010101  -- receive_q_ptr_7
+apbwr     5c0 01010101  -- receive_q_ptr_8
+apbwr     5c4 01010101  -- receive_q_ptr_9
+apbwr     5c8 01010101  -- receive_q_ptr_10
+apbwr     5cc 01010101  -- receive_q_ptr_11
+apbwr     5d0 01010101  -- receive_q_ptr_12
+apbwr     5d4 01010101  -- receive_q_ptr_13
+apbwr     5d8 01010101  -- receive_q_ptr_14
+apbwr     5dc 01010101  -- receive_q_ptr_15
+apbwr      1c 01010101  -- transmit_q_ptr_0
+apbwr     440 01010101  -- transmit_q_ptr_1
+apbwr     444 01010101  -- transmit_q_ptr_2
+apbwr     448 01010101  -- transmit_q_ptr_3
+apbwr     44c 01010101  -- transmit_q_ptr_4
+apbwr     450 01010101  -- transmit_q_ptr_5
+apbwr     454 01010101  -- transmit_q_ptr_6
+apbwr     458 01010101  -- transmit_q_ptr_7
+apbwr     45c 01010101  -- transmit_q_ptr_8
+apbwr     460 01010101  -- transmit_q_ptr_9
+apbwr     464 01010101  -- transmit_q_ptr_10
+apbwr     468 01010101  -- transmit_q_ptr_11
+apbwr     46c 01010101  -- transmit_q_ptr_12
+apbwr     470 01010101  -- transmit_q_ptr_13
+apbwr     474 01010101  -- transmit_q_ptr_14
+apbwr     478 01010101  -- transmit_q_ptr_15
+-- ***************** -- 
+
+-- force end of test in case it doesn't stop of its own accord
+end(10000)
+

@@ -1,0 +1,853 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2009
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_pfc_pause
+--
+--   Authors        : Christine Lin (htlin@cadence.com)
+--
+--   Date           : 24 November 2009
+--
+--------------------------------------------------------------------------------
+-- Test Description
+--
+-- This checks transmission of PFC pause frames controled by pins
+-- and registers in 100M mode.
+--
+--------------------------------------------------------------------------------
+
+requires ext_fifo_interface 0
+requires rx_pkt_buffer 1
+requires tx_pkt_buffer 1
+
+-- The following ensures that whatever datawidth is selected for this test, the 
+-- translator will pass through correct multiples of 32bit words for data transfers
+-- (not descriptors). This relies on the test writer using the rx_descr and tx_descr to
+-- differentiate between the DMA accesses.
+enforce_data_width 1
+
+-- In 32b datapaths, the 64bit descriptors are accessed not in incrementing order
+-- The used bit is always read first, and written last.
+-- For TX since the used bit is bit 63, the 2nd 32bit word is always read first
+-- For RX since the used bit is bit 0, the 2nd 32bit word is always written first
+-- This ordering is only there for 32bit modes
+-- To simplify writing testcases and ensure the same test can operate on different datawidths
+-- we can automatically reverse the order ...
+auto_descriptor_swap 1
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+pinsd(60) tx_pfc_sel        1         -- PFC pause frame
+pinsd(61) tx_pfc_pause      11111111  -- priority_enable
+pinsd(62) tx_pfc_pause_zero 11111111  -- all timers zero
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+
+# Initialize the network configuration register
+init_ncr -duplex full -speed random -jumbo 0 -databus random -copy_all 0 -eam 0 -pause_en 1 -retry_test 0
+
+# Initialize the transmit and receive DMA queue pointers (random values by default)
+# Disables all queues not mentioned here ...
+init_q_ptr  -num_tx_queues 1   -num_rx_queues 1 -rx_ptr_q0 ffffff00 -tx_ptr_q0 11111000
+
+# Enable the interrupts
+enable_ints -num_queues 1   -vector ffffffff  # enable all ints
+
+-- check and initialise the relevant registers
+apbrd      24 00000000  -- check interrupt status
+apbrd      24 00000000  -- check interrupt status
+apbrd      08 00000006  -- check reset value of network status register
+apbrd      38 00000000  -- check the value of the pause time register
+
+-- The next two commands point to the location of the receive buffer descriptor
+-- queue in memory
+
+apbrd      20 00000000 num=200 -- simple delay to allow enables to propagate through the IP ..
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+pinsd(apb) tx_pause 0   -- drive tx_pause low 
+
+
+-- ************************************************************************** --
+-- *               Driving in frame to be transmitted through DMA interface * --
+-- ************************************************************************** --
+
+apbwr        00 0000020C -- write tx_start
+--apbrd        14 00000000 -- read transmit status register
+apbwr        00 0000040C -- write tx_halt to ensure dma does not fetch next frame
+                         -- right away
+                         
+                         
+dma_rd tx_descr 11111000 98765000 -- TX buffer address
+dma_rd tx_descr 11111004 00008034 -- length 64, end of frame
+
+dma_rd 98765000 67452301
+dma_rd 98765004 1111ab89
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+dma_rd 98765030 cccccccc
+
+dma_wr tx_descr 11111004 80008034 -- write back ownership bit to tx descriptor
+
+-- ************************************************************************** --
+-- *               Driving in frame to be transmitted  through DMA interface* --
+-- ************************************************************************** --
+apbwr      00 0002000c  -- Send PFC Pause frame
+
+
+apbrd(int)   24 00004000 -- read int status (pause frame transmitted)
+apbwr        24 00004000 -- read int status (tx complete)
+apbrd(int)   24 00000080 -- read int status (tx complete)
+apbwr        24 00000080 -- read int status (tx complete)
+apbwr        00 0000020C -- write tx_start
+apbwr        00 0000040C -- write tx_halt to ensure dma does not fetch next frame
+                         -- right away
+
+
+dma_rd tx_descr 11111008 98765000 -- read next descriptor
+dma_rd tx_descr 1111100c 0000803c -- length 64, end of frame
+
+dma_rd 98765000 67452301 
+dma_rd 98765004 1111ab89
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+dma_rd 98765030 cccccccc
+dma_rd 98765034 dddddddd
+dma_rd 98765038 eeeeeeee
+
+dma_wr tx_descr 1111100c 8000803c -- write back ownership bit to tx descriptor
+
+
+
+-- Verify the Pause frame data on the MII interface
+txd            55555555555555d5
+txd            0180c200000100000000000088080101
+txd            0000ffffffffffffffffffffffffffff
+txd            ffff0000000000000000000000000000
+txd            00000000000000000000000062118448
+
+
+-- Verify the 1st transmit frame data on the MII interface
+txd            55555555555555d5
+txd            0123456789ab11112222222233333333
+txd            44444444555555556666666677777777
+txd            8888888899999999aaaaaaaabbbbbbbb
+txd            cccccccc0000000000000000a3e2b1ad
+
+
+-- Verify the 2nd transmit frame data on the MII interface
+txd            55555555555555d5
+txd            0123456789ab11112222222233333333
+txd            44444444555555556666666677777777
+txd            8888888899999999aaaaaaaabbbbbbbb
+txd            ccccccccddddddddeeeeeeee4e8deb37
+
+-- Check Stats
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete
+apbwr      24 00000080  -- clear it
+
+apbrd     150 00000000  -- read number of octets received
+apbrd     154 00000000 
+apbrd     100 00000080  -- read number of octets transmitted
+apbrd     104 00000000 
+apbrd     158 00000000  -- check no frames have been received
+apbrd     108 00000002  -- check frame has been transmitted
+apbrd     10C 00000000  -- no broadcast
+apbrd     110 00000002  -- no multicast
+apbrd     114 00000001  -- no pause
+apbrd     118 00000002  -- tx_64
+apbrd     11c 00000000  -- tx_65_to_127
+apbrd     120 00000000  -- tx_128_to_255
+apbrd     124 00000000  -- tx_256_to_511
+apbrd     128 00000000  -- tx_512_to_1023
+apbrd     12c 00000000  -- tx_1024_to_1518
+apbrd     130 00000000  -- tx_1519_to_max
+apbrd     134 00000000  -- transmitted error frames
+apbrd     108 00000000  -- check stats have been reset on read
+
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+apbwr      88 aaaaaaaa  -- specific address register 1 bottom
+apbwr      8C 0000aaaa  -- specific address register 1 top
+apbwrf     3c 0000aaaa  -- write pause quantum register
+
+
+-- ************************************************************************** --
+-- #2
+-- Insert a PFC pause frame right after the frame is finished 
+-- transmitting. The pause frame is 64 bytes, the destination address 
+-- matches pause frame address 0x0180C2000001, the source address matches 
+-- specific address register one address 0x0000aaaaaaaaaaaa, type field = 0x8808, 
+-- pause op-code = 0x0101.   
+-- Use the hardware control method to initiate transmission of the PFC pause frame. 
+-- (toggle the tx_pause pin)
+-- tx_pfc_pause      = 11111111 (priority enable)
+-- tx_pfc_pause_zero = 11111111 => pause time for each priority = 0x0000
+-- ************************************************************************** --
+-- ************************************************************************** --
+pinsd(apb) tx_pause 1   -- drive tx_pause high to start pause frame tx
+
+
+txd  55555555555555d50180C2000001aaaaaaaaaaaa88080101
+txd                  00ff0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000097a2395d
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+apbwr       88 00000000  -- specific address register 1 bottom
+apbwr       8C 00000000  -- specific address register 1 top
+apbwrf      3c 0000dead  -- write pause quantum register
+
+-- ************************************************************************** --
+-- #3
+-- Transmit a PFC pause frame. 
+-- The pause frame is 64 bytes, the destination address matches pause frame address 
+-- 0x0180C2000001, the source address matches specific address register one address 
+-- 0x0000000000000000, type field = 0x8808, pause op-code = 0x0101 
+-- Use the hardware control method to initiate transmission 
+-- of the pause frame. (toggle the tx_pause pin)
+-- tx_pfc_pause_zero = 00000000 => pause time for each priority = 0xdead
+-- ************************************************************************** --
+
+pinsd(apb) tx_pfc_pause_zero 00000000  -- all timers non-zero
+
+apbrd       3c 0000dead  -- read pause quantum register
+apbrdf      3c 0000dead  -- read pause quantum register
+
+pinsd(apb) tx_pause 0    -- toggle tx_pause to start pause frame tx
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00ffdeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  0000000000000000000000005a87a14d
+
+apbrd(int) 24 00004000  -- check interrupt status - pause frame tx complete
+apbwr      24 00004000  -- clear interrupt status
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000002  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+apbwr       88 bbbbbbbb  -- specific address register 1 bottom
+apbwr       8C 0000bbbb  -- specific address register 1 top
+
+apbwrf      3c 0000beef  -- write pause quantum register
+
+-- ************************************************************************** --
+-- #4
+-- Insert a PFC pause frame. 
+-- The pause frame is 64 bytes, the destination address 
+-- matches pause frame address 0x0180C2000001, the source address matches 
+-- specific address register one address 0x0000bbbbbbbbbbbb, type field = 0x8808, 
+-- pause op-code = 0x0101.   
+-- Use the hardware control method to initiate transmission of the PFC pause frame. 
+-- (toggle the tx_pause pin)
+-- tx_pfc_pause      = 11111111 (priority enable)
+-- tx_pfc_pause_zero = 01010101
+-- ************************************************************************** --
+-- ************************************************************************** --
+pinsd(apb) tx_pfc_pause_zero 01010101  -- timers 6,4,2,0 zero
+
+apbrd       3c 0000beef  -- read pause quantum register
+apbrdf      3c 0000beef  -- read pause quantum register
+
+pinsd(apb) tx_pause 1   -- drive tx_pause high to start pause frame tx
+
+txd  55555555555555d50180C2000001bbbbbbbbbbbb88080101
+txd                  00ff0000beef0000beef0000beef0000
+txd                  beef0000000000000000000000000000
+txd                  0000000000000000000000002d7052b9
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+apbwr       88 78563412  -- specific address register 1 bottom
+apbwr       8C 0000bc9a  -- specific address register 1 top
+apbwrf      3c 0000dead  -- write pause quantum register
+
+-- ************************************************************************** --
+-- #5
+-- Insert a PFC pause frame. 
+-- The pause frame is 64 bytes, the destination address 
+-- matches pause frame address 0x0180C2000001, the source address matches 
+-- specific address register one address 0x0000bbbbbbbbbbbb, type field = 0x8808, 
+-- pause op-code = 0x0101.   
+-- Use the hardware control method to initiate transmission of the PFC pause frame. 
+-- (toggle the tx_pause pin)
+-- tx_pfc_pause      = 11111111 (priority enable)
+-- tx_pfc_pause_zero = 10101010
+-- ************************************************************************** --
+-- ************************************************************************** --
+pinsd(apb) tx_pfc_pause_zero 10101010  -- timers 7,5,3,1 zero
+
+apbrd       3c 0000dead  -- read pause quantum register
+apbrdf      3c 0000dead  -- read pause quantum register
+
+pinsd(apb) tx_pause 0   -- drive tx_pause high to start pause frame tx
+
+
+txd  55555555555555d50180C2000001123456789abc88080101
+txd                  00ffdead0000dead0000dead0000dead
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000008ce4096a
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+apbwr       88 00000000  -- specific address register 1 bottom
+apbwr       8C 00000000  -- specific address register 1 top
+apbwrf      3c 0000beef  -- write pause quantum register
+
+-- ************************************************************************** --
+-- #6
+-- Transmit a classic pause frame. 
+-- The PFC pause frame is 64 bytes, the destination address matches pause frame address 
+-- 0x0180C2000001, the source address matches specific address register one address 
+-- 0x0000000000000000, type field = 0x8808, pause op-code = 0x0001 
+-- Use the hardware control method to initiate transmission 
+-- of the pause frame. (toggle the tx_pause pin)
+-- pause time = 0xbeef
+-- ************************************************************************** --
+
+pinsd(apb)  tx_pfc_sel        0         -- PFC pause frame
+
+apbrd       3c 0000beef                 -- read pause quantum register
+apbrdf      3c 0000beef                 -- read pause quantum register
+
+pinsd(apb)  tx_pause          1         -- toggle tx_pause to start pause frame tx
+
+txd  55555555555555d50180C200000100000000000088080001
+txd                  beef0000000000000000000000000000 
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000f87d3079
+
+apbrd(int) 24 00004000  -- check interrupt status - pause frame tx complete
+apbwr      24 00004000  -- clear interrupt status
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000003  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+apbwr      88 00000000  -- specific address register 1 bottom
+apbwr      8C 00000000  -- specific address register 1 top
+apbwrf     3c 0000dead  -- write pause quantum register
+
+-- ************************************************************************** --
+-- #7
+-- Insert a PFC pause frame. 
+-- The pause frame is 64 bytes, the destination address 
+-- matches pause frame address 0x0180C2000001, the source address matches 
+-- specific address register one address 0x0000bbbbbbbbbbbb, type field = 0x8808, 
+-- pause op-code = 0x0101.   
+-- Use the hardware control method to initiate transmission of the PFC pause frame. 
+-- (toggle the tx_pause pin)
+-- tx_pfc_pause      = 00000000 (priority enable)
+-- tx_pfc_pause_zero = 00000000
+-- ************************************************************************** --
+-- ************************************************************************** --
+pinsd(apb) tx_pfc_sel        1         -- PFC pause frame
+
+apbrd      3c 0000dead                 -- read pause quantum register
+apbrdf     3c 0000dead                 -- read pause quantum register
+
+pinsd(apb) tx_pfc_pause_zero 00000000  -- all timers non-zero
+
+apbrd      3c 0000dead                 -- read pause quantum register
+apbrdf     3c 0000dead                 -- read pause quantum register
+
+pinsd(apb) tx_pfc_pause      00000000  -- all priorities enable zero
+
+apbrd      3c 0000dead                 -- read pause quantum register
+apbrdf     3c 0000dead                 -- read pause quantum register
+
+pinsd(apb) tx_pause 0                  -- drive tx_pause high to start pause frame tx
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  0000deaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  000000000000000000000000965497a6
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+apbwr       88 33333333  -- specific address register 1 bottom
+apbwr       8C 00002222  -- specific address register 1 top
+apbwrf      3c 0000beef  -- write pause quantum register
+
+-- ************************************************************************** --
+-- #8
+-- Insert a PFC pause frame. 
+-- The pause frame is 64 bytes, the destination address 
+-- matches pause frame address 0x0180C2000001, the source address matches 
+-- specific address register one address 0x0000bbbbbbbbbbbb, type field = 0x8808, 
+-- pause op-code = 0x0101.   
+-- Use the hardware control method to initiate transmission of the PFC pause frame. 
+-- (toggle the tx_pause pin)
+-- tx_pfc_pause      = 01010101 (priority enable)
+-- tx_pfc_pause_zero = 00000000
+-- ************************************************************************** --
+-- ************************************************************************** --
+pinsd(apb)  tx_pfc_pause     01010101  -- priority enable
+
+apbrd       3c 0000beef                -- read pause quantum register
+apbrdf      3c 0000beef                -- read pause quantum register
+
+pinsd(apb)  tx_pause 1                 -- drive tx_pause high to start pause frame tx
+
+txd  55555555555555d50180C200000133333333222288080101
+txd                  0055beefbeefbeefbeefbeefbeefbeef
+txd                  beef0000000000000000000000000000
+txd                  000000000000000000000000721d64ee
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+apbwr       88 00000000  -- specific address register 1 bottom
+apbwr       8C 00000000  -- specific address register 1 top
+apbwrf      3c 0000dead  -- write pause quantum register
+
+-- ************************************************************************** --
+-- #9
+-- Insert a PFC pause frame. 
+-- The pause frame is 64 bytes, the destination address 
+-- matches pause frame address 0x0180C2000001, the source address matches 
+-- specific address register one address 0x0000bbbbbbbbbbbb, type field = 0x8808, 
+-- pause op-code = 0x0101.   
+-- Use the hardware control method to initiate transmission of the PFC pause frame. 
+-- (toggle the tx_pause pin)
+-- tx_pfc_pause      = 10101010 (priority enable)
+-- tx_pfc_pause_zero = 00000000
+-- ************************************************************************** --
+-- ************************************************************************** --
+pinsd(apb)  tx_pfc_pause    10101010    -- priority enable
+
+apbrd       3c 0000dead                 -- read pause quantum register
+apbrdf      3c 0000dead                 -- read pause quantum register
+pinsd(apb)  tx_pause         0          -- drive tx_pause high to start pause frame tx
+
+
+txd  55555555555555d50180C200000100000000000088080101
+txd                  00aadeaddeaddeaddeaddeaddeaddead
+txd                  dead0000000000000000000000000000
+txd                  000000000000000000000000213463a2
+
+apbrd(int)  24 00004000  -- check interrupt status - pause frame tx complete
+apbwr       24 00004000  -- clear interrupt status
+
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000003  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+apbwr       88 aaaaaaaa  -- specific address register 1 bottom
+apbwr       8C 00000000  -- specific address register 1 top
+apbwrf      3c 0000beef  -- write pause quantum register
+
+
+-- ************************************************************************** --
+-- #10
+-- Transmit a PFC pause frame with zero pause quantum. The pause frame is 64 bytes, 
+-- the destination address matches pause frame address 0x0180C2000001, 
+-- the source address matches specific address register one address 0x0000000000000000, 
+-- type field = 0x8808, pause op-code = 0x0101   
+-- Use the software control method to initiate transmission of the pause frame. 
+-- priority enable = 0xff
+-- zero pause time for all the priorities 
+-- (set bit 17 in the network configuration register to transmit PFC pause frame)
+-- ************************************************************************** --
+pinsd(apb) tx_pfc_sel        0         --set pin PFC select to zero
+
+apbrd      24 00000000  -- check interrupt status 
+apbwr      3c 00001234  -- write non zero pause quantum register
+apbwr      c4 0000ffff  -- zero pause time for all the priorities
+                        -- priority enable = 0xff
+apbwr      00 00020008  -- send PFC frame
+
+
+-- pause frame with zero quantum
+txd  55555555555555d50180C2000001aaaaaaaa000088080101
+txd                  00ff0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000085c03912
+
+
+apbrd(int) 24 00004000  -- check interrupt status - pause frame tx complete
+apbwr      24 00004000  -- clear interrupt status
+apbrd      38 00000000  -- check rx pause time 
+apbrd	   38 00000000  -- check rx pause time
+apbrd      3c 00001234  -- check non zero pause quantum register
+
+-- ************************************************************************** --
+-- #11
+-- Transmit a PFC pause frame with non-zero pause quantum. The pause frame is 64 bytes, 
+-- the destination address matches pause frame address 0x0180C2000001, 
+-- the source address matches specific address register one address 0x0000000000000000, 
+-- type field = 0x8808, pause op-code = 0x0101   
+-- Use the software control method to initiate transmission of the pause frame. 
+-- priority enable = 0xff
+-- non-zero pause time for all the priorities 
+-- (set bit 17 in the network configuration register to transmit PFC pause frame)
+-- ************************************************************************** --
+
+apbrd      24 00000000  -- check interrupt status 
+apbwr      3c 00001234  -- write non zero pause quantum register
+apbwr      c4 000000ff  -- non-zero pause time for all the priorities
+                        -- priority enable = 0xff
+apbwr      00 00020008  -- send PFC frame
+
+
+-- pause frame with non-zero quantum
+txd  55555555555555d50180C2000001aaaaaaaa000088080101
+txd                  00ff1234123412341234123412341234
+txd                  12340000000000000000000000000000
+txd                  000000000000000000000000eea89535
+
+apbrd(int) 24 00004000  -- check interrupt status - pause frame tx complete
+apbwr      24 00004000  -- clear interrupt status
+apbrd      38 00000000  -- check rx pause time 
+apbrd	   38 00000000  -- check rx pause time
+apbrd      3c 00001234  -- check non zero pause quantum register
+
+-- ************************************************************************** --
+-- #12
+-- Transmit a PFC pause frame with non-zero pause quantum. The pause frame is 64 bytes, 
+-- the destination address matches pause frame address 0x0180C2000001, 
+-- the source address matches specific address register one address 0x0000000000000000, 
+-- type field = 0x8808, pause op-code = 0x0101   
+-- Use the software control method to initiate transmission of the pause frame. 
+-- priority enable = 0x00
+-- zero-pause time for priority 6,4,2,0
+-- (set bit 17 in the network configuration register)
+-- ************************************************************************** --
+
+apbrd      24 00000000  -- check interrupt status 
+apbwr      3c 0000abcd  -- write non zero pause quantum register
+apbwr      c4 00005500  -- zero pause time for priority 7,5,3,1
+                        -- priority enable = 0x00
+apbwr      00 00020008  -- send PFC frame
+
+
+-- pause frame with non-zero quantum
+txd  55555555555555d50180C2000001aaaaaaaa000088080101
+txd                  00000000abcd0000abcd0000abcd0000
+txd                  abcd0000000000000000000000000000
+txd                  000000000000000000000000780789c5
+
+apbrd(int) 24 00004000  -- check interrupt status - pause frame tx complete
+apbwr      24 00004000  -- clear interrupt status
+apbrd      38 00000000  -- check rx pause time 
+apbrd      3c 0000abcd  -- check non zero pause quantum register
+
+-- ************************************************************************** --
+-- #13
+-- Transmit a PFC pause frame with non-zero pause quantum. The pause frame is 64 bytes, 
+-- the destination address matches pause frame address 0x0180C2000001, 
+-- the source address matches specific address register one address 0x0000000000000000, 
+-- type field = 0x8808, pause op-code = 0x0101   
+-- Use the software control method to initiate transmission of the pause frame. 
+-- priority enable = 0xff
+-- zero pause time for priority 7,5,3,1
+-- (set bit 17 in the network configuration register)
+-- ************************************************************************** --
+
+apbrd      24 00000000  -- check interrupt status 
+apbwr      3c 0000acca  -- write non zero pause quantum register
+apbwr      c4 0000aaff  -- zero pause time for priority 6,4,2,0
+                        -- priority enable = 0xff
+apbwr      00 00020008  -- send PFC frame
+
+
+-- pause frame with non-zero quantum
+txd  55555555555555d50180C2000001aaaaaaaa000088080101
+txd                  00ffacca0000acca0000acca0000acca
+txd                  00000000000000000000000000000000
+txd                  0000000000000000000000004d3579f0
+
+apbrd(int) 24 00004000  -- check interrupt status - pause frame tx complete
+apbwr      24 00004000  -- clear interrupt status
+apbrd      38 00000000  -- check rx pause time 
+apbrd      3c 0000acca  -- check non zero pause quantum register
+
+-- ************************************************************************** --
+-- #14
+-- Transmit a PFC pause frame with zero pause quantum. The pause frame is 64 bytes, 
+-- the destination address matches pause frame address 0x0180C2000001, 
+-- the source address matches specific address register one address 0x0000000000000000, 
+-- type field = 0x8808, pause op-code = 0x0101   
+-- Use the software control method to initiate transmission of the pause frame. 
+-- priority enable = 0x55
+-- non-zero pause time for all the priorities 
+-- (set bit 17 in the network configuration register)
+-- ************************************************************************** --
+
+apbrd      24 00000000  -- check interrupt status 
+apbwr      3c 0000abcd  -- write non zero pause quantum register
+apbwr      c4 00000055  -- non-zero pause time for all the priorities
+                        -- priority enable = 0xff
+apbwr      00 00020008  -- send PFC frame
+
+
+-- pause frame with non-zero quantum
+txd  55555555555555d50180C2000001aaaaaaaa000088080101
+txd                  0055abcdabcdabcdabcdabcdabcdabcd
+txd                  abcd0000000000000000000000000000
+txd                  0000000000000000000000004a5bccf6
+
+apbrd(int) 24 00004000  -- check interrupt status - pause frame tx complete
+apbwr      24 00004000  -- clear interrupt status
+apbrd      38 00000000  -- check rx pause time 
+apbrd      3c 0000abcd  -- check non zero pause quantum register
+
+-- ************************************************************************** --
+-- #15
+-- Transmit a PFC pause frame with zero pause quantum. The pause frame is 64 bytes, 
+-- the destination address matches pause frame address 0x0180C2000001, 
+-- the source address matches specific address register one address 0x0000000000000000, 
+-- type field = 0x8808, pause op-code = 0x0101   
+-- Use the software control method to initiate transmission of the pause frame. 
+-- priority enable = 0xaa
+-- non-zero pause time for all the priorities 
+-- (set bit 17 in the network configuration register)
+-- ************************************************************************** --
+
+apbrd      24 00000000  -- check interrupt status 
+apbwr      3c 00001234  -- write non zero pause quantum register
+apbwr      c4 000000aa  -- non-zero pause time for all the priorities
+                        -- priority enable = 0xff
+apbwr      00 00020008  -- send PFC frame
+
+
+-- pause frame with non-zero quantum
+txd  55555555555555d50180C2000001aaaaaaaa000088080101
+txd                  00aa1234123412341234123412341234
+txd                  12340000000000000000000000000000
+txd                  000000000000000000000000951b57da
+
+apbrd(int) 24 00004000  -- check interrupt status - pause frame tx complete
+apbwr      24 00004000  -- clear interrupt status
+apbrd      38 00000000  -- check rx pause time 
+apbrd      3c 00001234  -- check non zero pause quantum register
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000006  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- ************************************************************************** --
+end(scale 150000)

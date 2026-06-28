@@ -1,0 +1,107 @@
+-------------------------------------------------
+-- tx_random test scenario for the Ethernet MAC --
+-------------------------------------------------
+--
+-- Written by Arthur Marris
+--
+-- Cadence Design Systems Ltd
+-- Livingston Design Centre,
+-- West Lothian.
+--
+-- 04Apr2003     Arthur wrote
+--
+--
+-- This tests transmits a frame to queue 2.  When the MAC finishes fetching
+-- that packet from DPRAM, there are no further packets to transmit.
+-- After a few clock cycles, and before onepkt_in_pipe is cleared a new
+-- frame arrives destined for queue 1.  The MAC should reset queue_dma to 1
+-- and transmit the frame successfully
+--
+-- ************************************************************************** --
+
+
+-- need fast bus response for 25MHz Hclk
+wait_states 6
+sel_ahb_freq 1
+bus_grant_delay 0
+set_random_seed 1;
+
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 0000ffff  -- enable all interrupts
+apbwr      440 88000000  -- write transmit queue pointer 1
+apbwr      444 99000000  -- write transmit queue pointer 2
+apbwr      04 0008000a  -- gigabit mode, full duplex
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      00 00000208  -- write tx_go and enable tx and rx
+
+hready_stop 1100 100
+
+-- test 25 frames of random number of buffers with random data at random buffer locations
+tx_frame  25
+      number_of_bufs 1-10
+      buffer_size    1-100
+      data           random
+      auto_gen_int   0
+      num_dma_queues 3
+      fcs            YES
+
+
+apbrd(50000) 24 00000088  -- check interrupt status - transmit complete, used bit read
+apbwr        24 00000088  -- clear interrupt status
+apbrd	    14 00000021  -- tx status - frame transmitted, used bit set
+
+
+-- check transmit statistics
+--apbrd     100 00001e97  -- check octets transmitted bottom
+--apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000019  -- check frames transmitted ok
+--apbrd     10C 00000000  -- check broadcast frames transmitted
+--apbrd     110 0000000d  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+--apbrd     118 00000000  -- check frames transmitted 64
+--apbrd     11C 00000001  -- check frames transmitted 65-127
+--apbrd     120 00000000  -- check frames transmitted 128-255
+--apbrd     124 00000000  -- check frames transmitted 256-511
+--apbrd     128 00000000  -- check frames transmitted 512-1023
+--apbrd     12C 00000000  -- check frames transmitted 1024-1518
+--apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(60000)
+

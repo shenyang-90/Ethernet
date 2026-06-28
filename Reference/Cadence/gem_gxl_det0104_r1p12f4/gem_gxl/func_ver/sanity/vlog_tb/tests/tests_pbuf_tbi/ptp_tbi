@@ -1,0 +1,204 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2006
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : ptp_tbi
+--
+--   Author         : Ewan McCulloch
+--
+--   Date           : 11 October 2006
+--
+--------------------------------------------------------------------------------
+--
+-- Test Description
+-- See if a variety of non-encapsulated PTP frames can be detected
+-- Some have incorrect addresses
+--
+-- Receive frames:-
+-- RX Frame 1 : PTP sync frame
+--
+--
+--
+--------------------------------------------------------------------------------
+
+
+--******************************************************************************
+--  1. Initialise suitable wait states for the test.
+--******************************************************************************
+wait_states 0
+bus_grant_delay 0
+
+
+--******************************************************************************
+--  check reset state of PTP output flags
+--******************************************************************************
+pinsc(50) sof_tx         0
+pinsc     sync_frame_tx  0
+pinsc     delay_req_tx   0
+pinsc     sof_rx         0
+pinsc     sync_frame_rx  0
+pinsc     delay_req_rx   0
+
+
+--******************************************************************************
+--  2. Check reset values of registers and setup interrupts
+--     and then enable receive in 100M mode into a 32-bit DMA data bus.
+--******************************************************************************
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr     1dc 0000007d  -- set Timer increment register
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr     200 00000040  -- disable autonegotioation
+apbrd     200 00008040  -- check autoneg disabled
+apbwr      04 00280c13  -- 
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffff000  -- write receive queue pointer
+apbrd      18 fffff000  -- check receive queue pointer
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd(int) 24 00000200  
+
+apbrd      24 00000000  -- check interrupt status
+apbwr      00 00000004  -- enable receive
+apbrd      24 00000000  -- delay - check interrupt status
+apbrd      24 00000000  -- delay - check interrupt status
+apbrd      24 00000000  -- delay - check interrupt status
+
+--******************************************************************************
+-- RX Frame 1 : PTP sync frame
+--******************************************************************************
+
+apbrdf     20 00000000  "Frame 1 : PTP sync frame"
+                        -- trigger reception of frame
+pcs_rxd(apb)   55d5         -- preamble & SDF
+pcs_rxd        00e0f7263fe9 -- MAC DA
+pcs_rxd        08002086354b -- MAC SA
+pcs_rxd        0800         -- Length/typeID
+pcs_rxd        4500         -- Version, IHL, type of service
+pcs_rxd        002c         -- total length = 55
+pcs_rxd        08b8         -- ID
+pcs_rxd        4000         -- flags & fragmentation
+pcs_rxd        ff11         -- time to live and UDP protocol
+pcs_rxd        9997         -- IP Header checksum
+pcs_rxd        8b85d96e     -- IP SA
+pcs_rxd        e0000181     -- IP DA
+pcs_rxd        9005         -- UDP source port
+pcs_rxd        013f         -- UDP destination port
+pcs_rxd        0012         -- UDP length
+pcs_rxd        7228         -- UDP checksum
+pcs_rxd        60           -- transport specific, messageType
+pcs_rxd        02           -- version PTP
+pcs_rxd        6c6c         -- subdomain
+pcs_rxd        6f68656c     -- subdomain
+pcs_rxd        6f68656c     -- subdomain
+pcs_rxd        6f68656c     -- subdomain
+pcs_rxd        6f68656c     -- subdomain
+pcs_rxd        abababab     -- other stuff
+pcs_rxd        abababab     -- other stuff
+pcs_rxd        abababab     -- UUID, sequenceID
+pcs_rxd        00000000     -- sync frame control field, flags, reserved
+pcs_rxd        00000000     -- PAD
+pcs_rxd        00000000     -- PAD
+pcs_rxd        00000000     -- PAD
+pcs_rxd        00000000     -- PAD
+pcs_rxd        00000000     -- PAD
+pcs_rxd        00000000     -- PAD
+pcs_rxd        00000000     -- PAD
+pcs_rxd        00000000     -- PAD
+pcs_rxd        00000000     -- PAD
+pcs_rxd        00000000     -- PAD
+pcs_rxd        00000000     -- PAD
+pcs_rxd        gggggggg     -- FCS
+
+
+-- check the correct DA, SA, type, VID, IP SA and IP DA are
+-- present on the filter interface
+filterc da e93f26f7e000 sa 4b3586200008 type 0800 ipsa 6ed9858b ipda 810100e0 ptp_sync 1
+
+-- supply the receive buffer location
+dma_rd fffff000 22222100 -- dma reads pointer of 22222100
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222100 26f7e000 -- store frame to memory
+dma_wr 22222104 0008e93f
+dma_wr 22222108 4b358620
+dma_wr 2222210c 00450008
+dma_wr 22222110 b8082c00
+dma_wr 22222114 11ff0040
+dma_wr 22222118 858b9799
+dma_wr 2222211c 00e06ed9
+dma_wr 22222120 05908101
+dma_wr 22222124 12003f01
+dma_wr 22222128 02602872
+dma_wr 2222212c 686f6c6c
+dma_wr 22222130 686f6c65
+dma_wr 22222134 686f6c65
+dma_wr 22222138 686f6c65
+dma_wr 2222213c abab6c65
+dma_wr 22222140 abababab
+dma_wr 22222144 abababab
+dma_wr 22222148 0000abab
+dma_wr 2222214c 00000000
+dma_wr 22222150 00000000
+dma_wr 22222154 00000000
+dma_wr 22222158 00000000
+dma_wr 2222215c 00000000
+dma_wr 22222160 00000000
+dma_wr 22222164 00000000
+dma_wr 22222168 00000000
+dma_wr 2222216c 00000000
+dma_wr 22222170 00000000
+dma_wr 22222174 00000000
+dma_wr 22222178 45dd0000
+dma_wr 2222217c 00000d5d
+
+
+dma_wr fffff000 22222101 -- dma writes ownership bit
+dma_wr fffff004 0000c07e -- dma writes rx status,
+
+
+-- supply the receive buffer location
+dma_rd fffff008 22222100 -- dma reads pointer of 22222100
+
+
+-- check status on detection of receive sync frame
+apbrd(int) 24 00080000  "Frame 1 detected"
+                        -- check interrupt status - receive sync frame
+apbwr      24 00080000  -- clear interrupt status register
+apbrd      20 00000000  -- check RX status register
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00000002  "Frame 1 complete"
+                        -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status register
+apbrd      20 00000002  -- check RX status register - receive complete
+apbwr      20 00000002  -- clear RX status register
+
+-- check PTP event frame timer register, received nanoseconds has changed
+apbrd     1e0 00000000  -- PTP event frame transmitted seconds register
+apbrd     1e4 00000000  -- PTP event frame transmitted nanoseconds register
+apbrd     1e8 00000000  -- PTP event frame received seconds register
+apbrd     1ec 00000465  -- PTP event frame received nanoseconds register
+apbrd     1f0 00000000  -- peer event frame transmitted seconds register
+apbrd     1f4 00000000  -- peer event frame transmitted nanoseconds register
+apbrd     1f8 00000000  -- peer event frame received seconds register
+apbrd     1fc 00000000  -- peer event frame received nanoseconds register
+-- check again, no change
+apbrd     1e0 00000000  -- PTP event frame transmitted seconds register 
+apbrd     1e4 00000000  -- PTP event frame transmitted nanoseconds register 
+apbrd     1e8 00000000  -- PTP event frame received seconds register 
+apbrd     1ec 00000465  -- PTP event frame received nanoseconds register
+apbrd     1f0 00000000  -- peer event frame transmitted seconds register
+apbrd     1f4 00000000  -- peer event frame transmitted nanoseconds register
+apbrd     1f8 00000000  -- peer event frame received seconds register
+apbrd     1fc 00000000  -- peer event frame received nanoseconds register 
+
+
+
+end(20000)
+

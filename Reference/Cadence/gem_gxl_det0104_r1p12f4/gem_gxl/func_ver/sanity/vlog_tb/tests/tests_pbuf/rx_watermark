@@ -1,0 +1,726 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2017
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_watermark
+--
+--   Author         : Arthur Marris (arthurm@cadence.com)
+--
+--   Date           : 14 February 2017
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This checks that an XON pause frame is sent when the receive SRAM fill level 
+-- exceeds the non-zero high water mark level and an XOFF pause frame is sent when
+-- the fill level falls below the low (non-zero) water mark level
+--
+--
+-- Detailed Test Description
+----------------------------
+--
+-- Set the receive water mark register to non zero values and then receive a frame to
+-- make the SRAM fill level go up and down and see the XON and XOFF pause frames transmitted
+--
+-- Then increase the value of the high water mark level and show that no pause frame are
+-- transmitted
+--
+-- Then receive a much longer frame to show a higher water mark in operation and with
+-- the low fill thresh-hold higher than high threshold
+--
+--------------------------------------------------------------------------------
+
+--wait_states 9 -- delay the completion of receive to give the XON pause frame time to get out
+bus_grant_delay 0
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      18 00000000  -- check reset value of receive queue pointer
+apbwr      18 fffffff0  -- write receive queue pointer
+apbrd      18 fffffff0  -- check receive queue pointer
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00080403  -- indicate full duplex gigabit operation, will check pin l8r.
+apbrd      04 00080403  -- verify write to speed register..
+apbwr      00 0000000c  -- enable receive and transmit
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbrd      7c 00000000  -- check reset value of receive water mark register
+apbwr      7c 0002000a  -- write A to the high water mark field and 2 to the low water mark in the receive water mark register
+apbrd      08 00000006  -- check reset value of network status register
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+
+-- drive the receive frame data into the MII interface
+rxd(apb)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+
+-- supply the receive buffer location
+dma_rd fffffff0 22222004 -- dma reads pointer of 22222004
+
+
+-- get the XON pause frame as the receive fill level has exceeded A
+txd  55555555555555d50180C200000178563412111188080001
+txd                  ffff0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000e66784ed
+
+apbrd(int) 24 00004000  -- check interrupt status - pause frame transmitted
+apbwr      24 00004000  -- clear interrupt status
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 9b303826
+
+dma_wr fffffff4 0800c040 -- dma writes rx status, local address match and 64 bytes received
+dma_wr fffffff0 22222005 -- dma writes ownership bit
+
+dma_rd fffffff8 22222004 -- reads locations of next rx buffer
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+
+-- get the XOFF pause frame as the receive fill level is below 2
+txd  55555555555555d50180C200000178563412111188080001
+txd                  00000000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000620c8b94
+
+
+-- check status on reception of receive complete interrupt
+apbrd(int) 24 00004000  -- check interrupt status - pause frame transmitted
+apbwr      24 00004000  -- clear interrupt status
+apbwr      7c 0002002a  -- write 2a to the high water mark field to show that this time no pause frame are transmitted
+apbrd      08 00000006  -- check reset value of network status register
+apbrdf     20 00000002  -- check contents of the receive status register and trigger reception of frame
+
+
+-- drive the receive frame data into the MII interface
+rxd(apb)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            0000000000000000000000002638309b
+
+-- because the high water mark is higher neither XON nor XOFF pause frames will be transmitted
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 9b303826
+
+dma_wr fffffffc 0800c040 -- dma writes rx status, local address match and 64 bytes received
+dma_wr fffffff8 22222005 -- dma writes ownership bit
+
+dma_rd 00000000 22222004 -- reads locations of next rx buffer
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+apbrd      10 000207c4  -- dma config
+apbwr      10 00a007c4  -- set rx buffer size to be huge
+
+apbwr      7c 01990177  -- write 177 to the high water mark field this time an XON pause frame will be transmitted
+                        -- but no XOFF because high water mark is set to 199 
+
+apbrd      38 00000000  -- check rx pause time
+
+apbrdf     20 00000002  -- check contents of the receive status register and trigger reception of frame
+
+
+-- drive the receive frame data into the MII interface
+rxd(apb)   55d578563412111111112222222233333333
+rxd            44444444555555556666666677777777
+rxd            8888888899999999aaaaaaaabbbbbbbb
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            00000000000000000000000000000000
+rxd            000000000000000000000000gggggggg
+
+
+-- get the XON pause frame as the receive fill level has exceeded 177
+txd  55555555555555d50180C200000178563412111188080001
+txd                  ffff0000000000000000000000000000
+txd                  00000000000000000000000000000000
+txd                  000000000000000000000000e66784ed
+
+-- because the low water mark is 199 no XOFF pause frame will be transmitted
+
+-- check the receive data as it is written out on the AHB interface
+dma_wr 22222004 12345678 -- store frame to memory
+dma_wr 22222008 11111111
+dma_wr 2222200c 22222222
+dma_wr 22222010 33333333
+dma_wr 22222014 44444444
+dma_wr 22222018 55555555
+dma_wr 2222201c 66666666
+dma_wr 22222020 77777777
+dma_wr 22222024 88888888
+dma_wr 22222028 99999999
+dma_wr 2222202c aaaaaaaa
+dma_wr 22222030 bbbbbbbb
+dma_wr 22222034 00000000
+dma_wr 22222038 00000000
+dma_wr 2222203c 00000000
+dma_wr 22222040 00000000
+dma_wr 22222044 00000000
+dma_wr 22222048 00000000
+dma_wr 2222204c 00000000
+dma_wr 22222050 00000000
+dma_wr 22222054 00000000
+dma_wr 22222058 00000000
+dma_wr 2222205c 00000000
+dma_wr 22222060 00000000
+dma_wr 22222064 00000000
+dma_wr 22222068 00000000
+dma_wr 2222206c 00000000
+dma_wr 22222070 00000000
+dma_wr 22222074 00000000
+dma_wr 22222078 00000000
+dma_wr 2222207c 00000000
+dma_wr 22222080 00000000
+dma_wr 22222084 00000000
+dma_wr 22222088 00000000
+dma_wr 2222208c 00000000
+dma_wr 22222090 00000000
+dma_wr 22222094 00000000
+dma_wr 22222098 00000000
+dma_wr 2222209c 00000000
+dma_wr 222220a0 00000000
+dma_wr 222220a4 00000000
+dma_wr 222220a8 00000000
+dma_wr 222220ac 00000000
+dma_wr 222220b0 00000000
+dma_wr 222220b4 00000000
+dma_wr 222220b8 00000000
+dma_wr 222220bc 00000000
+dma_wr 222220c0 00000000
+dma_wr 222220c4 00000000
+dma_wr 222220c8 00000000
+dma_wr 222220cc 00000000
+dma_wr 222220d0 00000000
+dma_wr 222220d4 00000000
+dma_wr 222220d8 00000000
+dma_wr 222220dc 00000000
+dma_wr 222220e0 00000000
+dma_wr 222220e4 00000000
+dma_wr 222220e8 00000000
+dma_wr 222220ec 00000000
+dma_wr 222220f0 00000000
+dma_wr 222220f4 00000000
+dma_wr 222220f8 00000000
+dma_wr 222220fc 00000000
+dma_wr 22222100 00000000
+dma_wr 22222104 00000000
+dma_wr 22222108 00000000
+dma_wr 2222210c 00000000
+dma_wr 22222110 00000000
+dma_wr 22222114 00000000
+dma_wr 22222118 00000000
+dma_wr 2222211c 00000000
+dma_wr 22222120 00000000
+dma_wr 22222124 00000000
+dma_wr 22222128 00000000
+dma_wr 2222212c 00000000
+dma_wr 22222130 00000000
+dma_wr 22222134 00000000
+dma_wr 22222138 00000000
+dma_wr 2222213c 00000000
+dma_wr 22222140 00000000
+dma_wr 22222144 00000000
+dma_wr 22222148 00000000
+dma_wr 2222214c 00000000
+dma_wr 22222150 00000000
+dma_wr 22222154 00000000
+dma_wr 22222158 00000000
+dma_wr 2222215c 00000000
+dma_wr 22222160 00000000
+dma_wr 22222164 00000000
+dma_wr 22222168 00000000
+dma_wr 2222216c 00000000
+dma_wr 22222170 00000000
+dma_wr 22222174 00000000
+dma_wr 22222178 00000000
+dma_wr 2222217c 00000000
+dma_wr 22222180 00000000
+dma_wr 22222184 00000000
+dma_wr 22222188 00000000
+dma_wr 2222218c 00000000
+dma_wr 22222190 00000000
+dma_wr 22222194 00000000
+dma_wr 22222198 00000000
+dma_wr 2222219c 00000000
+dma_wr 222221a0 00000000
+dma_wr 222221a4 00000000
+dma_wr 222221a8 00000000
+dma_wr 222221ac 00000000
+dma_wr 222221b0 00000000
+dma_wr 222221b4 00000000
+dma_wr 222221b8 00000000
+dma_wr 222221bc 00000000
+dma_wr 222221c0 00000000
+dma_wr 222221c4 00000000
+dma_wr 222221c8 00000000
+dma_wr 222221cc 00000000
+dma_wr 222221d0 00000000
+dma_wr 222221d4 00000000
+dma_wr 222221d8 00000000
+dma_wr 222221dc 00000000
+dma_wr 222221e0 00000000
+dma_wr 222221e4 00000000
+dma_wr 222221e8 00000000
+dma_wr 222221ec 00000000
+dma_wr 222221f0 00000000
+dma_wr 222221f4 00000000
+dma_wr 222221f8 00000000
+dma_wr 222221fc 00000000
+
+dma_wr 22222200 00000000
+dma_wr 22222204 00000000
+dma_wr 22222208 00000000
+dma_wr 2222220c 00000000
+dma_wr 22222210 00000000
+dma_wr 22222214 00000000
+dma_wr 22222218 00000000
+dma_wr 2222221c 00000000
+dma_wr 22222220 00000000
+dma_wr 22222224 00000000
+dma_wr 22222228 00000000
+dma_wr 2222222c 00000000
+dma_wr 22222230 00000000
+dma_wr 22222234 00000000
+dma_wr 22222238 00000000
+dma_wr 2222223c 00000000
+dma_wr 22222240 00000000
+dma_wr 22222244 00000000
+dma_wr 22222248 00000000
+dma_wr 2222224c 00000000
+dma_wr 22222250 00000000
+dma_wr 22222254 00000000
+dma_wr 22222258 00000000
+dma_wr 2222225c 00000000
+dma_wr 22222260 00000000
+dma_wr 22222264 00000000
+dma_wr 22222268 00000000
+dma_wr 2222226c 00000000
+dma_wr 22222270 00000000
+dma_wr 22222274 00000000
+dma_wr 22222278 00000000
+dma_wr 2222227c 00000000
+dma_wr 22222280 00000000
+dma_wr 22222284 00000000
+dma_wr 22222288 00000000
+dma_wr 2222228c 00000000
+dma_wr 22222290 00000000
+dma_wr 22222294 00000000
+dma_wr 22222298 00000000
+dma_wr 2222229c 00000000
+dma_wr 222222a0 00000000
+dma_wr 222222a4 00000000
+dma_wr 222222a8 00000000
+dma_wr 222222ac 00000000
+dma_wr 222222b0 00000000
+dma_wr 222222b4 00000000
+dma_wr 222222b8 00000000
+dma_wr 222222bc 00000000
+dma_wr 222222c0 00000000
+dma_wr 222222c4 00000000
+dma_wr 222222c8 00000000
+dma_wr 222222cc 00000000
+dma_wr 222222d0 00000000
+dma_wr 222222d4 00000000
+dma_wr 222222d8 00000000
+dma_wr 222222dc 00000000
+dma_wr 222222e0 00000000
+dma_wr 222222e4 00000000
+dma_wr 222222e8 00000000
+dma_wr 222222ec 00000000
+dma_wr 222222f0 00000000
+dma_wr 222222f4 00000000
+dma_wr 222222f8 00000000
+dma_wr 222222fc 00000000
+
+
+dma_wr 22222300 00000000
+dma_wr 22222304 00000000
+dma_wr 22222308 00000000
+dma_wr 2222230c 00000000
+dma_wr 22222310 00000000
+dma_wr 22222314 00000000
+dma_wr 22222318 00000000
+dma_wr 2222231c 00000000
+dma_wr 22222320 00000000
+dma_wr 22222324 00000000
+dma_wr 22222328 00000000
+dma_wr 2222232c 00000000
+dma_wr 22222330 00000000
+dma_wr 22222334 00000000
+dma_wr 22222338 00000000
+dma_wr 2222233c 00000000
+dma_wr 22222340 00000000
+dma_wr 22222344 00000000
+dma_wr 22222348 00000000
+dma_wr 2222234c 00000000
+dma_wr 22222350 00000000
+dma_wr 22222354 00000000
+dma_wr 22222358 00000000
+dma_wr 2222235c 00000000
+dma_wr 22222360 00000000
+dma_wr 22222364 00000000
+dma_wr 22222368 00000000
+dma_wr 2222236c 00000000
+dma_wr 22222370 00000000
+dma_wr 22222374 00000000
+dma_wr 22222378 00000000
+dma_wr 2222237c 00000000
+dma_wr 22222380 00000000
+dma_wr 22222384 00000000
+dma_wr 22222388 00000000
+dma_wr 2222238c 00000000
+dma_wr 22222390 00000000
+dma_wr 22222394 00000000
+dma_wr 22222398 00000000
+dma_wr 2222239c 00000000
+dma_wr 222223a0 00000000
+dma_wr 222223a4 00000000
+dma_wr 222223a8 00000000
+dma_wr 222223ac 00000000
+dma_wr 222223b0 00000000
+dma_wr 222223b4 00000000
+dma_wr 222223b8 00000000
+dma_wr 222223bc 00000000
+dma_wr 222223c0 00000000
+dma_wr 222223c4 00000000
+dma_wr 222223c8 00000000
+dma_wr 222223cc 00000000
+dma_wr 222223d0 00000000
+dma_wr 222223d4 00000000
+dma_wr 222223d8 00000000
+dma_wr 222223dc 00000000
+dma_wr 222223e0 00000000
+dma_wr 222223e4 00000000
+dma_wr 222223e8 00000000
+dma_wr 222223ec 00000000
+dma_wr 222223f0 00000000
+dma_wr 222223f4 00000000
+dma_wr 222223f8 00000000
+dma_wr 222223fc 00000000
+
+
+dma_wr 22222400 00000000
+dma_wr 22222404 00000000
+dma_wr 22222408 00000000
+dma_wr 2222240c 00000000
+dma_wr 22222410 00000000
+dma_wr 22222414 00000000
+dma_wr 22222418 00000000
+dma_wr 2222241c 00000000
+dma_wr 22222420 00000000
+dma_wr 22222424 00000000
+dma_wr 22222428 00000000
+dma_wr 2222242c 00000000
+dma_wr 22222430 00000000
+dma_wr 22222434 00000000
+dma_wr 22222438 00000000
+dma_wr 2222243c 00000000
+dma_wr 22222440 00000000
+dma_wr 22222444 00000000
+dma_wr 22222448 00000000
+dma_wr 2222244c 00000000
+dma_wr 22222450 00000000
+dma_wr 22222454 00000000
+dma_wr 22222458 00000000
+dma_wr 2222245c 00000000
+dma_wr 22222460 00000000
+dma_wr 22222464 00000000
+dma_wr 22222468 00000000
+dma_wr 2222246c 00000000
+dma_wr 22222470 00000000
+dma_wr 22222474 00000000
+dma_wr 22222478 00000000
+dma_wr 2222247c 00000000
+dma_wr 22222480 00000000
+dma_wr 22222484 00000000
+dma_wr 22222488 00000000
+dma_wr 2222248c 00000000
+dma_wr 22222490 00000000
+dma_wr 22222494 00000000
+dma_wr 22222498 00000000
+dma_wr 2222249c 00000000
+dma_wr 222224a0 00000000
+dma_wr 222224a4 00000000
+dma_wr 222224a8 00000000
+dma_wr 222224ac 00000000
+dma_wr 222224b0 00000000
+dma_wr 222224b4 00000000
+dma_wr 222224b8 00000000
+dma_wr 222224bc 00000000
+dma_wr 222224c0 00000000
+dma_wr 222224c4 00000000
+dma_wr 222224c8 00000000
+dma_wr 222224cc 00000000
+dma_wr 222224d0 00000000
+dma_wr 222224d4 00000000
+dma_wr 222224d8 00000000
+dma_wr 222224dc 00000000
+dma_wr 222224e0 00000000
+dma_wr 222224e4 00000000
+dma_wr 222224e8 00000000
+dma_wr 222224ec 00000000
+dma_wr 222224f0 00000000
+dma_wr 222224f4 00000000
+dma_wr 222224f8 00000000
+dma_wr 222224fc 00000000
+
+
+dma_wr 22222500 00000000
+dma_wr 22222504 00000000
+dma_wr 22222508 00000000
+dma_wr 2222250c 00000000
+dma_wr 22222510 00000000
+dma_wr 22222514 00000000
+dma_wr 22222518 00000000
+dma_wr 2222251c 00000000
+dma_wr 22222520 00000000
+dma_wr 22222524 00000000
+dma_wr 22222528 00000000
+dma_wr 2222252c 00000000
+dma_wr 22222530 00000000
+dma_wr 22222534 00000000
+dma_wr 22222538 00000000
+dma_wr 2222253c 00000000
+dma_wr 22222540 00000000
+dma_wr 22222544 00000000
+dma_wr 22222548 00000000
+dma_wr 2222254c 00000000
+dma_wr 22222550 00000000
+dma_wr 22222554 00000000
+dma_wr 22222558 00000000
+dma_wr 2222255c 00000000
+dma_wr 22222560 00000000
+dma_wr 22222564 00000000
+dma_wr 22222568 00000000
+dma_wr 2222256c 00000000
+dma_wr 22222570 00000000
+dma_wr 22222574 00000000
+dma_wr 22222578 00000000
+dma_wr 2222257c 00000000
+dma_wr 22222580 00000000
+dma_wr 22222584 00000000
+dma_wr 22222588 00000000
+dma_wr 2222258c 00000000
+dma_wr 22222590 00000000
+dma_wr 22222594 00000000
+dma_wr 22222598 00000000
+dma_wr 2222259c 00000000
+dma_wr 222225a0 00000000
+dma_wr 222225a4 00000000
+dma_wr 222225a8 00000000
+dma_wr 222225ac 00000000
+dma_wr 222225b0 00000000
+dma_wr 222225b4 00000000
+dma_wr 222225b8 00000000
+dma_wr 222225bc 00000000
+dma_wr 222225c0 00000000
+dma_wr 222225c4 00000000
+dma_wr 222225c8 00000000
+dma_wr 222225cc 00000000
+dma_wr 222225d0 00000000
+dma_wr 222225d4 00000000
+dma_wr 222225d8 00000000
+dma_wr 222225dc 00000000
+
+dma_wr 222225e0 4b5f5fc2
+
+dma_wr 00000004 0800c5e0 -- dma writes rx status
+dma_wr 00000000 22222005 -- dma writes ownership bit
+
+dma_rd 00000008 44444004 -- reads locations of next rx buffer
+
+apbrd(int) 24 00004000  -- check interrupt status - pause frame transmitted
+apbwr      24 00004000  -- clear interrupt status
+
+apbrd(int) 24 00000002  -- check interrupt status - receive complete
+apbwr      24 00000002  -- clear interrupt status
+
+apbrd      38 00000000  -- check rx pause time
+
+-- check transmit statistics
+apbrd     100 00000000  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000000  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000003  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000660  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000003  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000002  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000001  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(10000)
+
+

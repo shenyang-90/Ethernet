@@ -1,0 +1,158 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_toe_4
+--
+--   Author         : Ewan McCulloch (ewanm@cadence.com)
+--
+--   Date           : 24th August 2007
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- This tests ensures that illegally early End of packets will reset the
+-- the TCP state machine correctly.  This covers the IPv6 states only
+-- (the IPv4 states, START, VLAN and SNAP states are covered in other tests)
+--
+--
+--------------------------------------------------------------------------------
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      28 0000ffff  -- enable all interrupts
+apbwr      04 00280000  -- check reset value of network config register
+apbrd      04 00280000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+apbwr      10 00020c04  -- enable 4k ram and tcp offload
+apbwr      00 00000208  -- write tx_go and enable tx
+
+
+--******************************************************************************
+-- Test 1
+--    Detect an EOP in the IPV6_M2BYTE state
+--******************************************************************************
+
+dma_rd tx_descr 55555500 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 55555504 00008018 -- start of frame
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 6f24a000
+dma_rd 98765004 a000a3b6
+dma_rd 98765008 02b76f24
+dma_rd 9876500c 0060dd86
+dma_rd 98765010 db000000
+dma_rd 98765014 155f4000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        00a0246fb6a3     -- MAC DA
+txd        00a0246fb702     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        60000000         -- Version, Traffic Class, Flow Label  
+txd        00db             -- Payload length         
+txd        0040             -- Next Header=hopbyhop, Hop Limit                             
+txd        5f15             
+
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+txd        00000000     
+
+txd        07b11c76     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 55555504 80708018 -- write used bit 
+
+apbrd(int)  24 00000080  -- check interrupt status - transmit complete
+apbwr       24 00000080  -- check interrupt status - transmit complete
+apbrd	      14 00000028  -- tx status - frame transmitted,
+
+--******************************************************************************
+-- Test 2
+--    Detect an EOP in the IPV6_EXTHDR state
+--******************************************************************************
+
+
+-- supply the transmit data to the AHB interface
+dma_rd tx_descr 55555508 98765000 -- dma reads pointer of 98765000
+dma_rd tx_descr 5555550c 00008046 -- start of frame, 
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 6f24a000
+dma_rd 98765004 a000a3b6
+dma_rd 98765008 02b76f24
+dma_rd 9876500c 0060dd86
+dma_rd 98765010 fb000000
+dma_rd 98765014 155f4000
+dma_rd 98765018 c0820050
+dma_rd 9876501c bd00000e
+dma_rd 98765020 6f24a000
+dma_rd 98765024 155f02b7
+dma_rd 98765028 c0820050
+dma_rd 9876502c bd00000e
+dma_rd 98765030 6f24a000
+dma_rd 98765034 003ca3b6
+dma_rd 98765038 00000000
+dma_rd 9876503c 04060000
+dma_rd 98765040 00000000
+dma_rd 98765044 00000000
+
+
+txd        55555555555555d5 -- preamble & SDF
+txd        00a0246fb6a3     -- MAC DA
+txd        00a0246fb702     -- MAC SA
+txd        86dd             -- IPV6 type
+txd        60000000         -- Version, Traffic Class, Flow Label  
+txd        00fb             -- Payload length         
+txd        0040             -- Next Header=hopbyhop, Hop Limit                             
+txd        5f155000         -- Source Address (1st 32)
+txd        82c00e00         -- Source Address (2nd 32) 
+txd        00bd00a0         -- Source Address (3rd 32)
+txd        246fb702         -- Source Address (4th 32) 
+txd        5f155000         -- Dest Address(1st 32)
+txd        82c00e00         -- Dest Address(2nd 32)
+txd        00bd00a0         -- Dest Address(3rd 32)
+txd        246fb6a3         -- Dest Address(4th 32)
+txd        3c000000         -- Hop By Hop Options Header
+txd        00000000         -- Padding
+txd        06040000         -- Destination Options Header
+txd        00000000         -- Reserved
+
+txd        zzzzzzzz     -- FCS
+
+
+-- write transmit complete status for the oldest frame 1
+dma_wr 5555550c 80708046 -- write used bit 
+
+apbrd(int)  24 00000088  -- check interrupt status - transmit complete
+apbwr       24 00000088  -- check interrupt status - transmit complete
+apbrd	      14 00000021  -- tx status - frame transmitted,
+
+
+
+dma_rd tx_descr 55555510 98767000 -- 
+dma_rd tx_descr 55555514 80008062 -- used bit read
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(30000)
+
+bus_grant_delay 0

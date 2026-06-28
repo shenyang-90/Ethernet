@@ -1,0 +1,1202 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_buffer
+--
+--   Author         : Adam Walker (awalker@tality.com)/ Martin James
+--                    (martinj@tality.com)/Mike MacGillis (mikema@tality.com)
+--
+--   Date           : 28 February 2002
+--
+--------------------------------------------------------------------------------
+--   Test Description
+--
+--   This test is intended to demonstrate the functionality of the transmit 
+--   buffer management.  Furthermore, this test is intended to test the GEMs 
+--   ability to recover from error, provide access to the buffer descriptors 
+--   and the transmit frames in a timely way.
+--   
+--
+--   Functional Coverage
+--   � Ensure proper operation of the ownership bit.
+--   � Ensure proper operation of the wrap bit.
+--   � Ensure proper operation of tx_go (tx enable bit).
+--   � Ensure writing of tx status is done properly.
+--   � Ensure a tx underrun is dealt with properly by the GEM.
+--
+--   Detailed Test Description
+--
+--   1. Initialise the GEM for 100M mode operation.
+--   2. Enable transmit.
+--   3. Try to transmit a frame that is 32 bytes with no crc (no crc should
+--      be appended). 
+--      However, the first transmit buffer descriptor read has the used bit set.  
+--      Therefore, the GEM should halt transmission of the frame and 
+--      the 'used bit read' should be set in the transmit status register. 
+--      Also, the 'tx used bit read' should be set in the interrupt status register.
+--      The transmit buffer queue pointer should be reset to the original value.
+--   4. Try to transmit a multibuffer frame. However, during transmission of 
+--      the frame, the final transmit buffer descriptor is read with the used bit 
+--      set.  This causes an under-run error to be generated because the dma 
+--      cannot keep up with the transmission of the buffer (not enough data in 
+--      the fifo). Therefore, the under-run error causes the GEM to transmit 
+--      a 32-bit jam sequence until transmission is halted. The transmit 
+--      buffer queue pointer should be reset to the original value.
+--   5. Try to transmit a multibuffer frame. However, during transmission 
+--      of the frame, the final transmit buffer descriptor is read with the 
+--      used bit set.  This causes an under-run error to be generated because 
+--      the dma cannot keep up with the transmission of the buffer 
+--      (not enough data in the fifo). Therefore, the under-run error causes 
+--      the GEM to transmit a 32-bit jam sequence until transmission is halted. 
+--      The transmit buffer queue pointer should be reset to the original value.
+--   6. Transmit a good multibuffer frame. Also check that the no-crc bit
+--      is only checked on first buffer in frame.
+--   7. Transmit a multibuffer frame. Also, during transmission of the frame, 
+--      the final transmit buffer descriptor is read with the wrap bit set. 
+--      This should cause the transmit buffer queue pointer to be reset to the 
+--      original value for the next buffer descriptor read.
+--      Also only the final buffer has the no CRC bit set, therefore no CRC 
+--      will be generated on the frame.
+--   8. Transmit a multibuffer frame.  Also, during transmission of the frame, 
+--      the first, second and third transmit buffer descriptors read have the 
+--      wrap bit set. This should cause the transmit buffer queue pointer to be 
+--      reset to the original value for the next buffer descriptor read 
+--      (excluding the last buffer descriptor read).
+--   9. Transmit a multibuffer frame.  Also, during transmission of the frame, 
+--      the second and third transmit buffer descriptors read have the wrap 
+--      bit set. This should cause the transmit buffer queue pointer to be reset
+--      to the original value for the next buffer descriptor read 
+--      (excluding the first and last buffer descriptor reads).
+--   10.Start transmitting a multibuffer frame. However, during transmission
+--      of the frame, a new address is written to the transmit buffer queue pointer.
+--      This should have no effect on the transmission of the frame.
+--   11.Transmit a multibuffer frame with several small buffers (1 byte).
+--      Since the FIFO must be almost filled before the TX will start
+--      transmission, this successfully completes.
+--   12.Start transmitting a multibuffer frame and provide enough data to
+--      ensure that the trigger level is reached to start transmission.
+--      Now provides lots of data as single bytes in a buffer.
+--      This causes an under-run error to be generated because the dma cannot 
+--      keep up with the transmission of the buffers (not enough data in the fifo).
+--      Therefore, the under-run error causes the GEM to transmit a 32-bit 
+--      jam sequence until transmission is halted. The transmit buffer queue 
+--      pointer should be reset to the original value.
+--   13.Check status and statistics registers and ensure the above operations 
+--      were handled properly.
+--   14.Reset the tx_go bit and write a new address to the tx_buffer queue
+--      pointer register.  Then tranmsit a normal sized frame.  The tx_buffer 
+--      queue pointer should be reset to the new address written to the
+--      tx_buffer queue pointer register.
+--   15.Check status and statistics registers and ensure the above operations 
+--      were handled properly.
+--      Note: only compatible with 2 wait state or less in tb_dma.v
+-------------------------------------------------------------------------------
+
+wait_states 2
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      1c ffffff00  -- write address of transmit buffer descriptor in memory
+apbwr      00 00000008  -- enable transmit 
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      04 00080000  -- check reset value of network config register
+apbwr      04 00080001  -- write 100M operation on speed pin
+apbrd      04 00080001  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+
+
+
+-- ************************************************************************** --
+--   3. Try to transmit a frame that is 32 bytes with no crc (no crc should 
+--      be appended). 
+--      However, the first transmit buffer descriptor read has the used bit set.  
+--      Therefore, the GEM should halt transmission of the frame and 
+--      the 'used bit read' should be set in the transmit status register. 
+--      Also, the 'tx used bit read' should be set in the interrupt status register.
+--      The transmit buffer queue pointer should be reset to the original value.
+-- ************************************************************************** --
+
+apbrd      1c ffffff00  "SCENARIO 1 : Used bit read in 1st buffer"
+                        -- check transmit queue pointer
+apbwr      00 00000208  -- Start the transmission by setting the go bit in network control register
+
+-- descriptor reads for first buffer
+dma_rd ffffff04 80010020 -- length 32 bytes, ownership bit set
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+
+-- check interrupt and status
+apbrd(int) 24 00000008  "SCENARIO 1 : complete"
+                        -- check interrupt status - used bit found
+apbrd      14 00000001  -- read transmit status register - used bit found
+apbrd      14 00000001  -- check the tx status register has not been cleared
+apbwr      14 00000001  -- clear the tx status register
+apbrd      14 00000000  -- check the tx status register is now cleared
+
+
+-- ************************************************************************** --
+--   4. Try to transmit a multibuffer frame. However, during transmission of 
+--      the frame, the final transmit buffer descriptor is read with the used bit 
+--      set.  This causes an under-run error to be generated because the dma 
+--      cannot keep up with the transmission of the buffer (not enough data in 
+--      the fifo). Therefore, the under-run error causes the GEM to transmit 
+--      a 32-bit jam sequence until transmission is halted. The transmit 
+--      buffer queue pointer should be reset to the original value.
+-- ************************************************************************** --
+
+-- start transmission again by writing TX_GO
+apbwr      00 00000208   "SCENARIO 2 : Used bit read in third buffer"
+                         -- Start the transmission by setting the go bit in network control register
+
+-- descriptor reads for first buffer
+dma_rd ffffff04 00010020 -- length 32 bytes, no ownership bit (no CRC)
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+
+
+
+-- descriptor reads for second buffer
+dma_rd ffffff0c 0001001f -- length 31 bytes, no ownership bit set (no CRC)
+dma_rd ffffff08 98765100 -- dma reads pointer of 98765000
+dma_rd 98765100 88888888
+dma_rd 98765104 99999999
+dma_rd 98765108 aaaaaaaa
+dma_rd 9876510c bbbbbbbb
+dma_rd 98765110 cccccccc
+dma_rd 98765114 dddddddd
+dma_rd 98765118 eeeeeeee
+dma_rd 9876511c 00ffffff -- only 31 bytes
+
+
+-- descriptor reads for third buffer
+dma_rd ffffff14 8001001e -- length 30 bytes, ownership bit set (no CRC)
+dma_rd ffffff10 98765200 -- dma reads pointer of 98765000
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd       55555555555555d578563412111111112222222233333333
+txd		                  444444445555555566666666
+txd                               777777778888888899999999
+txd                               aaaaaaaabbbbbbbbcccccccc
+txd                               ddddddddee
+-- at this point the buffers dry up and the last contents of the shift 
+-- register are repeated as a JAM sequence until TX is halted
+txd                               eeeeeeee
+
+-- write back bad tx status
+dma_wr ffffff04 98010020 -- writes tx error of buffers exhausted mid frame
+
+-- check interrupts and status
+apbrd(int) 24 00000050  "SCENARIO 2 : complete"
+                        -- check interrupt status - tx complete and buffers exhausted
+apbrd      14 00000050  -- read transmit status register - tx underrun, complete & buffers exhausted
+apbrd      14 00000050  -- check the tx status register has not been cleared
+apbwr      14 00000050  -- clear the tx status register
+apbrd      14 00000000  -- check the tx status register is now cleared
+
+
+
+-- ************************************************************************** --
+--   5. Try to transmit a multibuffer frame. However, during transmission 
+--      of the frame, the final transmit buffer descriptor is read with the 
+--      used bit set.  This causes an under-run error to be generated because 
+--      the dma cannot keep up with the transmission of the buffer 
+--      (not enough data in the fifo). Therefore, the under-run error causes 
+--      the GEM to transmit a 32-bit jam sequence until transmission is halted. 
+--      The transmit buffer queue pointer should be reset to the original value.
+-- ************************************************************************** --
+
+-- start transmission again by writing TX_GO
+apbwr      00 00000208   "SCENARIO 3 : Used bit read in final buffer"
+                         -- Start the transmission by setting the go bit in network control register
+
+-- descriptor reads for first buffer
+dma_rd ffffff04 00010020 -- length 32 bytes, no ownership bit, no CRC
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+
+
+-- descriptor reads for second buffer
+dma_rd ffffff0c 0001001f -- length 31 bytes, no ownership bit set, no CRC
+dma_rd ffffff08 98765100 -- dma reads pointer of 98765000
+dma_rd 98765100 88888888
+dma_rd 98765104 99999999
+dma_rd 98765108 aaaaaaaa
+dma_rd 9876510c bbbbbbbb
+dma_rd 98765110 cccccccc
+dma_rd 98765114 dddddddd
+dma_rd 98765118 eeeeeeee
+dma_rd 9876511c 00ffffff -- only 31 bytes
+
+
+-- descriptor reads for third buffer
+dma_rd ffffff14 0001001e -- length 30 bytes, no ownership bit set, no CRC
+dma_rd ffffff10 98765200 -- dma reads pointer of 98765000
+dma_rd 98765200 10101010
+dma_rd 98765204 11111111
+dma_rd 98765208 12121212
+dma_rd 9876520c 13131313
+dma_rd 98765210 14141414
+dma_rd 98765214 15151515
+dma_rd 98765218 16161616
+dma_rd 9876521c 00001717 -- only 30 bytes
+
+
+-- descriptor reads for fourth and final buffer
+dma_rd ffffff1c 8000801d -- end of frame, length 29 bytes, ownership bit set
+dma_rd ffffff18 98765300 -- dma reads pointer of 98765000, no wrap, not used
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd       55555555555555d578563412111111112222222233333333
+txd		                  444444445555555566666666
+txd                               777777778888888899999999
+txd                               aaaaaaaabbbbbbbbcccccccc
+txd                               ddddddddeeeeeeeeffffff10
+txd                               101010111111111212121213
+txd                               131313141414141515151516
+txd                               16
+-- at this point the buffers dry up and the last contents of the shift 
+-- register are repeated as a JAM sequence until TX is halted
+txd                               66666666 -- jam
+
+-- write back bad tx status
+dma_wr ffffff04 98010020 -- writes tx error of buffers exhausted mid frame
+
+-- this should generate a buffers exhausted & used bit set interrupts (bits 6&3)
+-- and halt transmission
+apbrd(int) 24 00000050  "SCENARIO 3 : complete"
+                        -- check interrupt status - tx complete and buffers exhausted
+apbrd      14 00000050  -- read transmit status register - tx underrun, complete & buffers exhausted
+apbrd      14 00000050  -- check the tx status register has not been cleared
+apbwr      14 00000050  -- clear the tx status register
+apbrd      14 00000000  -- check the tx status register is now cleared
+
+
+
+-- ************************************************************************** --
+--   6. Transmit a good multibuffer frame. Also check that the no-crc bit
+--      is only checked on first buffer in frame.
+-- ************************************************************************** --
+
+-- start transmission again by writing TX_GO
+apbwr      00 00000208   "SCENARIO 4 : A good frame finally transmitted"
+                         -- Start the transmission by setting the go bit in network control register
+
+-- descriptor reads for first buffer
+dma_rd ffffff04 00010040 -- length 32 bytes, no ownership bit, no CRC
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 12345678
+dma_rd 98765024 11111111
+dma_rd 98765028 22222222
+dma_rd 9876502c 33333333
+dma_rd 98765030 44444444
+dma_rd 98765034 55555555
+dma_rd 98765038 66666666
+dma_rd 9876503c 77777777
+
+
+-- descriptor reads for second buffer
+dma_rd ffffff0c 0001003f -- length 63 bytes, no ownership bit set, no CRC
+dma_rd ffffff08 98765100 -- dma reads pointer of 98765000
+dma_rd 98765100 88888888
+dma_rd 98765104 99999999
+dma_rd 98765108 aaaaaaaa
+dma_rd 9876510c bbbbbbbb
+dma_rd 98765110 cccccccc
+dma_rd 98765114 dddddddd
+dma_rd 98765118 eeeeeeee
+dma_rd 9876511c ffffffff 
+dma_rd 98765120 88888888
+dma_rd 98765124 99999999
+dma_rd 98765128 aaaaaaaa
+dma_rd 9876512c bbbbbbbb
+dma_rd 98765130 cccccccc
+dma_rd 98765134 dddddddd
+dma_rd 98765138 eeeeeeee
+dma_rd 9876513c 00ffffff -- only 63 bytes
+
+
+-- descriptor reads for third buffer
+dma_rd ffffff14 0001003e -- length 62 bytes, no ownership bit set, no CRC
+dma_rd ffffff10 98765200 -- dma reads pointer of 98765000
+dma_rd 98765200 10101010
+dma_rd 98765204 11111111
+dma_rd 98765208 12121212
+dma_rd 9876520c 13131313
+dma_rd 98765210 14141414
+dma_rd 98765214 15151515
+dma_rd 98765218 16161616
+dma_rd 9876521c 17171717 
+dma_rd 98765220 10101010
+dma_rd 98765224 11111111
+dma_rd 98765228 12121212
+dma_rd 9876522c 13131313
+dma_rd 98765230 14141414
+dma_rd 98765234 15151515
+dma_rd 98765238 16161616
+dma_rd 9876523c 00001717 -- only 62 bytes
+
+
+-- descriptor reads for fourth and final buffer
+dma_rd ffffff1c 0000803d -- end of frame, length 29 bytes, no ownership bit set, CRC
+dma_rd ffffff18 98765300 -- dma reads pointer of 98765000
+dma_rd 98765300 18181818
+dma_rd 98765304 19191919
+dma_rd 98765308 1a1a1a1a
+dma_rd 9876530c 1b1b1b1b
+dma_rd 98765310 1c1c1c1c
+dma_rd 98765314 1d1d1d1d
+dma_rd 98765318 1e1e1e1e
+dma_rd 9876531c 1f1f1f1f 
+dma_rd 98765320 18181818
+dma_rd 98765324 19191919
+dma_rd 98765328 1a1a1a1a
+dma_rd 9876532c 1b1b1b1b
+dma_rd 98765330 1c1c1c1c
+dma_rd 98765334 1d1d1d1d
+dma_rd 98765338 1e1e1e1e
+dma_rd 9876533c 00000011 -- only 61 bytes
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd       55555555555555d578563412111111112222222233333333
+txd		          444444445555555566666666
+txd                       777777777856341211111111
+txd                       222222223333333344444444
+txd                       555555556666666677777777
+txd                       8888888899999999aaaaaaaa
+txd                       bbbbbbbbccccccccdddddddd
+txd                       eeeeeeeeffffffff88888888
+txd                       99999999aaaaaaaabbbbbbbb
+txd                       ccccccccddddddddeeeeeeee
+txd                       ffffff
+txd                       101010101111111112121212
+txd                       131313131414141415151515
+txd                       161616161717171710101010
+txd                       111111111212121213131313
+txd                       141414141515151516161616
+txd                       1717
+txd                       18181818191919191a1a1a1a
+txd                       1b1b1b1b1c1c1c1c1d1d1d1d
+txd                       1e1e1e1e1f1f1f1f18181818
+txd                       191919191a1a1a1a1b1b1b1b
+txd                       1c1c1c1c1d1d1d1d1e1e1e1e
+txd                       11 -- no CRC
+
+
+-- write back ownership bit for first buffer descriptor only
+dma_wr ffffff04 80010040 -- write back descriptor with ownership bit set
+
+-- check interrupt and status
+apbrd(int) 24 00000080  "SCENARIO 4 : complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit complete in tx status
+apbrd      14 00000008  -- check transmit complete in tx status is clear
+
+
+
+
+-- ************************************************************************** --
+--   7. Transmit a multibuffer frame. Also, during transmission of the frame,
+--      the final transmit buffer descriptor is read with the wrap bit set.
+--      This should cause the transmit buffer queue pointer to be reset to the
+--      original value for the next buffer descriptor read.
+--      Also only the final buffer has the no CRC bit set, therefore CRC 
+--      will be generated on the frame.
+-- ************************************************************************** --
+
+apbrd      14 00000008   "SCENARIO 5 : Good frame with wrap on final buffer"
+
+-- descriptor reads for first buffer
+dma_rd ffffff24 00000020 -- length 32 bytes, no wrap, CRC
+dma_rd ffffff20 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+
+
+-- descriptor reads for second buffer
+dma_rd ffffff2c 0000001f -- length 31 bytes, no wrap, CRC
+dma_rd ffffff28 98765100 -- dma reads pointer of 98765000
+dma_rd 98765100 88888888
+dma_rd 98765104 99999999
+dma_rd 98765108 aaaaaaaa
+dma_rd 9876510c bbbbbbbb
+dma_rd 98765110 cccccccc
+dma_rd 98765114 dddddddd
+dma_rd 98765118 eeeeeeee
+dma_rd 9876511c 00ffffff -- only 31 bytes
+
+
+-- descriptor reads for third buffer
+dma_rd ffffff34 0000001e -- length 30 bytes, no wrap, CRC
+dma_rd ffffff30 98765200 -- dma reads pointer of 98765000
+dma_rd 98765200 10101010
+dma_rd 98765204 11111111
+dma_rd 98765208 12121212
+dma_rd 9876520c 13131313
+dma_rd 98765210 14141414
+dma_rd 98765214 15151515
+dma_rd 98765218 16161616
+dma_rd 9876521c 00001717 -- only 30 bytes
+
+
+-- descriptor reads for fourth and final buffer
+dma_rd ffffff3c 4001801d -- end of frame, length 29 bytes, wrap bit set, no CRC
+dma_rd ffffff38 98765300 -- dma reads pointer of 98765000, not used
+dma_rd 98765300 18181818
+dma_rd 98765304 19191919
+dma_rd 98765308 1a1a1a1a
+dma_rd 9876530c 1b1b1b1b
+dma_rd 98765310 1c1c1c1c
+dma_rd 98765314 1d1d1d1d
+dma_rd 98765318 1e1e1e1e
+dma_rd 9876531c 00000022 -- only 29 bytes
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd       55555555555555d578563412111111112222222233333333
+txd		                  444444445555555566666666
+txd                               777777778888888899999999
+txd                               aaaaaaaabbbbbbbbcccccccc
+txd                               ddddddddeeeeeeeeffffff10
+txd                               101010111111111212121213
+txd                               131313141414141515151516
+txd                               161616171718181818191919
+txd                               191a1a1a1a1b1b1b1b1c1c1c
+txd                               1c1d1d1d1d1e1e1e1e22
+txd                               9a7a9992 -- CRC
+
+-- write back ownership bit for first buffer descriptor only
+dma_wr ffffff24 80000020 -- write back descriptor with ownership bit set
+
+-- check interrupt and status
+apbrd(int) 24 00000080  "SCENARIO 5 : complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit complete in tx status
+apbrd      14 00000008  -- check transmit complete in tx status is clear
+
+
+-- ************************************************************************** --
+--   8. Transmit a multibuffer frame.  Also, during transmission of the frame, 
+--      the first, second and third transmit buffer descriptors read have the 
+--      wrap bit set. This should cause the transmit buffer queue pointer to be 
+--      reset to the original value for the next buffer descriptor read 
+--      (excluding the last buffer descriptor read).
+-- ************************************************************************** --
+
+apbrd      14 00000008   "SCENARIO 6 : Wrap on all but last buffer"
+
+-- descriptor reads for first buffer
+dma_rd ffffff04 40010020 -- length 32 bytes, wrap set, no CRC
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+
+
+-- descriptor reads for second buffer
+dma_rd ffffff04 4001001f -- length 31 bytes, wrap set, no CRC
+dma_rd ffffff00 98765100 -- dma reads pointer of 98765000
+dma_rd 98765100 88888888
+dma_rd 98765104 99999999
+dma_rd 98765108 aaaaaaaa
+dma_rd 9876510c bbbbbbbb
+dma_rd 98765110 cccccccc
+dma_rd 98765114 dddddddd
+dma_rd 98765118 eeeeeeee
+dma_rd 9876511c 00ffffff -- only 31 bytes
+
+
+-- descriptor reads for third buffer
+dma_rd ffffff04 4001001e -- length 30 bytes, wrap set, no CRC
+dma_rd ffffff00 98765200 -- dma reads pointer of 98765000
+dma_rd 98765200 10101010
+dma_rd 98765204 11111111
+dma_rd 98765208 12121212
+dma_rd 9876520c 13131313
+dma_rd 98765210 14141414
+dma_rd 98765214 15151515
+dma_rd 98765218 16161616
+dma_rd 9876521c 00001717 -- only 30 bytes
+
+
+-- descriptor reads for fourth and final buffer
+dma_rd ffffff04 0000801d -- end of frame, length 29 bytes, no wrap set, CRC
+dma_rd ffffff00 98765300 -- dma reads pointer of 98765000
+dma_rd 98765300 18181818
+dma_rd 98765304 19191919
+dma_rd 98765308 1a1a1a1a
+dma_rd 9876530c 1b1b1b1b
+dma_rd 98765310 1c1c1c1c
+dma_rd 98765314 1d1d1d1d
+dma_rd 98765318 1e1e1e1e
+dma_rd 9876531c 00000033 -- only 29 bytes
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd       55555555555555d578563412111111112222222233333333
+txd		                  444444445555555566666666
+txd                               777777778888888899999999
+txd                               aaaaaaaabbbbbbbbcccccccc
+txd                               ddddddddeeeeeeeeffffff10
+txd                               101010111111111212121213
+txd                               131313141414141515151516
+txd                               161616171718181818191919
+txd                               191a1a1a1a1b1b1b1b1c1c1c
+txd                               1c1d1d1d1d1e1e1e1e33 -- no CRC
+
+
+-- write back ownership bit for first buffer descriptor only
+dma_wr ffffff04 c0010020 -- write back descriptor with ownership bit set
+
+-- check interrupt and status
+apbrd(int) 24 00000080  "SCENARIO 6 : complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit complete in tx status
+apbrd      14 00000008  -- check transmit complete in tx status is clear
+
+
+-- ************************************************************************** --
+--   9. Transmit a multibuffer frame.  Also, during transmission of the frame, 
+--      the second and third transmit buffer descriptors read have the wrap 
+--      bit set. This should cause the transmit buffer queue pointer to be reset
+--      to the original value for the next buffer descriptor read 
+-- ************************************************************************** --
+
+apbrd      14 00000008   "SCENARIO 7 : wrap on all but first and last buffers"
+
+-- descriptor reads for first buffer
+dma_rd ffffff0c 00010020 -- no start of frame, length 32 bytes, no wrap, no CRC
+dma_rd ffffff08 98765100 -- dma reads pointer of 98765000
+dma_rd 98765100 12345678
+dma_rd 98765104 11111111
+dma_rd 98765108 22222222
+dma_rd 9876510c 33333333
+dma_rd 98765110 44444444
+dma_rd 98765114 55555555
+dma_rd 98765118 66666666
+dma_rd 9876511c 77777777
+
+
+-- descriptor reads for second buffer
+dma_rd ffffff14 4001001f -- length 31 bytes, wrap set. no CRC
+dma_rd ffffff10 98765200 -- dma reads pointer of 98765000
+dma_rd 98765200 88888888
+dma_rd 98765204 99999999
+dma_rd 98765208 aaaaaaaa
+dma_rd 9876520c bbbbbbbb
+dma_rd 98765210 cccccccc
+dma_rd 98765214 dddddddd
+dma_rd 98765218 eeeeeeee
+dma_rd 9876521c 00ffffff -- only 31 bytes
+
+
+-- descriptor reads for third buffer
+dma_rd ffffff04 4001001e -- length 30 bytes, wrap set, no CRC
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 10101010
+dma_rd 98765004 11111111
+dma_rd 98765008 12121212
+dma_rd 9876500c 13131313
+dma_rd 98765010 14141414
+dma_rd 98765014 15151515
+dma_rd 98765018 16161616
+dma_rd 9876501c 00001717 -- only 30 bytes
+
+
+-- descriptor reads for fourth and final buffer
+dma_rd ffffff04 0000801d -- end of frame, length 29 bytes, no wrap set, CRC
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 18181818
+dma_rd 98765004 19191919
+dma_rd 98765008 1a1a1a1a
+dma_rd 9876500c 1b1b1b1b
+dma_rd 98765010 1c1c1c1c
+dma_rd 98765014 1d1d1d1d
+dma_rd 98765018 1e1e1e1e
+dma_rd 9876501c 00000044 -- only 29 bytes
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd       55555555555555d578563412111111112222222233333333
+txd		                  444444445555555566666666
+txd                               777777778888888899999999
+txd                               aaaaaaaabbbbbbbbcccccccc
+txd                               ddddddddeeeeeeeeffffff10
+txd                               101010111111111212121213
+txd                               131313141414141515151516
+txd                               161616171718181818191919
+txd                               191a1a1a1a1b1b1b1b1c1c1c
+txd                               1c1d1d1d1d1e1e1e1e44 -- no CRC
+
+
+-- write back ownership bit for first buffer descriptor only
+dma_wr ffffff0c 80010020 -- write back descriptor with ownership bit set
+
+-- check interrupt and status
+apbrd(int) 24 00000080  "SCENARIO 7 : complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit complete in tx status
+apbrd      14 00000008  -- check transmit complete in tx status is clear
+
+
+-- ************************************************************************** --
+--   10.Start transmitting a multibuffer frame. However, during transmission
+--      of the frame, a new address is written to the transmit buffer queue pointer.
+--      This should have no effect on the transmission of the frame.
+-- ************************************************************************** --
+apbrd      14 00000008  "SCENARIO 8 : re-write queue pointer"
+apbwr      1c eeeeeeee  -- write new address of transmit buffer descriptor
+
+-- descriptor reads for first buffer
+dma_rd ffffff0c 00010020 -- length 32 bytes, no wrap, no CRC
+dma_rd ffffff08 98765100 -- dma reads pointer of 98765000
+dma_rd 98765100 12345678
+dma_rd 98765104 11111111
+dma_rd 98765108 22222222
+dma_rd 9876510c 33333333
+dma_rd 98765110 44444444
+dma_rd 98765114 55555555
+dma_rd 98765118 66666666
+dma_rd 9876511c 77777777
+
+
+-- descriptor reads for second buffer
+dma_rd ffffff14 4001001f -- length 31 bytes, wrap set, no CRC
+dma_rd ffffff10 98765200 -- dma reads pointer of 98765000
+dma_rd 98765200 88888888
+dma_rd 98765204 99999999
+dma_rd 98765208 aaaaaaaa
+dma_rd 9876520c bbbbbbbb
+dma_rd 98765210 cccccccc
+dma_rd 98765214 dddddddd
+dma_rd 98765218 eeeeeeee
+dma_rd 9876521c 00ffffff -- only 31 bytes
+
+
+-- descriptor reads for third buffer
+dma_rd ffffff04 4001401e -- length 30 bytes, wrap set, no CRC -reserved bit ignored
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 10101010
+dma_rd 98765004 11111111
+dma_rd 98765008 12121212
+dma_rd 9876500c 13131313
+dma_rd 98765010 14141414
+dma_rd 98765014 15151515
+dma_rd 98765018 16161616
+dma_rd 9876501c 00001717 -- only 30 bytes
+
+
+-- descriptor reads for fourth and final buffer
+dma_rd ffffff04 0000801d -- end of frame, length 29 bytes, no wrap set, CRC
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 18181818
+dma_rd 98765004 19191919
+dma_rd 98765008 1a1a1a1a
+dma_rd 9876500c 1b1b1b1b
+dma_rd 98765010 1c1c1c1c
+dma_rd 98765014 1d1d1d1d
+dma_rd 98765018 1e1e1e1e
+dma_rd 9876501c 00000055 -- only 29 bytes
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd       55555555555555d578563412111111112222222233333333
+txd		                  444444445555555566666666
+txd                               777777778888888899999999
+txd                               aaaaaaaabbbbbbbbcccccccc
+txd                               ddddddddeeeeeeeeffffff10
+txd                               101010111111111212121213
+txd                               131313141414141515151516
+txd                               161616171718181818191919
+txd                               191a1a1a1a1b1b1b1b1c1c1c
+txd                               1c1d1d1d1d1e1e1e1e55 -- no CRC
+
+
+-- write back ownership bit for first buffer descriptor only
+dma_wr ffffff0c 80010020 -- write back descriptor with ownership bit set
+
+-- check interrupt and status
+apbrd(int) 24 00000080  "SCENARIO 8 : complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit complete in tx status
+apbrd      14 00000008  -- check transmit complete in tx status is clear
+
+
+
+-- ************************************************************************** --
+--   11.Transmit a multibuffer frame with several small buffers (1 byte).
+--      Since the FIFO must be almost filled before the TX will start
+--      transmission, this successfully completes.
+--
+-- 16 bytes transmitted in total from 16 buffers as follows:
+--             byte lane |3|2|1|0|
+--  buffer no. _____________________
+--       1               | | | |X|
+--       2               | | |X| |
+--       3               | |X| | |
+--       4               |X| | | |
+--       5               | | | |X|
+--       6               | | |X| |
+--       7               | |X| | |
+--       8               |X| | | |
+--       9               | | | |X|
+--      10               | | |X| |
+--      11               | |X| | |
+--      12               |X| | | |
+--      13               | | | |X|
+--      14               | | |X| |
+--      15               | |X| | |
+--      16               |X| | | |
+-- ************************************************************************** --
+
+apbrd      14 00000008  "SCENARIO 9 : lots of offsets"
+
+----buffer 1
+dma_rd ffffff0c 00000001 -- start of frame, length 1 byte
+dma_rd ffffff08 98765100 -- no offset
+dma_rd 98765100 00000011
+--
+----buffer 2
+dma_rd ffffff14 00000001 -- length 1 byte
+dma_rd ffffff10 98765201 -- offset 1
+dma_rd 98765200 00002200
+--
+------buffer 3
+dma_rd ffffff1c 00000001 -- length 1 byte
+dma_rd ffffff18 98765302 -- offset 2
+dma_rd 98765300 00330000
+--
+--buffer 4
+dma_rd ffffff24 00000001 -- length 1 byte
+dma_rd ffffff20 98765403 -- offset 3
+dma_rd 98765400 44000000
+
+--buffer 5
+dma_rd ffffff2c 00000001 -- length 1 byte
+dma_rd ffffff28 98765500 -- no offset
+dma_rd 98765500 00000011
+
+--buffer 6
+dma_rd ffffff34 00000001 -- length 1 byte
+dma_rd ffffff30 98765601 -- offset 1
+dma_rd 98765600 00002200
+
+--buffer 7
+dma_rd ffffff3c 00000001 -- length 1 byte
+dma_rd ffffff38 98765702 -- offset 2
+dma_rd 98765700 00330000
+
+--buffer 8
+dma_rd ffffff44 00000001 -- length 1 byte
+dma_rd ffffff40 98765803 -- offset 3
+dma_rd 98765800 44000000
+
+--buffer 9
+dma_rd ffffff4c 00000001 -- length 1 byte
+dma_rd ffffff48 98765900 -- no offset
+dma_rd 98765900 00000011
+
+--buffer 10
+dma_rd ffffff54 00000001 -- length 1 byte
+dma_rd ffffff50 98765a01 -- offset 1
+dma_rd 98765a00 00002200
+
+--buffer 11
+dma_rd ffffff5c 00000001 -- length 1 byte
+dma_rd ffffff58 98765b02 -- offset 2
+dma_rd 98765b00 00330000
+
+--buffer 12
+dma_rd ffffff64 00000001 -- length 1 byte
+dma_rd ffffff60 98765c03 -- offset 3
+dma_rd 98765c00 44000000
+
+--buffer 13
+dma_rd ffffff6c 00000001 -- length 1 byte
+dma_rd ffffff68 98765d00 -- no offset
+dma_rd 98765d00 00000011
+
+--buffer 14
+dma_rd ffffff74 00000001 -- length 1 byte
+dma_rd ffffff70 98765e01 -- offset 1
+dma_rd 98765e00 00002200
+
+--buffer 15
+dma_rd ffffff7c 00000001 -- length 1 byte
+dma_rd ffffff78 98765f02 -- offset 2
+dma_rd 98765f00 00330000
+
+--buffer 16
+dma_rd ffffff84 00008001 -- end of frame, length 1 byte
+dma_rd ffffff80 98766003 -- offset 3
+dma_rd 98766000 44000000
+
+-- check for correct preamble, SFD, data, pad and crc
+txd       55555555555555d511223344112233441122334411223344
+txd                       00000000000000000000000000000000
+txd                       00000000000000000000000000000000
+txd                       000000000000000000000000bb928d2a -- CRC
+
+-- write back ownership bit for first buffer descriptor only
+dma_wr ffffff0c 80000001 -- write back descriptor with ownership bit set
+
+-- check interrupt and status
+apbrd(int) 24 00000080  "SCENARIO 9 : complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000028  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit complete in tx status
+apbrd      14 00000008  -- check transmit complete in tx status is clear
+
+
+
+-- ************************************************************************** --
+--   12.Start transmitting a multibuffer frame and provide enough data to
+--      ensure that the trigger level is reached to start transmission.
+--      Now provides lots of data as single bytes in a buffer.
+--      This causes an under-run error to be generated because the dma cannot 
+--      keep up with the transmission of the buffers (not enough data in the fifo).
+--      Therefore, the under-run error causes the GEM to transmit a 32-bit 
+--      jam sequence until transmission is halted. The transmit buffer queue 
+--      pointer should be reset to the original value.
+-- ************************************************************************** --
+
+apbrd      14 00000008  "SCENARIO 10 : underrun frame"
+apbwr      00 00000408  -- halt after this transmission
+
+--buffer 1
+dma_rd ffffff8c 00000020 -- length 32 bytes, no wrap, CRC
+dma_rd ffffff88 98765100 -- dma reads pointer of 98765000
+dma_rd 98765100 12345678
+dma_rd 98765104 11111111
+dma_rd 98765108 22222222
+dma_rd 9876510c 33333333
+dma_rd 98765110 44444444
+dma_rd 98765114 55555555
+dma_rd 98765118 66666666
+dma_rd 9876511c 77777777
+
+--buffer 2
+dma_rd ffffff94 00000001 -- length 1 byte
+dma_rd ffffff90 98765201 -- offset 1
+dma_rd 98765200 00002200
+--
+------buffer 3
+dma_rd ffffff9c 00000001 -- length 1 byte
+dma_rd ffffff98 98765302 -- offset 2
+dma_rd 98765300 00330000
+--
+--buffer 4
+dma_rd ffffffa4 00000001 -- length 1 byte
+dma_rd ffffffa0 98765403 -- offset 3
+dma_rd 98765400 44000000
+
+--buffer 5
+--dma_rd ffffffac 00000001 -- length 1 byte
+--dma_rd ffffffa8 98765500 -- no offset
+--dma_rd 98765500 00000011
+
+-- check for correct preamble, SFD, data, pad and crc
+-- This frame will underrun and be jammed
+txd       55555555555555d578563412111111112222222233333333
+txd		          44444444555555556666666677
+txd                       77777777 -- JAM
+
+-- write back ownership bit for first buffer descriptor only
+dma_wr ffffff8c 90000020 -- write back descriptor with ownership bit set
+
+-- check interrupt and status
+apbrd(int) 24 00000010  "SCENARIO 10 : complete"
+                        -- check interrupt status - transmit underrun
+apbrd      14 00000040  -- read transmit status register - transmitted underrun
+apbrd      14 00000040  -- read again to check not cleared
+apbwr      14 00000040  -- now clear it
+apbrd      14 00000000  -- check now cleared
+
+
+-- ************************************************************************** --
+--   13.Check status and statistics registers and ensure the above operations 
+--      were handled properly.
+-- ************************************************************************** --
+
+-- check transmit statistics
+apbrd     100 00000326  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000006  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000004  -- check frames transmitted 65-127
+apbrd     120 00000001  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000003  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- ************************************************************************** --
+--   14.Reset the tx_go bit and write a new address to the tx_buffer queue
+--      pointer register.  Then tranmsit a good multi-buffer frame.  The tx_buffer 
+--      queue pointer should be reset to the new address written to the
+--      tx_buffer queue pointer register.
+-- ************************************************************************** --
+
+apbwr      00 00000000  -- disable transmit 
+apbwr      1c aaaaaa00  -- write address of transmit buffer descriptor in memory
+
+-- start transmission again by writing TX_GO
+apbwr      00 00000208   "SCENARIO 11 : Re-write the tx buffer queue address"
+                         -- Start the transmission by setting the go bit in network control register
+apbwr      00 00000408   -- Halt the transmission by setting the halt bit in network control register
+
+-- descriptor reads for first buffer
+dma_rd aaaaaa04 00010040 -- length 32 bytes, no ownership bit, no CRC
+dma_rd aaaaaa00 98765000 -- dma reads pointer of 98765000
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 12345678
+dma_rd 98765024 11111111
+dma_rd 98765028 22222222
+dma_rd 9876502c 33333333
+dma_rd 98765030 44444444
+dma_rd 98765034 55555555
+dma_rd 98765038 66666666
+dma_rd 9876503c 77777777
+
+
+-- descriptor reads for second buffer
+dma_rd aaaaaa0c 0001003f -- length 63 bytes, no ownership bit set, no CRC
+dma_rd aaaaaa08 98765100 -- dma reads pointer of 98765000
+dma_rd 98765100 88888888
+dma_rd 98765104 99999999
+dma_rd 98765108 aaaaaaaa
+dma_rd 9876510c bbbbbbbb
+dma_rd 98765110 cccccccc
+dma_rd 98765114 dddddddd
+dma_rd 98765118 eeeeeeee
+dma_rd 9876511c ffffffff 
+dma_rd 98765120 88888888
+dma_rd 98765124 99999999
+dma_rd 98765128 aaaaaaaa
+dma_rd 9876512c bbbbbbbb
+dma_rd 98765130 cccccccc
+dma_rd 98765134 dddddddd
+dma_rd 98765138 eeeeeeee
+dma_rd 9876513c 00ffffff -- only 63 bytes
+
+
+-- descriptor reads for third buffer
+dma_rd aaaaaa14 0001003e -- length 62 bytes, no ownership bit set, no CRC
+dma_rd aaaaaa10 98765200 -- dma reads pointer of 98765000
+dma_rd 98765200 10101010
+dma_rd 98765204 11111111
+dma_rd 98765208 12121212
+dma_rd 9876520c 13131313
+dma_rd 98765210 14141414
+dma_rd 98765214 15151515
+dma_rd 98765218 16161616
+dma_rd 9876521c 17171717 
+dma_rd 98765220 10101010
+dma_rd 98765224 11111111
+dma_rd 98765228 12121212
+dma_rd 9876522c 13131313
+dma_rd 98765230 14141414
+dma_rd 98765234 15151515
+dma_rd 98765238 16161616
+dma_rd 9876523c 00001717 -- only 62 bytes
+
+
+-- descriptor reads for fourth and final buffer
+dma_rd aaaaaa1c 0000803d -- end of frame, length 29 bytes, no ownership bit set, CRC
+dma_rd aaaaaa18 98765300 -- dma reads pointer of 98765000
+dma_rd 98765300 18181818
+dma_rd 98765304 19191919
+dma_rd 98765308 1a1a1a1a
+dma_rd 9876530c 1b1b1b1b
+dma_rd 98765310 1c1c1c1c
+dma_rd 98765314 1d1d1d1d
+dma_rd 98765318 1e1e1e1e
+dma_rd 9876531c 1f1f1f1f 
+dma_rd 98765320 18181818
+dma_rd 98765324 19191919
+dma_rd 98765328 1a1a1a1a
+dma_rd 9876532c 1b1b1b1b
+dma_rd 98765330 1c1c1c1c
+dma_rd 98765334 1d1d1d1d
+dma_rd 98765338 1e1e1e1e
+dma_rd 9876533c 00000011 -- only 61 bytes
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd       55555555555555d578563412111111112222222233333333
+txd		          444444445555555566666666
+txd                       777777777856341211111111
+txd                       222222223333333344444444
+txd                       555555556666666677777777
+txd                       8888888899999999aaaaaaaa
+txd                       bbbbbbbbccccccccdddddddd
+txd                       eeeeeeeeffffffff88888888
+txd                       99999999aaaaaaaabbbbbbbb
+txd                       ccccccccddddddddeeeeeeee
+txd                       ffffff
+txd                       101010101111111112121212
+txd                       131313131414141415151515
+txd                       161616161717171710101010
+txd                       111111111212121213131313
+txd                       141414141515151516161616
+txd                       1717
+txd                       18181818191919191a1a1a1a
+txd                       1b1b1b1b1c1c1c1c1d1d1d1d
+txd                       1e1e1e1e1f1f1f1f18181818
+txd                       191919191a1a1a1a1b1b1b1b
+txd                       1c1c1c1c1d1d1d1d1e1e1e1e
+txd                       11 -- no CRC
+
+
+-- write back ownership bit for first buffer descriptor only
+dma_wr aaaaaa04 80010040 -- write back descriptor with ownership bit set
+
+-- check interrupt and status
+apbrd(int) 24 00000080  "SCENARIO 11 : complete"
+                        -- check interrupt status - transmit complete
+apbrd      14 00000020  -- read transmit status register - frame transmitted and tx_go
+apbwr      14 00000020  -- clear transmit complete in tx status
+apbrd      14 00000000  -- check tx status is clear
+
+-- ************************************************************************** --
+--   15.Check status and statistics registers and ensure the above operations 
+--      were handled properly.
+-- ************************************************************************** --
+
+-- check transmit statistics
+apbrd     100 000000fa  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000000  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000001  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(9000)
+
+

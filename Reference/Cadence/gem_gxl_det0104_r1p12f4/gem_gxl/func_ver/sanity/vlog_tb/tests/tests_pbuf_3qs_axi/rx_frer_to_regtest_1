@@ -1,0 +1,275 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2016
+--                                       Cadence Design Systems, Inc.
+--                                       All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : rx_frer_to_regtest_1
+--
+--   Author         : Steven Ho
+--
+--   Date           : 24th Aug 2016
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+----------------
+--
+-- Checks the timeout counters for FRER operation.
+-- Note that the actual timeout mechanism is not tested as that is covered in
+-- other tests, only interested in ensuring the timers operate as intended.
+--
+-- Part 1 checks the timeout time is roughly as expected based on a known tb
+-- event clock of 50MHz.
+--
+-- Functional Coverage
+----------------------
+-- · 
+-- 
+-- 
+--
+-- Detailed Test Description
+----------------------------
+--
+--  Set 'retry' bit in network config register to speed up timeout timer.
+--  Set timeout to max value = 16'hffff. RX clock is 8ns in 1Gb mode
+--                              increment every cycle = 65536*8 = 524288ns.
+--  Start at tb event time 3000 = 3000*20=60us.
+--  Enable stream function 0
+--  Wait 250 tb event cycles = 250*20 = 5us.
+--  Enable stream function 1
+--  Wait 250 tb event cycles = 250*20 = 5us.
+--  Enable stream function 2
+--  Wait 500us ensure no timeouts set.
+--  Wait 15us check timeout occurred on stream 0 only.
+--  Wait 5us check timeout occurred on stream 1 only.
+--  Wait 5us check timeout occurred on stream 2 only.
+--
+--------------------------------------------------------------------------------
+
+wait_states 0
+
+-- Set AHB clock freq to 250MHz
+-- At 32bit, this means we have maximum bandwidth of 8Gbit/s shared between
+-- TX and RX. Randomize hready, keeping the maximum to 5 (averages around 2.5)
+-- to ensure no RX overflows occur, and max line rate is acheivable on TX
+sel_ahb_freq 3 
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 speed 0 --  check reset state
+
+-- check and initialise the relevant registers
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbwr      10 01a00710  -- DMA config
+apbwr      18 10000000  -- write receive queue pointer
+apbwr      00 00000004  -- enable receive
+apbwr      28 ffffffff  -- enable all interrupts
+apbwr      88 12345678  -- specific address register 1 bottom
+apbwr      8C 00001111  -- specific address register 1 top
+apbwr      04 0028140a  -- 64bit enable, gigabit mode, full duplex, retry test
+
+-- Set up the screener registers
+-- Match against Source MAC address: 11:11:22:22:22:22
+
+-- First compare register set to compare 0x22221111 with no masking. Offset 6.
+-- Second compare register set to compare 0x2222 with mask of 0xffff. Offset 10.
+apbwr     700 22221111  -- Compare registers
+apbwr     704 00000206
+apbwr     708 2222ffff
+apbwr     70c 0000000a
+
+-- Screener Type2 register 0.
+-- Enable Compare A=0, B=1
+-- 0 0 00000 1 00001 1 00000 0000 00000 0000
+apbwr     540 010c0000  -- Screener type 2 setup
+
+-- Repeat for the other 2 stream functions.
+-- Note that we are only using queue 0 in all cases.
+-- Stream 1 match MAC address: 22:22:33:33:33:33
+-- Stream 2 match MAC address: 33:33:44:44:44:44
+apbwr     710 33332222  -- Compare registers
+apbwr     714 00000206
+apbwr     718 3333ffff
+apbwr     71c 0000000a
+apbwr     720 44443333  -- Compare registers
+apbwr     724 00000206
+apbwr     728 4444ffff
+apbwr     72c 0000000a
+
+-- Screener Type2 register 1.
+-- Enable Compare A=2, B=3
+-- 0 0 00000 1 00011 1 00010 0000 00000 0000
+apbwr     544 011c4000  -- Screener type 2 setup
+
+-- Screener Type2 register 2.
+-- Enable Compare A=4, B=5
+-- 0 0 00000 1 00101 1 00100 0000 00000 0000
+apbwr     548 012c8000  -- Screener type 2 setup
+
+-- Program the FRER registers
+apbwr     8a0 0000ffff  -- FRER Timeout value. This is 65535x8ns.
+apbwr     8a4 4000ffff  -- Don't strip redundancy tag and type set to 0xffff
+apbwr     8c0 b0000000  -- Stream 0 setup A. Enable, Match, Timeout, RTag.
+apbwr     8c4 00000000  -- Stream 0 setup B. Set to 16-bit sequence number.
+apbwr     8d0 b0000011  -- Stream 1 setup A. Enable, Match, Timeout, RTag.
+apbwr     8d4 00000000  -- Stream 1 setup B. Set to 16-bit sequence number.
+apbwr     8e0 b0000022  -- Stream 2 setup A. Enable, Match, Timeout, RTag.
+apbwr     8e4 00000000  -- Stream 2 setup B. Set to 16-bit sequence number.
+
+apbrdf     20 00000000  -- check contents of the receive status register and trigger reception of frame
+
+-- The perl script is set such that when randomising the sequence number it will ensure that the new
+-- sequence number is not the same as previous (initially set to 0xffff) and not the same as previous + 1.
+-- This ensures that each 'random' sequence number (in match algorithm mode) should result in an increment
+-- of the out of order statistics register and should always be accepted.
+
+-- First frame to stream 0, this is not duplicated.
+rx_frame (apb)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  random
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+
+-- Follow by 10 frames these are duplicated and should be automatically discarded.
+rx_frame (gap)  10
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          111122222222
+      vlan1_en          1
+      vlan1_field       2210
+      frer_loc          random
+      frer_rtag_en      1
+      frer_auto_dup     1
+      frer_rtag_seqnum  random
+      type_len_field    random
+      data_size         42
+      data              random
+      fcs               good
+
+-- Same for streams 1 and 2
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          222233333333
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  random
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+
+-- Follow by 10 frames these are duplicated and should be automatically discarded.
+rx_frame (gap)  10
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          222233333333
+      vlan1_en          1
+      vlan1_field       2210
+      frer_loc          random
+      frer_rtag_en      1
+      frer_auto_dup     1
+      frer_rtag_seqnum  random
+      type_len_field    random
+      data_size         42
+      data              random
+      fcs               good
+
+rx_frame (gap)  1
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          333344444444
+      vlan1_en          1           -- At least 1 VLAN
+      vlan1_field       2210
+      frer_loc          random      -- Randomly select location of redundancy tag wrt VLAN
+      frer_rtag_en      1
+      frer_rtag_seqnum  random
+      type_len_field    random
+      data_size         42
+      data              random
+      num_dma_queues    3
+      fcs               good
+
+
+-- Follow by 10 frames these are duplicated and should be automatically discarded.
+rx_frame (gap)  10
+      preamble_size     1-14
+      auto_gen_int      1
+      dest_addr         broadcast
+      src_addr          333344444444
+      vlan1_en          1
+      vlan1_field       2210
+      frer_loc          random
+      frer_rtag_en      1
+      frer_auto_dup     1
+      frer_rtag_seqnum  random
+      type_len_field    random
+      data_size         42
+      data              random
+      fcs               good
+
+
+-- Now we know that the streams kind of works, the real test starts here...
+-- First disable all the streams.
+apbwr(3000) 8c0 30000000  -- Stream 0 setup A. Disable, Match, Timeout, RTag.
+apbwr       8d0 30000011  -- Stream 1 setup A. Disable, Match, Timeout, RTag.
+apbwr       8e0 30000022  -- Stream 2 setup A. Disable, Match, Timeout, RTag.
+
+-- Sequence enabling of streams so we can check status better later.
+apbwr       8c0 b0000000  -- Stream 0 setup A. Enable, Match, Timeout, RTag.
+apbwr(3250) 8d0 b0000011  -- Stream 1 setup A. Enable, Match, Timeout, RTag.
+apbwr(3500) 8e0 b0000022  -- Stream 2 setup A. Enable, Match, Timeout, RTag.
+
+-- Check that no timeouts have been set after 500us.
+apbrd(28500)  8c8 00000001  -- Stats A for CB function 0. 0 Rogue, 1 latent errors.
+apbrd         8cc 0000000a  -- Stats B for CB function 0. 0 timeouts, 10 out of order frames.
+apbrd         8d8 00000001  -- Stats A for CB function 1. 0 Rogue, 1 latent errors.
+apbrd         8dc 0000000a  -- Stats B for CB function 1. 0 timeouts, 10 out of order frames.
+apbrd         8e8 00000001  -- Stats A for CB function 2. 0 Rogue, 1 latent errors.
+apbrd         8ec 0000000a  -- Stats B for CB function 2. 0 timeouts, 10 out of order frames.
+
+-- After another 15us, stream 0 should have timed out.
+apbrd(29250)  8c8 00000000  -- Stats A for CB function 0. 0 Rogue, 1 latent errors.
+apbrd         8cc 00010000  -- Stats B for CB function 0. 1 timeouts, 0 out of order frames.
+apbrd         8d8 00000000  -- Stats A for CB function 1. 0 Rogue, 1 latent errors.
+apbrd         8dc 00000000  -- Stats B for CB function 1. 0 timeouts, 0 out of order frames.
+apbrd         8e8 00000000  -- Stats A for CB function 2. 0 Rogue, 1 latent errors.
+apbrd         8ec 00000000  -- Stats B for CB function 2. 0 timeouts, 0 out of order frames.
+
+-- Remaining streams times out each after 5us.
+apbrd(29500)  8c8 00000000  -- Stats A for CB function 0. 0 Rogue, 1 latent errors.
+apbrd         8cc 00000000  -- Stats B for CB function 0. 0 timeouts, 0 out of order frames.
+apbrd         8d8 00000000  -- Stats A for CB function 1. 0 Rogue, 1 latent errors.
+apbrd         8dc 00010000  -- Stats B for CB function 1. 1 timeouts, 0 out of order frames.
+apbrd         8e8 00000000  -- Stats A for CB function 2. 0 Rogue, 1 latent errors.
+apbrd         8ec 00000000  -- Stats B for CB function 2. 0 timeouts, 0 out of order frames.
+
+apbrd(29750)  8c8 00000000  -- Stats A for CB function 0. 0 Rogue, 1 latent errors.
+apbrd         8cc 00000000  -- Stats B for CB function 0. 0 timeouts, 0 out of order frames.
+apbrd         8d8 00000000  -- Stats A for CB function 1. 0 Rogue, 1 latent errors.
+apbrd         8dc 00000000  -- Stats B for CB function 1. 0 timeouts, 0 out of order frames.
+apbrd         8e8 00000000  -- Stats A for CB function 2. 0 Rogue, 1 latent errors.
+apbrd         8ec 00010000  -- Stats B for CB function 2. 1 timeouts, 0 out of order frames.
+
+end(50000)
+

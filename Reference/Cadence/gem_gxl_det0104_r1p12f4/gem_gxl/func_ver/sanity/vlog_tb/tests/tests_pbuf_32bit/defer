@@ -1,0 +1,416 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : defer
+--
+--   Author         : Arthru Marris (arthrum@tality.com)
+--
+--   Date           : 15 February 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+-- 
+-- This test verifies that the deference functionality works properly 
+-- in the GEM in 10/100.
+-- 
+-- Functional Coverage
+-- -------------------
+-- · Ensures that the GEM defers to carrier sense when the medium 
+--     is busy and the GEM has a frame waiting to be sent.
+-- · Ensure that the deference statistic is not set when there is a 
+--     deference during transmission of a frame and a collision occurs 
+--     during transmission of a frame.
+--     
+-- Detailed Test Description
+-- -------------------------
+-- 
+-- 1) Initialise the GEM for 10M or 100M mode.
+-- 2) assert crs
+-- 3) try and transmit a frame - nothing happens
+-- 4) deassert crs at event count 3000
+-- 5) Observe frame transmission and reassert crs
+-- 6) Check stats on tx interrupt and observe deference stat has been set
+-- 7) Another frame is queued for transmission
+-- 8) deassert crs at event count 6000
+-- 9) observe frame transmission and force collision
+--10) check stats on tx complete interrupt after second transmission attempt
+--    and observe the deference stat is not set this time.
+--11) Queue another frame to be transmitted. Since CRS is inactive transmission
+--    will begin immediately.
+--    This time allow CRS to go high as a result of the transmission and then
+--    force CRS low whilst the transmission is on-going.
+--12) check stats on tx complete interrupt and observe a carrier sense error
+--    has been recorded.
+--------------------------------------------------------------------------------
+
+
+--******************************************************************************
+-- 1) Initialise the GEM for 10M or 100M mode.
+--******************************************************************************
+apbrd(100) 00 00000000  -- check reset value of network control register
+apbrd      24 00000000  -- check interrupt status
+apbwr      28 ffffffff  -- enable all interrupts
+apbrd      24 00000000  -- check interrupt status
+apbwr      00 00000008  -- enable transmit
+apbrd      04 00080000  -- check reset value of network config register
+apbrd      08 00000006  -- check reset value of network status register
+apbrdf     20 00000000  -- check contents of the receive status register and trigger pinsd
+
+--******************************************************************************
+-- 2) assert crs
+--******************************************************************************
+pinsd(apb) crs 1 -- set crs high to cause deference
+
+
+--******************************************************************************
+-- 3) try and transmit a frame - nothing happens
+--******************************************************************************
+
+-- The next two commands point to the location of the transmit buffer descriptor
+-- queue in memory
+apbwr      1c ffffff00  -- write address of transmit buffer descriptor in memory
+apbrd      1c ffffff00  -- check transmit queue pointer
+
+-- Start the transmission by setting the go bit in network control register
+apbwr      00 00000208  -- write tx_go and enable tx
+
+
+-- supply the transmit buffer location
+-- With TX packet buffer included all of frame is read in once
+-- into the packet buffer.
+dma_rd ffffff04 00008030 -- reads tx control of eof and length of 48 bytes
+dma_rd ffffff00 98765000 -- dma reads pointer of 98765000
+
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+
+
+--******************************************************************************
+-- 4) deassert crs at event count 3000
+--******************************************************************************
+pinsd(3000) crs 0 -- stop deference
+
+
+apbrd(3000) 14 00000008  -- read transmit status register indicates tx_go
+apbrd       24 00000000  -- check interrupt status
+
+
+--******************************************************************************
+-- 5) Observe frame transmission and reassert crs
+--******************************************************************************
+
+
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    0000000000000000000000002638309b
+
+-- write used bit
+dma_wr ffffff04 80008030
+
+
+pinsd(3200) crs 1 -- set crs high again to cause deference
+
+
+--******************************************************************************
+-- 6) Check stats on tx interrupt and observe deference stat has been set
+--******************************************************************************
+
+-- check status on transmit complete interrupt
+apbrd(int) 24 00000080  -- check interrupt status - transmit complete 
+apbwr      24 00000080  -- clear interrupt status
+apbrd      14 00000028  -- read transmit status register - transmit complete and tx go
+
+-- check transmit statistics
+apbrd     100 00000040  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000001  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+--******************************************************************************
+-- 7) Another frame is queued for transmission
+--******************************************************************************
+
+-- With TX packet buffer included all of frame is read in once and retried
+-- from the packet buffer.
+dma_rd ffffff0c 00008020 -- reads eof and length of buffer, length 32 bytes
+dma_rd ffffff08 99999900 -- dma reads pointer of 99999900
+
+dma_rd 99999900 10101010
+dma_rd 99999904 11111111
+dma_rd 99999908 22222222
+dma_rd 9999990c 33333333
+dma_rd 99999910 44444444
+dma_rd 99999914 55555555
+dma_rd 99999918 66666666
+dma_rd 9999991c 77777777
+
+-- Next buffer descriptor has used bit set
+dma_rd ffffff14 80000020 -- reads used bit
+dma_rd ffffff10 aaaaaa00 -- dma reads pointer of aaaaaa00
+
+
+
+--******************************************************************************
+-- 8) deassert crs at event count 6000
+--******************************************************************************
+pinsd(6000) crs 0 -- stop deference
+
+
+--******************************************************************************
+-- 9) observe frame transmission and force collision
+--******************************************************************************
+
+
+-- First attempt - Collision
+
+-- apply single collision should stop deference statistic being set
+txd    55555555555555d510101010x1111111122222222 
+
+
+
+-- Second attempt - Successful (deferred)
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d510101010111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    00000000000000000000000000000000
+txd                    00000000000000000000000096e32671
+
+-- write used bit
+dma_wr ffffff0c 80008020
+
+
+--******************************************************************************
+--10) check stats on tx complete interrupt after second transmission attempt
+--    and observe the deference stat is not set this time.
+--******************************************************************************
+
+apbrd(int) 24 00000088  -- check interrupt status - transmit complete
+                        -- and tx used bit read
+apbwr      24 00000088  -- clear interrupt status
+apbrd      14 00000023  -- read transmit status register
+apbwr      14 00000023  -- clear transmit status register
+
+-- check transmit statistics
+apbrd     100 00000040  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000001  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+--******************************************************************************
+--11) Queue another frame to be transmitted. Since CRS is inactive transmission
+--    will begin immediately.
+--    This time allow CRS to go high as a result of the transmission and then
+--    force CRS low whilst the transmission is on-going.
+--******************************************************************************
+
+-- Start the transmission by setting the go bit in network control register
+apbwr      00 00000208  -- write tx_go and enable tx
+
+
+-- supply the transmit buffer location
+-- With TX packet buffer included all of frame is read in once
+-- into the packet buffer.
+dma_rd ffffff14 00008030 -- reads tx control of eof and length of 48 bytes
+dma_rd ffffff10 98765000 -- dma reads pointer of 98765000
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 12345678
+dma_rd 98765004 11111111
+dma_rd 98765008 22222222
+dma_rd 9876500c 33333333
+dma_rd 98765010 44444444
+dma_rd 98765014 55555555
+
+pinsd(7200) tx_en_crs 0 -- stop crs being driven by tx_en
+pinsd(7210) tx_en_crs 1 -- re-enable crs driving by tx_en
+
+dma_rd 98765018 66666666
+dma_rd 9876501c 77777777
+dma_rd 98765020 88888888
+dma_rd 98765024 99999999
+dma_rd 98765028 aaaaaaaa
+dma_rd 9876502c bbbbbbbb
+
+-- check for correct preamble, SFD, data, pad and crc
+txd    55555555555555d578563412111111112222222233333333
+txd                    44444444555555556666666677777777
+txd                    8888888899999999aaaaaaaabbbbbbbb
+txd                    0000000000000000000000002638309b
+
+-- write used bit
+dma_wr ffffff14 80008030
+
+-- supply used bit to stop test
+dma_rd ffffff1c 80000020 -- reads used bit
+dma_rd ffffff18 aaaaaa00 -- dma reads pointer of aaaaaa00
+
+
+--******************************************************************************
+--12) check stats on tx complete interrupt and observe a carrier sense error
+--    has been recorded.
+--******************************************************************************
+
+apbrd(int) 24 00000088  -- check interrupt status - transmit complete & exhaust
+apbwr      24 00000088  -- clear interrupt status
+apbrd      14 00000021  -- read transmit status register - transmit complete, halt & exhausted
+apbwr      14 00000021  -- clear transmit status register
+
+
+-- check transmit statistics
+apbrd     100 00000040  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000001  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000000  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000000  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+--apbrd     14C 00000001  -- check carrier sense errors
+apbrd     14C 00000000  -- check carrier sense errors - impossible to get CRS errors with the RGMII because it always drives CRS when TX_EN is asserted
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+
+
+
+-- force end of test in case it doesn't stop of its own accord
+end(10000)
+
+bus_grant_delay 0

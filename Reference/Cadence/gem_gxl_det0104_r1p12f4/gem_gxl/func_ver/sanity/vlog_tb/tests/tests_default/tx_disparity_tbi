@@ -1,0 +1,572 @@
+--------------------------------------------------------------------------------
+--
+--            CADENCE                    Copyright (c) 2002
+--            DESIGN                     Cadence Design Foundry, Inc.
+--            FOUNDRY                    All rights reserved.
+--
+--------------------------------------------------------------------------------
+--
+--   Test           : tx_disparity_tbi_fifo
+--
+--   Author         : Pete Hawkins (phawkins@tality.com)
+--
+--   Date           : 20 February 2002
+--
+--------------------------------------------------------------------------------
+--
+--   Description
+--
+-- This test is intended to cover the transmit functionality of the
+-- GEM in gigabit operation when using the TBI (PCS layer) interface.
+-- Full duplex operation is used throughout this test case. Input data
+-- to the MAC is supplied via the external fifo interface.
+-- 
+-- Functional Coverage
+----------------------
+-- · Ensure the link status interrupt indicates a good link.
+--  
+-- . Ensure the PCS correctly transmits all 256 valid data code groups
+--   with both even and odd disparity.
+--
+-- · Ensure an error (tx_err) is correctly propagated through the MAC and PCS.
+--  
+-- Detailed Test Description
+----------------------------
+--
+-- The auto-negotiation function is disabled (using bit-7 of the PCS
+-- Control Register) prior to selecting PCS. The PCS is selected
+-- by setting the MAC into Gigabit mode and setting PCS enable in the
+-- MAC network configuration register.
+--
+-- Wait for the link status interrupt.
+--
+-- SINGLE FRAME - FRAME 1.
+--
+-- Generate a single frame with all 256 valid code groups repeated twice, the
+-- first with odd disparity and the second with even disparity. The data code
+-- groups '00' and '03' are used to maintain/reverse the current disparity.
+--
+-- Generate a single frame with an error received from the external fifo
+-- interface.
+--
+-- Check the statistics registers.
+-- 
+--------------------------------------------------------------------------------
+
+
+wait_states 1
+bus_grant_delay 1
+
+
+pinsc(50) loopback 0 half_duplex 1  extint 0 --  check reset state
+
+-- check the relevant pcs registers
+apbrd(100) 200 00009040  -- check reset value of pcs control register, bit-15
+                         -- indicates the pcs is in reset (until enabled)
+apbrd      204 00000109  -- check reset value of pcs status reg
+apbrd      210 00000020  -- check reset value of pcs a-n advertisement reg
+apbrd      214 00000000  -- check reset value of pcs a-n link ptnr ability reg
+apbrd      218 00000004  -- check reset value of pcs a-n expansion reg
+apbrd      21C 00000000  -- check reset value of pcs a-n next page reg
+apbrd      220 00000000  -- check reset value of pcs a-n link partner reg
+apbrd      23C 00008000  -- check reset value of pcs a-n extended status reg
+
+-- initialise the relevant pcs registers
+apbwr      200 00000040  -- disable auto-negotiation prior to enabling PCS
+
+-- check and initialise the relevant mac registers
+apbrd      000 00000000  -- check reset value of network control register
+apbwr      028 ffffffff  -- enable all interrupts
+apbrd      004 00080000  -- check reset value of network config register
+apbrd      008 00000006  -- check reset value of network status register
+apbwr      004 00480c02  -- set gigabit, full duplex and pcs enabled - 128 bit bus
+apbwr      1c 55555500  -- write address of transmit buffer descriptor in memory
+apbrd      1c 55555500  -- check transmit queue pointer
+
+apbrd(int)  24 00000200  -- check link status change interrupt
+apbrd       14 00000000  -- check tx status to delay trigger
+apbrd       14 00000000  -- check tx status to delay trigger
+--apbrd       14 00000000  -- check tx status to delay trigger
+--apbrd       14 00000000  -- check tx status to delay trigger
+apbrd       14 00000000  -- check tx status to delay trigger
+apbwr      000 00000208  -- enable tx (apb trigger to trigger fifo)
+apbwr      00 00000408  -- write tx halt immediately keeping tx enabled
+                         -- this stops fetch of second frame
+
+
+dma_rd 55555504 00008400 -- start of frame
+dma_rd 55555500 98765000 -- dma reads pointer of 98765000
+
+
+-- supply the transmit data to the AHB interface
+dma_rd 98765000 03000300
+dma_rd 98765004 03010301
+dma_rd 98765008 03020302
+dma_rd 9876500c 00030003
+dma_rd 98765010 03040304
+dma_rd 98765014 00050005
+dma_rd 98765018 00060006
+dma_rd 9876501c 00070007
+dma_rd 98765020 03080308
+dma_rd 98765024 00090009
+dma_rd 98765028 000a000a
+dma_rd 9876502c 000b000b
+dma_rd 98765030 000c000c
+dma_rd 98765034 000d000d
+dma_rd 98765038 000e000e
+dma_rd 9876503c 030f030f
+dma_rd 98765040 03100310
+dma_rd 98765044 00110011
+dma_rd 98765048 00120012
+dma_rd 9876504c 00130013
+dma_rd 98765050 00140014
+dma_rd 98765054 00150015
+dma_rd 98765058 00160016
+dma_rd 9876505c 03170317
+dma_rd 98765060 03180318
+dma_rd 98765064 00190019
+dma_rd 98765068 001a001a
+dma_rd 9876506c 031b031b
+dma_rd 98765070 001c001c
+dma_rd 98765074 031d031d
+dma_rd 98765078 031e031e
+dma_rd 9876507c 031f031f
+dma_rd 98765080 00200020
+dma_rd 98765084 00210021
+dma_rd 98765088 00220022
+dma_rd 9876508c 03230323
+dma_rd 98765090 00240024
+dma_rd 98765094 03250325
+dma_rd 98765098 03260326
+dma_rd 9876509c 03270327
+dma_rd 987650a0 00280028
+dma_rd 987650a4 03290329
+dma_rd 987650a8 032a032a
+dma_rd 987650ac 032b032b
+dma_rd 987650b0 032c032c
+dma_rd 987650b4 032d032d
+dma_rd 987650b8 032e032e
+dma_rd 987650bc 002f002f
+dma_rd 987650c0 00300030
+dma_rd 987650c4 03310331
+dma_rd 987650c8 03320332
+dma_rd 987650cc 03330333
+dma_rd 987650d0 03340334
+dma_rd 987650d4 03350335
+dma_rd 987650d8 03360336
+dma_rd 987650dc 00370037
+dma_rd 987650e0 00380038
+dma_rd 987650e4 03390339
+dma_rd 987650e8 033a033a
+dma_rd 987650ec 003b003b
+dma_rd 987650f0 033c033c
+dma_rd 987650f4 003d003d
+dma_rd 987650f8 003e003e
+dma_rd 987650fc 003f003f
+dma_rd 98765100 00400040
+dma_rd 98765104 00410041
+dma_rd 98765108 00420042
+dma_rd 9876510c 03430343
+dma_rd 98765110 00440044
+dma_rd 98765114 03450345
+dma_rd 98765118 03460346
+dma_rd 9876511c 03470347
+dma_rd 98765120 00480048
+dma_rd 98765124 03490349
+dma_rd 98765128 034a034a
+dma_rd 9876512c 034b034b
+dma_rd 98765130 034c034c
+dma_rd 98765134 034d034d
+dma_rd 98765138 034e034e
+dma_rd 9876513c 004f004f
+dma_rd 98765140 00500050
+dma_rd 98765144 03510351
+dma_rd 98765148 03520352
+dma_rd 9876514c 03530353
+dma_rd 98765150 03540354
+dma_rd 98765154 03550355
+dma_rd 98765158 03560356
+dma_rd 9876515c 00570057
+dma_rd 98765160 00580058
+dma_rd 98765164 03590359
+dma_rd 98765168 035a035a
+dma_rd 9876516c 005b005b
+dma_rd 98765170 035c035c
+dma_rd 98765174 005d005d
+dma_rd 98765178 005e005e
+dma_rd 9876517c 005f005f
+dma_rd 98765180 00600060
+dma_rd 98765184 00610061
+dma_rd 98765188 00620062
+dma_rd 9876518c 03630363
+dma_rd 98765190 00640064
+dma_rd 98765194 03650365
+dma_rd 98765198 03660366
+dma_rd 9876519c 03670367
+dma_rd 987651a0 00680068
+dma_rd 987651a4 03690369
+dma_rd 987651a8 036a036a
+dma_rd 987651ac 036b036b
+dma_rd 987651b0 036c036c
+dma_rd 987651b4 036d036d
+dma_rd 987651b8 036e036e
+dma_rd 987651bc 006f006f
+dma_rd 987651c0 00700070
+dma_rd 987651c4 03710371
+dma_rd 987651c8 03720372
+dma_rd 987651cc 03730373
+dma_rd 987651d0 03740374
+dma_rd 987651d4 03750375
+dma_rd 987651d8 03760376
+dma_rd 987651dc 00770077
+dma_rd 987651e0 00780078
+dma_rd 987651e4 03790379
+dma_rd 987651e8 037a037a
+dma_rd 987651ec 007b007b
+dma_rd 987651f0 037c037c
+dma_rd 987651f4 007d007d
+dma_rd 987651f8 007e007e
+dma_rd 987651fc 007f007f
+dma_rd 98765200 03800380
+dma_rd 98765204 03810381
+dma_rd 98765208 03820382
+dma_rd 9876520c 00830083
+dma_rd 98765210 03840384
+dma_rd 98765214 00850085
+dma_rd 98765218 00860086
+dma_rd 9876521c 00870087
+dma_rd 98765220 03880388
+dma_rd 98765224 00890089
+dma_rd 98765228 008a008a
+dma_rd 9876522c 008b008b
+dma_rd 98765230 008c008c
+dma_rd 98765234 008d008d
+dma_rd 98765238 008e008e
+dma_rd 9876523c 038f038f
+dma_rd 98765240 03900390
+dma_rd 98765244 00910091
+dma_rd 98765248 00920092
+dma_rd 9876524c 00930093
+dma_rd 98765250 00940094
+dma_rd 98765254 00950095
+dma_rd 98765258 00960096
+dma_rd 9876525c 03970397
+dma_rd 98765260 03980398
+dma_rd 98765264 00990099
+dma_rd 98765268 009a009a
+dma_rd 9876526c 039b039b
+dma_rd 98765270 009c009c
+dma_rd 98765274 039d039d
+dma_rd 98765278 039e039e
+dma_rd 9876527c 039f039f
+dma_rd 98765280 00a000a0
+dma_rd 98765284 00a100a1
+dma_rd 98765288 00a200a2
+dma_rd 9876528c 03a303a3
+dma_rd 98765290 00a400a4
+dma_rd 98765294 03a503a5
+dma_rd 98765298 03a603a6
+dma_rd 9876529c 03a703a7
+dma_rd 987652a0 00a800a8
+dma_rd 987652a4 03a903a9
+dma_rd 987652a8 03aa03aa
+dma_rd 987652ac 03ab03ab
+dma_rd 987652b0 03ac03ac
+dma_rd 987652b4 03ad03ad
+dma_rd 987652b8 03ae03ae
+dma_rd 987652bc 00af00af
+dma_rd 987652c0 00b000b0
+dma_rd 987652c4 03b103b1
+dma_rd 987652c8 03b203b2
+dma_rd 987652cc 03b303b3
+dma_rd 987652d0 03b403b4
+dma_rd 987652d4 03b503b5
+dma_rd 987652d8 03b603b6
+dma_rd 987652dc 00b700b7
+dma_rd 987652e0 00b800b8
+dma_rd 987652e4 03b903b9
+dma_rd 987652e8 03ba03ba
+dma_rd 987652ec 00bb00bb
+dma_rd 987652f0 03bc03bc
+dma_rd 987652f4 00bd00bd
+dma_rd 987652f8 00be00be
+dma_rd 987652fc 00bf00bf
+dma_rd 98765300 00c000c0
+dma_rd 98765304 00c100c1
+dma_rd 98765308 00c200c2
+dma_rd 9876530c 03c303c3
+dma_rd 98765310 00c400c4
+dma_rd 98765314 03c503c5
+dma_rd 98765318 03c603c6
+dma_rd 9876531c 03c703c7
+dma_rd 98765320 00c800c8
+dma_rd 98765324 03c903c9
+dma_rd 98765328 03ca03ca
+dma_rd 9876532c 03cb03cb
+dma_rd 98765330 03cc03cc
+dma_rd 98765334 03cd03cd
+dma_rd 98765338 03ce03ce
+dma_rd 9876533c 00cf00cf
+dma_rd 98765340 00d000d0
+dma_rd 98765344 03d103d1
+dma_rd 98765348 03d203d2
+dma_rd 9876534c 03d303d3
+dma_rd 98765350 03d403d4
+dma_rd 98765354 03d503d5
+dma_rd 98765358 03d603d6
+dma_rd 9876535c 00d700d7
+dma_rd 98765360 00d800d8
+dma_rd 98765364 03d903d9
+dma_rd 98765368 03da03da
+dma_rd 9876536c 00db00db
+dma_rd 98765370 03dc03dc
+dma_rd 98765374 00dd00dd
+dma_rd 98765378 00de00de
+dma_rd 9876537c 00df00df
+dma_rd 98765380 03e003e0
+dma_rd 98765384 03e103e1
+dma_rd 98765388 03e203e2
+dma_rd 9876538c 00e300e3
+dma_rd 98765390 03e403e4
+dma_rd 98765394 00e500e5
+dma_rd 98765398 00e600e6
+dma_rd 9876539c 00e700e7
+dma_rd 987653a0 03e803e8
+dma_rd 987653a4 00e900e9
+dma_rd 987653a8 00ea00ea
+dma_rd 987653ac 00eb00eb
+dma_rd 987653b0 00ec00ec
+dma_rd 987653b4 00ed00ed
+dma_rd 987653b8 00ee00ee
+dma_rd 987653bc 03ef03ef
+dma_rd 987653c0 03f003f0
+dma_rd 987653c4 00f100f1
+dma_rd 987653c8 00f200f2
+dma_rd 987653cc 00f300f3
+dma_rd 987653d0 00f400f4
+dma_rd 987653d4 00f500f5
+dma_rd 987653d8 00f600f6
+dma_rd 987653dc 03f703f7
+dma_rd 987653e0 03f803f8
+dma_rd 987653e4 00f900f9
+dma_rd 987653e8 00fa00fa
+dma_rd 987653ec 03fb03fb
+dma_rd 987653f0 00fc00fc
+dma_rd 987653f4 03fd03fd
+dma_rd 987653f8 03fe03fe
+dma_rd 987653fc 03ff03ff
+
+-- check for correct preamble, SFD, data, pad and crc
+pcs_txd(s)    555555555555d500030003010301030203020303000300
+pcs_txd                       04030403050005000600060007000700
+pcs_txd                       08030803090009000a000a000b000b00
+pcs_txd                       0c000c000d000d000e000e000f030f03
+pcs_txd                       10031003110011001200120013001300
+pcs_txd                       14001400150015001600160017031703
+pcs_txd                       18031803190019001a001a001b031b03
+pcs_txd                       1c001c001d031d031e031e031f031f03
+pcs_txd                       20002000210021002200220023032303
+pcs_txd                       24002400250325032603260327032703
+pcs_txd                       28002800290329032a032a032b032b03
+pcs_txd                       2c032c032d032d032e032e032f002f00
+pcs_txd                       30003000310331033203320333033303
+pcs_txd                       34033403350335033603360337003700
+pcs_txd                       38003800390339033a033a033b003b00
+pcs_txd                       3c033c033d003d003e003e003f003f00
+pcs_txd                       40004000410041004200420043034303
+pcs_txd                       44004400450345034603460347034703
+pcs_txd                       48004800490349034a034a034b034b03
+pcs_txd                       4c034c034d034d034e034e034f004f00
+pcs_txd                       50005000510351035203520353035303
+pcs_txd                       54035403550355035603560357005700
+pcs_txd                       58005800590359035a035a035b005b00
+pcs_txd                       5c035c035d005d005e005e005f005f00
+pcs_txd                       60006000610061006200620063036303
+pcs_txd                       64006400650365036603660367036703
+pcs_txd                       68006800690369036a036a036b036b03
+pcs_txd                       6c036c036d036d036e036e036f006f00
+pcs_txd                       70007000710371037203720373037303
+pcs_txd                       74037403750375037603760377007700
+pcs_txd                       78007800790379037a037a037b007b00
+pcs_txd                       7c037c037d007d007e007e007f007f00
+pcs_txd                       80038003810381038203820383008300
+pcs_txd                       84038403850085008600860087008700
+pcs_txd                       88038803890089008a008a008b008b00
+pcs_txd                       8c008c008d008d008e008e008f038f03
+pcs_txd                       90039003910091009200920093009300
+pcs_txd                       94009400950095009600960097039703
+pcs_txd                       98039803990099009a009a009b039b03
+pcs_txd                       9c009c009d039d039e039e039f039f03
+pcs_txd                       a000a000a100a100a200a200a303a303
+pcs_txd                       a400a400a503a503a603a603a703a703
+pcs_txd                       a800a800a903a903aa03aa03ab03ab03
+pcs_txd                       ac03ac03ad03ad03ae03ae03af00af00
+pcs_txd                       b000b000b103b103b203b203b303b303
+pcs_txd                       b403b403b503b503b603b603b700b700
+pcs_txd                       b800b800b903b903ba03ba03bb00bb00
+pcs_txd                       bc03bc03bd00bd00be00be00bf00bf00
+pcs_txd                       c000c000c100c100c200c200c303c303
+pcs_txd                       c400c400c503c503c603c603c703c703
+pcs_txd                       c800c800c903c903ca03ca03cb03cb03
+pcs_txd                       cc03cc03cd03cd03ce03ce03cf00cf00
+pcs_txd                       d000d000d103d103d203d203d303d303
+pcs_txd                       d403d403d503d503d603d603d700d700
+pcs_txd                       d800d800d903d903da03da03db00db00
+pcs_txd                       dc03dc03dd00dd00de00de00df00df00
+pcs_txd                       e003e003e103e103e203e203e300e300
+pcs_txd                       e403e403e500e500e600e600e700e700
+pcs_txd                       e803e803e900e900ea00ea00eb00eb00
+pcs_txd                       ec00ec00ed00ed00ee00ee00ef03ef03
+pcs_txd                       f003f003f100f100f200f200f300f300
+pcs_txd                       f400f400f500f500f600f600f703f703
+pcs_txd                       f803f803f900f900fa00fa00fb03fb03
+pcs_txd                       fc00fc00fd03fd03fe03fe03ff03ff03gggggggg
+
+
+
+-- write transmit complete status
+dma_wr 55555504 80008400 -- write used bit
+
+dma_rd 5555550c 0000803d -- start of frame
+dma_rd 55555508 98765000 -- dma reads pointer of 98765000
+
+
+
+apbrd(int) 24 00000080  -- check interrupt status -
+apbrd	   14 00000020  -- tx status - frame transmitted, always enabled
+apbwr      14 00000028  -- clear it
+apbwr      00 00000208  -- enable tx (apb trigger to trigger fifo)
+
+-- Supply second frame (65 bytes) TX FIFO interface (Full Duplex)
+--
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002  not_ok
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000 
+dma_rd 9876503c 000000e0 
+
+
+-- check for correct preamble, SFD, data, pad and crc
+pcs_txd(s_r)      555555555555d501005e00000200d0bcece704080045c0
+pcs_txd                       003000000000021158729e8ce0fce000
+pcs_txd                       000207c107c1001cb6e9000008030a64
+pcs_txd                       0200636973636f0000009e8ce01d0e2117
+
+
+apbrd(int) 24 00000800  -- check interrupt status - 
+apbrd	   14 00000100  -- tx status - frame transmitted, always enabled
+apbwr      14 00000108  -- clear it
+apbwr      00 00000208  -- enable tx (apb trigger to trigger fifo)
+
+  
+
+-- write transmit complete status
+dma_wr 5555550c 8000803d -- write used bit
+
+dma_rd 5555550c 0000803c -- start of frame
+dma_rd 55555508 98765000 -- dma reads pointer of 98765000
+
+
+-- Do a good frame to trigger interrupt and check stats.
+--
+
+dma_rd 98765000 005e0001
+dma_rd 98765004 d0000200
+dma_rd 98765008 04e7ecbc
+dma_rd 9876500c c0450008
+dma_rd 98765010 00003000
+dma_rd 98765014 11020000
+dma_rd 98765018 8c9e7258
+dma_rd 9876501c 00e0fce0
+dma_rd 98765020 c1070200
+dma_rd 98765024 1c00c107
+dma_rd 98765028 0000e9b6
+dma_rd 9876502c 640a0308
+dma_rd 98765030 69630002
+dma_rd 98765034 006f6373
+dma_rd 98765038 8c9e0000
+dma_rd 9876503c 00000000  --extra read
+
+-- check for correct preamble, SFD, data, pad and crc
+pcs_txd(s)      555555555555d501005e00000200d0bcece704080045c0
+pcs_txd                       003000000000021158729e8ce0fce000
+pcs_txd                       000207c107c1001cb6e9000008030a64
+pcs_txd                       0200636973636f0000009e8cggggggggr
+
+
+
+-- write transmit complete status
+dma_wr 5555550c 8000803c -- write used bit
+
+dma_rd 55555514 800081fd -- start of frame
+dma_rd 55555510 98765000 -- dma reads pointer of 98765000
+
+
+
+apbrd(int) 24 00000088  -- check interrupt status - used bit set
+apbrd	   14 00000021  -- tx status - frame transmitted, always enabled
+apbwr      14 00000029  -- clear it
+apbrd      14 00000000  -- check it again - frame transmitted, always enabled
+
+
+
+-- check transmit statistics
+apbrd     100 00000444  -- check octets transmitted bottom
+apbrd     104 00000000  -- check octets transmitted top
+apbrd     108 00000002  -- check frames transmitted ok
+apbrd     10C 00000000  -- check broadcast frames transmitted
+apbrd     110 00000001  -- check multicast frames transmitted
+apbrd     114 00000000  -- check pause frames transmitted
+apbrd     118 00000001  -- check frames transmitted 64
+apbrd     11C 00000000  -- check frames transmitted 65-127
+apbrd     120 00000000  -- check frames transmitted 128-255
+apbrd     124 00000000  -- check frames transmitted 256-511
+apbrd     128 00000000  -- check frames transmitted 512-1023
+apbrd     12C 00000001  -- check frames transmitted 1024-1518
+apbrd     130 00000000  -- check frames transmitted 1519
+apbrd     134 00000000  -- check transmit underruns errors (no underrun status)
+apbrd     138 00000000  -- check single collisions frames
+apbrd     13C 00000000  -- check multiple collisions frames
+apbrd     140 00000000  -- check excessive collisions frames
+apbrd     144 00000000  -- check late collisions frames
+apbrd     148 00000000  -- check deferred frames
+apbrd     14C 00000000  -- check carrier sense errors
+
+-- check receive statistics
+apbrd     150 00000000  -- check octets received bottom
+apbrd     154 00000000  -- check octets received top
+apbrd     158 00000000  -- check frames received ok
+apbrd     15C 00000000  -- check broadcast frames received
+apbrd     160 00000000  -- check multicast frames received
+apbrd     164 00000000  -- check pause frames received
+apbrd     168 00000000  -- check frames received 64
+apbrd     16C 00000000  -- check frames received 65-127
+apbrd     170 00000000  -- check frames received 128-255
+apbrd     174 00000000  -- check frames received 256-511
+apbrd     178 00000000  -- check frames received 512-1023
+apbrd     17C 00000000  -- check frames received 1024-1518
+apbrd     180 00000000  -- check frames received 1519
+apbrd     184 00000000  -- check undersize frame errors
+apbrd     188 00000000  -- check excessive receive length errors
+apbrd     18C 00000000  -- check receive jabbers errors
+apbrd     190 00000000  -- check FCS errors
+apbrd     194 00000000  -- check receive length errors
+apbrd     198 00000000  -- check receive symbol errors
+apbrd     19C 00000000  -- check alignment errors
+apbrd     1A0 00000000  -- check receive resource errors
+apbrd     1A4 00000000  -- check receive overrun errors
+
+-- force end of test in case it doesn't stop of its own accord
+end(5000)
+
