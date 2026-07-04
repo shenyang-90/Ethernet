@@ -2,12 +2,12 @@
 
 > **项目**: Ethernet IP (IP_20260502_001)
 > **模块**: Gigabit Ethernet MAC + PHY Subsystem
-> **版本**: v1.1  
-> **日期**: 2026-05-29  
+> **版本**: v1.2  
+> **日期**: 2026-06-25  
 > **作者**: RTL Coding Agent (PAD-REWORK-012)  
 > **评审状态**: Draft → 待评审  
-> **前置文档**: `Docs/Arch/ethernet_arch_spec.md` **v1.8d**, `Docs/Arch/ethernet_interface_spec.md` **v1.0**, `Docs/Arch/ethernet_clock_reset_spec.md` **v1.2**  
-> **变更**: (PAD-REWORK-012) RTL-MAJ-004/005 + RTL-MIN-002: 1. §4.1.4 新增 AXI Protocol Parameters (ID分配/Outstanding上限/QoS映射) 2. §7 关闭 μARCH-001/005/007/008/009/010 3. §6 参数默认值与 Arch Spec §1.4 统一 (差异表+修正)
+> **前置文档**: `Docs/Arch/ethernet_arch_spec.md` **v1.9**, `Docs/Arch/ethernet_interface_spec.md` **v1.2**, `Docs/Arch/ethernet_clock_reset_spec.md` **v1.2**  
+> **变更**: (PAD-REWORK-013) Switch-Centric 重构：1. MTL 前移到 Switch Core 前端，MAC 内仅保留 PHY 弹性缓冲；2. 统一 `swi_port_if` 替代 `swi_if`/`swi_host_if`，并拆分为 `swi_port_tx_if` / `swi_port_rx_if`；3. 新增 `dma_swi_adapter`/`mac_swi_adapter`；4. 新增 `SUPPORT_DRE` 与外部 DRE Port；5. `DESC_SIZE` 默认改为 32；6. 同步 Interface Spec AXI ID 表。
 
 ---
 
@@ -15,7 +15,7 @@
 
 ### 1.1 顶层模块划分
 
-基于**Arch Spec v1.8d**的架构定义和TC4x GETH / R-Car S4 对标分析,本IP微架构划分为**8个顶层功能模块 + 1个Switch Core + 1个vPHC虚拟化模块**:
+基于**Arch Spec v1.9**的架构定义和TC4x GETH / R-Car S4 对标分析,本IP微架构划分为**顶层功能模块 + Switch Core（含共享MTL前端）+ 外部DRE + vPHC虚拟化模块**:
 
 ```
 +========================================================================================+
@@ -27,20 +27,24 @@
 |  |   Arbiter (Internal)   |     |   (AXI4-Lite Slave)    |     |   Aggregator       |   |
 |  +-----------|------------+     +-----------|------------+     +---------|----------+   |
 |              |                              |                           |               |
-|  +-----------v------------+     +-----------v------------+     +---------v----------+   |
-|  |   DMA Engine (全局池)  |<--->|   MTL Layer            |<--->|   GMAC/XGMAC Core  |   |
-|  |   - 8/16/32 通道池     |     |   - TX/RX FIFO 32KB    |     |   - 每实例独立配置 |   |
-|  |   - 所有MAC共享复用    |     |   - 8 TX / 8 RX Queues |     |   - TBU/TFC/TPE    |   |
-|  |   - 64b/128b AXI Mstr  |     |   - CBS/TAS/Qbu        |     |   - AFM/Rx Parser  |   |
-|  +-----------|------------+     +-----------|------------+     +---------|----------+   |
-|              |                              |                           |               |
-|              |         +--------------------v--------------------+     |               |
-|              |         |   Switch Core (N-port L2/L3, N=SWITCH_PORT_COUNT) |<----|               |
-|              |         |   - FDB 8K + VLAN + L3 Route            |     |               |
-|              |         |   - TAS Gate Control List (Switch级)    |     |               |
-|              |         |   - FRER / Stream ID / AVTP Filter      |     |               |
-|              |         |   - 独立Host端口 (CPU管理)               |     |               |
-|              |         +--------------------|--------------------+     |               |
+|  +-----------v------------+                 |                 +---------v----------+   |
+|  |   DMA Engine (全局池)  |                 |                 |   GMAC/XGMAC Core  |   |
+|  |   - 8/16/32 通道池     |                 |                 |   - 每实例独立配置 |   |
+|  |   - 所有MAC共享复用    |                 |                 |   - TBU/TFC/TPE    |   |
+|  |   - 64b/128b AXI Mstr  |                 |                 |   - AFM/Rx Parser  |   |
+|  |   - dma_swi_adapter    |                 |                 |   - PHY Elas. Buf  |   |
+|  +-----------|------------+                 |                 +---------|----------+   |
+|              | swi_port_tx_if/rx_if        |                           |               |
+|              | (request + data)            |                           |               |
+|              v                             |                           v               |
+|  +=================================================================================+   |
+|  |   Switch Core (N-port L2/L3 + Shared MTL Front-End, N=SWITCH_PORT_COUNT)        |   |
+|  |   - FDB 8K + VLAN + L3 Route                                                    |   |
+|  |   - Shared MTL: TX/RX Queue, CBS/TAS/Qbu, Scheduler                             |   |
+|  |   - FRER / Stream ID / AVTP Filter                                              |   |
+|  |   - DRE Port (external, ETH<->CAN)                                              |   |
+|  |   - Host Port (CPU管理)                                                         |   |
+|  +=================================================================================+   |
 |              |                              |                           |               |
 |  +-----------v------------+     +-----------v------------+     +---------v----------+   |
 |  |   HSPHY Interface      |     |   PTP / Timestamp Unit   |     |   Safety Monitor   |   |
@@ -68,9 +72,10 @@
 | 模块 | 英文缩写 | 职责描述 | 时钟域 | 关键参数 |
 |------|---------|---------|--------|---------|
 | DMA引擎 | `eth_dma` | **全局通道池 (8/16/32)**,所有MAC共享复用,描述符管理,AXI Master | `clk_sys` | 64b/128b AXI, 全局池, 描述符环 |
-| MTL传输层 | `eth_mtl` | FIFO缓冲,队列调度,QoS整形 | `clk_mac` | 32KB TX/RX, 8Q, CBS/TAS |
+| MTL传输层 | `eth_mtl` | **Switch Core 前端共享 FIFO/队列调度/QoS整形**，不再每 MAC 独立 | `clk_mac` | 共享 32KB TX/RX, 8Q, CBS/TAS |
 | **GMAC/XGMAC核心** | `eth_mac[0..N-1]` | **每实例独立配置** (`MAC_x_TYPE`/`PHY_x_TYPE`/`PHY_x_SPEED`),MAC协议引擎 | `clk_mac` | 10M~10G, 802.1Qav/bv/bu |
-| **Switch Core** | `eth_switch` | **N-port L2/L3 Switch** (N=2~8, default 4), FDB/VLAN/L3 Route/TAS GCL | `clk_mac` | N-port, 8K FDB, Switch级TAS |
+| **Switch Core** | `eth_switch` | **N-port L2/L3 Switch + 共享MTL前端** (N=2~8, default 4), FDB/VLAN/L3 Route/TAS GCL/AVTP Filter | `clk_mac` | N-port, 8K FDB, Switch级TAS |
+| **DRE** | `eth_dre` | **外部 ETH↔CAN 路由引擎**，AVTP ACF_CAN_BRIEF 封装/解封装 | `clk_mac` | `SUPPORT_DRE`, MCMCAN 触发接口 |
 | HSPHY接口 | `eth_hsphy` | PHY接口适配,SerDes/并行,**温度自适应链路降速** | `clk_tx_phy` / `clk_rx_phy` | MII/RMII/RGMII/SGMII/USXGMII |
 | PTP时间戳 | `eth_ptp` | **双PHC + Crossbar**,gPTP/PTP硬件时间戳,PPS | `clk_ts` | **250MHz**, 64b NS, 4×PPS, ±10ns |
 | **vPHC虚拟化** | `eth_vphc` | **Xen IO Rings**,SDV/Hypervisor 每VM独立时间域 | `clk_sys` / `clk_ts` | `SUPPORT_VPHC` |
@@ -86,20 +91,33 @@
 ### 2.1 发送数据通路 (TX Path)
 
 ```
-[系统内存] ──AXI64──► [TX DMA Channel i] ──68b(ATI)──► [MTL TX Queue i]
+[系统内存] ──AXI64──► [TX DMA Channel i] ──68b(ATI)──► [dma_swi_adapter]
                                                               │
-                                                              │ 阈值/存储转发模式
+                                                              │ swi_port_tx_if (request + data)
                                                               ▼
-                                                    [MTL TX Scheduler]
+                                                    [Switch Core Ingress / DMA Port]
+                                                              │
+                                                              │ FDB/VLAN/优先级转发
+                                                              ▼
+                                                    [Shared MTL TX Scheduler]
+                                                              │
+                                                              │ swi_port_rx_if (data)
                                                               │
                                                               │ CBS / TAS / SP / WRR
+                                                              ▼
+                                                    [目标 MAC Port]
+                                                              │
+                                                              │ swi_port_if
+                                                              ▼
+                                                    [mac_swi_adapter]
+                                                              │
                                                               ▼
                                                     [TBU + TFC + TPE]
                                                               │
                                                               │ 插入VLAN / SA替换
                                                               │ 计算IP/TCP/UDP校验和
                                                               ▼
-                                                    [XGMAC TX FIFO]
+                                                    [PHY Elastic Buffer]
                                                               │
                                                               │ MII/GMII/XGMII
                                                               ▼
@@ -141,13 +159,27 @@
                                     │ DA/SA过滤,VLAN过滤,IP/Port过滤
                                     │ FFP流识别 → Gate Control
                                     ▼
-                              [MTL RX Queue j] (按优先级/哈希分发)
+                              [PHY Elastic Buffer]
                                     │
-                                    │ 阈值/存储转发模式
+                                    ▼
+                              [mac_swi_adapter]
+                                    │
+                                    │ swi_port_tx_if (request + data)
+                                    ▼
+                              [Switch Core Ingress Port]
+                                    │
+                                    │ FDB/VLAN/AVTP过滤
+                                    ▼
+                              [Shared MTL RX Queue j]
+                                    │
+                                    │ 按优先级/哈希/dma_chid分发
+                                    ▼
+                              [DMA Switch Port → dma_swi_adapter]
+                                    │
+                                    │ 描述符写回 (状态+src_pid+时间戳)
                                     ▼
                               [RX DMA Channel j]
                                     │
-                                    │ 描述符写回 (状态+时间戳)
                                     ▼
                               [系统内存] ◄──AXI64──
 ```
@@ -217,28 +249,99 @@
 - 背压 (Back-pressure): Egress 忙时发送 pause 帧
 - 优先级调度: TSN 队列优先,普通队列轮转
 
-#### 2.3.1 Switch 内部接口 (`swi_if`)
+#### 2.3.1 统一 Switch 端口接口 (`swi_port_if`)
+
+> **范围**: 本接口族取代原有 `swi_if` 与 `swi_host_if`，用于 **DMA Switch Port、MAC-MTL Port、DRE Port、Host Port** 与 Switch Core 的连接。从端口视角拆分为 **`swi_port_tx_if`**（端口 → Switch）和 **`swi_port_rx_if`**（Switch → 端口），每组均含请求/控制、数据和背压通道。
+
+##### `swi_port_tx_if` — 端口 → Switch
+
+###### 请求/控制通道
 
 | 信号 | 宽度 | 方向 | 描述 |
 |------|------|------|------|
-| `swi_ingress_data` | 64b | MAC → Switch | 入口帧数据 |
-| `swi_ingress_sof` | 1 | MAC → Switch | 帧起始 |
-| `swi_ingress_port` | $clog2(SWITCH_PORT_COUNT) | MAC → Switch | 入口端口号 (0~N-1) |
-| `swi_ingress_valid` | 1 | MAC → Switch | 数据有效 |
-| `swi_egress_data` | 64b | Switch → MAC | 出口帧数据 |
-| `swi_egress_port` | SWITCH_PORT_COUNT | Switch → MAC | 端口掩码 (bit[i]=1 → 发送到Port i) |
-| `swi_egress_valid` | 1 | Switch → MAC | 数据有效 |
-| `swi_backpressure` | SWITCH_PORT_COUNT | MAC → Switch | 每端口背压请求 |
+| `swi_tx_req_valid` | 1 | Port → Switch | 请求有效 |
+| `swi_tx_req_ready` | 1 | Switch → Port | 请求接受 |
+| `swi_tx_req_src_pid` | `SWI_PID_W` | Port → Switch | 源端口 ID |
+| `swi_tx_req_dst_pid` | `SWI_PID_W` | Port → Switch | 目的端口 ID；`0`=FDB 查找 |
+| `swi_tx_req_tc` | 3 | Port → Switch | Traffic Class |
+| `swi_tx_req_frame_len` | 16 | Port → Switch | 帧总字节长度 |
+| `swi_tx_req_sof` | 1 | Port → Switch | 帧起始（与数据通道同周期） |
+| `swi_tx_req_eof` | 1 | Port → Switch | 帧结束（与数据通道同周期，可选） |
+| `swi_tx_req_avtp` | 1 | Port → Switch | AVTP/ACF 帧标识 |
+| `swi_tx_req_stream_id` | 64 | Port → Switch | AVTP Stream ID |
+| `swi_tx_req_drop_on_bp` | 1 | Port → Switch | 背压时丢弃 |
+| `swi_tx_req_dma_chid` | `ceil(log2(DMA_CH_COUNT))` | Port → Switch | DMA 通道 ID |
+| `swi_tx_req_vlan_tag` | 16 | Port → Switch | VLAN TCI |
+| `swi_tx_req_cic` | 2 | Port → Switch | Checksum offload 控制 |
+| `swi_tx_req_ttse` | 1 | Port → Switch | 时间戳使能 |
+| `swi_tx_req_no_fcs` | 1 | Port → Switch | 不附加 FCS |
 
-#### 2.3.2 Switch ↔ Host 接口 (`swi_host_if`)
+###### 数据通道
 
 | 信号 | 宽度 | 方向 | 描述 |
 |------|------|------|------|
-| `swi_host_rx_data` | 64b | Switch → Host | 发往 CPU 的帧 |
-| `swi_host_rx_valid` | 1 | Switch → Host | RX 有效 |
-| `swi_host_tx_data` | 64b | Host → Switch | 来自 CPU 的帧 |
-| `swi_host_tx_valid` | 1 | Host → Switch | TX 有效 |
-| `swi_host_tx_ready` | 1 | Switch → Host | 可接收 |
+| `swi_tx_data_valid` | 1 | Port → Switch | 数据拍有效 |
+| `swi_tx_data_ready` | 1 | Switch → Port | 可接收 |
+| `swi_tx_data` | `SWI_DATA_W` | Port → Switch | 帧数据（默认 64b） |
+| `swi_tx_data_be` | `SWI_DATA_W/8` | Port → Switch | 字节使能 |
+| `swi_tx_data_sof` | 1 | Port → Switch | 帧首拍 |
+| `swi_tx_data_eof` | 1 | Port → Switch | 帧末拍 |
+| `swi_tx_data_len` | `ceil(log2(SWI_DATA_W/8))` | Port → Switch | 末拍有效字节数 |
+| `swi_tx_data_err` | 1 | Port → Switch | 帧错误/中止 |
+| `swi_tx_data_timestamp` | 64 | Port → Switch | SFD 时间戳 |
+
+##### `swi_port_rx_if` — Switch → 端口
+
+###### 数据通道
+
+| 信号 | 宽度 | 方向 | 描述 |
+|------|------|------|------|
+| `swi_rx_data_valid` | 1 | Switch → Port | 数据拍有效 |
+| `swi_rx_data_ready` | 1 | Port → Switch | 可接收 |
+| `swi_rx_data` | `SWI_DATA_W` | Switch → Port | 帧数据 |
+| `swi_rx_data_be` | `SWI_DATA_W/8` | Switch → Port | 字节使能 |
+| `swi_rx_data_sof` | 1 | Switch → Port | 帧首拍 |
+| `swi_rx_data_eof` | 1 | Switch → Port | 帧末拍 |
+| `swi_rx_data_len` | `ceil(log2(SWI_DATA_W/8))` | Switch → Port | 末拍有效字节数 |
+| `swi_rx_data_err` | 1 | Switch → Port | 帧错误/中止 |
+| `swi_rx_data_timestamp` | 64 | Switch → Port | SFD 时间戳 |
+| `swi_rx_data_status` | 16 | Switch → Port | RX 状态摘要 |
+| `swi_rx_data_src_pid` | `SWI_PID_W` | Switch → Port | 源端口 ID |
+| `swi_rx_data_tc` | 3 | Switch → Port | Traffic Class |
+| `swi_rx_data_avtp` | 1 | Switch → Port | AVTP 帧标识 |
+| `swi_rx_data_stream_id` | 64 | Switch → Port | AVTP Stream ID |
+
+###### 背压/状态通道
+
+| 信号 | 宽度 | 方向 | 描述 |
+|------|------|------|------|
+| `swi_rx_bp_valid` | 1 | Switch → Port | 背压/状态有效 |
+| `swi_rx_bp_dst_mask` | `SWITCH_PORT_COUNT` | Switch → Port | 拥塞目的端口掩码 |
+| `swi_rx_bp_pause` | 1 | Switch → Port | 全局 pause |
+| `swi_rx_bp_pfc_vec` | 8 | Switch → Port | 每优先级 Pause 向量 |
+| `swi_rx_tx_status` | 8 | Switch → Port | TX 完成状态反馈 |
+
+#### 2.3.2 Switch 端口适配器
+
+由于 DMA 和 MAC 仍保留既有通道接口，需增加适配层完成 `swi_port_tx_if` / `swi_port_rx_if` 与旧接口的转换。
+
+**`dma_swi_adapter`**
+
+| 侧 | 接口 | 功能 |
+|----|------|------|
+| DMA | `ati_tx_if` / `ari_rx_if` | 维持原 DMA 通道语义 |
+| Switch TX | `swi_port_tx_if` | 将 DMA TX 帧及 `dst_pid`/`tc`/`avtp`/`stream_id`/`dma_chid` 等元数据发往 Switch |
+| Switch RX | `swi_port_rx_if` | 从 Switch 接收目标为本 DMA port 的帧，按 `src_pid` + `dma_chid` 写回 `ari_rx_if` |
+
+**`mac_swi_adapter`**
+
+| 侧 | 接口 | 功能 |
+|----|------|------|
+| MAC | `mac_tx_if` / `mac_rx_if` | 维持原 MAC 层语义 |
+| Switch TX | `swi_port_tx_if` | 将 MAC RX 帧（含 `src_pid`/`timestamp`/`rx_status`）发往 Switch |
+| Switch RX | `swi_port_rx_if` | 从 Switch 接收目标 MAC 帧，转换为 `mac_tx_if`，传递 `timestamp`/`tx_status` |
+
+> **注意**: 随 MTL 前移到 Switch Core，MAC 内部不再保留完整 32KB MTL FIFO，仅保留 PHY 接口弹性缓冲（Elastic Buffer/FIFO）。`mac_swi_adapter` 与 PHY 弹性缓冲共同构成 MAC 侧数据通路。
 
 ---
 
@@ -411,14 +514,16 @@ AXI4 的 AWQOS/ARQOS 4-bit 信号直接映射 DMA 通道优先级,指导 SoC Int
 
 ### 4.2 MTL Layer (`eth_mtl`)
 
-#### 4.2.1 内部子模块划分
+#### 4.2.1 内部子模块划分 (Switch 前端共享 MTL)
+
+> **架构变更**: MTL 不再位于每 MAC 内部，而是作为 **Switch Core 前端的共享资源**，为所有 Switch Port 提供统一队列、调度和流量整形。MAC 实例内部仅保留 PHY 接口弹性缓冲。
 
 | 子模块 | 实例数 | 功能描述 |
 |--------|--------|---------|
-| `mtl_tx_fifo` | 1 | 32KB TX FIFO,8个逻辑队列分区 |
-| `mtl_rx_fifo` | 1 | 32KB RX FIFO,8个逻辑队列分区 |
-| `mtl_tx_sched` | 1 | 发送调度器: SP(严格优先)/WRR(加权轮询)/CBS/TAS |
-| `mtl_rx_dispatch` | 1 | 接收分发器: 按VLAN优先级/哈希/DMA通道映射 |
+| `mtl_tx_fifo` | 1 | 共享 TX FIFO，按端口/队列分区；总深度 = `MTL_TX_FIFO_DEPTH` × 1 |
+| `mtl_rx_fifo` | 1 | 共享 RX FIFO，按端口/队列分区；总深度 = `MTL_RX_FIFO_DEPTH` × 1 |
+| `mtl_tx_sched` | 1 | 共享发送调度器: SP/WRR/CBS/TAS，跨所有 Switch egress ports |
+| `mtl_rx_dispatch` | 1 | 接收分发器: 按 `src_pid`/`dma_chid`/VLAN优先级/哈希分发到目标 DMA channel |
 | `mtl_cbs_shaper` | 4 | 802.1Qav CBS整形器 (每队列独立credit计数) |
 | `mtl_tas_gcl` | 1 | 802.1Qbv TAS门控列表 (64-1024条目,循环执行) |
 | `mtl_qbu_preempt` | 1 | 802.1Qbu帧抢占: pMAC/eMAC双队列管理 |
@@ -426,19 +531,19 @@ AXI4 的 AWQOS/ARQOS 4-bit 信号直接映射 DMA 通道优先级,指导 SoC Int
 #### 4.2.2 TX Scheduler 仲裁逻辑
 
 ```verilog
-// 伪代码: 调度优先级 (从高到低)
-if (tas_gcl.current_gate == OPEN && queue_has_frame) begin
-    // TAS门控打开且队列有帧 → 按TAS周期调度
-    selected_queue = tas_gcl.queue_id;
-end else if (cbs_shaper[i].credit >= 0 && cbs_queue_ready[i]) begin
+// 伪代码: 共享 MTL 调度优先级 (从高到低)
+if (tas_gcl.port[pid].current_gate == OPEN && queue_has_frame[pid]) begin
+    // TAS门控打开且该端口队列有帧 → 按TAS周期调度
+    selected_port_queue = {pid, tas_gcl.queue_id};
+end else if (cbs_shaper[q].credit >= 0 && cbs_queue_ready[q]) begin
     // CBS整形器有credit → AVB流量
-    selected_queue = cbs_queue_id;
-end else if (preempt_queue.has express_frame) begin
+    selected_port_queue = cbs_queue_id;
+end else if (preempt_queue[pid].has_express_frame) begin
     // 帧抢占: Express流量 (pMAC) 优先
-    selected_queue = preempt_express_qid;
+    selected_port_queue = preempt_express_qid;
 end else begin
-    // 默认: 严格优先级 (Queue 7 > 6 > ... > 0)
-    selected_queue = highest_ready_sp_queue;
+    // 默认: 严格优先级 (Queue 7 > 6 > ... > 0)，按 port 轮询避免饥饿
+    selected_port_queue = highest_ready_sp_queue;
 end
 ```
 
@@ -475,7 +580,9 @@ end
 | `sw_egress_sched` | 1 | 出口调度: **Crossbar 全并发**,按端口优先级仲裁,背压控制 |
 | `sw_egress_port` | **N** | 每出口端口: 帧组装,优先级标记,pause 帧生成 |
 | `sw_host_port` | 1 | **独立 Host 端口**: CPU 管理帧收发,独立 MAC 流量透传 |
+| `sw_dre_port` | 0~1 | **DRE Port**: 外部 DRE 模块接入，`SUPPORT_DRE=1` 时实例化 |
 | `sw_learning` | 1 | 自学习引擎: 源 MAC+VID → FDB 动态更新 (可关闭,静态绑定优先) |
+| `sw_mtl_shared` | 1 | **共享 MTL 前端**: 队列、CBS/TAS、调度集中到 Switch Core |
 
 #### 4.4.1a 参数化实例化策略 (`generate` 块)
 
@@ -773,12 +880,12 @@ endgenerate
 
 | 接口 | 源时钟域 | 目标时钟域 | FIFO深度 | 位宽 | CDC方式 |
 |------|---------|-----------|---------|------|---------|
-| DMA→MTL TX | `clk_sys` | `clk_mac` | 16 | 68b | 异步FIFO (Gray码指针) |
-| MTL→DMA RX | `clk_mac` | `clk_sys` | 16 | 68b | 异步FIFO (Gray码指针) |
+| DMA→Switch (via dma_swi_adapter) | `clk_sys` | `clk_mac` | 16 | 68b | 异步FIFO (Gray码指针) |
+| Switch→DMA RX (via dma_swi_adapter) | `clk_mac` | `clk_sys` | 16 | 68b | 异步FIFO (Gray码指针) |
 | MAC→HSPHY TX | `clk_mac` | `clk_tx_phy` | 8 | 8b/32b | 异步FIFO + 握手 |
 | HSPHY→MAC RX | `clk_rx_phy` | `clk_mac` | 8 | 8b/32b | 异步FIFO + 握手 |
-| **MAC ↔ Switch Ingress** | `clk_mac` | `clk_mac` | 8 | 64b | **同步 (同域)** |
-| **Switch Egress → MAC** | `clk_mac` | `clk_mac` | 8 | 64b | **同步 (同域)** |
+| **MAC ↔ Switch Port** | `clk_mac` | `clk_mac` | 8 | 64b+meta | **同步 (同域)** |
+| **DRE ↔ Switch Port** | `clk_mac` | `clk_mac` | 8 | 64b+meta | **同步 (同域，或按 DRE 时钟域加 CDC)** |
 | **Switch Host Port ↔ DMA** | `clk_mac` | `clk_sys` | 16 | 64b | 异步FIFO (Gray码指针) |
 | PTP→MAC TS | `clk_ts` | `clk_mac` | 4 | 64b | 握手同步器 |
 | **PHC0 ↔ PHC1** | `clk_ts` | `clk_ts` | - | 64b | **同步 (同源)** |
@@ -826,8 +933,8 @@ rst_n (全局异步复位,低有效)
 | **`DMA_CH_PER_MAC`** | int | **4** | 1~8 | **每 MAC 可分配的 DMA 通道数上限** (新增,Arch Spec §1.4.2) |
 | `MTL_TX_FIFO_DEPTH` | int | **32** | 8/16/32/64 | TX FIFO 深度 (单位 KB,Arch Spec §1.4.2) |
 | `MTL_RX_FIFO_DEPTH` | int | **32** | 8/16/32/64 | RX FIFO 深度 (单位 KB,Arch Spec §1.4.2) |
-| `MTL_TXQ_COUNT` | int | **8** | 1/2/4/8 | 发送队列数 (每 MAC,范围修正为 2^n) |
-| `MTL_RXQ_COUNT` | int | **8** | 1/2/4/8 | 接收队列数 (每 MAC,范围修正为 2^n) |
+| `MTL_TXQ_COUNT` | int | **8** | 1/2/4/8 | 发送队列数 (**Switch 前端共享**,按端口/TC 逻辑分区) |
+| `MTL_RXQ_COUNT` | int | **8** | 1/2/4/8 | 接收队列数 (**Switch 前端共享**,按端口/TC 逻辑分区) |
 | **`SUPPORT_SWITCH`** | bit | **1** | 0/1 | **是否支持 N-port L2/L3 Switch (N=SWITCH_PORT_COUNT)** |
 | **`SWITCH_PORT_COUNT`** | int | **4** | 2-8 | **Switch 端口数量** |
 | **`SWITCH_TAS`** | bit | **1** | 0/1 | **Switch 级 TAS 使能** (与端点级 TAS 互斥) |
@@ -852,7 +959,8 @@ rst_n (全局异步复位,低有效)
 | `AXI_ADDR_WIDTH` | int | 32 | 32/40/64 | AXI Master 地址位宽 |
 | **`AXI_ID_WIDTH`** | int | **4** | 4/8 | **AXI Master ID 位宽** (新增,Arch Spec §1.4.2) |
 | **`CSR_ADDR_WIDTH`** | int | **12** | 10/12/14 | **AXI-Lite Slave 地址位宽** (新增,Arch Spec §1.4.2) |
-| **`DESC_SIZE`** | int | **16** | 16/32 | **描述符大小 (Byte)** (新增,Arch Spec §1.4.2) |
+| **`DESC_SIZE`** | int | **32** | 16/32 | **描述符大小 (Byte)**；Switch/AVTP 模式必须为 32，端点模式可配 16 |
+| **`SUPPORT_DRE`** | bit | **1** | 0/1 | **DRE ETH↔CAN 路由使能** (新增,Arch Spec §1.4.1) |
 | **`MAX_BURST_LEN`** | int | **16** | 8/16 | **AXI 最大 Burst 长度 (beats)** (新增,Arch Spec §1.4.2) |
 | **`EEE_ENABLE`** | bit | **0** | 0/1 | **802.3az EEE 低功耗使能** (默认关闭,Arch Spec §1.4.1 `SUPPORT_EEE=0`) |
 | **`WOL_ENABLE`** | bit | **1** | 0/1 | **Wake-on-LAN 使能** |

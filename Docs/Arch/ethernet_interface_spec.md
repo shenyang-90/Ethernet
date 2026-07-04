@@ -1,11 +1,11 @@
 # Ethernet IP Interface Specification
 
 > **文档名称**: Ethernet IP Interface Specification  
-> **版本**: v1.1  
-> **日期**: 2026-05-22  
+> **版本**: v1.2  
+> **日期**: 2026-06-25  
 > **作者**: Arch Agent  
 > **评审状态**: Draft  
-> **变更**: 新增 Security IF、EEE LPI、半双工控制、vPHC 硬件接口；更新 AXI4 QoS/ID/outstanding
+> **变更**: 1. 统一 `DMA_CH_POOL` → `DMA_CH_COUNT`；2. AXI ID 分配表与 Design Spec §4.1.4 对齐；3. 保留 Security IF、EEE LPI、半双工控制、vPHC 硬件接口定义。
 
 ---
 
@@ -121,29 +121,24 @@
 
 ### 2.3 ID 分配策略
 
-每 DMA 通道独立 AXI ID，RX 与 TX 分离，支持乱序完成识别：
+每 DMA 通道独立 AXI ID，TX 与 RX 分组，支持乱序完成识别。默认 `DMA_CH_COUNT=8` 时的分配与 `Docs/Design/ethernet/ethernet_design_spec.md` §4.1.4 保持一致：
 
 | AXI ID | 通道/用途 | 优先级 (QoS) | 说明 |
 |--------|----------|:------------:|------|
-| `0x0` | CH0 TX | 0xF (最高) | 队列 0 发送 |
-| `0x1` | CH0 RX | 0xF | 队列 0 接收 |
-| `0x2` | CH1 TX | 0xE | 队列 1 发送 |
-| `0x3` | CH1 RX | 0xE | 队列 1 接收 |
-| `0x4` | CH2 TX | 0xD | 队列 2 发送 |
-| `0x5` | CH2 RX | 0xD | 队列 2 接收 |
-| `0x6` | CH3 TX | 0xC | 队列 3 发送 |
-| `0x7` | CH3 RX | 0xC | 队列 3 接收 |
-| `0x8` | CH4 TX | 0xB | 队列 4 发送 |
-| `0x9` | CH4 RX | 0xB | 队列 4 接收 |
-| `0xA` | CH5 TX | 0xA | 队列 5 发送 |
-| `0xB` | CH5 RX | 0xA | 队列 5 接收 |
-| `0xC` | CH6 TX | 0x9 | 队列 6 发送 |
-| `0xD` | CH6 RX | 0x9 | 队列 6 接收 |
-| `0xE` | CH7 TX | 0x8 | 队列 7 发送 |
-| `0xF` | CH7 RX / PTP | 0x8 | 队列 7 接收 / PTP 描述符 |
+| `0x0` ~ `0x3` | **CH0~CH3 TX** | 0xF / 0xE / 0xD / 0xC | 普通数据发送，每通道 1 个 ID |
+| `0x4` ~ `0x7` | **CH0~CH3 RX** | 0xF / 0xE / 0xD / 0xC | 普通数据接收，每通道 1 个 ID |
+| `0x8` ~ `0xB` | **CH4~CH7 TX** (TSN/CBS 可用) | 0xB / 0xA / 0x9 / 0x8 | TSN 时间敏感流发送 |
+| `0xC` ~ `0xD` | **CH4~CH5 RX** (TSN/CBS 可用) | 0xB / 0xA | AVB/gPTP 高优先级接收 |
+| `0xE` | **Switch Host Port TX** | 0x6 | Switch Core CPU 管理帧发送 |
+| `0xF` | **Switch Host Port RX / PTP** | 0x6 | Switch Core CPU 管理帧接收 / PTP 描述符 |
+
+**扩展规则** (当 `DMA_CH_COUNT > 8` 时):
+- ID 位宽由 `AXI_ID_WIDTH` 参数化（默认 4-bit，可扩展至 8-bit）。
+- 每 8 个通道占用 16 个连续 ID（8 TX + 8 RX）；Switch Host Port 与 PTP 仍使用固定保留 ID。
+- 最小粒度: **每通道 TX/RX 至少各 1 个独立 ID**。
 
 > **Out-of-Order 支持**: AXI ID 独立使能每通道 TX/RX 乱序完成。同一 ID 内事务按顺序完成。  
-> **ID 扩展**: 若 `DMA_CH_POOL=16` 或 `32`，高位扩展至 `m_axi_awid[5:0]` / `m_axi_arid[5:0]`。
+> **ID 扩展**: 若 `DMA_CH_COUNT=16` 或 `32`，高位扩展至 `m_axi_awid[5:0]` / `m_axi_arid[5:0]`。
 
 ### 2.4 地址映射
 
@@ -617,15 +612,7 @@ ACTIVE
 |------|------|------|----------|
 | v0.1 | 2026-05-02 | Arch Agent | 初始模板创建 |
 | v1.0 | 2026-05-11 | Arch Agent | 填充完整接口定义 (AXI/PHY/PPS/Interrupt/SMU/CLK-RST) |
-| **v1.1** | **2026-05-22** | **Arch Agent** | **(PAD-REWORK-006)**  
-| | | | 1. 新增 §9 Security Accelerator 接口 (IPsec/SecOC/D-TLS/MACsec 封装卸载) |
-| | | | 2. 新增 §4.7 EEE LPI 控制信号 (802.3az MAC↔PHY 低功耗握手) |
-| | | | 3. 新增 §4.6 半双工控制信号 (CRS/COL for 10M/100M, 映射至 MII/RMII/RGMII) |
-| | | | 4. 更新 §2 AXI4 Master: 新增 QoS (`awqos`/`arqos`)、ID 分配策略表、Outstanding  per-channel |
-| | | | 5. 更新 §3 AXI4-Lite: 补充 Outstanding 读写并发、VM 隔离地址解码说明 |
-| | | | 6. 新增 §5.3 vPHC 硬件接口信号 (引用 `vphc_hw_interface.md` §3 信号清单) |
-| | | | 7. 更新 §8.1 时钟接口: 补充典型频率 `clk_sys=200MHz`, `clk_mac=250MHz`, `clk_ts=250MHz` |
-| | | | 8. 更新 §1.1/1.2 接口列表与分类图，纳入 Security/EEE/vPHC |
+| **v1.1** | **2026-05-22** | **Arch Agent** | **(PAD-REWORK-006)**<br>1. 新增 §9 Security Accelerator 接口 (IPsec/SecOC/D-TLS/MACsec 封装卸载)<br>2. 新增 §4.7 EEE LPI 控制信号 (802.3az MAC↔PHY 低功耗握手)<br>3. 新增 §4.6 半双工控制信号 (CRS/COL for 10M/100M, 映射至 MII/RMII/RGMII)<br>4. 更新 §2 AXI4 Master: 新增 QoS (`awqos`/`arqos`)、ID 分配策略表、Outstanding per-channel<br>5. 更新 §3 AXI4-Lite: 补充 Outstanding 读写并发、VM 隔离地址解码说明<br>6. 新增 §5.3 vPHC 硬件接口信号 (引用 `vphc_hw_interface.md` §3 信号清单)<br>7. 更新 §8.1 时钟接口: 补充典型频率 `clk_sys=200MHz`, `clk_mac=250MHz`, `clk_ts=250MHz`<br>8. 更新 §1.1/1.2 接口列表与分类图，纳入 Security/EEE/vPHC |
 
 ### 10.2 待解决问题
 
