@@ -24,6 +24,11 @@ public:
 
     void run_test()
     {
+        const std::string case_name = "sc04_vphc";
+
+        // 初始化 VCD 波形和日志
+        dut.init_vcd_trace(case_name);
+
         std::cout << "\n========================================\n";
         std::cout << "SC-04: vPHC VM Switch Test\n";
         std::cout << "========================================\n";
@@ -49,6 +54,9 @@ public:
 
         // 运行仿真
         wait(100, sc_core::SC_US);
+
+        // 周期性更新 VCD 信号
+        dut.update_vcd_signals();
 
         // 读取响应
         std::cout << "[INFO] Reading responses...\n";
@@ -86,6 +94,9 @@ public:
 
         std::cout << "Verdict: " << (pass ? "PASS" : "FAIL") << "\n";
         std::cout << "========================================\n\n";
+
+        // 导出统计到 tmp/<case_name>/
+        dut.export_statistics(case_name);
 
         sc_core::sc_stop();
     }

@@ -25,6 +25,11 @@ public:
 
     void run_test()
     {
+        const std::string case_name = "sc03_concurrent";
+
+        // 初始化 VCD 波形和日志
+        dut.init_vcd_trace(case_name);
+
         std::cout << "\n========================================\n";
         std::cout << "SC-03: Multi-Port Concurrent Test\n";
         std::cout << "========================================\n";
@@ -46,6 +51,9 @@ public:
 
         std::cout << "[INFO] Running simulation for 10 us...\n";
         wait(10, sc_core::SC_US);
+
+        // 周期性更新 VCD 信号
+        dut.update_vcd_signals();
 
         // 停止流量
         for (unsigned int i = 0; i < dut.cfg.MAC_COUNT; ++i) {
@@ -101,6 +109,9 @@ public:
         bool pass = (fairness >= 0.5) && (total_rx > 0);
         std::cout << "Verdict: " << (pass ? "PASS" : "FAIL") << "\n";
         std::cout << "========================================\n\n";
+
+        // 导出统计到 tmp/<case_name>/
+        dut.export_statistics(case_name);
 
         sc_core::sc_stop();
     }

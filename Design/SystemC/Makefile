@@ -98,15 +98,26 @@ run-all: all
 	done
 
 clean:
-	rm -f tests/*.o $(UNIT_TARGETS) $(INTEG_TARGETS) $(SYS_TARGETS) *.o metrics_*.csv metrics_*.json
+	rm -f tests/*.o $(UNIT_TARGETS) $(INTEG_TARGETS) $(SYS_TARGETS) *.o
+	rm -rf tmp/
 
 help:
 	@echo "Targets:"
 	@echo "  all          - Build all tests"
 	@echo "  unit         - Build unit tests only"
+	@echo "  integ        - Build integration tests only"
 	@echo "  sys          - Build system tests only"
 	@echo "  run-unit     - Run unit tests"
+	@echo "  run-integ    - Run integration tests"
 	@echo "  run-sys      - Run system tests"
+	@echo "  run-all      - Run all tests"
 	@echo "  test-compile - Syntax check only"
-	@echo "  clean        - Remove build artifacts"
+	@echo "  clean        - Remove build artifacts and tmp/"
 	@echo "  help         - Show this help"
+	@echo ""
+	@echo "Output structure (after running system tests):"
+	@echo "  tmp/<case_name>/waveform.vcd    - VCD waveform"
+	@echo "  tmp/<case_name>/simulation.log  - Simulation log"
+	@echo "  tmp/<case_name>/metrics.csv     - Metrics CSV"
+	@echo "  tmp/<case_name>/metrics.json    - Metrics JSON"
+	@echo "  tmp/<case_name>/frame_trace.csv - Frame trace"

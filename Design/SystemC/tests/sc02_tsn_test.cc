@@ -11,12 +11,17 @@
 
 int sc_main(int argc, char* argv[])
 {
+    const std::string case_name = "sc02_tsn";
+
     std::cout << "\n========================================\n";
     std::cout << "SC-02: TSN Gate Control Test\n";
     std::cout << "========================================\n";
 
     // 创建 top
     ethernet_tlm::tlm_ethernet_top dut("dut");
+
+    // 初始化 VCD 波形和日志
+    dut.init_vcd_trace(case_name);
 
     // 配置 TAS 门控列表（Queue 7 始终开，其他轮询）
     // std::vector<ethernet_tlm::tas_gate_entry> gcl;
@@ -49,6 +54,9 @@ int sc_main(int argc, char* argv[])
     std::cout << "[INFO] Running TSN gate control simulation for 10 us...\n";
     sc_core::sc_start(10, sc_core::SC_US);
 
+    // 周期性更新 VCD 信号
+    dut.update_vcd_signals();
+
     // 停止流量
     for (unsigned int i = 0; i < dut.cfg.MAC_COUNT; ++i) {
         dut.stop_traffic(i);
@@ -72,6 +80,9 @@ int sc_main(int argc, char* argv[])
 
     std::cout << "Verdict: " << (pass ? "PASS" : "FAIL") << "\n";
     std::cout << "========================================\n\n";
+
+    // 导出统计到 tmp/<case_name>/
+    dut.export_statistics(case_name);
 
     return pass ? 0 : 1;
 }
