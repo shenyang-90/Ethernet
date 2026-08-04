@@ -8,6 +8,9 @@ ethernet
   - Arch Spec        [Arch Agent]    05/13-05/18
   - Interface Spec   [Arch Agent]    05/16-05/20
   - Clock/Reset Spec [Arch Agent]    05/18-05/20
+  - SystemC/TLM 建模计划 [Arch Agent] 05/18-05/19
+  - TLM 平台代码开发  [Design Agent]  05/19-05/22
+  - SystemC 建模报告  [Arch/Design]   05/22-05/24
   - 微架构设计        [Design Agent]  05/20-05/25
   - PAD Review       [AI Yang]       05/25
 - EDR Phase (2026-05-26 ~ 2026-06-15)
@@ -47,6 +50,8 @@ ethernet
     ↓
 Arch Spec (TASK-003) — 含 Interface Spec + Clock/Reset Spec
     ↓
+SystemC/TLM 建模 (TASK-PAD-SC-001~003) — 建模计划/平台/报告
+    ↓
 微架构设计 (TASK-004)
     ↓
 PAD Review (TASK-PAD-REV)
@@ -54,4 +59,5 @@ PAD Review (TASK-PAD-REV)
 
 ---
 
-*更新: 2026-05-11*
+*更新: 2026-05-11*  
+*更新: 2026-07-30 — SystemC/TLM 建模完成：单元测试 77/77，集成测试 10/10，系统测试 5/5 全部通过*

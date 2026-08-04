@@ -27,7 +27,7 @@ PCD ──→ PAD ──→ EDR ──→ IDR ──→ FDR ──→ Post Silic
 | 阶段 | 任务目录 | Review 目录 | 交付物示例 |
 |------|---------|------------|-----------|
 | PCD | `ProjectMgmt/Phases/PCD/Tasks/` | `ProjectMgmt/Phases/PCD/Reviews/` | 立项文档 |
-| PAD | `ProjectMgmt/Phases/PAD/Tasks/` | `ProjectMgmt/Phases/PAD/Reviews/` | Arch Spec, Interface Spec |
+| PAD | `ProjectMgmt/Phases/PAD/Tasks/` | `ProjectMgmt/Phases/PAD/Reviews/` | Arch Spec, Interface Spec, SystemC 建模计划/报告 |
 | EDR | `ProjectMgmt/Phases/EDR/Tasks/` | `ProjectMgmt/Phases/EDR/Reviews/` | Design Spec, Verification Plan, DFT Spec, FuSa Doc |
 | IDR | `ProjectMgmt/Phases/IDR/Tasks/` | `ProjectMgmt/Phases/IDR/Reviews/` | RTL, UVM Env |
 | FDR | `ProjectMgmt/Phases/FDR/Tasks/` | `ProjectMgmt/Phases/FDR/Reviews/` | Netlist, Backend, FMEDA |
@@ -181,6 +181,11 @@ eternet/
 │   ├── FuSa/                # FuSa_Agent 产出
 │   └── Firmware/            # Firmware 相关文档
 ├── Design/                  # 设计数据 (git提交)
+│   ├── SystemC/             # SystemC 架构/性能模型 (Arch_Agent, Design_Agent 可使用)
+│   │   ├── models/          # SystemC 事务级/架构模型 (Switch/MAC/PHC/vPHC/DMA/Host/TrafficGen/Top)
+│   │   ├── tests/           # SystemC 模型测试平台 (单元测试 77/77，集成测试 10/10，系统测试 5/5)
+│   │   ├── utils/           # 建模辅助脚本与工具 (statistics/trace/dummy/tlm_mm)
+│   │   └── Makefile         # SystemC 2.3.3-pthreads 构建脚本
 │   └── RTL/ip/ethernet/     # Design_Coding_Agent 产出
 ├── Verification/            # 验证环境 (git提交)
 │   ├── Env/                 # Verification_Coding_Agent 产出
